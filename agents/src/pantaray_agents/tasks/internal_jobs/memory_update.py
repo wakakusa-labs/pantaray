@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Protocol
@@ -11,6 +12,7 @@ from pantaray_agents.agents.memory_agent import (
     MemoryUpdateAgent,
     MemoryUpdateAgentResult,
 )
+from pantaray_agents.agents.memory_file_editor.runner import MemoryEditorConversation
 from pantaray_agents.local_runtime.memory_catalog.connection import (
     open_memory_catalog_connection,
 )
@@ -18,6 +20,7 @@ from pantaray_agents.local_runtime.memory_catalog.models import MemorySource
 from pantaray_agents.local_runtime.memory_catalog.run_workspace import (
     MemoryRunWorkspaceScope,
 )
+from pantaray_agents.local_runtime.runtime.help_outcomes import DueOutcome
 from pantaray_agents.local_runtime.runtime.job_route_identity import (
     require_current_route_identity,
 )
@@ -29,6 +32,7 @@ from pantaray_agents.local_runtime.runtime.memory_update_progress import (
     load_published_memory_categories,
     memory_update_is_complete,
 )
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.tooling.memory_file_editor import (
     LocalMemoryFileEditorRuntime,
     build_local_memory_file_editor_runtime,
@@ -44,11 +48,16 @@ from pantaray_agents.tasks.memory_update_completion import (
     publish_memory_update_run,
 )
 from pantaray_agents.tasks.memory_update_context import (
+    PreparedMemoryUpdateRun,
     prepare_memory_update_run,
     resolve_memory_run_fact_id,
 )
 from pantaray_agents.tasks.types import MemoryUpdateJobPayload
 from pantaray_agents.tools.contract import ReactToolDefinition
+from pantaray_agents.utils.local_time import describe_utc_timestamp
+from pantaray_agents.utils.structured_logging import log_structured_event
+
+logger = logging.getLogger(__name__)
 
 
 class MemoryUpdateWorkerAgent(Protocol):
@@ -68,6 +77,15 @@ class MemoryUpdateWorkerAgent(Protocol):
         tool_definitions: tuple[ReactToolDefinition, ...],
         tool_results_path: Path,
         db_path: Path,
+    ) -> None: ...
+
+    async def look_back_on_outcomes(
+        self,
+        conversation: MemoryEditorConversation,
+        due: tuple[DueOutcome, ...],
+        *,
+        tool_definitions: tuple[ReactToolDefinition, ...],
+        now: str,
     ) -> None: ...
 
 
@@ -113,7 +131,7 @@ async def execute_memory_update_job(
                 workspace_scope=workspace_scope,
             )
             agent = await build_agent()
-            applied_memory_request_ids: tuple[str, ...] = ()
+            result: MemoryUpdateAgentResult | None = None
             # With every input deleted from history, the run publishes nothing.
             if prepared.has_evidence:
                 result = await agent.update(
@@ -122,7 +140,15 @@ async def execute_memory_update_job(
                     tool_results_path=workspace_scope.require_tool_results_path(),
                     db_path=runtime.db_path,
                 )
-                applied_memory_request_ids = result.applied_memory_request_ids
+                # Before publishing, so what it finds reaches this run's memory,
+                # Agent Experience included.
+                if prepared.due:
+                    await _look_back_on_outcomes(
+                        payload=payload,
+                        agent=agent,
+                        conversation=result.conversation,
+                        prepared=prepared,
+                    )
             # Everything above stayed in the run-only workspace; this is where
             # the edits become the owner's memory, so the route they were made
             # on has to still be current.
@@ -133,7 +159,9 @@ async def execute_memory_update_job(
                 prepared=prepared,
                 prompt_name=MemoryUpdateAgent.PROMPT_NAME,
                 prompt_version=MemoryUpdateAgent.PROMPT_VERSION,
-                applied_memory_request_ids=applied_memory_request_ids,
+                applied_memory_request_ids=(
+                    () if result is None else result.applied_memory_request_ids
+                ),
             )
         # After completion: a crash from here leaves the update complete, and
         # the next update that changes an oversized file consolidates it.
@@ -158,6 +186,47 @@ async def execute_memory_update_job(
         is_complete=is_complete,
         run=run,
     )
+
+
+async def _look_back_on_outcomes(
+    *,
+    payload: MemoryUpdateJobPayload,
+    agent: MemoryUpdateWorkerAgent,
+    conversation: MemoryEditorConversation,
+    prepared: PreparedMemoryUpdateRun,
+) -> None:
+    """Continue the accepted update into what the due items changed.
+
+    A failure is logged and the drafts go back to where the accepted update
+    left them, so the update still publishes. A look-back stopped midway can
+    leave edits each tool accepted but the tree as a whole fails, such as a new
+    Agent Experience entry whose superseded entry is not deleted yet.
+    """
+
+    accepted = tuple(route.session.draft for route in prepared.router.routes)
+    try:
+        await agent.look_back_on_outcomes(
+            conversation,
+            prepared.due,
+            tool_definitions=prepared.tool_definitions,
+            now=describe_utc_timestamp(now_utc_iso()),
+        )
+    # Every failure the conversation and its model sends declare is a
+    # RuntimeError (output refused, turns exhausted, context full, upstream
+    # error). A deferred job is a BaseException and still ends the run.
+    except RuntimeError as exc:
+        for route, draft in zip(prepared.router.routes, accepted, strict=True):
+            route.session.draft = draft
+        log_structured_event(
+            logger,
+            level="error",
+            evt="MEMORY_OUTCOMES_LOOK_BACK_FAILED",
+            exception=exc,
+            component="tasks.memory_update",
+            user_id=payload["user_id"],
+            job_id=payload["job_id"],
+            error_class=exc.__class__.__name__,
+        )
 
 
 def _memory_update_sources(

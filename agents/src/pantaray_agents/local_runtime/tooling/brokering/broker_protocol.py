@@ -10,6 +10,9 @@ from pydantic import (
     model_validator,
 )
 
+from pantaray_agents.local_runtime.runtime.html_render_relay import (
+    BlockedRequestReason,
+)
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.files.read_contract import (
     DiscoveryTruncationReason,
@@ -18,17 +21,23 @@ from pantaray_agents.tools.files.read_contract import (
     ListToolArgs,
     ReadToolArgs,
 )
-from pantaray_agents.tools.files.render_pages import RenderPdfPageToolArgs
+from pantaray_agents.tools.files.render_pages import (
+    RenderHtmlPageToolArgs,
+    RenderPdfPageToolArgs,
+    SaveHtmlAsPdfToolArgs,
+)
 
 from ..models import BrokerNetworkPolicy
 
 BrokerExecutionPath = Literal[
     "broker_direct_read",
     "broker_direct_render_pdf",
+    "broker_direct_render_html",
     "broker_direct_list",
     "broker_direct_glob",
     "broker_direct_grep",
     "broker_direct_patch",
+    "broker_direct_save_pdf",
     "broker_sandbox_command",
     "broker_sandbox_python",
 ]
@@ -208,6 +217,36 @@ class RenderPdfPageOutput(
     model_config = ConfigDict(strict=True)
 
 
+class HtmlBlockedRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    reason: BlockedRequestReason
+    url: str
+
+
+class RenderHtmlPageOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    kind: Literal["html_pages"]
+    path: str
+    message: str
+    page_count: int
+    blocked_requests: list[HtmlBlockedRequest]
+    attachments: list[RenderedPdfPageAttachment]
+
+
+class SaveHtmlAsPdfOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    status: Literal["saved"]
+    path: str
+    pdf_path: str
+    byte_size: int
+    replaced: bool
+    blocked_requests: list[HtmlBlockedRequest]
+    message: str
+
+
 class DiscoveryEntry(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -325,6 +364,20 @@ class RunPythonToolOutput(BaseModel):
     error: ToolError | None = None
 
 
+type BrokerToolArgs = (
+    ReadToolArgs
+    | RenderPdfPageToolArgs
+    | RenderHtmlPageToolArgs
+    | SaveHtmlAsPdfToolArgs
+    | ListToolArgs
+    | GlobToolArgs
+    | GrepToolArgs
+    | ApplyPatchToolArgs
+    | BashToolArgs
+    | RunPythonToolArgs
+)
+
+
 class BrokerToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -332,16 +385,7 @@ class BrokerToolRequest(BaseModel):
     user_id: str
     manifest_id: str
     execution_session_id: str
-    args: (
-        ReadToolArgs
-        | RenderPdfPageToolArgs
-        | ListToolArgs
-        | GlobToolArgs
-        | GrepToolArgs
-        | ApplyPatchToolArgs
-        | BashToolArgs
-        | RunPythonToolArgs
-    )
+    args: BrokerToolArgs
     invocation_id: str | None = None
     tool_request_id: str | None = None
     requested_at: str | None = None
@@ -371,6 +415,18 @@ class ValidatedRenderPdfPageRequest(BaseModel):
     requested_at: str
     path: str
     pages: list[int]
+
+
+class ValidatedRenderHtmlPageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    tool_invocation_id: str | None = None
+    manifest_id: str
+    execution_session_id: str
+    action_id: str
+    tool_request_id: str
+    requested_at: str
+    args: RenderHtmlPageToolArgs
 
 
 class ValidatedListRequest(BaseModel):
@@ -420,6 +476,22 @@ class ValidatedPatchRequest(BaseModel):
     approval_source: Literal["settings", "prompt"] | None = None
     changes: list[ApplyPatchChange]
     patch_paths: list[str]
+    command_summary_json: dict[str, JSONValue]
+    tool_request_id: str
+    requested_at: str
+    preflight_only: bool
+
+
+class ValidatedSaveHtmlAsPdfRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    tool_invocation_id: str
+    manifest_id: str
+    execution_session_id: str
+    action_id: str
+    approval_session_id: str | None = None
+    approval_source: Literal["settings", "prompt"] | None = None
+    args: SaveHtmlAsPdfToolArgs
     command_summary_json: dict[str, JSONValue]
     tool_request_id: str
     requested_at: str

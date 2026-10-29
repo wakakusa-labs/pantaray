@@ -88,6 +88,8 @@ EXPECTED_CONCURRENCY: dict[str, ToolConcurrency] = {
             "run_python",
             "capture_screen",
             "render_pdf_page",
+            "render_html_page",
+            "save_html_as_pdf",
             "write_session_memory",
             "spawn_subagent",
             "send_message_to_subagent",

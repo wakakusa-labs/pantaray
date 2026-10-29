@@ -3,7 +3,7 @@ from typing import Literal
 type ReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
 
 OPENAI_GPT_6_LUNA_MODEL = "gpt-6-luna"
-OPENAI_GPT_56_SOL_MODEL = "gpt-5.6-sol"
+OPENAI_GPT_61_SOL_MODEL = "gpt-6.1-sol"
 
 SUGGESTION_PROFILE_ID = "suggestion"
 ACTIVITY_SUMMARY_PROFILE_ID = "activity_summary"
@@ -22,7 +22,7 @@ __all__ = [
     "INSIGHT_PROFILE_ID",
     "MEMORY_UPDATE_PROFILE_ID",
     "OPENAI_GPT_6_LUNA_MODEL",
-    "OPENAI_GPT_56_SOL_MODEL",
+    "OPENAI_GPT_61_SOL_MODEL",
     "ReasoningEffort",
     "SUGGESTION_PROFILE_ID",
     "TOOL_THINKING_PROFILE_ID",

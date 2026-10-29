@@ -47,6 +47,7 @@ def _request(*, purpose: str = "action.executing", image: bool = False) -> LlmRe
         ("openai_codex", "gpt-6-astra", "high", None),
         ("openai_codex", "gpt-6.1-sol", "high", None),
         ("openai_codex", "gpt-6-sol", "high", None),
+        ("openai_codex", "gpt-6.1-terra", "high", None),
         ("openai_codex", "gpt-5.6-luna", "high", None),
         ("openai_codex", "gpt-5.5", "high", None),
         ("fireworks", _FIREWORKS_MODEL, None, 8192),

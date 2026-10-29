@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import shutil
 import subprocess
 import sys
@@ -10,6 +12,11 @@ from pathlib import Path
 
 import pytest
 
+from pantaray_agents.local_runtime.runtime.html_render_relay import (
+    HTML_RENDER_TEMP_DIRECTORY,
+    HtmlRenderClaimed,
+    html_render_broker,
+)
 from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
     resolve_suggestion_artifacts_root,
 )
@@ -31,6 +38,8 @@ from pantaray_agents.tools.contract import (
     ToolCallEnvelope,
 )
 
+from .broker_test_support import RecordingDesktopSession, desktop_session
+from .test_pdf_page_render import write_pdf
 from .test_suggestion_commands import _EXITED, _capture_request, _command
 from .test_suggestion_commands import allowed_db as allowed_db  # the fixture
 from .test_suggestion_research_tools import BUSY_TIMEOUT_MS, _snapshot
@@ -226,4 +235,210 @@ async def test_a_command_cannot_swap_the_folder_for_a_way_outside(
 
     assert refused.output["error_code"] == "ARTIFACT_FOLDER_REPLACED"
     assert len(requests) == 1
+    assert list(outside.iterdir()) == []
+
+
+def _python(code: str) -> ReactToolCall:
+    args = {"code": code, "cwd": None}
+    return ReactToolCall(
+        tool_name="run_python",
+        tool_args=args,  # type: ignore[arg-type]
+        tool_call_envelope=ToolCallEnvelope("run_python", None, args),  # type: ignore[arg-type]
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("commands_allowed", [True, False])
+async def test_run_python_is_offered_to_the_make_stage_only_with_bash(
+    allowed_db: Path, commands_allowed: bool
+) -> None:
+    snapshot = replace(_snapshot(db_path=allowed_db), commands_allowed=commands_allowed)
+    tools = LocalSuggestionResearchTools(
+        db_path=allowed_db,
+        busy_timeout_ms=BUSY_TIMEOUT_MS,
+        snapshot=snapshot,
+        activity_start=None,
+    )
+
+    research = await tools.build_tool_definitions(user_id="user-1", run_id="sug-1")
+    make = await tools.build_make_tools(user_id="user-1", run_id="sug-1")
+
+    made = {tool.name for tool in make.definitions}
+    assert {"bash", "run_python"} & made == (
+        {"bash", "run_python"} if commands_allowed else set()
+    )
+    assert "run_python" not in {tool.name for tool in research}
+    # Neither asks anything, so both are made-stage tools whatever the setting.
+    assert {"render_html_page", "save_html_as_pdf"} <= made
+
+
+@pytest.mark.skipif(
+    sys.platform != "darwin" or not Path("/usr/bin/sandbox-exec").is_file(),
+    reason="requires Darwin with /usr/bin/sandbox-exec",
+)
+@pytest.mark.asyncio
+async def test_run_python_writes_only_into_the_folder_offline(
+    allowed_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The user lets research commands reach the network; run_python never does.
+    update_command_network_enabled(
+        db_path=allowed_db,
+        busy_timeout_ms=BUSY_TIMEOUT_MS,
+        user_id="user-1",
+        command_network_enabled=True,
+        now=TIMESTAMP,
+    )
+    outside = (tmp_path / "outside").resolve()
+    outside.mkdir()
+    temp_dir = (tmp_path / "temp").resolve()
+    temp_dir.mkdir()
+    requests = _capture_request(monkeypatch, temp_dir, _EXITED)
+    make = await _tools(allowed_db).build_make_tools(user_id="user-1", run_id="sug-1")
+    code = f"""
+import pathlib, socket
+pathlib.Path("made.txt").write_text("ok")
+for name, attempt in (
+    ("outside", lambda: pathlib.Path({str(outside)!r}, "escaped.txt").write_text("x")),
+    ("network", lambda: socket.create_connection(("1.1.1.1", 443), timeout=3)),
+):
+    try:
+        attempt()
+        print(name, "allowed")
+    except OSError:
+        print(name, "denied")
+"""
+    await ReactToolRegistry(make.definitions).execute(_python(code), 1)
+
+    (request,) = requests
+    assert request.network_policy == "deny"
+    assert request.real_write_roots == [str(make.folder), str(temp_dir)]
+    assert request.cwd == str(make.folder)
+    # Run under the profile and argv the call really gets.
+    ran = subprocess.run(
+        [
+            "/usr/bin/sandbox-exec",
+            "-p",
+            render_seatbelt_profile(request),
+            *request.argv,
+        ],
+        cwd=request.cwd,
+        env=request.env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert ran.stdout.split("\n")[:2] == ["outside denied", "network denied"], (
+        ran.stderr
+    )
+    assert (make.folder / "made.txt").read_text() == "ok"
+    assert list(outside.iterdir()) == []
+
+
+def _call(name: str, args: dict[str, object]) -> ReactToolCall:
+    return ReactToolCall(
+        tool_name=name,
+        tool_args=args,  # type: ignore[arg-type]
+        tool_call_envelope=ToolCallEnvelope(name, None, args),  # type: ignore[arg-type]
+        call_id="c1",
+    )
+
+
+async def _electron(desktop: RecordingDesktopSession, artifact_root: Path) -> None:
+    """Answer the one render request as Electron main would."""
+
+    while not desktop.requests:
+        await asyncio.sleep(0.005)
+    render_request_id = str(desktop.requests[0]["render_request_id"])
+    pdf_path = artifact_root / HTML_RENDER_TEMP_DIRECTORY / f"{render_request_id}.pdf"
+    pdf_path.parent.mkdir(parents=True, exist_ok=True)
+    write_pdf(pdf_path, marks=[(0, 0, 0)] * 2)
+    pdf = pdf_path.read_bytes()
+    claimed = HtmlRenderClaimed(len(pdf), hashlib.sha256(pdf).hexdigest(), ())
+    assert (
+        html_render_broker().answer(
+            request_id=render_request_id, user_id="user-1", outcome=claimed
+        )
+        == "accepted"
+    )
+
+
+@pytest.fixture
+def artifact_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    root = (tmp_path / "relay").resolve()
+    root.mkdir()
+    monkeypatch.setenv("LOCAL_ARTIFACT_ROOT", str(root))
+    return root
+
+
+@pytest.mark.asyncio
+async def test_html_is_printed_offline_and_saved_into_the_folder(
+    allowed_db: Path, artifact_root: Path
+) -> None:
+    update_command_network_enabled(
+        db_path=allowed_db,
+        busy_timeout_ms=BUSY_TIMEOUT_MS,
+        user_id="user-1",
+        command_network_enabled=True,
+        now=TIMESTAMP,
+    )
+    make = await _tools(allowed_db).build_make_tools(user_id="user-1", run_id="sug-1")
+    (make.folder / "deck.html").write_text("<h1>Deck</h1>")
+    registry = ReactToolRegistry(make.definitions)
+    page = str(make.folder / "deck.html")
+
+    with desktop_session() as desktop:
+        saved, _ = await asyncio.gather(
+            registry.execute(
+                _call("save_html_as_pdf", {"path": page, "pdf_path": "deck.pdf"}), 1
+            ),
+            _electron(desktop, artifact_root),
+        )
+    with desktop_session() as desktop:
+        rendered, _ = await asyncio.gather(
+            registry.execute(
+                _call("render_html_page", {"path": page, "pages": None}), 2
+            ),
+            _electron(desktop, artifact_root),
+        )
+        [asked] = desktop.requests
+
+    assert saved.status == "success", saved.output
+    assert (make.folder / "deck.pdf").read_bytes().startswith(b"%PDF-")
+    assert rendered.status == "success", rendered.output
+    assert rendered.output["page_count"] == 2
+    assert len(rendered.images) == 2
+    # Never the network, whatever the user's command setting says.
+    assert (asked["kind"], asked["allow_network"]) == ("suggestion", False)
+
+
+@pytest.mark.asyncio
+async def test_a_pdf_is_never_saved_outside_the_folder(
+    allowed_db: Path, tmp_path: Path, artifact_root: Path
+) -> None:
+    outside = (tmp_path / "outside").resolve()
+    outside.mkdir()
+    make = await _tools(allowed_db).build_make_tools(user_id="user-1", run_id="sug-1")
+    (make.folder / "deck.html").write_text("<h1>Deck</h1>")
+    (make.folder / "link").symlink_to(outside, target_is_directory=True)
+    registry = ReactToolRegistry(make.definitions)
+    page = str(make.folder / "deck.html")
+
+    with desktop_session() as desktop:
+        refused = [
+            await registry.execute(
+                _call("save_html_as_pdf", {"path": page, "pdf_path": pdf_path}), 1
+            )
+            for pdf_path in (str(outside / "a.pdf"), "../outside/a.pdf")
+        ]
+        # A link inside the folder is refused when the PDF is written.
+        linked, _ = await asyncio.gather(
+            registry.execute(
+                _call("save_html_as_pdf", {"path": page, "pdf_path": "link/a.pdf"}),
+                2,
+            ),
+            _electron(desktop, artifact_root),
+        )
+
+    assert [result.status for result in (*refused, linked)] == ["error"] * 3
+    assert len(desktop.requests) == 1  # Paths outside are refused before printing.
     assert list(outside.iterdir()) == []

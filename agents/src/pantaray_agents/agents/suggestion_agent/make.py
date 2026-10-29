@@ -38,6 +38,7 @@ from pantaray_llm.contracts.tool_use import LlmToolDefinition
 
 from .nudges import render_nudge
 from .react import (
+    SUGGESTION_PYTHON_TOOL_ID,
     SUGGESTION_TOOL_IDS,
     SuggestionConversation,
     SuggestionRunSteps,
@@ -48,7 +49,13 @@ from .research import SuggestionResearchTools
 
 SUGGESTION_MAKE_PROMPT_NAME = "suggestion/suggestion_make"
 FINISH_SUGGESTION_TOOL_NAME = "finish_suggestion"
-MAKE_STAGE_TOOL_IDS = (*SUGGESTION_TOOL_IDS, "apply_patch")
+MAKE_STAGE_TOOL_IDS = (
+    *SUGGESTION_TOOL_IDS,
+    "apply_patch",
+    SUGGESTION_PYTHON_TOOL_ID,
+    "render_html_page",
+    "save_html_as_pdf",
+)
 _FINISH_REQUIRED = (
     "Respond with tool calls. When you are done, call "
     f"`{FINISH_SUGGESTION_TOOL_NAME}` alone with your decision."

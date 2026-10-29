@@ -349,13 +349,13 @@ async def test_reaching_85_percent_rebuilds_at_the_next_think_boundary(
     agent, runtime, state = await _build_fixture(
         monkeypatch, tmp_path, action_id="act-reset-85"
     )
-    # The real tool definitions (about 55 KB) are part of the fixed input, so the
+    # The real tool definitions (about 57 KB) are part of the fixed input, so the
     # window leaves room for them plus one body inside the 50% target.
-    monkeypatch.setattr(context_budget, "_window_tokens", lambda: 40_000)
+    monkeypatch.setattr(context_budget, "_window_tokens", lambda: 42_000)
     for entry in state["history_by_scope"]["S"]:
         if entry["step_type"] == StepType.TOOL_EXECUTION:
             entry["output"] = f"body {entry['step_number']} " + "x" * 16_000
-    _install_think(agent, prompt_tokens=34_400)
+    _install_think(agent, prompt_tokens=36_120)
 
     state = await execution_think_step(
         agent, state, runtime, sink=create_state_token_sink(state)
@@ -380,7 +380,7 @@ async def test_reaching_85_percent_rebuilds_at_the_next_think_boundary(
         assert f"- Note: note {index}" in rebuilt_prompt
         assert f"- History Ref: S-{index}-TOOL (use history_fetch)" in rebuilt_prompt
         assert (f'"body {index} ' in rebuilt_prompt) is (index == 4)
-    assert state["context"]["context_input_baseline"]["rendered_bytes"] <= 20_000 * 4
+    assert state["context"]["context_input_baseline"]["rendered_bytes"] <= 21_000 * 4
     assert state["context"]["context_reset_pending"] is False
     assert _think_entries(state)[-1]["result_line"] == (
         context_budget.CONTEXT_RESET_RESULT_LINE

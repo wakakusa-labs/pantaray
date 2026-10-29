@@ -31,8 +31,10 @@ from .brokering.broker_common import (
     GREP_TOOL_ID,
     LIST_TOOL_ID,
     READ_TOOL_ID,
+    RENDER_HTML_PAGE_TOOL_ID,
     RENDER_PDF_PAGE_TOOL_ID,
     RUN_PYTHON_TOOL_ID,
+    SAVE_HTML_AS_PDF_TOOL_ID,
 )
 from .models import (
     ActionExecutionContext,
@@ -93,15 +95,19 @@ WORKSPACE_TOOL_IDS = frozenset(
     {
         READ_TOOL_ID,
         RENDER_PDF_PAGE_TOOL_ID,
+        RENDER_HTML_PAGE_TOOL_ID,
         LIST_TOOL_ID,
         GLOB_TOOL_ID,
         GREP_TOOL_ID,
         APPLY_PATCH_TOOL_ID,
+        SAVE_HTML_AS_PDF_TOOL_ID,
         BASH_TOOL_ID,
         RUN_PYTHON_TOOL_ID,
     }
 )
-HIGH_RISK_TOOL_IDS = frozenset({APPLY_PATCH_TOOL_ID, BASH_TOOL_ID, RUN_PYTHON_TOOL_ID})
+HIGH_RISK_TOOL_IDS = frozenset(
+    {APPLY_PATCH_TOOL_ID, SAVE_HTML_AS_PDF_TOOL_ID, BASH_TOOL_ID, RUN_PYTHON_TOOL_ID}
+)
 SCRATCH_ALLOWED_CAPABILITIES = (CAPABILITY_SCOPED_READ,)
 
 

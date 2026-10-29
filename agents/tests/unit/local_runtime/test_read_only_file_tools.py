@@ -23,6 +23,7 @@ from pantaray_agents.local_runtime.tooling.tool_result_storage import (
 from pantaray_agents.schema.action_conversation import RENDERER_PREPARING_OUTPUT_KIND
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.read_access import ReadAccessScope
+from pantaray_agents.security.image_media_types import IMAGE_MIME_TYPE_BY_EXTENSION
 from pantaray_agents.tools.contract import (
     ReactToolCall,
     ReactToolRegistry,
@@ -32,7 +33,7 @@ from pantaray_agents.tools.contract import (
 from pantaray_agents.tools.files import read_only_tools, ripgrep
 from pantaray_agents.tools.files.read_only_tools import (
     RENDER_PDF_PAGE_TOOL_NAME,
-    build_read_only_file_tools,
+    read_only_file_tools,
 )
 
 from .discovery_output_support import grep_matches
@@ -62,13 +63,13 @@ def _tools(
     storage.mkdir(parents=True)
     (storage / "pantaray.db").write_text("app-storage-secret", encoding="utf-8")
     spill_root = storage / "suggestion_tool_results" / "run-1"
-    definitions = build_read_only_file_tools(
+    definitions = read_only_file_tools(
         db_path=tmp_path / "runtime.sqlite3",
         folders=(folder.resolve(),),
         read_access_scope=read_access_scope,
         app_storage_roots=(storage.resolve(),),
         spill_root=spill_root,
-    )
+    ).definitions()
     return ReactToolRegistry(definitions), folder.resolve(), storage, spill_root
 
 
@@ -364,6 +365,7 @@ async def test_drawn_pages_are_kept_in_the_runs_folder_and_sent_from_there(
         source = Path(image.workspace_root_path, image.workspace_relative_path)
         assert source.parent.parent == spill.resolve()
         assert source.read_bytes() == page.payload
+        assert IMAGE_MIME_TYPE_BY_EXTENSION[source.suffix] == image.mime_type
         assert image.sha256 == hashlib.sha256(page.payload).hexdigest()
         assert image.ref in result.output["message"]
 

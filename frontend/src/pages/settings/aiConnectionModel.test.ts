@@ -12,8 +12,8 @@ it('starts a ChatGPT connection on a model that backend actually serves', () => 
 });
 
 it('keeps a model the target actually offers', () => {
-  expect(modelForTarget({ method: 'chatgpt', provider: 'openai', model: 'gpt-5.6-sol' })).toBe(
-    'gpt-5.6-sol'
+  expect(modelForTarget({ method: 'chatgpt', provider: 'openai', model: 'gpt-6.1-terra' })).toBe(
+    'gpt-6.1-terra'
   );
   expect(modelForTarget({ method: 'api_key', provider: 'openai', model: 'gpt-6-luna' })).toBe(
     'gpt-6-luna'

@@ -179,7 +179,7 @@ def test_prepare_opens_every_category_and_inlines_derived_evidence(
         "agent_experience/index.md",
     )
     tool_names = {definition.name for definition in prepared.tool_definitions}
-    assert "memory_search" in tool_names
+    assert {"memory_search", "memory_sql"} <= tool_names
     # Without an Action terminal the run has no Action history to read.
     assert "history_fetch" not in tool_names
 
@@ -695,3 +695,46 @@ def test_memory_seed_evidence_shows_local_times(tmp_path: Path) -> None:
         "(2026-09-26T06:00+09:00 - 2026-09-27T06:00+09:00)\n"
     )
     assert "(completed at 2026-09-27T06:50+09:00, " in context.action_turns
+
+
+def test_due_items_alone_are_evidence_for_the_model(tmp_path: Path) -> None:
+    # The run's other inputs were deleted from history after it was queued; a
+    # suggestion delivered the day before is due at its first checkpoint.
+    runtime = _runtime(tmp_path)
+    _bootstrap(runtime.db_path)
+    delivered = "2026-09-05T12:00:00.000Z"
+    with sqlite3.connect(runtime.db_path) as connection, connection:
+        connection.execute(
+            """
+            INSERT INTO agent_suggestions(
+                suggestion_id, user_id, status, answer, has_suggestion,
+                interaction_contract, created_at, updated_at
+            ) VALUES ('s-1', ?, 'success', 'Shall I draft the reply?', 1,
+                      'message_only', ?, ?)
+            """,
+            (USER_ID, delivered, delivered),
+        )
+        connection.execute(
+            """
+            INSERT INTO processes(
+                process_id, user_id, kind, status, suggestion_id, started_at,
+                updated_at, completed_at, heartbeat_at, next_event_seq
+            ) VALUES ('process-s1', ?, 'suggestion', 'success', 's-1', ?, ?, ?, ?, 1)
+            """,
+            (USER_ID, *[delivered] * 4),
+        )
+    payload = _payload()
+    payload["short_insight_ids"] = ["insight-deleted"]
+    payload["summary_ids"] = ["summary-deleted"]
+
+    with MemoryRunWorkspaceScope() as scope:
+        prepared = prepare_memory_update_run(
+            runtime=runtime, payload=payload, workspace_scope=scope
+        )
+
+    assert prepared.context.short_term_insights == ""
+    assert prepared.context.activity_summaries == ""
+    assert [(item.item_id, item.checkpoint_days) for item in prepared.due] == [
+        ("s-1", 1)
+    ]
+    assert prepared.has_evidence

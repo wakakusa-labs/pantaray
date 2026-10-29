@@ -101,8 +101,26 @@ _REQUEST_SCHEMA: JsonSchema = {
 }
 
 
-class _PathOutsideFolder(ValueError):
+class PathOutsideFolder(ValueError):
     pass
+
+
+def folder_relative(folder: Path, path: str) -> str:
+    """``path`` relative to the canonical ``folder``; anything outside is refused."""
+
+    candidate = PurePosixPath(path)
+    if candidate.is_absolute():
+        if not candidate.is_relative_to(folder):
+            raise PathOutsideFolder(f"{path} is outside the artifact folder")
+        candidate = candidate.relative_to(folder)
+    relative = str(candidate)
+    try:
+        SUGGESTION_ARTIFACTS_ADAPTER.validate_python([relative])
+    except ValidationError as exc:
+        raise PathOutsideFolder(
+            f"{path} is not a plain path inside the artifact folder"
+        ) from exc
+    return relative
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,23 +156,6 @@ class SuggestionArtifactPatch:
             concurrency=ToolConcurrency("sequential"),
         )
 
-    def folder_relative(self, path: str) -> str:
-        """``path`` relative to the folder; anything outside it is refused."""
-
-        candidate = PurePosixPath(path)
-        if candidate.is_absolute():
-            if not candidate.is_relative_to(self.folder):
-                raise _PathOutsideFolder(f"{path} is outside the artifact folder")
-            candidate = candidate.relative_to(self.folder)
-        relative = str(candidate)
-        try:
-            SUGGESTION_ARTIFACTS_ADAPTER.validate_python([relative])
-        except ValidationError as exc:
-            raise _PathOutsideFolder(
-                f"{path} is not a plain path inside the artifact folder"
-            ) from exc
-        return relative
-
     async def run(self, call: ReactToolCall, _step_number: int) -> ReactToolResult:
         try:
             args = ApplyPatchToolArgs.model_validate(call.tool_args)
@@ -166,8 +167,8 @@ class SuggestionArtifactPatch:
             )
         (change,) = args.changes
         try:
-            relative = self.folder_relative(change.path)
-        except _PathOutsideFolder as exc:
+            relative = folder_relative(self.folder, change.path)
+        except PathOutsideFolder as exc:
             return tool_error_response(
                 tool_name=call.tool_name,
                 error_code=PATH_OUTSIDE_FOLDER_ERROR_CODE,
@@ -192,4 +193,10 @@ class SuggestionArtifactPatch:
         )
 
 
-__all__ = ["ARTIFACT_PATCH_TOOL_ID", "SuggestionArtifactPatch"]
+__all__ = [
+    "ARTIFACT_PATCH_TOOL_ID",
+    "PATH_OUTSIDE_FOLDER_ERROR_CODE",
+    "PathOutsideFolder",
+    "SuggestionArtifactPatch",
+    "folder_relative",
+]

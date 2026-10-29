@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
 from pantaray_agents.local_runtime.runtime.office_runtime import (
     OFFICE_RUNTIME,
@@ -71,22 +71,41 @@ RENDER_TIMED_OUT = "RENDER_TIMED_OUT"
 CONTINUE_WITH_READ = "Continue with read, which returns the file's text."
 
 
+def _reject_repeated_pages(pages: list[int]) -> list[int]:
+    # A repeat would spend one of the few page slots on an image the caller
+    # already has, so it is a mistake to report rather than honour.
+    if len(set(pages)) != len(pages):
+        raise ValueError("pages must not name the same page twice")
+    return pages
+
+
+PageNumbers = Annotated[
+    list[Annotated[int, Field(ge=1)]],
+    Field(min_length=1, max_length=MAX_RENDERED_PAGES),
+    AfterValidator(_reject_repeated_pages),
+]
+
+
 class RenderPdfPageToolArgs(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     path: str = Field(min_length=1, pattern=r"\S")
-    pages: list[Annotated[int, Field(ge=1)]] = Field(
-        min_length=1, max_length=MAX_RENDERED_PAGES
-    )
+    pages: PageNumbers
 
-    @field_validator("pages")
-    @classmethod
-    def _reject_repeated_pages(cls, pages: list[int]) -> list[int]:
-        # A repeat would spend one of the few page slots on an image the
-        # caller already has, so it is a mistake to report rather than honour.
-        if len(set(pages)) != len(pages):
-            raise ValueError("pages must not name the same page twice")
-        return pages
+
+class RenderHtmlPageToolArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    path: str = Field(min_length=1, pattern=r"\S")
+    # None: the first MAX_RENDERED_PAGES pages, as many as the page prints to.
+    pages: PageNumbers | None = None
+
+
+class SaveHtmlAsPdfToolArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    path: str = Field(min_length=1, pattern=r"\S")
+    pdf_path: str = Field(pattern=r"\S.*\.[Pp][Dd][Ff]$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,7 +158,9 @@ async def draw_document_pages(
             pdf_path = office_pdf
     finally:
         os.close(descriptor)
-    drawn = await _draw(target=target, pdf_path=pdf_path, pages=pages)
+    drawn = await draw_pdf(
+        target=target, pdf_path=pdf_path, pages=pages, drop_pages_past_end=False
+    )
     return DrawnDocument(
         target=target, page_count=drawn.page_count, pages=tuple(drawn.pages)
     )
@@ -269,9 +290,19 @@ async def _office_pdf(
     return cached
 
 
-async def _draw(
-    *, target: ReadTarget, pdf_path: Path, pages: list[int]
+async def draw_pdf(
+    *,
+    target: ReadTarget,
+    pdf_path: Path,
+    pages: list[int],
+    drop_pages_past_end: bool,
 ) -> RenderedPages:
+    """Draw pages of a PDF made from ``target``, refusing with a code and a hint.
+
+    With ``drop_pages_past_end`` a page past the end is left out rather than
+    refused, for a caller that learns the page count only by drawing.
+    """
+
     try:
         return await render_pdf_pages(
             # The resolved real path: the renderer's sandbox admits the file by
@@ -296,6 +327,16 @@ async def _draw(
     except DocumentTooLargeError as exc:
         raise _too_large(target, exc) from exc
     except PageOutOfRangeError as exc:
+        if drop_pages_past_end:
+            in_range = [number for number in pages if number <= exc.total_units]
+            if not in_range:
+                return RenderedPages(page_count=exc.total_units, pages=())
+            return await draw_pdf(
+                target=target,
+                pdf_path=pdf_path,
+                pages=in_range,
+                drop_pages_past_end=False,
+            )
         raise BrokerPolicyError(
             f"{target.display_path} has {exc.total_units} pages: {exc}",
             code=RENDER_PAGE_OUT_OF_RANGE,
@@ -330,7 +371,10 @@ def _too_large(target: ReadTarget, reason: object) -> BrokerPolicyError:
 __all__ = [
     "CONTINUE_WITH_READ",
     "DrawnDocument",
+    "RenderHtmlPageToolArgs",
     "RenderPdfPageToolArgs",
     "RendererPreparing",
+    "SaveHtmlAsPdfToolArgs",
     "draw_document_pages",
+    "draw_pdf",
 ]

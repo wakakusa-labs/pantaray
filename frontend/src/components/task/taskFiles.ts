@@ -1,10 +1,11 @@
 import type { ActionConversationView } from '../../../electron/src/actions/actionConversationModel';
+import type { TaskFileTarget } from '../../../electron/src/actions/actionFileAccess';
 import { pantarayFilePaths } from '../../../electron/src/actions/pantarayFileLinks';
 
 /**
- * How the preview shows a file: rendered from its text (Markdown, a web page, a diff, or plain
- * text), as a web page converted from a word-processor document, drawn as an image or by the PDF
- * viewer, or left to Quick Look and its app.
+ * How the preview shows a file: rendered from its text (Markdown, a diff, or plain text), as a web
+ * page converted from a word-processor document, drawn as an image or by the PDF viewer (a web
+ * page is printed to PDF first), or left to Quick Look and its app.
  */
 export type TaskFileKind =
   | 'markdown'
@@ -23,6 +24,9 @@ export type TaskFile = Readonly<{
   /** The chip's short type label, such as `HTML`. */
   label: string;
 }>;
+
+/** A file open in the preview, with its owner: main checks the file against that owner. */
+export type TaskPreview = Readonly<{ target: TaskFileTarget; file: TaskFile }>;
 
 const KIND_BY_EXTENSION: Readonly<Record<string, TaskFileKind>> = {
   md: 'markdown',

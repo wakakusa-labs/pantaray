@@ -59,7 +59,7 @@ async def test_missing_read_is_failed_in_history_and_checkpoint(
     failed_entry = next(
         entry for entry in _tool_history(state) if entry["step_id"] == failed["step_id"]
     )
-    expected = "read: failed ACTION_TOOL_READ_FAILED"
+    expected = "read: failed READ_PATH_NOT_FOUND"
     assert failed_entry["result_line"] == expected
     # The conversation replays the call the model made; without its arguments
     # the model would read a read it never wrote.

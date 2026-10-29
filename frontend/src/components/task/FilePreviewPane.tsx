@@ -11,6 +11,7 @@ import { useI18n } from '@/context/useI18n';
 
 import { FileOpenMenu, type FileOpenMenuItem } from './FileOpenMenu';
 import { offersQuickLook, type TaskFile } from './taskFiles';
+import { htmlPreviewDocument, usePreviewZoom } from './previewZoom';
 import './taskFiles.css';
 
 const COPY = {
@@ -28,6 +29,7 @@ const COPY = {
     truncated: 'Showing the beginning only.',
     appOnly: 'Open this file from the Open menu.',
     unavailable: "This file can't be shown here.",
+    renderFailed: "This page couldn't be shown.",
     openFailed: "Couldn't open the file.",
   },
   ja: {
@@ -44,6 +46,7 @@ const COPY = {
     truncated: '途中まで表示しています。',
     appOnly: 'このファイルは「開く」から見られます。',
     unavailable: 'このファイルはここでは表示できません。',
+    renderFailed: 'このページを表示できませんでした。',
     openFailed: 'ファイルを開けませんでした。',
   },
 } as const;
@@ -62,21 +65,38 @@ function middleEllipsis(path: string): string {
 
 type OpenWay = 'reveal' | 'quickLook' | 'openInApp' | 'openWithApp';
 
-/*
- * The document is untrusted content. The empty sandbox runs no script and gives the frame an
- * opaque origin, and this policy stops it loading anything over the network: only inline
- * styles and data: images render. A policy can only be tightened by a later one, so the
- * document's own <meta> tags cannot loosen it.
- */
-const HTML_PREVIEW_POLICY =
-  "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:";
-const POLICY_META = `<meta http-equiv="Content-Security-Policy" content="${HTML_PREVIEW_POLICY}">`;
-const LEADING_DOCTYPE = /^\s*<!doctype[^>]*>/i;
+type ZoomablePreviewProps =
+  | Readonly<{ kind: 'page'; title: string; html: string }>
+  | Readonly<{ kind: 'image'; alt: string; url: string }>;
 
-/** The policy goes first so it applies before any element; after a doctype, to keep standards mode. */
-function htmlPreviewDocument(html: string): string {
-  const doctype = LEADING_DOCTYPE.exec(html)?.[0] ?? '';
-  return `${doctype}${POLICY_META}${html.slice(doctype.length)}`;
+/** A converted document or an image, fitted to the pane's width; a pinch zooms it. */
+function ZoomablePreview(props: ZoomablePreviewProps) {
+  const { viewportRef, extentRef, boxRef, onFrameLoad, onImageLoad } = usePreviewZoom();
+  return (
+    <div ref={viewportRef} className="task-file-zoom">
+      <div ref={extentRef} className="task-file-zoom__extent">
+        <div ref={boxRef} className="task-file-zoom__box">
+          {props.kind === 'page' ? (
+            <iframe
+              className="task-file-zoom__frame"
+              title={props.title}
+              // Never with allow-scripts: see previewZoom.
+              sandbox="allow-same-origin"
+              srcDoc={htmlPreviewDocument(props.html)}
+              onLoad={onFrameLoad}
+            />
+          ) : (
+            <img
+              className="task-file-zoom__image"
+              src={props.url}
+              alt={props.alt}
+              onLoad={onImageLoad}
+            />
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /** A new revision changes the URL, so the frame loads the PDF again instead of keeping it. */
@@ -91,7 +111,9 @@ type Content =
   | Readonly<{ kind: 'text'; text: string; truncated: boolean }>
   | Readonly<{ kind: 'page'; html: string }>
   | Readonly<{ kind: 'image'; url: string }>
-  | Readonly<{ kind: 'unavailable' }>;
+  /** An HTML file, printed to PDF by main so the charts its script draws show. */
+  | Readonly<{ kind: 'pdf'; url: string }>
+  | Readonly<{ kind: 'unavailable'; renderFailed: boolean }>;
 
 const READ_KINDS = new Set<TaskFile['kind']>([
   'markdown',
@@ -109,7 +131,7 @@ const READ_KINDS = new Set<TaskFile['kind']>([
 function useFileContent(target: TaskFileTarget, file: TaskFile, revision: string | null): Content {
   const read = READ_KINDS.has(file.kind) ? window.electron?.actionFiles?.read : undefined;
   const [content, setContent] = useState<Content>(() =>
-    read ? { kind: 'loading' } : { kind: 'unavailable' }
+    read ? { kind: 'loading' } : { kind: 'unavailable', renderFailed: false }
   );
   const { kind, id } = target;
   useEffect(() => {
@@ -126,13 +148,15 @@ function useFileContent(target: TaskFileTarget, file: TaskFile, revision: string
         } else if (result.kind === 'image') {
           imageUrl = URL.createObjectURL(new Blob([result.bytes], { type: result.mime }));
           setContent({ kind: 'image', url: imageUrl });
+        } else if (result.kind === 'pdf') {
+          setContent({ kind: 'pdf', url: result.url });
         } else {
-          setContent({ kind: 'unavailable' });
+          setContent({ kind: 'unavailable', renderFailed: result.reason === 'render_failed' });
         }
       },
       (error: unknown) => {
         console.error('Failed to read a file for preview', error);
-        if (active) setContent({ kind: 'unavailable' });
+        if (active) setContent({ kind: 'unavailable', renderFailed: false });
       }
     );
     return () => {
@@ -189,13 +213,10 @@ export function FilePreviewPane({ target, file, revision, onClose }: FilePreview
     item(copy.openInApp, 'openInApp'),
     item(copy.openWithApp, 'openWithApp'),
   ];
-  const page = (html: string) => (
-    <iframe
-      className="task-file-preview__frame"
-      title={file.name}
-      sandbox=""
-      srcDoc={htmlPreviewDocument(html)}
-    />
+  const pdfFrame = (url: string) => (
+    // Not sandboxed: a sandboxed frame turns plugins off, and the PDF viewer is one. The scheme
+    // serves only a PDF of a file its owner names, from an origin of its own.
+    <iframe className="task-file-preview__frame" title={file.name} src={url} />
   );
 
   return (
@@ -243,33 +264,31 @@ export function FilePreviewPane({ target, file, revision, onClose }: FilePreview
       ) : null}
       <div className="task-file-preview__body">
         {file.kind === 'pdf' ? (
-          // Not sandboxed: a sandboxed frame turns plugins off, and the PDF viewer is one. The
-          // scheme serves only a PDF its owner names, from an origin of its own.
-          <iframe
-            className="task-file-preview__frame"
-            title={file.name}
-            src={pdfUrl(target, file.path, revision)}
-          />
+          pdfFrame(pdfUrl(target, file.path, revision))
         ) : content.kind === 'loading' ? (
           <p className="task-file-preview__status" role="status">
             {copy.loading}
           </p>
         ) : content.kind === 'unavailable' ? (
           <p className="task-file-preview__status">
-            {file.kind === 'app_only' ? copy.appOnly : copy.unavailable}
+            {file.kind === 'app_only'
+              ? copy.appOnly
+              : content.renderFailed
+                ? copy.renderFailed
+                : copy.unavailable}
           </p>
+        ) : content.kind === 'pdf' ? (
+          pdfFrame(content.url)
         ) : content.kind === 'page' ? (
-          page(content.html)
+          <ZoomablePreview kind="page" title={file.name} html={content.html} />
         ) : content.kind === 'image' ? (
-          <img className="task-file-preview__image" src={content.url} alt={file.name} />
+          <ZoomablePreview kind="image" alt={file.name} url={content.url} />
         ) : (
           <>
             {content.truncated ? (
               <p className="task-file-preview__status">{copy.truncated}</p>
             ) : null}
-            {file.kind === 'html' ? (
-              page(content.text)
-            ) : diffs !== null ? (
+            {diffs !== null ? (
               <div className="task-file-preview__diffs">
                 {diffs.map((diff, index) => (
                   <ToolDiffView key={index} diff={diff} label={diff.path} />

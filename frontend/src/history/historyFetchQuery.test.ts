@@ -20,6 +20,8 @@ const PAGE = {
       updated_at: '2026-08-30T01:02:03.456Z',
       status: 'idle',
       latest_completion_event_id: 'event-new',
+      status_line: 'The report is fixed',
+      artifact_names: ['report.md', 'deck.pdf'],
     },
     {
       kind: 'conversation',
@@ -28,6 +30,8 @@ const PAGE = {
       updated_at: '2026-08-30T01:01:03.456Z',
       status: 'running',
       latest_completion_event_id: 'event-running',
+      status_line: null,
+      artifact_names: [],
     },
     {
       kind: 'suggestion',
@@ -35,6 +39,7 @@ const PAGE = {
       title: 'Review this',
       updated_at: '2026-08-30T01:00:03.456Z',
       status: 'approval_pending',
+      artifact_names: [],
     },
   ],
   next_cursor: 'cursor-next',
@@ -134,23 +139,33 @@ describe('createHistoryFetcher', () => {
       items: [{ ...PAGE.items[0], updated_at: '2026-08-30T01:02:03Z' }],
     },
     { ...PAGE, total_count: 3 },
-  ])('private field・extra field・非 canonical timestamp をページ全体で拒否する', async (page) => {
-    const fetchHistory = createHistoryFetcher({
-      getRuntimeState: () => READY_RUNTIME,
-      requestJson: vi.fn(async () => page) as unknown as HistoryRequestJson,
-      getCompletionUnreadSnapshot: () => () => true,
-    });
+    { ...PAGE, items: [{ ...PAGE.items[0], status_line: undefined }] },
+    { ...PAGE, items: [{ ...PAGE.items[0], status_line: ' ' }] },
+    { ...PAGE, items: [{ ...PAGE.items[0], status_line: '😀'.repeat(121) }] },
+    { ...PAGE, items: [{ ...PAGE.items[2], status_line: null }] },
+    { ...PAGE, items: [{ ...PAGE.items[0], artifact_names: undefined }] },
+    { ...PAGE, items: [{ ...PAGE.items[0], artifact_names: [''] }] },
+    { ...PAGE, items: [{ ...PAGE.items[2], artifact_names: ['/Users/me/notes.md', 1] }] },
+  ])(
+    'private field・extra field・非 canonical timestamp・不正な状況行やファイル名をページ全体で拒否する',
+    async (page) => {
+      const fetchHistory = createHistoryFetcher({
+        getRuntimeState: () => READY_RUNTIME,
+        requestJson: vi.fn(async () => page) as unknown as HistoryRequestJson,
+        getCompletionUnreadSnapshot: () => () => true,
+      });
 
-    const result = await fetchHistory(REQUEST);
+      const result = await fetchHistory(REQUEST);
 
-    expect(result).toEqual({
-      data: [],
-      nextCursor: null,
-      unreadActionIds: [],
-      error: 'Invalid conversation history response.',
-      errorCode: null,
-    });
-  });
+      expect(result).toEqual({
+        data: [],
+        nextCursor: null,
+        unreadActionIds: [],
+        error: 'Invalid conversation history response.',
+        errorCode: null,
+      });
+    }
+  );
 
   it('local backend の typed error code を renderer 契約へ保持する', async () => {
     const { LocalBackendRequestError } = await import('../../electron/src/localBackend/client');

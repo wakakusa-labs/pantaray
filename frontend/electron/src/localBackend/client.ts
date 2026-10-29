@@ -43,6 +43,7 @@ const ALLOWED_LOCAL_BACKEND_ROUTES: ReadonlyArray<{
   methods: ReadonlySet<HttpMethod>;
 }> = [
   { path: /^\/local\/action-screen-capture$/, methods: new Set(['POST']) },
+  { path: /^\/local\/action-html-render$/, methods: new Set(['POST']) },
   { path: /^\/v1\/agents\/users\/[^/]+\/context-source$/, methods: new Set(['GET']) },
   { path: /^\/v1\/agents\/users\/[^/]+\/context-source\/transitions$/, methods: new Set(['POST']) },
   { path: /^\/v1\/agents\/users\/[^/]+\/suggestions\/welcome$/, methods: new Set(['POST']) },

@@ -26,14 +26,12 @@ from .action_subagent_broker_authority import ACTION_SUBAGENT_WRITE_DENIED
 from .broker_common import BrokerContext
 from .broker_protocol import (
     ValidatedCommandRequest,
-    ValidatedGlobRequest,
-    ValidatedGrepRequest,
-    ValidatedListRequest,
     ValidatedPatchRequest,
-    ValidatedReadRequest,
-    ValidatedRenderPdfPageRequest,
+    ValidatedSaveHtmlAsPdfRequest,
 )
 from .direct_execution_start import (
+    DirectReadOnlyRequest,
+    GatedRequest,
     build_direct_invocation_start,
     should_start_direct_invocation,
     start_direct_execution,
@@ -87,7 +85,7 @@ def claim_approval_gated_execution_start(
     db_path: Path,
     busy_timeout_ms: int,
     context: BrokerContext,
-    validated: ValidatedPatchRequest | ValidatedCommandRequest,
+    validated: GatedRequest,
     args: dict[str, JSONValue],
 ) -> str:
     if validated.approval_session_id is None or validated.approval_source is None:
@@ -128,19 +126,18 @@ def claim_broker_execution_start(
     db_path: Path,
     busy_timeout_ms: int,
     context: BrokerContext,
-    validated: (
-        ValidatedReadRequest
-        | ValidatedRenderPdfPageRequest
-        | ValidatedListRequest
-        | ValidatedGlobRequest
-        | ValidatedGrepRequest
-        | ValidatedPatchRequest
-        | ValidatedCommandRequest
-    ),
+    validated: DirectReadOnlyRequest | GatedRequest,
     args: dict[str, JSONValue],
 ) -> str | None:
     try:
-        if isinstance(validated, (ValidatedPatchRequest, ValidatedCommandRequest)):
+        if isinstance(
+            validated,
+            (
+                ValidatedPatchRequest,
+                ValidatedSaveHtmlAsPdfRequest,
+                ValidatedCommandRequest,
+            ),
+        ):
             if (
                 validated.approval_session_id is not None
                 and validated.approval_source is not None

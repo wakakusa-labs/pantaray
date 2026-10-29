@@ -10,7 +10,7 @@ from pantaray_agents.local_runtime.integrations.search import (
     integration_tools_available,
 )
 from pantaray_agents.tools.contract import ReactToolDefinition
-from pantaray_agents.tools.files.read_only_tools import build_read_only_file_tools
+from pantaray_agents.tools.files.read_only_tools import read_only_file_tools
 from pantaray_agents.tools.memory.retrieval import (
     MemoryContextSession,
     MemoryRetrievalPolicy,
@@ -29,6 +29,7 @@ from ..outside_workspace_grant import app_owned_roots
 from ..tool_result_storage import discard_run_tool_results
 from .artifact_patch import SuggestionArtifactPatch
 from .commands import PinnedFolder, SuggestionCommandSession
+from .html_pages import SuggestionHtmlPages
 from .integrations import IntegrationRunBudget, SuggestionIntegrationSession
 from .snapshot import SuggestionResearchSnapshot
 from .zanei import InsightActivityStart, SuggestionZaneiSession
@@ -92,8 +93,9 @@ class LocalSuggestionResearchTools:
         user_id: str,
         run_id: str,
     ) -> SuggestionMakeTools:
-        """The research tools, with commands and apply_patch writing only into
-        the Suggestion's artifact folder."""
+        """The research tools, with commands, run_python, apply_patch and
+        save_html_as_pdf writing only into the Suggestion's artifact folder,
+        and render_html_page to look at a page."""
 
         folder = resolve_suggestion_artifacts_root(
             db_path=self.db_path, user_id=user_id, suggestion_id=run_id
@@ -138,6 +140,15 @@ class LocalSuggestionResearchTools:
                 enqueue_repair_on_reference_failure=False,
             ),
         )
+        files = read_only_file_tools(
+            db_path=self.db_path,
+            folders=self.snapshot.folders,
+            read_access_scope=self.snapshot.read_access_scope,
+            app_storage_roots=app_owned_roots(self.db_path),
+            spill_root=spill_root,
+            memory_folders=self.snapshot.memory_folders,
+            own_folder=None if artifact_folder is None else artifact_folder.path,
+        )
         return (
             *memory_tools.definitions(),
             MemorySqlSession(
@@ -145,14 +156,16 @@ class LocalSuggestionResearchTools:
                 busy_timeout_ms=self.busy_timeout_ms,
                 user_id=user_id,
             ).definition(),
-            *build_read_only_file_tools(
-                db_path=self.db_path,
-                folders=self.snapshot.folders,
-                read_access_scope=self.snapshot.read_access_scope,
-                app_storage_roots=app_owned_roots(self.db_path),
-                spill_root=spill_root,
-                memory_folders=self.snapshot.memory_folders,
-                own_folder=None if artifact_folder is None else artifact_folder.path,
+            *files.definitions(),
+            *(
+                ()
+                if artifact_folder is None
+                else SuggestionHtmlPages(
+                    files=files,
+                    folder=artifact_folder,
+                    user_id=user_id,
+                    run_id=run_id,
+                ).definitions()
             ),
             *WebResearchToolSession(
                 user_id=user_id,

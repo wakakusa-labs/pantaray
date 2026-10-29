@@ -14,6 +14,7 @@ from pantaray_agents.schema.conversation_history import (
 
 from .history_candidates import (
     ConversationHistoryItemKey,
+    read_conversation_history_answers_in_connection,
     read_conversation_history_candidates_in_connection,
 )
 from .history_projection import (
@@ -47,11 +48,15 @@ def read_conversation_history_page_in_connection(
         user_id=user_id,
         selections=required_history_run_selections(candidates.candidates),
     )
+    answers = read_conversation_history_answers_in_connection(
+        connection=connection, user_id=user_id, candidates=candidates.candidates
+    )
     return project_conversation_history_page(
         candidate_page=candidates,
         user_id=user_id,
         normalized_search=normalized_search,
         authorities=authorities,
+        answers=answers,
     )
 
 

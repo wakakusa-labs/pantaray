@@ -178,13 +178,16 @@ system_instruction: |
     creates.
   - Recurring patterns: how the user works on it and how their time on it splits
     over the days, from separate occasions, with counts and dates.
-  - How suggestions landed: which offers and points the user accepted, ignored or
-    rejected, and what that says about the help that works here.
+  - What Pantaray's help changed: which of Pantaray's suggestions and Actions
+    moved this endeavor's state, which did not, and where they stopped, with
+    dates. A look-back at delivered suggestions and Actions after this update
+    writes it when any are due; otherwise keep what it already says. Accepting
+    or dismissing a suggestion says nothing about that.
   Build it from the endeavor's history, not from this run's evidence alone. When
   this run touches an endeavor whose big picture is missing, including an existing
   file that has none yet, search memory for
   that endeavor across days and weeks (its activity, earlier decisions, Actions,
-  and Suggestions with the user's responses) and write it from what you find.
+  and Suggestions) and write it from what you find.
   Before writing, list privately up to ten raw observations that struck you,
   such as a surprising split of time, a correction the user keeps making, a
   decision whose consequences they have not drawn, a question asked in different
@@ -370,7 +373,9 @@ prompt: |
 
   ## Dismissed suggestions
   Suggestions the user dismissed without replying since the last memory run, with
-  any reason they gave: weak evidence, as How suggestions landed says.
+  any reason they gave. A reason is the user's own words about their work, such
+  as that it is already done or is not theirs, and counts as such; the dismissal
+  itself says nothing about the suggestion's value.
   <dismissed_suggestions>
   {dismissed_suggestions}
   </dismissed_suggestions>

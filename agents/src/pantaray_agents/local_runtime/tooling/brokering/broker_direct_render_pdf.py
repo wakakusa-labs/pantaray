@@ -1,9 +1,10 @@
-"""The Action's render tool: a document's pages, drawn, so the model can look.
+"""The Action's render tools: a document's pages, drawn, so the model can look.
 
 ``tools.files.render_pages`` draws them and decides which file may be opened.
-What this module owns is where the Action keeps them: the converted PDF with
-the Action, so the same file is converted once, and the images where the
-conversation page and the next turn can both find them again. The bytes ride
+What this module owns, for ``render_html_page`` as well, is where the Action
+keeps them: the converted PDF with the Action, so the same file is converted
+once, and the images where the conversation page and the next turn can both
+find them again. The bytes ride
 the attachment path ``capture_screen`` puts a screenshot on, never the output,
 which is durable history the memory tools read.
 """
@@ -11,6 +12,7 @@ which is durable history the memory tools read.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, cast
@@ -78,34 +80,59 @@ async def run_render_pdf_page_executor(
         scope=read_scope(context),
         raw_path=request.path,
         pages=request.pages,
-        # Under the Action's root, beside its workspace rather than in it.
-        converted_dir=resolve_action_storage_paths(
-            db_path=context.db_path,
-            user_id=context.execution_session.user_id,
-            # The render tool is offered to Action runs alone, which always
-            # carry their Action.
-            action_id=cast(str, context.execution_session.action_id),
-        ).action_root
-        / RENDERED_DOCUMENTS_DIRNAME,
+        converted_dir=rendered_documents_dir(context),
     )
     if isinstance(drawn, RendererPreparing):
         return _preparing(drawn.target)
-    target = drawn.target
-    stored = [
-        _store(user_id=context.execution_session.user_id, page=page)
-        for page in drawn.pages
-    ]
-    output: dict[str, JSONValue] = {
-        "kind": "pdf_pages",
-        "path": target.display_path,
+    return rendered_pages_outcome(
+        user_id=context.execution_session.user_id,
+        target=drawn.target,
+        pages=drawn.pages,
+        message=(
+            f"Drew pages of {drawn.target.display_path}, which has "
+            f"{drawn.page_count} pages."
+        ),
+        output={
+            "kind": "pdf_pages",
+            "path": drawn.target.display_path,
+            "page_count": drawn.page_count,
+        },
+    )
+
+
+def rendered_documents_dir(context: BrokerContext) -> Path:
+    """Under the Action's root, beside its workspace rather than in it."""
+
+    return (
+        resolve_action_storage_paths(
+            db_path=context.db_path,
+            user_id=context.execution_session.user_id,
+            # The render tools are offered to Action runs alone, which always
+            # carry their Action.
+            action_id=cast(str, context.execution_session.action_id),
+        ).action_root
+        / RENDERED_DOCUMENTS_DIRNAME
+    )
+
+
+def rendered_pages_outcome(
+    *,
+    user_id: str,
+    target: ReadTarget,
+    pages: Sequence[RenderedPage],
+    message: str,
+    output: dict[str, JSONValue],
+) -> UnprojectedBrokerToolOutcome:
+    """Store a render's drawn pages and attach them to its ``output``."""
+
+    stored = [_store(user_id=user_id, page=page) for page in pages]
+    output = {
+        **output,
         # The refs are in the message as well as in the attachments: on the
         # string prompt path, the prompt text says where each image goes.
-        "message": (
-            f"Drew pages of {target.display_path}, which has "
-            f"{drawn.page_count} pages. "
-            + " ".join(f"Page {page.number}: {page.ref}" for page in stored)
+        "message": " ".join(
+            [message, *(f"Page {page.number}: {page.ref}" for page in stored)]
         ),
-        "page_count": drawn.page_count,
         # Durable history keeps this output, so an attachment names the image
         # by its user-scoped storage_path, never by path or by bytes.
         "attachments": [
@@ -186,4 +213,8 @@ def _store(*, user_id: str, page: RenderedPage) -> _StoredPage:
     )
 
 
-__all__ = ["run_render_pdf_page_executor"]
+__all__ = [
+    "rendered_documents_dir",
+    "rendered_pages_outcome",
+    "run_render_pdf_page_executor",
+]

@@ -20,15 +20,22 @@ from .broker_protocol import (
     ValidatedListRequest,
     ValidatedPatchRequest,
     ValidatedReadRequest,
+    ValidatedRenderHtmlPageRequest,
     ValidatedRenderPdfPageRequest,
+    ValidatedSaveHtmlAsPdfRequest,
 )
 
 type DirectReadOnlyRequest = (
     ValidatedReadRequest
     | ValidatedRenderPdfPageRequest
+    | ValidatedRenderHtmlPageRequest
     | ValidatedListRequest
     | ValidatedGlobRequest
     | ValidatedGrepRequest
+)
+# Approval-gated requests, recorded with the command summary that was approved.
+type GatedRequest = (
+    ValidatedPatchRequest | ValidatedSaveHtmlAsPdfRequest | ValidatedCommandRequest
 )
 
 
@@ -37,7 +44,7 @@ def start_direct_execution(
     db_path: Path,
     busy_timeout_ms: int,
     context: BrokerContext,
-    validated: DirectReadOnlyRequest | ValidatedPatchRequest | ValidatedCommandRequest,
+    validated: DirectReadOnlyRequest | GatedRequest,
     args: dict[str, JSONValue],
 ) -> str | None:
     tool_invocation_id = validated.tool_invocation_id
@@ -99,7 +106,7 @@ def tool_invocation_exists(
 def build_direct_invocation_start(
     *,
     context: BrokerContext,
-    validated: DirectReadOnlyRequest | ValidatedPatchRequest | ValidatedCommandRequest,
+    validated: DirectReadOnlyRequest | GatedRequest,
     args: dict[str, JSONValue],
 ) -> ToolInvocationStartInput:
     if validated.tool_invocation_id is None:
@@ -109,6 +116,7 @@ def build_direct_invocation_start(
         (
             ValidatedReadRequest,
             ValidatedRenderPdfPageRequest,
+            ValidatedRenderHtmlPageRequest,
             ValidatedListRequest,
             ValidatedGlobRequest,
             ValidatedGrepRequest,

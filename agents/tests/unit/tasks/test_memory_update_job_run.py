@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 from pantaray_agents.agents.memory_agent import MemoryUpdateAgentResult
+from pantaray_agents.agents.memory_file_editor.runner import MemoryEditorConversation
+from pantaray_agents.conversation.loop import ConversationTurnsExhausted
 from pantaray_agents.local_runtime.action_conversation.history_deletion import (
     delete_history_item,
 )
@@ -34,6 +37,7 @@ from pantaray_agents.local_runtime.memory_catalog.memory_run_binding import (
 from pantaray_agents.local_runtime.memory_catalog.search_policy import (
     parse_memory_search_focus,
 )
+from pantaray_agents.local_runtime.runtime.help_outcomes import DueOutcome
 from pantaray_agents.local_runtime.runtime.identity import (
     register_logged_out_owner,
     reset_logged_out_owner,
@@ -56,6 +60,7 @@ from pantaray_agents.local_runtime.runtime.session_store import (
     import_desktop_session,
     mark_configured,
 )
+from pantaray_agents.local_runtime.runtime.utc_timestamps import format_utc_iso
 from pantaray_agents.local_runtime.storage.migrations import (
     apply_migrations,
     load_default_migrations,
@@ -81,6 +86,8 @@ BUSY_TIMEOUT_MS = 1_000
 USER_ID = "user-1"
 TRIGGER_AT = "2026-01-05T00:00:00Z"
 DISPATCH_AT = datetime(2026, 1, 5, 1, 0, tzinfo=UTC)
+# The scripted agents look back without continuing a real conversation.
+_NO_CONVERSATION = cast(MemoryEditorConversation, object())
 
 
 class _ScriptedMemoryAgent:
@@ -94,6 +101,10 @@ class _ScriptedMemoryAgent:
         self._edits = edits
         self.applied_memory_request_ids = applied_memory_request_ids
         self.contexts: list[MemoryUpdateContext] = []
+        self.looked_back: list[tuple[DueOutcome, ...]] = []
+        self.look_back_edits: tuple[tuple[str, str], ...] = ()
+        self.look_back_fails = False
+        self._draft_revision = ""
 
     async def update(
         self,
@@ -105,13 +116,38 @@ class _ScriptedMemoryAgent:
     ) -> MemoryUpdateAgentResult:
         del tool_results_path, db_path
         self.contexts.append(context)
+        self._draft_revision = context.draft_revision
+        await self._write(self._edits, tool_definitions)
+        return MemoryUpdateAgentResult(
+            applied_memory_request_ids=self.applied_memory_request_ids,
+            conversation=_NO_CONVERSATION,
+        )
+
+    async def look_back_on_outcomes(
+        self,
+        conversation: MemoryEditorConversation,
+        due: tuple[DueOutcome, ...],
+        *,
+        tool_definitions: tuple[ReactToolDefinition, ...],
+        now: str,
+    ) -> None:
+        del conversation, now
+        self.looked_back.append(due)
+        await self._write(self.look_back_edits, tool_definitions)
+        if self.look_back_fails:
+            raise ConversationTurnsExhausted("no completed")
+
+    async def _write(
+        self,
+        edits: tuple[tuple[str, str], ...],
+        tool_definitions: tuple[ReactToolDefinition, ...],
+    ) -> None:
         write = next(item for item in tool_definitions if item.name == "write_file")
-        draft_revision = context.draft_revision
-        for step, (path, content) in enumerate(self._edits, start=1):
+        for step, (path, content) in enumerate(edits, start=1):
             args: dict[str, JSONValue] = {
                 "path": path,
                 "text": content,
-                "expected_draft_revision": draft_revision,
+                "expected_draft_revision": self._draft_revision,
             }
             result = await write.execute(
                 ReactToolCall(
@@ -125,10 +161,7 @@ class _ScriptedMemoryAgent:
             )
             assert result.status == "success", result.output
             assert isinstance(result.output, dict)
-            draft_revision = str(result.output["draft_revision"])
-        return MemoryUpdateAgentResult(
-            applied_memory_request_ids=self.applied_memory_request_ids,
-        )
+            self._draft_revision = str(result.output["draft_revision"])
 
 
 def _bootstrap(tmp_path: Path) -> LocalMemoryFileEditorRuntime:
@@ -249,6 +282,8 @@ async def test_a_due_trigger_runs_the_agent_and_publishes_every_touched_category
     assert json.loads(str(completed[0][0])) == {
         "published_sources": ["agent_experience", "fact", "long_term_insight"]
     }
+    # Nothing was delivered, so the run does not go on to look back.
+    assert agent.looked_back == []
 
 
 def _experience_content(experience_id: str) -> AgentExperienceContent:
@@ -271,10 +306,130 @@ def _builder(agent: MemoryUpdateWorkerAgent) -> object:
     return build
 
 
-class _AgentThatReplacesTheRoute:
+def _deliver_suggestion(runtime: LocalMemoryFileEditorRuntime) -> None:
+    """A suggestion delivered two days before the run, due at its first checkpoint."""
+
+    delivered = format_utc_iso(DISPATCH_AT - timedelta(days=2))
+    with sqlite3.connect(runtime.db_path) as connection, connection:
+        connection.execute(
+            """INSERT INTO agent_suggestions(suggestion_id, user_id, status, answer,
+              has_suggestion, interaction_contract, created_at, updated_at)
+              VALUES ('suggestion-1', ?, 'success', 'Try the checklist.', 1,
+              'message_only', ?, ?)""",
+            (USER_ID, delivered, delivered),
+        )
+        connection.execute(
+            """INSERT INTO processes(process_id, user_id, kind, status, suggestion_id,
+              started_at, updated_at, completed_at, heartbeat_at, next_event_seq)
+              VALUES ('process-s1', ?, 'suggestion', 'success', 'suggestion-1',
+              ?, ?, ?, ?, 1)""",
+            (USER_ID, *[delivered] * 4),
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fails", [False, True])
+async def test_the_look_back_writes_into_the_runs_one_publication(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, fails: bool
+) -> None:
+    """Its edits go out with the update's; a failed one's are dropped."""
+    runtime = _bootstrap(tmp_path)
+    _deliver_suggestion(runtime)
+    payload = _claimed_payload(runtime)
+    agent = _ScriptedMemoryAgent(
+        (("facts/tooling.md", "# Tooling\n\n- Ships runs.\n"),)
+    )
+    agent.look_back_edits = (
+        ("insights/help.md", "# Help\n\n- The checklist moved reviews along.\n"),
+    )
+    agent.look_back_fails = fails
+
+    await execute_memory_update_job(
+        payload=payload, runtime=runtime, build_agent=_builder(agent)
+    )
+
+    with sqlite3.connect(runtime.db_path) as connection:
+        revisions = connection.execute(
+            """SELECT nodes.source_type, COUNT(*) FROM memory_nodes AS nodes
+               JOIN memory_revisions AS revisions ON revisions.node_id = nodes.node_id
+               WHERE nodes.current_revision_id IS NOT NULL
+               GROUP BY nodes.source_type ORDER BY nodes.source_type"""
+        ).fetchall()
+        completed = connection.execute(
+            """SELECT COUNT(*) FROM process_events
+               WHERE process_id = ? AND event_name = 'memory_update_completed'""",
+            (payload["process_id"],),
+        ).fetchone()
+    assert [[item.item_id for item in due] for due in agent.looked_back] == [
+        ["suggestion-1"]
+    ]
+    # One revision each: the look-back's edit went out with the update's.
+    assert revisions == (
+        [("fact", 1)] if fails else [("fact", 1), ("long_term_insight", 1)]
+    )
+    assert completed == (1,)
+    assert ("MEMORY_OUTCOMES_LOOK_BACK_FAILED" in caplog.text) == fails
+
+
+@pytest.mark.asyncio
+async def test_a_failed_look_back_publishes_the_update_without_its_partial_edits(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    runtime = _bootstrap(tmp_path)
+    _deliver_suggestion(runtime)
+    payload = _claimed_payload(runtime)
+    kept, replacing = derived_experience_ids(payload["job_id"])[:2]
+    agent = _ScriptedMemoryAgent(
+        (
+            ("facts/tooling.md", "# Tooling\n\n- Ships runs.\n"),
+            (
+                experience_entry_path(kept),
+                render_agent_experience_markdown(_experience_content(kept)),
+            ),
+        )
+    )
+    # Replacing a lesson is a write and a delete; the look-back stops between
+    # them, which publication would reject as a still-active superseded entry.
+    agent.look_back_edits = (
+        (
+            experience_entry_path(replacing),
+            render_agent_experience_markdown(
+                _experience_content(replacing).model_copy(
+                    update={"supersedes_experience_ids": (kept,)}
+                )
+            ),
+        ),
+    )
+    agent.look_back_fails = True
+
+    await execute_memory_update_job(
+        payload=payload, runtime=runtime, build_agent=_builder(agent)
+    )
+
+    with sqlite3.connect(runtime.db_path) as connection:
+        revisions = connection.execute(
+            """SELECT nodes.source_type, COUNT(*) FROM memory_nodes AS nodes
+               JOIN memory_revisions AS revisions ON revisions.node_id = nodes.node_id
+               WHERE nodes.current_revision_id IS NOT NULL
+               GROUP BY nodes.source_type ORDER BY nodes.source_type"""
+        ).fetchall()
+        entries = connection.execute(
+            """SELECT DISTINCT fragments.source_path FROM memory_fragments AS fragments
+               JOIN memory_nodes AS nodes
+                 ON nodes.current_revision_id = fragments.revision_id
+               WHERE nodes.source_type = 'agent_experience'
+                 AND fragments.source_path LIKE '%entries/%'"""
+        ).fetchall()
+    assert revisions == [("agent_experience", 1), ("fact", 1)]
+    assert [path for (path,) in entries] == [experience_entry_path(kept)]
+    assert "MEMORY_OUTCOMES_LOOK_BACK_FAILED" in caplog.text
+
+
+class _AgentThatReplacesTheRoute(_ScriptedMemoryAgent):
     """Ends its run on a different account than it started on."""
 
     def __init__(self, db_path: Path) -> None:
+        super().__init__(())
         self._db_path = db_path
 
     async def update(
@@ -295,7 +450,9 @@ class _AgentThatReplacesTheRoute:
             expires_at="2099-08-16T00:00:00Z",
             session_version="2",
         )
-        return MemoryUpdateAgentResult(applied_memory_request_ids=())
+        return MemoryUpdateAgentResult(
+            applied_memory_request_ids=(), conversation=_NO_CONVERSATION
+        )
 
 
 @pytest.mark.asyncio

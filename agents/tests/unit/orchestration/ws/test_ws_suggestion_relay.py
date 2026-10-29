@@ -10,9 +10,9 @@ import pytest
 from starlette.websockets import WebSocketState
 
 import pantaray_agents.dependencies as deps
+from pantaray_agents.local_runtime.runtime import deliverable_sessions
 from pantaray_agents.orchestration.session.store import InMemorySessionStore
 from pantaray_agents.orchestration.ws import (
-    deliverable_sessions,
     suggestion_job_timing,
     suggestion_relay,
 )

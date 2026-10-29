@@ -18,21 +18,20 @@
   --app-titlebar-height: 40px;
   /* The detail panes' header row; the sidebar panel's top edge runs on from its bottom line. */
   --app-pane-header-height: 52px;
-  /* Fog: a dark grey-indigo ground with a barely visible haze rising from the bottom edge. */
-  --app-background:
-    radial-gradient(120% 70% at 50% 110%, rgba(150, 166, 194, 0.035), rgba(0, 0, 0, 0) 60%),
-    linear-gradient(180deg, #12161e 0%, #0f131a 45%, #0b0e14 100%);
+  /* Fog: one flat dark grey-indigo. A gradient or haze reads as a glow behind the text. */
+  --app-background: #13171e;
   /* Fog tokens for the main window. Light is reserved for what needs attention. */
   --fog-mist: rgba(170, 186, 212, 0.07);
   --fog-mist-strong: rgba(170, 186, 212, 0.1);
   --fog-line: rgba(214, 226, 248, 0.07);
-  --fog-text: #e3e9f4;
+  /* Off-white rather than near-white: bright strokes on the dark ground shimmer. */
+  --fog-text: #d5dbe5;
   --fog-text-2: #a4aec1;
   /* Raised from the mockup's #747f93 so small text keeps 4.5:1 on the fog and popovers. */
   --fog-text-3: #828da1;
   --fog-light: #f1f5fc;
   --fog-popover: #1b2230;
-  --text-primary: rgba(255, 255, 255, 0.92);
+  --text-primary: rgba(255, 255, 255, 0.85);
   --text-secondary: rgba(215, 225, 235, 0.78); /* わずかに冷たい白 */
   --text-muted: rgba(200, 210, 220, 0.45);
   --border-color: rgba(255, 255, 255, 0.08);
@@ -136,7 +135,6 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   background: var(--app-background);
-  background-attachment: fixed;
   color: var(--text-primary);
   min-height: 100vh;
 }
@@ -148,7 +146,7 @@ body.overlay-window {
   --text-body-leading: 1.75;
   background: transparent !important;
   overflow: hidden;
-  color: #ffffff;
+  color: rgba(255, 255, 255, 0.88);
 }
 
 body.overlay-window #root {

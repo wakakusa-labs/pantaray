@@ -365,11 +365,29 @@
   white-space: nowrap;
 }
 
-.history-item-live {
+.history-item-live,
+.history-item-line,
+.history-item-files__name {
   overflow: hidden;
   color: var(--fog-text-3);
   font-size: var(--text-meta-size);
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The files a task made: the first name gives way before how many more there are. */
+.history-item-files {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--fog-text-3);
+  font-size: var(--text-meta-size);
+}
+
+.history-item-files > svg,
+.history-item-files__more {
+  flex: none;
   white-space: nowrap;
 }
 

@@ -142,6 +142,9 @@ test('the runner starts Vite and passes the selected port to Electron', async (t
   );
   const env = { ...process.env, NODE_ENV: 'development' };
   delete env.FRONTEND_PORT;
+  // The runner resolves `electron` from its own checkout, not from `root`, so a signing
+  // identity in the developer's shell would re-sign the real Electron.app.
+  delete env.PANTARAY_DEV_SIGN_IDENTITY;
   const { stdout } = await promisify(execFile)(
     process.execPath,
     [path.join(__dirname, '../scripts/run-electron-dev.js')],

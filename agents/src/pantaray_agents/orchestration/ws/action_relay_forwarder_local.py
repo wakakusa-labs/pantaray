@@ -17,9 +17,6 @@ from pantaray_agents.local_runtime.runtime.process_events import (
     PROCESS_STATUS_PAUSED,
     read_local_process_events_after,
 )
-from pantaray_agents.local_runtime.runtime.screen_capture_broker import (
-    SCREEN_CAPTURE_REQUESTED_EVENT,
-)
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.storage.migrations.connection import (
     configure_connection,
@@ -36,7 +33,6 @@ from pantaray_agents.schema.events import OutboundEvent
 from pantaray_agents.schema.websocket.server_messages import (
     PhysicalActionRunCompletedMessage,
     ProcessPausedMessage,
-    ScreenCaptureRequestedMessage,
 )
 from pantaray_agents.utils.metrics import record_action_job_completed
 from pantaray_agents.utils.public_error import public_ws_error
@@ -222,30 +218,6 @@ async def _forward_action_events_from_local_runtime(
                     event_id=str(event.event_id),
                     store_in_session_store=False,
                     persisted_sequence_override=persisted_sequence,
-                )
-                if not sent:
-                    return
-                last_cursor = event.cursor
-                continue
-            if event_name == SCREEN_CAPTURE_REQUESTED_EVENT:
-                # A control message for the desktop client, not conversation
-                # history: it is never persisted and never replayed, because a
-                # capture request that arrives late has nothing left to answer.
-                sent = await self._send(
-                    OutboundEvent.SCREEN_CAPTURE_REQUESTED.value,
-                    ScreenCaptureRequestedMessage(
-                        kind="action",
-                        process_id=str(event.payload["process_id"]),
-                        action_id=str(event.payload["action_id"]),
-                        tool_request_id=str(event.payload["tool_request_id"]),
-                        capture_request_id=str(event.payload["capture_request_id"]),
-                        app_name=str(event.payload["app_name"]),
-                    ),
-                    process_id=process_id,
-                    meta=dict(meta),
-                    event_id=str(event.event_id),
-                    store_in_session_store=False,
-                    persist_public_event=False,
                 )
                 if not sent:
                     return

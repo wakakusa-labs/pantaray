@@ -14,7 +14,7 @@ import { useI18n } from '@/context/useI18n';
 
 import { FileChips } from './FileChips';
 import { FilePreviewPane } from './FilePreviewPane';
-import { taskFileAt, type TaskFile } from './taskFiles';
+import { taskFileAt, type TaskFile, type TaskPreview } from './taskFiles';
 import { useSuggestionTask, type SuggestionStartFailure } from './useSuggestionTask';
 import './actionTaskPane.css';
 import './suggestionTaskPane.css';
@@ -50,8 +50,11 @@ type SuggestionTaskPaneProps = {
   title: string;
   /** One of its files to preview, asked for by an Overlay chip; each new request opens it. */
   requestedFile: string | null;
-  /** Called once an Action exists for the suggestion: accepted, or replied to. */
-  onStarted: (actionId: string) => void;
+  /**
+   * Called once an Action exists for the suggestion: accepted, or replied to. The file open in
+   * the preview goes with it, so the Action's pane taking over keeps it open.
+   */
+  onStarted: (actionId: string, preview: TaskPreview | null) => void;
   /** Opens the chat, as the task pane's header button does. */
   /** The composer's @-mention "Add project" option. */
   onAddProject: () => void;
@@ -103,12 +106,17 @@ export function SuggestionTaskPane({
       });
   };
 
-  const onStartedRef = useRef(onStarted);
+  const handOver = (actionId: string) =>
+    onStarted(
+      actionId,
+      previewFile && { target: { kind: 'suggestion', id: suggestionId }, file: previewFile }
+    );
+  const handOverRef = useRef(handOver);
   useEffect(() => {
-    onStartedRef.current = onStarted;
+    handOverRef.current = handOver;
   });
   useEffect(() => {
-    if (task.actionId !== null) onStartedRef.current(task.actionId);
+    if (task.actionId !== null) handOverRef.current(task.actionId);
   }, [task.actionId]);
 
   const dismissed = phase === 'dismissed';

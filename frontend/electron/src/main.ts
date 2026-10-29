@@ -542,6 +542,7 @@ installDesktopApplicationLifecycle({
       readConversationPage: featureRuntime.readActionConversationPage,
       readSuggestionBootstrap: featureRuntime.resolveOverlayBootstrap,
       getCurrentSubjectId: featureRuntime.getCurrentSubjectId,
+      readRenderedPdf: featureRuntime.readRenderedPdf,
     });
   },
   createMainWindow: createWindow,

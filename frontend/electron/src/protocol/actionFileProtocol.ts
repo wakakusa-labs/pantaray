@@ -1,10 +1,13 @@
 /**
  * `pantaray-action-file://local/?kind={action|suggestion}&id={id}&path={path}` — a PDF an Action
- * names or a Suggestion made, for Chromium's PDF viewer in the main window's preview frame.
+ * names or a Suggestion made, for Chromium's PDF viewer in the main window's preview frame. With
+ * `&render={id}`, the PDF `actionFile:read` printed from an HTML file at that path (`htmlPreview`).
  *
  * Every request passes the same check as `actionFile:read` (`resolveTaskFile`). Only a file whose
- * bytes start as a PDF is served, as `application/pdf`, so an HTML or script file can never be
- * loaded into a frame through this scheme. Any failure is a bare 404.
+ * bytes start as a PDF, or a PDF printed from the file the request names, is served, as
+ * `application/pdf`, so an HTML or script file can never be loaded into a frame through this
+ * scheme. No response says it accepts byte ranges, so the viewer reads each one whole. Any
+ * failure is a bare 404.
  */
 
 import fs from 'fs';
@@ -17,11 +20,17 @@ import {
   type TaskFileRequest,
   type TaskFileSources,
 } from '../actions/actionFileAccess';
+import type { HtmlPreviewPdfs } from '../render/htmlPreview';
 import { ACTION_FILE_SCHEME, ACTION_FILE_URL_HOST } from './actionFileUrl';
 
 const PDF_SIGNATURE = Buffer.from('%PDF-');
 
-export function parseActionFileUrl(requestUrl: string): TaskFileRequest | null {
+export type ActionFileProtocolSources = TaskFileSources &
+  Readonly<{ readRenderedPdf: HtmlPreviewPdfs['readRendered'] }>;
+
+export function parseActionFileUrl(
+  requestUrl: string
+): (TaskFileRequest & Readonly<{ renderId: string | null }>) | null {
   let url: URL;
   try {
     url = new URL(requestUrl);
@@ -34,11 +43,23 @@ export function parseActionFileUrl(requestUrl: string): TaskFileRequest | null {
   const filePath = url.searchParams.get('path');
   if ((kind !== 'action' && kind !== 'suggestion') || !id || !filePath) return null;
   if (kind === 'action' && !path.isAbsolute(filePath)) return null;
-  return { target: { kind, id }, path: filePath };
+  return { target: { kind, id }, path: filePath, renderId: url.searchParams.get('render') };
+}
+
+function pdfResponse(body: Buffer | ReadableStream<Uint8Array>, size: number): Response {
+  return new Response(body, {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/pdf',
+      'Content-Length': String(size),
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+    },
+  });
 }
 
 export function createActionFileProtocolHandler(
-  deps: TaskFileSources
+  deps: ActionFileProtocolSources
 ): (request: { url: string }) => Promise<Response> {
   const notFound = () => new Response(null, { status: 404 });
   return async (request) => {
@@ -52,6 +73,10 @@ export function createActionFileProtocolHandler(
       return notFound();
     }
     if (realPath === null) return notFound();
+    if (fileRequest.renderId !== null) {
+      const pdf = deps.readRenderedPdf(fileRequest.renderId, realPath);
+      return pdf === null ? notFound() : pdfResponse(pdf, pdf.byteLength);
+    }
     const file = openRegularFile(realPath);
     if (file === null) return notFound();
     const head = Buffer.alloc(PDF_SIGNATURE.length);
@@ -61,15 +86,7 @@ export function createActionFileProtocolHandler(
       return notFound();
     }
     const body = Readable.toWeb(fs.createReadStream('', { fd: file.fd, start: 0 }));
-    return new Response(body as ReadableStream<Uint8Array>, {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/pdf',
-        'Content-Length': String(file.size),
-        'Cache-Control': 'no-store',
-        'X-Content-Type-Options': 'nosniff',
-      },
-    });
+    return pdfResponse(body as ReadableStream<Uint8Array>, file.size);
   };
 }
 
@@ -95,7 +112,7 @@ export const ACTION_FILE_PRIVILEGED_SCHEME = {
 /** Must run after `app.whenReady()`. */
 export function registerActionFileProtocol(
   registrar: ProtocolHandlerRegistrar,
-  deps: TaskFileSources
+  deps: ActionFileProtocolSources
 ): void {
   registrar.handle(ACTION_FILE_SCHEME, createActionFileProtocolHandler(deps));
 }

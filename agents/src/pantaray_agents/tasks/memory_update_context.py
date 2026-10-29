@@ -46,17 +46,17 @@ from pantaray_agents.local_runtime.memory_catalog.run_workspace import (
 from pantaray_agents.local_runtime.runtime.fact_identity import (
     load_current_fact_identity,
 )
+from pantaray_agents.local_runtime.runtime.help_outcomes import (
+    DueOutcome,
+    load_due_outcomes,
+)
 from pantaray_agents.local_runtime.runtime.memory_dismissal_range import (
-    DismissedSuggestion,
     read_dismissed_suggestions,
 )
 from pantaray_agents.local_runtime.runtime.memory_update_progress import (
     load_published_memory_categories,
 )
-from pantaray_agents.local_runtime.storage.chat_messages import (
-    ChatMessage,
-    read_chat_messages,
-)
+from pantaray_agents.local_runtime.storage.chat_messages import read_chat_messages
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
 from pantaray_agents.local_runtime.tooling.agent_experience import (
     ActionTurnWindow,
@@ -75,6 +75,12 @@ from pantaray_agents.local_runtime.tooling.repository.workspace_context import (
     load_workspace_structure_prompt,
 )
 from pantaray_agents.schema.agent.memory_update import MemoryUpdateContext
+from pantaray_agents.tasks.memory_update_evidence import (
+    render_activity_summaries,
+    render_chat_messages,
+    render_dismissed_suggestions,
+    render_short_insights,
+)
 from pantaray_agents.tasks.types import (
     MemoryUpdateActionTerminal,
     MemoryUpdateJobPayload,
@@ -85,9 +91,9 @@ from pantaray_agents.tools.memory.retrieval import (
     MemoryContextSession,
     MemoryRetrievalSession,
 )
+from pantaray_agents.tools.memory.sql_tool import MemorySqlSession
 from pantaray_agents.utils.local_time import (
     describe_utc_timestamp,
-    local_period,
     local_time_note,
     local_zone_name,
 )
@@ -114,6 +120,8 @@ class PreparedMemoryUpdateRun:
     base_drafts: tuple[tuple[MemorySource, MemoryDraftCheckpoint], ...]
     tool_definitions: tuple[ReactToolDefinition, ...]
     memory_requests: tuple[MemoryRequest, ...]
+    # Delivered suggestions and Actions the run looks back on after the update.
+    due: tuple[DueOutcome, ...]
 
     @property
     def editable_sources(self) -> tuple[MemorySource, ...]:
@@ -127,6 +135,9 @@ class PreparedMemoryUpdateRun:
             or self.context.action_turns
             or self.context.chat_messages
             or self.context.dismissed_suggestions
+            # A run that skips the model still completes and moves the
+            # look-back's boundary past them.
+            or self.due
         )
 
     def base_draft(self, source: MemorySource) -> MemoryDraftCheckpoint:
@@ -174,12 +185,12 @@ def prepare_memory_update_run(
                 (user_id, terminal["action_id"]),
             ).fetchone()
         )
-        short_term_insights = _render_short_insights(
+        short_term_insights = render_short_insights(
             connection=connection,
             user_id=user_id,
             insight_ids=tuple(payload["short_insight_ids"]),
         )
-        activity_summaries = _render_activity_summaries(
+        activity_summaries = render_activity_summaries(
             connection=connection,
             user_id=user_id,
             summary_ids=tuple(payload["summary_ids"]),
@@ -194,7 +205,7 @@ def prepare_memory_update_run(
         chat_messages = (
             ""
             if chat is None
-            else _render_chat_messages(
+            else render_chat_messages(
                 read_chat_messages(
                     connection,
                     user_id=user_id,
@@ -203,12 +214,15 @@ def prepare_memory_update_run(
                 )
             )
         )
-        dismissed_suggestions = _render_dismissed_suggestions(
+        dismissed_suggestions = render_dismissed_suggestions(
             read_dismissed_suggestions(
                 connection,
                 user_id=user_id,
                 suggestion_ids=tuple(payload.get("dismissed_suggestion_ids", ())),
             )
+        )
+        due = load_due_outcomes(
+            connection, user_id=user_id, enqueued_at=payload["enqueued_at"]
         )
         workspace_scope.create(
             artifact_root=runtime.artifact_root,
@@ -314,8 +328,18 @@ def prepare_memory_update_run(
         router=router,
         fact_id=fact_id,
         base_drafts=tuple(base_drafts),
-        tool_definitions=(*file_tools, *retrieval_tools, *history_tools),
+        tool_definitions=(
+            *file_tools,
+            *retrieval_tools,
+            MemorySqlSession(
+                db_path=runtime.db_path,
+                busy_timeout_ms=runtime.busy_timeout_ms,
+                user_id=user_id,
+            ).definition(),
+            *history_tools,
+        ),
         memory_requests=memory_requests,
+        due=due,
     )
 
 
@@ -523,101 +547,6 @@ ORDER BY step_number DESC, local_step_number DESC, created_at DESC
 LIMIT 1
 """
 )
-
-
-def _render_chat_messages(messages: tuple[ChatMessage, ...]) -> str:
-    entries: list[str] = []
-    for message in messages:
-        content = message.content
-        speaker = "user" if content.kind == "user_message" else "Pantaray"
-        notes = [describe_utc_timestamp(message.created_at)]
-        if content.quote_item_id is not None:
-            notes.append(f"quoting {content.quote_item_id}")
-        if content.kind == "user_message" and (content.images or content.files):
-            notes.append(
-                f"with {len(content.images)} image(s) and {len(content.files)} file(s)"
-            )
-        entries.append(
-            f"### chat item {message.item_id}, {speaker} ({', '.join(notes)})\n"
-            f"{content.text}"
-        )
-    return "\n\n".join(entries)
-
-
-def _render_dismissed_suggestions(
-    suggestions: tuple[DismissedSuggestion, ...],
-) -> str:
-    return "\n\n".join(
-        f"### suggestion {suggestion.suggestion_id} "
-        f"(dismissed {describe_utc_timestamp(suggestion.rejected_at)})\n"
-        f"{suggestion.answer}\n\nDismissed"
-        + (
-            ""
-            if suggestion.dismiss_reason is None
-            else f", the user's reason: {suggestion.dismiss_reason}"
-        )
-        for suggestion in suggestions
-    )
-
-
-def _render_short_insights(
-    *, connection: sqlite3.Connection, user_id: str, insight_ids: tuple[str, ...]
-) -> str:
-    if not insight_ids:
-        return ""
-    placeholders = ",".join("?" for _ in insight_ids)
-    rows = connection.execute(
-        f"""
-        SELECT insights.insight_id, insights.short_term_insight_data,
-               insights.created_at, activity.description,
-               activity.period_start, activity.period_end
-        FROM agent_insights AS insights
-        LEFT JOIN activity_logs AS activity
-          ON activity.user_id = insights.user_id
-         AND activity.log_id = insights.insight_id AND activity.status = 'success'
-        WHERE insights.user_id = ? AND insights.status = 'success'
-          AND insights.insight_id IN ({placeholders})
-        ORDER BY insights.created_at ASC, insights.insight_id ASC
-        """,
-        (user_id, *insight_ids),
-    ).fetchall()
-    return "\n\n".join(
-        f"### short-term Insight {row['insight_id']} "
-        f"({describe_utc_timestamp(row['created_at'])})\n"
-        f"{str(row['short_term_insight_data'] or '').strip()}\n\n"
-        + (
-            "#### Objective Activity "
-            f"({local_period(row['period_start'], row['period_end'])})\n"
-            f"{row['description']}"
-            if row["description"] is not None
-            else "Objective Activity: unavailable for this Insight."
-        )
-        for row in rows
-    )
-
-
-def _render_activity_summaries(
-    *, connection: sqlite3.Connection, user_id: str, summary_ids: tuple[str, ...]
-) -> str:
-    if not summary_ids:
-        return ""
-    placeholders = ",".join("?" for _ in summary_ids)
-    rows = connection.execute(
-        f"""
-        SELECT summary_id, summary, period_start, period_end
-        FROM activity_summaries
-        WHERE user_id = ? AND status = 'success' AND summary_type = '24h'
-          AND summary_id IN ({placeholders})
-        ORDER BY period_end ASC, summary_id ASC
-        """,
-        (user_id, *summary_ids),
-    ).fetchall()
-    return "\n\n".join(
-        f"### 24h Activity Summary {row['summary_id']} "
-        f"({local_period(row['period_start'], row['period_end'])})\n"
-        f"{str(row['summary'] or '').strip()}"
-        for row in rows
-    )
 
 
 __all__ = [

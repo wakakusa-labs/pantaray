@@ -358,6 +358,26 @@ export type ScreenCaptureRequestedEvent = OrchestrationEventEnvelope<
 >;
 
 /**
+ * A control message for the desktop client, never forwarded to a renderer: print one
+ * HTML file to PDF. The answer goes back over the local backend, like a screen capture.
+ */
+export type HtmlRenderRequestedEvent = OrchestrationEventEnvelope<
+  'html_render_requested',
+  {
+    kind: 'action' | 'suggestion';
+    process_id: string;
+    action_id: string;
+    tool_request_id: string;
+    render_request_id: string;
+    html_path: string;
+    file_roots: string[];
+    private_roots: string[];
+    private_root_exceptions: string[];
+    allow_network: boolean;
+  }
+>;
+
+/**
  * An item appended to the owner's chat. Only the main window shows the chat, so main parses
  * the item and hands it to that window alone; it never reaches an Overlay.
  */
@@ -382,6 +402,7 @@ export type OrchestrationServerEvent =
   | CompletionChunkEvent
   | ProcessPausedActionEvent
   | ScreenCaptureRequestedEvent
+  | HtmlRenderRequestedEvent
   | ChatItemAppendedEvent
   | ChatTurnStateEvent
   | ProcessCompletedSuggestionEvent
@@ -442,6 +463,12 @@ export function isScreenCaptureRequestedEvent(
   event: OrchestrationServerEvent
 ): event is ScreenCaptureRequestedEvent {
   return event.event === 'screen_capture_requested';
+}
+
+export function isHtmlRenderRequestedEvent(
+  event: OrchestrationServerEvent
+): event is HtmlRenderRequestedEvent {
+  return event.event === 'html_render_requested';
 }
 
 export function isChatItemAppendedEvent(

@@ -9,7 +9,11 @@ from pantaray_agents.tools.files.read_contract import (
     ReadToolArgs,
 )
 from pantaray_agents.tools.files.read_output import ReadToolOutput
-from pantaray_agents.tools.files.render_pages import RenderPdfPageToolArgs
+from pantaray_agents.tools.files.render_pages import (
+    RenderHtmlPageToolArgs,
+    RenderPdfPageToolArgs,
+    SaveHtmlAsPdfToolArgs,
+)
 
 from .broker_protocol import (
     ApplyPatchToolArgs,
@@ -21,9 +25,11 @@ from .broker_protocol import (
     GlobToolOutput,
     GrepToolOutput,
     ListToolOutput,
+    RenderHtmlPageOutput,
     RenderPdfPageOutput,
     RunPythonToolArgs,
     RunPythonToolOutput,
+    SaveHtmlAsPdfOutput,
     ToolError,
 )
 
@@ -40,20 +46,24 @@ BROKER_MODEL_REGISTRY = BrokerModelRegistry(
     input_models={
         "ReadToolArgs": ReadToolArgs,
         "RenderPdfPageToolArgs": RenderPdfPageToolArgs,
+        "RenderHtmlPageToolArgs": RenderHtmlPageToolArgs,
         "ListToolArgs": ListToolArgs,
         "GlobToolArgs": GlobToolArgs,
         "GrepToolArgs": GrepToolArgs,
         "ApplyPatchToolArgs": ApplyPatchToolArgs,
+        "SaveHtmlAsPdfToolArgs": SaveHtmlAsPdfToolArgs,
         "BashToolArgs": BashToolArgs,
         "RunPythonToolArgs": RunPythonToolArgs,
     },
     output_models={
         "ReadToolOutput": ReadToolOutput,
         "RenderPdfPageOutput": RenderPdfPageOutput,
+        "RenderHtmlPageOutput": RenderHtmlPageOutput,
         "ListToolOutput": ListToolOutput,
         "GlobToolOutput": GlobToolOutput,
         "GrepToolOutput": GrepToolOutput,
         "ApplyPatchToolOutput": ApplyPatchToolOutput,
+        "SaveHtmlAsPdfOutput": SaveHtmlAsPdfOutput,
         "BashToolOutput": BashToolOutput,
         "RunPythonToolOutput": RunPythonToolOutput,
     },
@@ -81,6 +91,17 @@ BROKER_TOOL_REGISTRY = BrokerToolRegistry(
             path_access_kind="read",
             input_model_ref="RenderPdfPageToolArgs",
             output_model_ref="RenderPdfPageOutput",
+            error_model_ref="ToolError",
+            required_capabilities=["scoped_read"],
+            approval_policy="none",
+            resource_kinds=["none"],
+        ),
+        "render_html_page": BrokerManagedToolDefinition(
+            tool_id="render_html_page",
+            execution_path="broker_direct_render_html",
+            path_access_kind="read",
+            input_model_ref="RenderHtmlPageToolArgs",
+            output_model_ref="RenderHtmlPageOutput",
             error_model_ref="ToolError",
             required_capabilities=["scoped_read"],
             approval_policy="none",
@@ -125,6 +146,18 @@ BROKER_TOOL_REGISTRY = BrokerToolRegistry(
             path_access_kind="write",
             input_model_ref="ApplyPatchToolArgs",
             output_model_ref="ApplyPatchToolOutput",
+            error_model_ref="ToolError",
+            required_capabilities=["scoped_write"],
+            approval_policy="prompt_each_time",
+            resource_kinds=["lock"],
+        ),
+        # Written under apply_patch's rules, so it is approved like apply_patch.
+        "save_html_as_pdf": BrokerManagedToolDefinition(
+            tool_id="save_html_as_pdf",
+            execution_path="broker_direct_save_pdf",
+            path_access_kind="write",
+            input_model_ref="SaveHtmlAsPdfToolArgs",
+            output_model_ref="SaveHtmlAsPdfOutput",
             error_model_ref="ToolError",
             required_capabilities=["scoped_write"],
             approval_policy="prompt_each_time",

@@ -6,7 +6,7 @@ License texts that have to travel with the binary are reproduced here.
 
 | Component | Version | Pinned by |
 | --- | --- | --- |
-| [Electron](https://github.com/electron/electron) | 44.5.1 | `frontend/package.json` |
+| [Electron](https://github.com/electron/electron) | 44.10.0 | `frontend/package.json` |
 | [Zanei](https://github.com/KentoShimizu/zanei) | 0.7.0 | `frontend/electron/zanei_release.json` |
 | [sqlite-vec](https://github.com/asg017/sqlite-vec) | 0.1.9 | `agents/pyproject.toml` |
 | [PDFium](https://pdfium.googlesource.com/pdfium/) (via [pypdfium2](https://github.com/pypdfium2-team/pypdfium2)) | 5.13.0 (PDFium 153.0.7999.0) | `agents/pyproject.toml` |

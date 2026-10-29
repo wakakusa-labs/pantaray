@@ -12,7 +12,7 @@ import asyncio
 import hashlib
 import os
 import tempfile
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -22,6 +22,8 @@ from pydantic import BaseModel, ValidationError
 from pantaray_agents.local_runtime.tooling.documents import (
     MAX_RENDERED_PAGES,
     RENDERED_PAGE_MEDIA_TYPE,
+    RENDERED_PAGE_SUFFIX,
+    RenderedPage,
 )
 from pantaray_agents.local_runtime.tooling.tool_result_storage import (
     store_run_tool_result,
@@ -69,7 +71,6 @@ from .read_contract import (
 from .read_scope import ReadScope
 from .render_pages import (
     CONTINUE_WITH_READ,
-    DrawnDocument,
     RendererPreparing,
     RenderPdfPageToolArgs,
     draw_document_pages,
@@ -105,7 +106,7 @@ _READ_IMAGES_DIRNAME = "read_images"
 _CONVERTED_DIRNAME = "converted_documents"
 
 
-def build_read_only_file_tools(
+def read_only_file_tools(
     *,
     db_path: Path,
     folders: tuple[Path, ...],
@@ -114,7 +115,7 @@ def build_read_only_file_tools(
     spill_root: Path,
     memory_folders: tuple[Path, ...] = (),
     own_folder: Path | None = None,
-) -> tuple[ReactToolDefinition, ...]:
+) -> ReadOnlyFileTools:
     """The tools over ``folders`` and ``memory_folders``, which they only read.
 
     Paths are absolute: there is no current directory and no scratch workspace.
@@ -157,9 +158,9 @@ def build_read_only_file_tools(
         if memory_folders
         else _MEMORY_NOTE
     )
-    return _ReadOnlyFileTools(
+    return ReadOnlyFileTools(
         db_path=db_path, scope=scope, spill_root=spill_path, memory_note=memory_note
-    ).definitions()
+    )
 
 
 def build_saved_result_read_tool(
@@ -172,7 +173,7 @@ def build_saved_result_read_tool(
     """
 
     spill_path = spill_root.resolve(strict=True)
-    tools = _ReadOnlyFileTools(
+    tools = ReadOnlyFileTools(
         db_path=db_path,
         scope=ReadScope(
             manifest_roots=(_read_only_root("tool_results", spill_path),),
@@ -205,7 +206,7 @@ def _read_only_root(root_id: str, path: Path) -> ManifestRoot:
 
 
 @dataclass(frozen=True, slots=True)
-class _ReadOnlyFileTools:
+class ReadOnlyFileTools:
     db_path: Path  # where the Office converter is installed from
     scope: ReadScope
     spill_root: Path
@@ -414,7 +415,7 @@ class _ReadOnlyFileTools:
                     ),
                 },
             )
-        images = await asyncio.to_thread(self._keep_pages, drawn)
+        images = await asyncio.to_thread(self.keep_pages, drawn.pages)
         return ReactToolResult(
             tool_name=call.tool_name,
             status="success",
@@ -433,14 +434,14 @@ class _ReadOnlyFileTools:
             images=images,
         )
 
-    def _keep_pages(self, drawn: DrawnDocument) -> tuple[ToolImage, ...]:
+    def keep_pages(self, pages: Sequence[RenderedPage]) -> tuple[ToolImage, ...]:
         """Keep each page in the run's folder, the file its image is sent from."""
 
         images = []
-        for page in drawn.pages:
+        for page in pages:
             sha256 = hashlib.sha256(page.payload).hexdigest()
             attachment_id = sha256[:ATTACHMENT_ID_HEX_LENGTH]
-            name = f"page-{page.number}-{attachment_id}.png"
+            name = f"page-{page.number}-{attachment_id}{RENDERED_PAGE_SUFFIX}"
             images.append(
                 ToolImage(
                     ref=f"{TOOL_ATTACHMENT_REF_PREFIX}{attachment_id}",
@@ -559,6 +560,7 @@ def _definition(
 
 __all__ = [
     "RENDER_PDF_PAGE_TOOL_NAME",
-    "build_read_only_file_tools",
+    "ReadOnlyFileTools",
     "build_saved_result_read_tool",
+    "read_only_file_tools",
 ]

@@ -97,6 +97,8 @@ def _pattern_in_path(args: dict[str, JSONValue]) -> str | None:
 _TOOL_SUBJECTS: dict[str, _ArgsSubject] = {
     "read": _text("path"),
     "render_pdf_page": _text("path"),
+    "render_html_page": _text("path"),
+    "save_html_as_pdf": _text("pdf_path"),
     "list": _text("path"),
     "glob": _text("pattern"),
     "grep": _pattern_in_path,

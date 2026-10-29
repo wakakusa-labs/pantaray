@@ -8,6 +8,7 @@ import type { ActionConversationUserItem } from '../../electron/src/actions/acti
 import type { ConversationHistoryListItem } from '../../electron/src/history/historyContracts';
 import { UserItem } from '@/components/action-conversation/UserMessage';
 import type { ChatViewHandle } from '@/components/chat/ChatView';
+import type { TaskPreview } from '@/components/task/taskFiles';
 import { ChatSessionContext, type ChatSession } from '@/components/chat/chatSession';
 import { LocalOwnerContext } from '@/context/localOwnerContext';
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
@@ -28,14 +29,17 @@ vi.mock('@/components/task/TaskWorkspace', () => ({
   TaskWorkspace: ({
     actionId,
     title,
+    initialPreview,
     onAddProject,
   }: {
     actionId: string;
     title: string;
+    initialPreview: TaskPreview | null;
     onAddProject: () => void;
   }) => (
     <section aria-label={`action ${actionId}`}>
       <h1>{title}</h1>
+      {initialPreview ? <p>preview {initialPreview.file.path}</p> : null}
       <UserItem item={SENT_NAMING_SUGGESTION} />
       <button type="button" onClick={onAddProject}>
         add project
@@ -51,12 +55,15 @@ vi.mock('@/components/task/SuggestionTaskPane', () => ({
   }: {
     suggestionId: string;
     title: string;
-    onStarted: (actionId: string) => void;
+    onStarted: (actionId: string, preview: TaskPreview | null) => void;
   }) => (
     <section aria-label={`suggestion ${suggestionId}`}>
       <h1>{title}</h1>
-      <button type="button" onClick={() => onStarted('A9')}>
+      <button type="button" onClick={() => onStarted('A9', null)}>
         accept
+      </button>
+      <button type="button" onClick={() => onStarted('A9', OPEN_REPLY)}>
+        reply with a file open
       </button>
     </section>
   ),
@@ -96,6 +103,11 @@ const SENT_NAMING_SUGGESTION: ActionConversationUserItem = {
   },
 };
 
+const OPEN_REPLY: TaskPreview = {
+  target: { kind: 'suggestion', id: 'S1' },
+  file: { path: 'drafts/reply.md', name: 'reply.md', kind: 'markdown', label: 'MD' },
+};
+
 const ITEMS: ConversationHistoryListItem[] = [
   {
     kind: 'conversation',
@@ -104,6 +116,8 @@ const ITEMS: ConversationHistoryListItem[] = [
     updated_at: '2026-10-10T01:00:00.000Z',
     status: 'idle',
     latest_completion_event_id: null,
+    status_line: null,
+    artifact_names: [],
   },
   {
     kind: 'suggestion',
@@ -111,6 +125,7 @@ const ITEMS: ConversationHistoryListItem[] = [
     title: '請求書を作りましょうか',
     updated_at: '2026-10-10T00:00:00.000Z',
     status: 'approval_pending',
+    artifact_names: [],
   },
 ];
 const deleteItem = vi.fn(async () => ({ ok: true }) as const);
@@ -171,6 +186,9 @@ function LocationProbe() {
       <output aria-label="location">{`${location.pathname}${location.search}`}</output>
       <button type="button" onClick={() => navigate(-1)}>
         back
+      </button>
+      <button type="button" onClick={() => navigate(1)}>
+        forward
       </button>
     </>
   );
@@ -266,6 +284,49 @@ it('replaces an accepted suggestion with its Action in the same history entry', 
 
   await userEvent.click(screen.getByRole('button', { name: 'back' }));
   expect(location()).toHaveTextContent('/history?item=chat');
+});
+
+it('keeps the file open beside a suggestion open in its Action, until the selection moves', async () => {
+  renderPage(['/history?item=suggestion:S1']);
+  await userEvent.click(screen.getByRole('button', { name: 'reply with a file open' }));
+  expect(location()).toHaveTextContent('/history?item=action:A9');
+  expect(screen.getByRole('region', { name: 'action A9' })).toHaveTextContent(
+    'preview drafts/reply.md'
+  );
+
+  // Shown again later, the Action opens as the user left it.
+  await userEvent.click(await screen.findByRole('button', { name: /^見積書を直す/ }));
+  await userEvent.click(screen.getByRole('button', { name: 'back' }));
+  expect(location()).toHaveTextContent('/history?item=action:A9');
+  expect(screen.getByRole('region', { name: 'action A9' })).not.toHaveTextContent('preview');
+});
+
+it('drops the handed-over file when the address moves away without a selection', async () => {
+  renderPage(['/history?item=chat', '/history?item=suggestion:S1']);
+  await userEvent.click(screen.getByRole('button', { name: 'reply with a file open' }));
+  expect(screen.getByRole('region', { name: 'action A9' })).toHaveTextContent(
+    'preview drafts/reply.md'
+  );
+
+  await userEvent.click(screen.getByRole('button', { name: 'back' }));
+  expect(location()).toHaveTextContent('/history?item=chat');
+  await userEvent.click(screen.getByRole('button', { name: 'forward' }));
+  expect(location()).toHaveTextContent('/history?item=action:A9');
+  expect(screen.getByRole('region', { name: 'action A9' })).not.toHaveTextContent('preview');
+});
+
+it('does not hand the file over again when the suggestion is shown after its Action', async () => {
+  renderPage(['/history?item=suggestion:S1']);
+  await userEvent.click(screen.getByRole('button', { name: 'reply with a file open' }));
+  expect(screen.getByRole('region', { name: 'action A9' })).toHaveTextContent(
+    'preview drafts/reply.md'
+  );
+
+  // A started suggestion shown again goes straight back to its Action.
+  await userEvent.click(await screen.findByRole('button', { name: /^請求書を作りましょうか/ }));
+  await userEvent.click(screen.getByRole('button', { name: 'accept' }));
+  expect(location()).toHaveTextContent('/history?item=action:A9');
+  expect(screen.getByRole('region', { name: 'action A9' })).not.toHaveTextContent('preview');
 });
 
 it('opens a new task from ✎ and replaces it with the Action its send opened', async () => {

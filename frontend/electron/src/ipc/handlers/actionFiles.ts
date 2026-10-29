@@ -1,4 +1,5 @@
 import fs from 'fs';
+import path from 'path';
 
 import { documentHtmlFormat, readDocumentAsHtml } from '../../actions/actionDocumentHtml';
 import {
@@ -6,14 +7,17 @@ import {
   openActionFileWithApp,
   readActionFile,
   resolveTaskFile,
+  type ActionFileReadResult,
   type TaskFileRequest,
 } from '../../actions/actionFileAccess';
+import { buildActionFileUrl } from '../../protocol/actionFileUrl';
 import type { MainContext } from '../context';
 import type { IpcRegistrar } from '../registrar';
 import { parseInput } from '../schemas/error';
 import { ActionFileOpenInputSchema, TaskFileRequestInputSchema } from '../schemas/actionFiles';
 
 const NOT_FOUND = { kind: 'unavailable', reason: 'not_found' } as const;
+const HTML_EXTENSIONS = new Set(['.html', '.htm']);
 
 function isRegularFile(realPath: string): boolean {
   try {
@@ -21,6 +25,18 @@ function isRegularFile(realPath: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** An HTML file as the PDF printed from it, at the URL the preview's frame loads it from. */
+async function readHtmlAsPdf(
+  ctx: MainContext,
+  request: TaskFileRequest,
+  realPath: string
+): Promise<ActionFileReadResult> {
+  const rendered = await ctx.actionFiles.renderHtml(realPath);
+  return rendered.kind === 'rendered'
+    ? { kind: 'pdf', url: buildActionFileUrl(request.target, request.path, rendered.renderId) }
+    : { kind: 'unavailable', reason: 'render_failed' };
 }
 
 export function registerActionFileHandlers(ctx: MainContext, registrar: IpcRegistrar): void {
@@ -43,6 +59,10 @@ export function registerActionFileHandlers(ctx: MainContext, registrar: IpcRegis
     const parsed = parseInput(TaskFileRequestInputSchema, 'actionFile:read', params);
     const realPath = await resolve(parsed);
     if (realPath === null) return NOT_FOUND;
+    // By the real path, as the Action's HTML tools: a link named deck.html to a text file is text.
+    if (HTML_EXTENSIONS.has(path.extname(realPath).toLowerCase())) {
+      return await readHtmlAsPdf(ctx, parsed, realPath);
+    }
     const format = documentHtmlFormat(realPath);
     return format === null
       ? readActionFile(realPath)

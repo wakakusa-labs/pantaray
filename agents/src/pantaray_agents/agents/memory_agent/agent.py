@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,6 +12,7 @@ from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import (
 from pantaray_agents.agents.core.mixins.llm_usage import CountingSink
 from pantaray_agents.agents.core.tool_llm_runner import ToolLlmRunner
 from pantaray_agents.agents.memory_file_editor.runner import (
+    MemoryEditorConversation,
     MemoryFileEditorRunInput,
     run_memory_file_editor,
 )
@@ -25,6 +27,7 @@ from pantaray_agents.agents.memory_file_editor.tools import (
     WRITE_FILE_TOOL_NAME,
 )
 from pantaray_agents.conversation.loop import ConversationRequest, SendTurn
+from pantaray_agents.local_runtime.runtime.help_outcomes import DueOutcome
 from pantaray_agents.local_runtime.tooling.agent_experience import (
     HISTORY_FETCH_TOOL_NAME,
     LIST_ACTION_STEPS_TOOL_NAME,
@@ -44,6 +47,8 @@ from pantaray_agents.tools.memory.retrieval import (
     GET_MEMORY_REFERENCE_TOOL_NAME,
     MEMORY_SEARCH_TOOL_NAME,
 )
+from pantaray_agents.tools.memory.sql_tool import MEMORY_SQL_TOOL_NAME
+from pantaray_agents.utils.local_time import describe_utc_timestamp
 from pantaray_agents.utils.prompt_loader import PromptConfig, prompt_loader
 from pantaray_llm.profiles import MEMORY_UPDATE_PROFILE_ID
 
@@ -54,6 +59,13 @@ from pantaray_llm.profiles import MEMORY_UPDATE_PROFILE_ID
 # Writing an endeavor's big picture searches its history first, which doubles it.
 MEMORY_UPDATE_MAX_LLM_TURNS = 60
 MEMORY_UPDATE_MAX_TOOL_CALLS = 96
+# The look-back at due suggestions and Actions that continues an update has its
+# own bound: a few reads per item, at most MAX_OUTCOMES_PER_RUN of them, and the
+# edits that record what they changed. A replay with five due items took 28
+# turns (16 reads, 11 edits); widen when real runs stop at the limit.
+OUTCOMES_PROMPT_NAME = "memory_update_outcomes"
+OUTCOMES_MAX_LLM_TURNS = 40
+OUTCOMES_MAX_TOOL_CALLS = 48
 # A consolidation writes its one file whole, then may rewrite it after a refused
 # ref or to shrink it further, and ends with `completed`. Replays of 24-145k
 # character files took 1-6 rewrites and up to 7 turns; widen these if real runs
@@ -71,6 +83,7 @@ _WHAT_FACTS_HOLD_HEADING = "## What facts hold\n"
 @dataclass(frozen=True, slots=True)
 class MemoryUpdateAgentResult:
     applied_memory_request_ids: tuple[str, ...]
+    conversation: MemoryEditorConversation
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,7 +111,7 @@ class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
     """ReAct editor for one user's Fact, Insight and Agent Experience memory."""
 
     PROMPT_NAME = "memory_update"
-    PROMPT_VERSION = "1.5"
+    PROMPT_VERSION = "1.6"
     TOOL_IDS = (
         READ_FILE_TOOL_NAME,
         SEARCH_FILES_TOOL_NAME,
@@ -110,6 +123,7 @@ class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
         DELETE_MEMORY_FILE_TOOL_NAME,
         MEMORY_SEARCH_TOOL_NAME,
         GET_MEMORY_REFERENCE_TOOL_NAME,
+        MEMORY_SQL_TOOL_NAME,
         LIST_ACTION_STEPS_TOOL_NAME,
         SEARCH_ACTION_STEPS_TOOL_NAME,
         HISTORY_FETCH_TOOL_NAME,
@@ -169,7 +183,7 @@ class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
         save_result, read_saved_results = saved_results_for_run(
             tool_results_path=tool_results_path, db_path=db_path
         )
-        applied = await run_memory_file_editor(
+        conversation = await run_memory_file_editor(
             MemoryFileEditorRunInput(
                 run_id=context.run_id,
                 save_result=save_result,
@@ -185,7 +199,36 @@ class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
                 memory_request_ids=context.memory_request_ids,
             )
         )
-        return MemoryUpdateAgentResult(applied_memory_request_ids=applied)
+        return MemoryUpdateAgentResult(
+            applied_memory_request_ids=conversation.applied_memory_request_ids,
+            conversation=conversation,
+        )
+
+    async def look_back_on_outcomes(
+        self,
+        conversation: MemoryEditorConversation,
+        due: tuple[DueOutcome, ...],
+        *,
+        tool_definitions: tuple[ReactToolDefinition, ...],
+        now: str,
+    ) -> None:
+        """Continue the accepted update into what the due items changed; its
+        edits land in the same draft, which is published after it."""
+
+        items = json.dumps(
+            [_due_item(item) for item in due], ensure_ascii=False, indent=1
+        )
+        instruction = prompt_loader.load_config(OUTCOMES_PROMPT_NAME).prompt.strip()
+        await conversation.continue_with(
+            answer={"status": "accepted"},
+            message=f"{instruction}\n\nNow: {now}\n\n<due>\n{items}\n</due>",
+            tools=resolve_react_tool_definitions(
+                definitions=tool_definitions,
+                tool_ids=self._selected_tool_ids(tool_definitions),
+            ),
+            max_turns=OUTCOMES_MAX_LLM_TURNS,
+            max_tool_calls=OUTCOMES_MAX_TOOL_CALLS,
+        )
 
     async def consolidate(
         self,
@@ -250,6 +293,19 @@ class MemoryUpdateAgent(LlmToolUseMixin, ToolLlmRunner):
         # history tools are absent rather than empty.
         available = {definition.name for definition in tool_definitions}
         return tuple(item for item in self.TOOL_IDS if item in available)
+
+
+def _due_item(item: DueOutcome) -> JSONValue:
+    shown: dict[str, JSONValue] = {
+        "kind": item.kind,
+        f"{item.kind}_id": item.item_id,
+        "checkpoint_days": item.checkpoint_days,
+        "delivered_at": describe_utc_timestamp(item.delivered_at),
+        "expectation": item.expectation,
+    }
+    if item.source_suggestion_id is not None:
+        shown["source_suggestion_id"] = item.source_suggestion_id
+    return shown
 
 
 def saved_results_for_run(

@@ -17,8 +17,10 @@ from .brokering.broker_common import (
     GREP_TOOL_ID,
     LIST_TOOL_ID,
     READ_TOOL_ID,
+    RENDER_HTML_PAGE_TOOL_ID,
     RENDER_PDF_PAGE_TOOL_ID,
     RUN_PYTHON_TOOL_ID,
+    SAVE_HTML_AS_PDF_TOOL_ID,
 )
 from .brokering.broker_protocol import ApplyPatchToolArgs
 from .brokering.broker_structured_patch import extract_structured_patch_paths
@@ -44,10 +46,12 @@ BROKERED_TOOL_IDS = frozenset(
     {
         READ_TOOL_ID,
         RENDER_PDF_PAGE_TOOL_ID,
+        RENDER_HTML_PAGE_TOOL_ID,
         LIST_TOOL_ID,
         GLOB_TOOL_ID,
         GREP_TOOL_ID,
         APPLY_PATCH_TOOL_ID,
+        SAVE_HTML_AS_PDF_TOOL_ID,
         BASH_TOOL_ID,
         RUN_PYTHON_TOOL_ID,
     }

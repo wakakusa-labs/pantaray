@@ -111,10 +111,12 @@ def test_broker_registry_declares_path_access_kind_for_all_managed_tools() -> No
     } == {
         "read": "read",
         "render_pdf_page": "read",
+        "render_html_page": "read",
         "list": "read",
         "glob": "read",
         "grep": "read",
         "apply_patch": "write",
+        "save_html_as_pdf": "write",
         "bash": "exec",
         "run_python": "exec",
     }

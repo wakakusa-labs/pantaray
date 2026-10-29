@@ -16,8 +16,20 @@ from pantaray_agents.agents.memory_file_editor.runner import (
     run_memory_file_editor,
 )
 from pantaray_agents.conversation.loop import ConversationRequest, SendTurn
+from pantaray_agents.local_runtime.memory_catalog.draft import create_memory_draft
+from pantaray_agents.local_runtime.memory_catalog.models import (
+    DraftLink,
+    MemoryDocument,
+)
+from pantaray_agents.local_runtime.tooling.fs_sandbox import EditablePathPolicy
+from pantaray_agents.local_runtime.tooling.memory_file_editor import (
+    MemoryDraftRoute,
+    MemoryDraftRouter,
+    MemoryDraftToolSession,
+)
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import ReactToolDefinition, ReactToolResult
+from pantaray_agents.tools.memory.retrieval import MemoryContextSession
 from pantaray_llm.contracts.action_turn import LlmActionTurnResponse, LlmCommentary
 from pantaray_llm.contracts.conversation import (
     LlmTurnToolResultItem,
@@ -146,11 +158,11 @@ async def test_a_large_text_is_saved_and_read_on_from_its_hint(tmp_path: Path) -
         _reply(("read_memory", {"path": "facts.md"})), *([read_next] * 8)
     )
 
-    applied = await run_memory_file_editor(
+    ended = await run_memory_file_editor(
         _run_input(tmp_path, send, tools=(_read_tool(large_text),))
     )
 
-    assert applied == ()
+    assert ended.applied_memory_request_ids == ()
     assert "".join(read_back) == large_text
     assert all(large_text not in str(request.conversation) for request in requests)
     tool_names = {tool.name for tool in requests[0].tools}
@@ -183,11 +195,11 @@ async def test_completed_reports_the_requests_applied_after_a_rejected_report(
         _reply(("completed", {"applied_memory_requests": ["R2"]})),
     )
 
-    applied = await run_memory_file_editor(
+    ended = await run_memory_file_editor(
         _run_input(tmp_path, send, memory_request_ids=("R1", "R2"))
     )
 
-    assert applied == ("R2",)
+    assert ended.applied_memory_request_ids == ("R2",)
     completed = next(tool for tool in requests[0].tools if tool.name == "completed")
     assert completed.parameters["required"] == ["applied_memory_requests"]
     asked = requests[1].conversation[-1]
@@ -198,3 +210,99 @@ async def test_completed_reports_the_requests_applied_after_a_rejected_report(
     rejected = _last_result(requests[2]).output
     assert isinstance(rejected, dict)
     assert rejected["error_code"] == "COMPLETION_PRECONDITION_FAILED"
+
+
+def _facts_router() -> MemoryDraftRouter:
+    refs = "".join(
+        f'- Point {ref} [[ref:{ref} note:"why"]]\n' for ref in ("ref_1", "ref_2")
+    )
+    return MemoryDraftRouter(
+        routes=(
+            MemoryDraftRoute(
+                source="fact",
+                root="facts",
+                session=MemoryDraftToolSession(
+                    editable_policy=EditablePathPolicy(("facts/**",)),
+                    draft=create_memory_draft(
+                        user_id="user-1",
+                        owner_node_id="node-facts",
+                        base_revision_id=None,
+                        documents=(
+                            *(
+                                MemoryDocument(f"facts/{name}.md", f"# {name}\n")
+                                for name in ("a", "b", "c", "e")
+                            ),
+                            MemoryDocument("facts/refs.md", f"# Refs\n\n{refs}"),
+                        ),
+                        carried_links=tuple(
+                            DraftLink(
+                                local_ref_id=ref,
+                                target_fragment_id=f"fragment-{ref}",
+                                source_path="facts/refs.md",
+                                source_anchor_text=f"- Point {ref}",
+                                source_anchor_occurrence=1,
+                                reference_note="why",
+                                created_at="2026-01-05T00:00:00Z",
+                                state="active",
+                            )
+                            for ref in ("ref_1", "ref_2")
+                        ),
+                    ),
+                    memory_context=MemoryContextSession(
+                        user_id="user-1", run_id="run-1"
+                    ),
+                ),
+            ),
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_edits_before_and_after_the_continuation_each_apply(
+    tmp_path: Path,
+) -> None:
+    router = _facts_router()
+
+    def edit(
+        name: str, **args: JSONValue
+    ) -> Callable[[ConversationRequest], ActionTurnReply]:
+        # The revision the call names is the one current when it is sent.
+        return lambda _request: _reply(
+            (name, {**args, "expected_draft_revision": router.draft.draft_revision})
+        )
+
+    # Each half makes the same kinds of calls at the same positions, which the
+    # draft tools key their idempotency by.
+    send, _ = _scripted(
+        edit("delete_memory_file", path="facts/a.md"),
+        edit(
+            "move_memory_file", source_path="facts/c.md", destination_path="facts/d.md"
+        ),
+        edit("unlink_memory", local_ref_id="ref_1"),
+        _reply(("completed", {})),
+        edit("delete_memory_file", path="facts/b.md"),
+        edit(
+            "move_memory_file", source_path="facts/e.md", destination_path="facts/f.md"
+        ),
+        edit("unlink_memory", local_ref_id="ref_2"),
+        _reply(("completed", {})),
+    )
+    conversation = await run_memory_file_editor(
+        _run_input(tmp_path, send, tools=router.definitions())
+    )
+
+    await conversation.continue_with(
+        answer={"status": "accepted"},
+        message="Look back.",
+        tools=router.definitions(),
+        max_turns=8,
+        max_tool_calls=8,
+    )
+
+    draft = router.routes[0].session.draft
+    assert sorted(item.source_path for item in draft.documents) == [
+        "facts/d.md",
+        "facts/f.md",
+        "facts/refs.md",
+    ]
+    assert [link.state for link in draft.links] == ["removed", "removed"]

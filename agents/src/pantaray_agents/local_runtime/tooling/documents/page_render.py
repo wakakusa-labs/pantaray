@@ -34,6 +34,7 @@ from .sandboxed_worker import sandboxed_worker
 
 WORKER_SCRIPT: Final = Path(__file__).with_name("pdf_render_worker.py")
 RENDERED_PAGE_MEDIA_TYPE: Final = "image/webp"
+RENDERED_PAGE_SUFFIX: Final = ".webp"
 # What the providers charge for and accept for a single image. A4 portrait
 # lands at about 134 dpi, which keeps body text legible without paying for a
 # resolution the image is downscaled out of again on the way to the model.
@@ -256,6 +257,7 @@ __all__ = [
     "MAX_RENDERED_PAGES",
     "RENDERED_PAGE_LONG_EDGE_PX",
     "RENDERED_PAGE_MEDIA_TYPE",
+    "RENDERED_PAGE_SUFFIX",
     "PageOutOfRangeError",
     "PageRenderTimeoutError",
     "RenderedPage",

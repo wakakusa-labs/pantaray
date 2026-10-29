@@ -1,132 +1,95 @@
 from __future__ import annotations
 
-import json
-import sqlite3
-from pathlib import Path
+import asyncio
+import threading
+import time
 
 import pytest
-from tests.unit.local_runtime.broker_test_support import (
-    BROKER_ACTOR_PROCESS_ID,
-    _bootstrap_runtime_db,
-)
+from tests.unit.local_runtime.broker_test_support import desktop_session
 
+from pantaray_agents.local_runtime.runtime.one_shot_requests import OneShotRequests
 from pantaray_agents.local_runtime.runtime.screen_capture_broker import (
-    SCREEN_CAPTURE_REQUESTED_EVENT,
-    ScreenCaptureBroker,
+    ScreenCaptureOutcome,
     ScreenCaptureRefused,
     announce_screen_capture_request,
 )
-from pantaray_agents.local_runtime.storage.migrations import MigrationError
+from pantaray_agents.schema.events import OutboundEvent
 
-TIMESTAMP = "2026-09-08T00:00:00Z"
-CHILD_PROCESS_ID = "process:action-1:child"
+SUBAGENT_PROCESS_ID = "process:action-1:child"
 APP_NAME = "Google Chrome"
 
 
-def _announce(db_path: Path, *, process_id: str) -> None:
-    announce_screen_capture_request(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        user_id="user-1",
+async def _announce(*, user_id: str = "user-1") -> None:
+    await announce_screen_capture_request(
+        user_id=user_id,
         action_id="action-1",
-        process_id=process_id,
+        process_id=SUBAGENT_PROCESS_ID,
         tool_request_id="action-1:step-1:1",
         capture_request_id="capture-1",
         app_name=APP_NAME,
     )
 
 
-def _announced(db_path: Path) -> list[tuple[str, str]]:
-    """Each announcement's stream, and the app Electron is asked to capture."""
+async def test_a_request_reaches_the_owners_desktop_whichever_process_asked() -> None:
+    """No session follows a chat-launched Action or a subagent, and both still ask."""
 
-    with sqlite3.connect(db_path) as connection:
-        rows = connection.execute(
-            "SELECT process_id, payload_json FROM process_events WHERE event_name = ?",
-            (SCREEN_CAPTURE_REQUESTED_EVENT,),
-        ).fetchall()
-    return [(str(row[0]), json.loads(row[1])["app_name"]) for row in rows]
+    with desktop_session() as desktop:
+        await _announce()
 
-
-def _insert_child_process(db_path: Path) -> None:
-    with sqlite3.connect(db_path) as connection, connection:
-        connection.execute(
-            """
-            INSERT INTO processes(
-                process_id, user_id, kind, status, action_id, started_at,
-                updated_at, heartbeat_at, next_event_seq, parent_process_id
-            ) VALUES (?, 'user-1', 'action_subagent', 'running', 'action-1',
-                      ?, ?, ?, 1, ?)
-            """,
-            (
-                CHILD_PROCESS_ID,
-                TIMESTAMP,
-                TIMESTAMP,
-                TIMESTAMP,
-                BROKER_ACTOR_PROCESS_ID,
-            ),
-        )
+    assert desktop.events == [OutboundEvent.SCREEN_CAPTURE_REQUESTED]
+    assert desktop.requests == [
+        {
+            "kind": "action",
+            "process_id": SUBAGENT_PROCESS_ID,
+            "action_id": "action-1",
+            "tool_request_id": "action-1:step-1:1",
+            "capture_request_id": "capture-1",
+            "app_name": APP_NAME,
+        }
+    ]
 
 
-def test_a_subagent_request_is_announced_on_the_root_process_stream(
-    tmp_path: Path,
-) -> None:
-    """Only the root Action stream reaches the desktop client."""
+async def test_only_the_newest_session_that_can_send_is_asked() -> None:
+    """Each delivery is one capture, so two sessions must not both be asked."""
 
-    db_path, _ = _bootstrap_runtime_db(tmp_path)
-    _insert_child_process(db_path)
+    with desktop_session() as older, desktop_session() as newer:
+        await _announce()
+        assert (len(older.requests), len(newer.requests)) == (0, 1)
 
-    _announce(db_path, process_id=CHILD_PROCESS_ID)
-
-    assert _announced(db_path) == [(BROKER_ACTOR_PROCESS_ID, APP_NAME)]
-
-
-def test_a_root_request_is_announced_on_its_own_stream(tmp_path: Path) -> None:
-    db_path, _ = _bootstrap_runtime_db(tmp_path)
-
-    _announce(db_path, process_id=BROKER_ACTOR_PROCESS_ID)
-
-    assert _announced(db_path) == [(BROKER_ACTOR_PROCESS_ID, APP_NAME)]
+        # A session whose send failed can never send again.
+        newer.open = False
+        await _announce()
+        assert (len(older.requests), len(newer.requests)) == (1, 1)
 
 
-def test_a_request_from_another_users_process_is_refused(tmp_path: Path) -> None:
-    db_path, _ = _bootstrap_runtime_db(tmp_path)
+async def test_another_owners_session_is_not_asked() -> None:
+    with desktop_session(owner_id="user-2") as other:
+        await _announce(user_id="user-1")
 
-    with pytest.raises(MigrationError):
-        announce_screen_capture_request(
-            db_path=db_path,
-            busy_timeout_ms=1_000,
-            user_id="user-2",
-            action_id="action-1",
-            process_id=BROKER_ACTOR_PROCESS_ID,
-            tool_request_id="action-1:step-1:1",
-            capture_request_id="capture-1",
-            app_name=APP_NAME,
-        )
-    assert _announced(db_path) == []
+    assert other.requests == []
 
 
 @pytest.mark.asyncio
 async def test_a_request_is_answered_once_and_then_forgotten() -> None:
-    broker = ScreenCaptureBroker()
+    broker = OneShotRequests[ScreenCaptureOutcome]()
     capture_request_id = broker.open(user_id="user-1")
     refusal = ScreenCaptureRefused(code="CAPTURE_REFUSED_URL_UNAVAILABLE", details={})
 
     assert (
         broker.answer(
-            capture_request_id=capture_request_id,
+            request_id=capture_request_id,
             user_id="user-1",
             outcome=refusal,
         )
         == "accepted"
     )
     assert (
-        await broker.wait(capture_request_id=capture_request_id, timeout_seconds=1)
-        is refusal
+        await broker.wait(request_id=capture_request_id, timeout_seconds=1) is refusal
     )
     # The waiter took the request with it, so a late answer has nothing to resolve.
     assert (
         broker.answer(
-            capture_request_id=capture_request_id,
+            request_id=capture_request_id,
             user_id="user-1",
             outcome=refusal,
         )
@@ -136,27 +99,24 @@ async def test_a_request_is_answered_once_and_then_forgotten() -> None:
 
 @pytest.mark.asyncio
 async def test_an_unanswered_request_times_out_and_is_dropped() -> None:
-    broker = ScreenCaptureBroker()
+    broker = OneShotRequests[ScreenCaptureOutcome]()
     capture_request_id = broker.open(user_id="user-1")
 
     assert (
-        await broker.wait(capture_request_id=capture_request_id, timeout_seconds=0.01)
-        is None
+        await broker.wait(request_id=capture_request_id, timeout_seconds=0.01) is None
     )
     with pytest.raises(KeyError):
-        await broker.wait(capture_request_id=capture_request_id, timeout_seconds=0.01)
+        await broker.wait(request_id=capture_request_id, timeout_seconds=0.01)
 
 
 @pytest.mark.asyncio
 async def test_a_stopped_waiter_closes_its_request_before_electron_answers() -> None:
     """停止で待ち手が消えたら、遅れて届いた Electron の答えは受け取らない。"""
 
-    import asyncio
-
-    broker = ScreenCaptureBroker()
+    broker = OneShotRequests[ScreenCaptureOutcome]()
     capture_request_id = broker.open(user_id="user-1")
     waiter = asyncio.ensure_future(
-        broker.wait(capture_request_id=capture_request_id, timeout_seconds=60)
+        broker.wait(request_id=capture_request_id, timeout_seconds=60)
     )
     await asyncio.sleep(0)
     waiter.cancel()
@@ -165,11 +125,70 @@ async def test_a_stopped_waiter_closes_its_request_before_electron_answers() -> 
 
     assert (
         broker.answer(
-            capture_request_id=capture_request_id,
+            request_id=capture_request_id,
             user_id="user-1",
             outcome=ScreenCaptureRefused(
                 code="CAPTURE_REFUSED_URL_UNAVAILABLE", details={}
             ),
         )
+        == "unknown_request"
+    )
+
+
+def test_an_answer_from_the_server_thread_wakes_the_waiting_loop_at_once() -> None:
+    """The tool waits on its Action worker's loop; Electron's answer arrives on
+    the server's. Nothing else runs on the waiting loop here, so only the answer
+    itself can wake it before the deadline."""
+
+    broker = OneShotRequests[ScreenCaptureOutcome]()
+    refusal = ScreenCaptureRefused(code="CAPTURE_REFUSED_URL_UNAVAILABLE", details={})
+    opened = threading.Event()
+    request: dict[str, str] = {}
+    waited: dict[str, object] = {}
+
+    async def _tool() -> None:
+        request["id"] = broker.open(user_id="user-1")
+        opened.set()
+        started = time.monotonic()
+        waited["outcome"] = await broker.wait(
+            request_id=request["id"], timeout_seconds=5
+        )
+        waited["seconds"] = time.monotonic() - started
+
+    worker = threading.Thread(target=asyncio.run, args=(_tool(),))
+    worker.start()
+    assert opened.wait(timeout=5)
+    time.sleep(0.05)
+    statuses = [
+        broker.answer(request_id=request["id"], user_id="user-1", outcome=refusal)
+        for _ in range(2)
+    ]
+    worker.join(timeout=10)
+
+    assert statuses == ["accepted", "already_answered"]
+    assert waited["outcome"] is refusal
+    assert waited["seconds"] < 0.5  # type: ignore[operator]
+
+
+async def test_an_answer_that_races_a_closing_waiter_is_dropped_quietly() -> None:
+    broker = OneShotRequests[ScreenCaptureOutcome]()
+    errors: list[dict[str, object]] = []
+    asyncio.get_running_loop().set_exception_handler(
+        lambda _loop, context: errors.append(context)
+    )
+    request_id = broker.open(user_id="user-1")
+
+    refusal = ScreenCaptureRefused(code="CAPTURE_REFUSED_URL_UNAVAILABLE", details={})
+    assert (
+        broker.answer(request_id=request_id, user_id="user-1", outcome=refusal)
+        == "accepted"
+    )
+    # The waiter is stopped before the scheduled resolution runs.
+    broker.close(request_id=request_id)
+    await asyncio.sleep(0.01)
+
+    assert errors == []
+    assert (
+        broker.answer(request_id=request_id, user_id="user-1", outcome=refusal)
         == "unknown_request"
     )

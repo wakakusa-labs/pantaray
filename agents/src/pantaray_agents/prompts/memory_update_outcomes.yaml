@@ -1,34 +1,33 @@
-# What follows the Memory update's `completed`, as a user message, when
-# delivered suggestions are due for an outcome verdict: the same run continues,
-# its memory work done, to judge what each suggestion changed.
+# What follows the Memory update's accepted `completed`, as a user message, when
+# delivered suggestions or Actions are due: the same run goes on, before its
+# draft is published, and writes what each one changed into memory.
 prompt: |
-  The memory update is published. Now judge what each suggestion in `due`
-  changed. Your memory edits are done: the tools here only read.
+  Your memory update is accepted and not yet published. Now look back on each
+  suggestion and Action in `due` and write what it changed into memory, with
+  the same tools and rules.
 
-  Judge one thing: how the user's and the environment's state changed from
-  `delivered_at` to now, measured against the suggestion's `hypothesis` (what
-  it expected to change) at its checkpoint (`checkpoint_days` after delivery).
-  Look for that change in the records: activity logs and summaries, memory
-  files, Actions and their results, later suggestions and conversation, files
-  and git history the records show. `context_not_evidence` (accepting,
-  dismissing, the Action's status, a dismiss reason) and anything the user said
-  they felt or thought only help you read those records; they never show what
-  the suggestion changed. When the only support is the user's own claim, or the
-  records do not reach the change either way, the verdict is `unknown`.
+  Judge how the user's and the environment's state changed from `delivered_at`
+  to now, measured against the item's `expectation`, at its checkpoint
+  (`checkpoint_days` after delivery). Find the change in the records: activity
+  logs and summaries, memory files, Actions and their results, later
+  suggestions and chat, and the files and git history the records show.
+  Accepting, dismissing, an Action's status, a dismiss reason, and what the
+  user says they felt only help you read those records; they never show what
+  changed. When the records do not reach the change, say it is unknown rather
+  than guess.
 
-  - `improved`: after delivery, the change the hypothesis expected happened,
-    or moved closer. A state already reached before delivery is no change:
-    confirming it is `no_effect`.
-  - `no_effect`: the records cover the period and the state did not move.
-  - `worse`: the state moved against what the hypothesis wanted.
-  - `unknown`: the records cannot tell.
+  Judge a suggestion and an Action separately, even when the Action came from
+  the suggestion (`source_suggestion_id`: read the two side by side). A
+  suggestion pointed right when what it pointed at was real and moved, by
+  anyone's hand: if the Action's product was poor but the user moved the
+  matter themselves, the suggestion still pointed right. An Action is judged by
+  whether what it produced served that movement. Where something stopped, say
+  where: how it was pointed (the suggestion's content or timing), how it was
+  made (the Action's product), or outside circumstances. Whether it would have
+  happened anyway is usually unknowable; mention it only with evidence.
 
-  Every verdict but `unknown` cites evidence: each item names its `source`
-  (such as activity_log, activity_summary, memory_file, action, suggestion,
-  chat), a `ref` copied exactly as a tool returned it (a full id or memory
-  file path, never shortened or with an ellipsis), when it was observed, and
-  what it shows. `earlier_verdicts` are what earlier checkpoints found; judge
-  this checkpoint on its own records.
-
-  Then call `record_outcomes` once with one outcome per item in `due`, in your
-  `reason` saying in one or two sentences what changed and why that verdict.
+  Write what you find into the "What Pantaray's help changed" part of the
+  endeavor's big picture, dated, rewriting that part in place rather than
+  appending a log. Write an Agent Experience entry, with Outcome effective or
+  ineffective, only when a pattern repeats across items or across what memory
+  already records. Then call `completed`.

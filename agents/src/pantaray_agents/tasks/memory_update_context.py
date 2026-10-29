@@ -46,14 +46,15 @@ from pantaray_agents.local_runtime.memory_catalog.run_workspace import (
 from pantaray_agents.local_runtime.runtime.fact_identity import (
     load_current_fact_identity,
 )
+from pantaray_agents.local_runtime.runtime.help_outcomes import (
+    DueOutcome,
+    load_due_outcomes,
+)
 from pantaray_agents.local_runtime.runtime.memory_dismissal_range import (
     read_dismissed_suggestions,
 )
 from pantaray_agents.local_runtime.runtime.memory_update_progress import (
     load_published_memory_categories,
-)
-from pantaray_agents.local_runtime.runtime.suggestion_outcomes import (
-    read_verdicts_since_last_run,
 )
 from pantaray_agents.local_runtime.storage.chat_messages import read_chat_messages
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
@@ -78,7 +79,6 @@ from pantaray_agents.tasks.memory_update_evidence import (
     render_activity_summaries,
     render_chat_messages,
     render_dismissed_suggestions,
-    render_outcome_verdicts,
     render_short_insights,
 )
 from pantaray_agents.tasks.types import (
@@ -120,6 +120,8 @@ class PreparedMemoryUpdateRun:
     base_drafts: tuple[tuple[MemorySource, MemoryDraftCheckpoint], ...]
     tool_definitions: tuple[ReactToolDefinition, ...]
     memory_requests: tuple[MemoryRequest, ...]
+    # Delivered suggestions and Actions the run looks back on after the update.
+    due: tuple[DueOutcome, ...]
 
     @property
     def editable_sources(self) -> tuple[MemorySource, ...]:
@@ -133,7 +135,9 @@ class PreparedMemoryUpdateRun:
             or self.context.action_turns
             or self.context.chat_messages
             or self.context.dismissed_suggestions
-            or self.context.outcome_verdicts
+            # A run that skips the model still completes and moves the
+            # look-back's boundary past them.
+            or self.due
         )
 
     def base_draft(self, source: MemorySource) -> MemoryDraftCheckpoint:
@@ -217,10 +221,8 @@ def prepare_memory_update_run(
                 suggestion_ids=tuple(payload.get("dismissed_suggestion_ids", ())),
             )
         )
-        outcome_verdicts = render_outcome_verdicts(
-            read_verdicts_since_last_run(
-                connection, user_id=user_id, enqueued_at=payload["enqueued_at"]
-            )
+        due = load_due_outcomes(
+            connection, user_id=user_id, enqueued_at=payload["enqueued_at"]
         )
         workspace_scope.create(
             artifact_root=runtime.artifact_root,
@@ -304,7 +306,6 @@ def prepare_memory_update_run(
         session_memories=session_memories,
         chat_messages=chat_messages,
         dismissed_suggestions=dismissed_suggestions,
-        outcome_verdicts=outcome_verdicts,
         local_time_note=local_time_note(local_zone_name()),
         memory_file_manifest=render_artifact_manifest(router.draft.documents),
         facts_index=_index_text(router.draft.documents, FACTS_INDEX_PATH),
@@ -338,6 +339,7 @@ def prepare_memory_update_run(
             *history_tools,
         ),
         memory_requests=memory_requests,
+        due=due,
     )
 
 

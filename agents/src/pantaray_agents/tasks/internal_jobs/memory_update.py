@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import sqlite3
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Protocol
@@ -13,10 +12,6 @@ from pantaray_agents.agents.memory_agent import (
     MemoryUpdateAgent,
     MemoryUpdateAgentResult,
 )
-from pantaray_agents.agents.memory_agent.outcomes import (
-    OUTCOMES_PROMPT_NAME,
-    OUTCOMES_PROMPT_VERSION,
-)
 from pantaray_agents.agents.memory_file_editor.runner import MemoryEditorConversation
 from pantaray_agents.local_runtime.memory_catalog.connection import (
     open_memory_catalog_connection,
@@ -25,6 +20,7 @@ from pantaray_agents.local_runtime.memory_catalog.models import MemorySource
 from pantaray_agents.local_runtime.memory_catalog.run_workspace import (
     MemoryRunWorkspaceScope,
 )
+from pantaray_agents.local_runtime.runtime.help_outcomes import DueOutcome
 from pantaray_agents.local_runtime.runtime.job_route_identity import (
     require_current_route_identity,
 )
@@ -36,16 +32,7 @@ from pantaray_agents.local_runtime.runtime.memory_update_progress import (
     load_published_memory_categories,
     memory_update_is_complete,
 )
-from pantaray_agents.local_runtime.runtime.suggestion_outcomes import (
-    DueOutcome,
-    JudgedOutcome,
-    load_due_outcomes,
-    record_outcome_verdicts,
-)
-from pantaray_agents.local_runtime.runtime.utc_timestamps import (
-    format_utc_iso,
-    utc_now,
-)
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.tooling.memory_file_editor import (
     LocalMemoryFileEditorRuntime,
     build_local_memory_file_editor_runtime,
@@ -61,6 +48,7 @@ from pantaray_agents.tasks.memory_update_completion import (
     publish_memory_update_run,
 )
 from pantaray_agents.tasks.memory_update_context import (
+    PreparedMemoryUpdateRun,
     prepare_memory_update_run,
     resolve_memory_run_fact_id,
 )
@@ -91,14 +79,14 @@ class MemoryUpdateWorkerAgent(Protocol):
         db_path: Path,
     ) -> None: ...
 
-    async def judge_outcomes(
+    async def look_back_on_outcomes(
         self,
         conversation: MemoryEditorConversation,
         due: tuple[DueOutcome, ...],
         *,
         tool_definitions: tuple[ReactToolDefinition, ...],
         now: str,
-    ) -> tuple[JudgedOutcome, ...]: ...
+    ) -> None: ...
 
 
 type MemoryUpdateAgentBuilder = Callable[[], Awaitable[MemoryUpdateWorkerAgent]]
@@ -152,6 +140,15 @@ async def execute_memory_update_job(
                     tool_results_path=workspace_scope.require_tool_results_path(),
                     db_path=runtime.db_path,
                 )
+                # Before publishing, so what it finds reaches this run's memory,
+                # Agent Experience included.
+                if prepared.due:
+                    await _look_back_on_outcomes(
+                        payload=payload,
+                        agent=agent,
+                        conversation=result.conversation,
+                        prepared=prepared,
+                    )
             # Everything above stayed in the run-only workspace; this is where
             # the edits become the owner's memory, so the route they were made
             # on has to still be current.
@@ -166,16 +163,6 @@ async def execute_memory_update_job(
                     () if result is None else result.applied_memory_request_ids
                 ),
             )
-            # A run without evidence had no conversation to continue; a later
-            # run judges what is due then.
-            if result is not None:
-                await _judge_suggestion_outcomes(
-                    runtime=runtime,
-                    payload=payload,
-                    agent=agent,
-                    conversation=result.conversation,
-                    tool_definitions=prepared.tool_definitions,
-                )
         # After completion: a crash from here leaves the update complete, and
         # the next update that changes an oversized file consolidates it.
         await consolidate_memory_files(
@@ -201,58 +188,38 @@ async def execute_memory_update_job(
     )
 
 
-async def _judge_suggestion_outcomes(
+async def _look_back_on_outcomes(
     *,
-    runtime: LocalMemoryFileEditorRuntime,
     payload: MemoryUpdateJobPayload,
     agent: MemoryUpdateWorkerAgent,
     conversation: MemoryEditorConversation,
-    tool_definitions: tuple[ReactToolDefinition, ...],
+    prepared: PreparedMemoryUpdateRun,
 ) -> None:
-    """Judge the due suggestions in the published update's conversation. The
-    update is complete by now: a failure is logged and stores nothing, and the
-    same suggestions stay due for the next update."""
+    """Continue the accepted update into what the due items changed.
 
-    user_id = payload["user_id"]
-    now = utc_now()
+    A failure is logged and the run publishes its draft as it stands: every edit
+    was checked when the tool applied it, so the draft is one the update itself
+    could have ended on, the look-back's finished edits included.
+    """
+
     try:
-        with open_memory_catalog_connection(
-            db_path=runtime.db_path, busy_timeout_ms=runtime.busy_timeout_ms
-        ) as connection:
-            due = load_due_outcomes(connection, user_id=user_id, now=now)
-        if not due:
-            return
-        outcomes = await agent.judge_outcomes(
+        await agent.look_back_on_outcomes(
             conversation,
-            due,
-            tool_definitions=tool_definitions,
-            now=describe_utc_timestamp(format_utc_iso(now)),
+            prepared.due,
+            tool_definitions=prepared.tool_definitions,
+            now=describe_utc_timestamp(now_utc_iso()),
         )
-        await require_current_route_identity()
-        with open_memory_catalog_connection(
-            db_path=runtime.db_path, busy_timeout_ms=runtime.busy_timeout_ms
-        ) as connection:
-            record_outcome_verdicts(
-                connection,
-                user_id=user_id,
-                job_id=payload["job_id"],
-                prompt_name=OUTCOMES_PROMPT_NAME,
-                prompt_version=OUTCOMES_PROMPT_VERSION,
-                judged_at=format_utc_iso(utc_now()),
-                outcomes=outcomes,
-            )
     # Every failure the conversation and its model sends declare is a
     # RuntimeError (output refused, turns exhausted, context full, upstream
-    # error, route changed); reading and storing raise sqlite3.Error. A deferred
-    # job is a BaseException and still ends the run.
-    except (RuntimeError, sqlite3.Error) as exc:
+    # error). A deferred job is a BaseException and still ends the run.
+    except RuntimeError as exc:
         log_structured_event(
             logger,
             level="error",
-            evt="SUGGESTION_OUTCOMES_FAILED",
+            evt="MEMORY_OUTCOMES_LOOK_BACK_FAILED",
             exception=exc,
             component="tasks.memory_update",
-            user_id=user_id,
+            user_id=payload["user_id"],
             job_id=payload["job_id"],
             error_class=exc.__class__.__name__,
         )

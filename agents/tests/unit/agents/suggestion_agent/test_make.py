@@ -112,11 +112,16 @@ async def _decide(model: _Model, folder: Path, steps: list[ReactLoopStep]):
     loader = PromptLoader()
     lens_config = loader.load_config(SUGGESTION_LENS_PROMPT_NAME)
     lens_config.role_rules = {lens: f"### {lens}" for lens in (CHOSEN, OTHER)}
-    research = build_mock_suggestion_research_tools().definitions
     folder.mkdir()
-    patch = SuggestionArtifactPatch(folder.resolve()).definition()
+    mock = build_mock_suggestion_research_tools(folder.resolve())
+    assert mock.make_tools is not None
+    # Every make-stage tool refuses, except a real apply_patch into the folder.
+    made = (
+        *(t for t in mock.make_tools.definitions if t.name != "apply_patch"),
+        SuggestionArtifactPatch(folder.resolve()).definition(),
+    )
     tools = FixedSuggestionResearchTools(
-        research, SuggestionMakeTools((*research, patch), folder.resolve())
+        mock.definitions, SuggestionMakeTools(made, folder.resolve())
     )
 
     async def record(step: ReactLoopStep) -> None:

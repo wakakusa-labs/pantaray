@@ -5,7 +5,8 @@ user's default lets Actions run them without asking. Each command runs in the
 Action's command sandbox with the Action's read scope and limits. A research
 command has no writable folder at all and follows the user's network setting;
 a make-stage command writes only into the Suggestion's artifact folder and its
-own temp dir, with the network off.
+own temp dir, with the network off. The make stage's ``run_python`` is such a
+command: the app runtime Python, run on its program as the Action's is.
 """
 
 from __future__ import annotations
@@ -15,13 +16,17 @@ import stat
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from pantaray_agents.agents.suggestion_agent.react import SUGGESTION_COMMAND_TOOL_ID
+from pantaray_agents.agents.suggestion_agent.react import (
+    SUGGESTION_COMMAND_TOOL_ID,
+    SUGGESTION_PYTHON_TOOL_ID,
+)
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.read_access import (
     READ_ACCESS_SCOPE_FULL_ACCESS,
     ReadAccessScope,
 )
 from pantaray_agents.tools.contract import (
+    JsonSchema,
     ReactToolCall,
     ReactToolDefinition,
     ReactToolResult,
@@ -34,7 +39,7 @@ from ..brokering.broker_common import (
     APPROVAL_MODE_ALWAYS_ALLOW,
     APPROVAL_SCOPE_WORKSPACE_EDIT_AND_COMMAND,
 )
-from ..brokering.broker_protocol import BashToolOutput
+from ..brokering.broker_protocol import BashToolOutput, BrokerExecutionKind
 from ..brokering.broker_registry import BROKER_TOOL_REGISTRY
 from ..brokering.command_runtime import build_command_env
 from ..outside_workspace_grant import app_owned_roots
@@ -48,8 +53,11 @@ from ..sandbox.command_sandbox_protocol import (
     ActionSandboxStorage,
     BrokerToSandboxCommandRequest,
 )
-from ..sandbox.command_sandbox_request import compose_sandbox_request
-from ..sandbox.runtime_policy import resolve_runtime_budget
+from ..sandbox.command_sandbox_request import (
+    GENERATED_PYTHON_SCRIPT_NAME,
+    compose_sandbox_request,
+)
+from ..sandbox.runtime_policy import SandboxLaunchBudget, resolve_runtime_budget
 from ..sandbox.unrecorded_command import run_unrecorded_sandbox_command
 from ..tool_result_spill import accepting_spilled_texts
 from ..tool_result_storage import store_run_tool_result
@@ -116,6 +124,12 @@ def _react_result(
         message=output.error.message[:ERROR_MESSAGE_MAX_CHARS],
         details=streams,
     )
+
+
+def _python_budget() -> SandboxLaunchBudget:
+    return resolve_runtime_budget(
+        sandbox_profile="agent_generated_python"
+    ).sandbox_launch
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,7 +199,7 @@ class SuggestionCommandSession:
 
     def definitions(self) -> tuple[ReactToolDefinition, ...]:
         self.spill_root.mkdir(mode=_SPILL_ROOT_MODE, parents=True, exist_ok=True)
-        return (
+        definitions = (
             ReactToolDefinition(
                 name=SUGGESTION_COMMAND_TOOL_ID,
                 description=self._description(),
@@ -244,6 +258,48 @@ class SuggestionCommandSession:
                 execute=self.run,
             ),
         )
+        if self.artifact_folder is None:
+            return definitions
+        return (*definitions, self._python_definition(definitions[0].response_schema))
+
+    def _python_definition(self, response_schema: JsonSchema) -> ReactToolDefinition:
+        assert self.artifact_folder is not None
+        return ReactToolDefinition(
+            name=SUGGESTION_PYTHON_TOOL_ID,
+            description=(
+                "Run one short Python 3.12 program to make or check the "
+                "Suggestion's files, such as a Word, Excel or PowerPoint file, an "
+                "image or a PDF. Besides the standard library it can import "
+                "python-docx (docx, .docx), openpyxl (.xlsx), python-pptx (pptx, "
+                ".pptx), Pillow (PIL, images), pypdf (read, merge or split PDFs), "
+                "numpy and lxml; nothing else can be installed, and there is no "
+                "plotting library, so draw a chart with Pillow, or as SVG or "
+                "HTML. Files can be written only in the artifact folder, "
+                f"`{self.artifact_folder.path}`, where a null cwd starts, and in "
+                "the temp dir tempfile gives; workspace folders are read-only and "
+                "the network is off. A program runs at most "
+                f"{_python_budget().timeout_ms // 1000} seconds. Look at a file "
+                "you made with render_pdf_page. Long stdout or stderr is saved to "
+                "a file and read back with read or grep."
+            ),
+            request_schema={
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["code", "cwd"],
+                "properties": {
+                    "code": {"type": "string", "minLength": 1, "pattern": r"\S"},
+                    "cwd": {
+                        "type": ["string", "null"],
+                        "description": (
+                            "Absolute path of a directory inside a listed "
+                            "workspace folder, or null for the artifact folder."
+                        ),
+                    },
+                },
+            },
+            response_schema=response_schema,
+            execute=self.run_python,
+        )
 
     def _resolve_cwd(self, raw_cwd: JSONValue) -> tuple[Path, Path] | None:
         """(cwd, the workspace folder holding it), or None for the temp dir."""
@@ -270,6 +326,36 @@ class SuggestionCommandSession:
         command = args["command"]
         use_login_environment = args["use_login_environment"]
         assert isinstance(command, str) and isinstance(use_login_environment, bool)
+        return await self._run_sandboxed(
+            call,
+            raw_cwd=args.get("cwd"),
+            bash_command=command,
+            use_login_environment=use_login_environment,
+        )
+
+    async def run_python(
+        self, call: ReactToolCall, _step_number: int
+    ) -> ReactToolResult:
+        args = call.tool_args
+        assert isinstance(args, dict)  # Validated against request_schema.
+        code = args["code"]
+        assert isinstance(code, str)
+        return await self._run_sandboxed(
+            call, raw_cwd=args.get("cwd"), python_code=code, use_login_environment=False
+        )
+
+    async def _run_sandboxed(
+        self,
+        call: ReactToolCall,
+        *,
+        raw_cwd: JSONValue,
+        use_login_environment: bool,
+        bash_command: str | None = None,
+        python_code: str | None = None,
+    ) -> ReactToolResult:
+        """Run bash on ``bash_command``, or the app runtime Python on
+        ``python_code`` as the Action's run_python runs it."""
+
         # Read per call, as the broker does: a change the user makes while the
         # run is in progress applies to the next command.
         if not commands_run_without_asking(
@@ -289,7 +375,7 @@ class SuggestionCommandSession:
                 message="The artifact folder was replaced, so no command can run.",
             )
         try:
-            resolved_cwd = self._resolve_cwd(args.get("cwd"))
+            resolved_cwd = self._resolve_cwd(raw_cwd)
         except (ValueError, OSError) as exc:
             return tool_error_response(
                 tool_name=call.tool_name,
@@ -302,14 +388,30 @@ class SuggestionCommandSession:
             user_id=self.user_id,
         )
         full_disk_read = self.read_access_scope == READ_ACCESS_SCOPE_FULL_ACCESS
-        budget = resolve_runtime_budget(
-            sandbox_profile="workspace_process_exec"
-        ).sandbox_launch
         app_runtime_python = load_and_verify_app_runtime_python_from_env()
+        if python_code is None:
+            assert bash_command is not None
+            executable = BASH_EXECUTABLE
+            arguments = ["--noprofile", "--norc", "-c", bash_command]
+            execution_kind: BrokerExecutionKind = "workspace_command"
+            budget = resolve_runtime_budget(
+                sandbox_profile="workspace_process_exec"
+            ).sandbox_launch
+        else:
+            executable = app_runtime_python
+            arguments = []
+            execution_kind = "agent_generated"
+            budget = _python_budget()
         private_storage_roots = [str(root) for root in app_owned_roots(self.db_path)]
 
         def build_request(temp_dir: Path) -> BrokerToSandboxCommandRequest:
             cwd, execution_root = resolved_cwd or (temp_dir, temp_dir)
+            argv = [str(executable), *arguments]
+            if python_code is not None:
+                # Where the Action's run_python puts its program: the temp dir.
+                script_path = temp_dir / GENERATED_PYTHON_SCRIPT_NAME
+                script_path.write_text(python_code, encoding="utf-8")
+                argv.append(str(script_path))
             return compose_sandbox_request(
                 temp_dir=temp_dir,
                 real_read_roots=[
@@ -330,12 +432,12 @@ class SuggestionCommandSession:
                 ),
                 app_runtime_python=app_runtime_python,
                 cwd=str(cwd),
-                argv=[str(BASH_EXECUTABLE), "--noprofile", "--norc", "-c", command],
+                argv=argv,
                 env=build_command_env(
                     command_cwd=cwd,
-                    execution_kind="workspace_command",
+                    execution_kind=execution_kind,
                     workspace_root=execution_root,
-                    resolved_executable=BASH_EXECUTABLE,
+                    resolved_executable=executable,
                     use_login_environment=use_login_environment,
                     full_disk_read=full_disk_read,
                 ),

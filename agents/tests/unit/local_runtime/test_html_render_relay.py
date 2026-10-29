@@ -54,6 +54,7 @@ async def _start_render(runtime: Runtime, data: bytes | None):
     render = asyncio.ensure_future(
         relay_module.request_html_render(
             user_id="user-1",
+            kind="action",
             action_id="action-1",
             process_id=BROKER_ACTOR_PROCESS_ID,
             tool_request_id="action-1:step-1:1",

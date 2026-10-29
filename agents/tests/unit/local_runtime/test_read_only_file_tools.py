@@ -32,7 +32,7 @@ from pantaray_agents.tools.contract import (
 from pantaray_agents.tools.files import read_only_tools, ripgrep
 from pantaray_agents.tools.files.read_only_tools import (
     RENDER_PDF_PAGE_TOOL_NAME,
-    build_read_only_file_tools,
+    read_only_file_tools,
 )
 
 from .discovery_output_support import grep_matches
@@ -62,13 +62,13 @@ def _tools(
     storage.mkdir(parents=True)
     (storage / "pantaray.db").write_text("app-storage-secret", encoding="utf-8")
     spill_root = storage / "suggestion_tool_results" / "run-1"
-    definitions = build_read_only_file_tools(
+    definitions = read_only_file_tools(
         db_path=tmp_path / "runtime.sqlite3",
         folders=(folder.resolve(),),
         read_access_scope=read_access_scope,
         app_storage_roots=(storage.resolve(),),
         spill_root=spill_root,
-    )
+    ).definitions()
     return ReactToolRegistry(definitions), folder.resolve(), storage, spill_root
 
 

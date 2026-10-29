@@ -4,7 +4,9 @@ Electron prints the HTML with its own Chromium (``runtime.html_render_relay``),
 so no browser has to be started outside the command sandbox. The PDF it returns
 is drawn and stored like ``render_pdf_page``'s. What this module owns is what
 the page may load: the same folders ``read`` may open, never Pantaray's private
-storage, and the network only when the user lets commands use it.
+storage, and the network only when the user lets commands use it. A
+Suggestion's make stage prints and draws through the same functions, with the
+network always off.
 """
 
 from __future__ import annotations
@@ -13,7 +15,7 @@ import os
 import stat
 import tempfile
 from pathlib import Path
-from typing import Final
+from typing import Final, Literal
 
 from pantaray_agents.local_runtime.runtime.html_render_relay import (
     HtmlRendered,
@@ -27,6 +29,7 @@ from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
 from pantaray_agents.local_runtime.tooling.documents import (
     MAX_DOCUMENT_BYTES,
     MAX_RENDERED_PAGES,
+    RenderedPages,
 )
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.read_access import READ_ACCESS_SCOPE_FULL_ACCESS
@@ -85,7 +88,6 @@ async def run_render_html_page_executor(
     *, context: BrokerContext, request: ValidatedRenderHtmlPageRequest
 ) -> UnprojectedBrokerToolOutcome:
     ensure_session_capabilities(context=context)
-    user_id = context.execution_session.user_id
     target, rendered = await print_html_file(
         context=context,
         scope=read_scope(context),
@@ -93,6 +95,37 @@ async def run_render_html_page_executor(
         action_id=request.action_id,
         tool_request_id=request.tool_request_id,
     )
+    converted_dir = rendered_documents_dir(context)
+    converted_dir.mkdir(mode=MANAGED_DIRECTORY_MODE, exist_ok=True)
+    drawn, message = await draw_printed_html(
+        target=target,
+        rendered=rendered,
+        requested=request.args.pages,
+        converted_dir=converted_dir,
+    )
+    return rendered_pages_outcome(
+        user_id=context.execution_session.user_id,
+        target=target,
+        pages=drawn.pages,
+        message=message,
+        output={
+            "kind": "html_pages",
+            "path": target.display_path,
+            "page_count": drawn.page_count,
+            "blocked_requests": blocked_requests_output(rendered),
+        },
+    )
+
+
+async def draw_printed_html(
+    *,
+    target: ReadTarget,
+    rendered: HtmlRendered,
+    requested: list[int] | None,
+    converted_dir: Path,
+) -> tuple[RenderedPages, str]:
+    """Draw the printed PDF's pages, and say what was and was not drawn."""
+
     if len(rendered.pdf) > MAX_DOCUMENT_BYTES:
         raise BrokerPolicyError(
             f"The printed PDF of {target.display_path} is larger than "
@@ -100,10 +133,7 @@ async def run_render_html_page_executor(
             code=HTML_PDF_TOO_LARGE,
             fix_hint=_SMALLER_PAGE_HINT,
         )
-    requested = request.args.pages
     pages = requested or list(range(1, MAX_RENDERED_PAGES + 1))
-    converted_dir = rendered_documents_dir(context)
-    converted_dir.mkdir(mode=MANAGED_DIRECTORY_MODE, exist_ok=True)
     handle, pdf_path = tempfile.mkstemp(
         prefix=".printed-", suffix=".pdf", dir=converted_dir
     )
@@ -132,18 +162,7 @@ async def run_render_html_page_executor(
         )
     if rendered.blocked_requests:
         notes.append(BLOCKED_REQUESTS_NOTE)
-    return rendered_pages_outcome(
-        user_id=user_id,
-        target=target,
-        pages=drawn.pages,
-        message=" ".join(notes),
-        output={
-            "kind": "html_pages",
-            "path": target.display_path,
-            "page_count": drawn.page_count,
-            "blocked_requests": blocked_requests_output(rendered),
-        },
-    )
+    return drawn, " ".join(notes)
 
 
 async def print_html_file(
@@ -158,24 +177,52 @@ async def print_html_file(
 
     target = resolve_html_file(scope=scope, raw_path=raw_path)
     user_id = context.execution_session.user_id
-    rendered = await request_html_render(
+    rendered = await print_html_target(
+        target=target,
+        scope=scope,
         user_id=user_id,
-        action_id=action_id,
+        kind="action",
+        requester_id=action_id,
         process_id=context.actor_process_id,
         tool_request_id=tool_request_id,
-        html_path=target.real_path,
-        file_roots=_file_roots(scope),
-        private_roots=scope.private_storage.storage_roots,
-        private_root_exceptions=scope.private_storage.readable_roots,
         allow_network=load_command_network_enabled(
             db_path=context.db_path,
             busy_timeout_ms=context.busy_timeout_ms,
             user_id=user_id,
         ),
     )
+    return target, rendered
+
+
+async def print_html_target(
+    *,
+    target: ReadTarget,
+    scope: ReadScope,
+    user_id: str,
+    kind: Literal["action", "suggestion"],
+    requester_id: str,
+    process_id: str,
+    tool_request_id: str,
+    allow_network: bool,
+) -> HtmlRendered:
+    """Print ``target``, resolved by ``resolve_html_file`` in ``scope``, letting
+    the page load local files only where ``scope`` reads."""
+
+    rendered = await request_html_render(
+        user_id=user_id,
+        kind=kind,
+        action_id=requester_id,
+        process_id=process_id,
+        tool_request_id=tool_request_id,
+        html_path=target.real_path,
+        file_roots=_file_roots(scope),
+        private_roots=scope.private_storage.storage_roots,
+        private_root_exceptions=scope.private_storage.readable_roots,
+        allow_network=allow_network,
+    )
     if isinstance(rendered, HtmlRenderFailed):
         raise _render_failed(target, rendered)
-    return target, rendered
+    return rendered
 
 
 def blocked_requests_output(rendered: HtmlRendered) -> list[JSONValue]:
@@ -251,7 +298,9 @@ def _render_failed(target: ReadTarget, failure: HtmlRenderFailed) -> BrokerPolic
 __all__ = [
     "BLOCKED_REQUESTS_NOTE",
     "blocked_requests_output",
+    "draw_printed_html",
     "print_html_file",
+    "print_html_target",
     "resolve_html_file",
     "run_render_html_page_executor",
 ]

@@ -48,7 +48,7 @@ from pantaray_agents.tools.contract import (
     react_tool_response_schema,
     tool_error_response,
 )
-from pantaray_agents.tools.files.read_only_tools import build_read_only_file_tools
+from pantaray_agents.tools.files.read_only_tools import read_only_file_tools
 from pantaray_agents.tools.memory.retrieval import (
     MemoryContextSession,
     MemoryRetrievalPolicy,
@@ -110,7 +110,7 @@ async def chat_research_tools(
         MemorySqlSession(
             db_path=db_path, busy_timeout_ms=busy_timeout_ms, user_id=user_id
         ).definition(),
-        *build_read_only_file_tools(
+        *read_only_file_tools(
             db_path=db_path,
             folders=tuple(
                 Path(folder.canonical_real_path) for folder in settings.folders
@@ -118,7 +118,7 @@ async def chat_research_tools(
             read_access_scope=settings.read_access_scope,
             app_storage_roots=app_owned_roots(db_path),
             spill_root=chat_tool_results_root(db_path=db_path, run_id=run_id),
-        ),
+        ).definitions(),
         *WebResearchToolSession(
             user_id=user_id,
             speaks_to_user=True,

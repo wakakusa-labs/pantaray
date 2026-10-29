@@ -187,9 +187,11 @@ class HtmlRenderRequestedMessage(BaseModel):
     the page may load; the desktop client enforces it.
     """
 
-    kind: Literal["action"] = Field(description="Process kind")
-    process_id: str = Field(description="Physical process ID of the requester")
-    action_id: str = Field(description="Action ID of the requester")
+    kind: Literal["action", "suggestion"] = Field(description="Requester kind")
+    process_id: str = Field(
+        description="Physical process ID of the Action, or the Suggestion's ID"
+    )
+    action_id: str = Field(description="ID of the requesting Action or Suggestion")
     tool_request_id: str = Field(description="Logical ID of the tool request")
     render_request_id: str = Field(description="Render request ID, consumed once")
     html_path: str = Field(description="Real path of the HTML file to render")

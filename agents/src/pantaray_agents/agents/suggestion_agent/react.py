@@ -82,10 +82,16 @@ _SUBMIT_REQUIRED = (
 _SEND_FAILED_MESSAGE = "LLM provider request failed."
 # Offered only while the user lets commands run without asking.
 SUGGESTION_COMMAND_TOOL_ID = "bash"
+# The make stage's, offered with bash.
+SUGGESTION_PYTHON_TOOL_ID = "run_python"
 # Offered only while an integration account is connected, for read tools only.
 SUGGESTION_INTEGRATION_TOOL_IDS = ("integration_list_tools", "integration_run_tool")
 _OFFERED_ONLY_TOOL_IDS = frozenset(
-    {SUGGESTION_COMMAND_TOOL_ID, *SUGGESTION_INTEGRATION_TOOL_IDS}
+    {
+        SUGGESTION_COMMAND_TOOL_ID,
+        SUGGESTION_PYTHON_TOOL_ID,
+        *SUGGESTION_INTEGRATION_TOOL_IDS,
+    }
 )
 SUGGESTION_TOOL_IDS: tuple[str, ...] = (
     "memory_search",
@@ -544,6 +550,7 @@ __all__ = [
     "SuggestionTurnSender",
     "SUGGESTION_COMMAND_TOOL_ID",
     "SUGGESTION_INTEGRATION_TOOL_IDS",
+    "SUGGESTION_PYTHON_TOOL_ID",
     "SUGGESTION_TOOL_IDS",
     "SUGGESTION_MAX_LLM_TURNS",
     "SUGGESTION_MAX_RESEARCH_TOOL_CALLS",

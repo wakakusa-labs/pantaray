@@ -332,6 +332,7 @@ def _deliver_suggestion(runtime: LocalMemoryFileEditorRuntime) -> None:
 async def test_the_look_back_writes_into_the_runs_one_publication(
     tmp_path: Path, caplog: pytest.LogCaptureFixture, fails: bool
 ) -> None:
+    """Its edits go out with the update's; a failed one's are dropped."""
     runtime = _bootstrap(tmp_path)
     _deliver_suggestion(runtime)
     payload = _claimed_payload(runtime)
@@ -341,7 +342,6 @@ async def test_the_look_back_writes_into_the_runs_one_publication(
     agent.look_back_edits = (
         ("insights/help.md", "# Help\n\n- The checklist moved reviews along.\n"),
     )
-    # A failure after an edit keeps the draft as it stands.
     agent.look_back_fails = fails
 
     await execute_memory_update_job(
@@ -364,9 +364,65 @@ async def test_the_look_back_writes_into_the_runs_one_publication(
         ["suggestion-1"]
     ]
     # One revision each: the look-back's edit went out with the update's.
-    assert revisions == [("fact", 1), ("long_term_insight", 1)]
+    assert revisions == (
+        [("fact", 1)] if fails else [("fact", 1), ("long_term_insight", 1)]
+    )
     assert completed == (1,)
     assert ("MEMORY_OUTCOMES_LOOK_BACK_FAILED" in caplog.text) == fails
+
+
+@pytest.mark.asyncio
+async def test_a_failed_look_back_publishes_the_update_without_its_partial_edits(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    runtime = _bootstrap(tmp_path)
+    _deliver_suggestion(runtime)
+    payload = _claimed_payload(runtime)
+    kept, replacing = derived_experience_ids(payload["job_id"])[:2]
+    agent = _ScriptedMemoryAgent(
+        (
+            ("facts/tooling.md", "# Tooling\n\n- Ships runs.\n"),
+            (
+                experience_entry_path(kept),
+                render_agent_experience_markdown(_experience_content(kept)),
+            ),
+        )
+    )
+    # Replacing a lesson is a write and a delete; the look-back stops between
+    # them, which publication would reject as a still-active superseded entry.
+    agent.look_back_edits = (
+        (
+            experience_entry_path(replacing),
+            render_agent_experience_markdown(
+                _experience_content(replacing).model_copy(
+                    update={"supersedes_experience_ids": (kept,)}
+                )
+            ),
+        ),
+    )
+    agent.look_back_fails = True
+
+    await execute_memory_update_job(
+        payload=payload, runtime=runtime, build_agent=_builder(agent)
+    )
+
+    with sqlite3.connect(runtime.db_path) as connection:
+        revisions = connection.execute(
+            """SELECT nodes.source_type, COUNT(*) FROM memory_nodes AS nodes
+               JOIN memory_revisions AS revisions ON revisions.node_id = nodes.node_id
+               WHERE nodes.current_revision_id IS NOT NULL
+               GROUP BY nodes.source_type ORDER BY nodes.source_type"""
+        ).fetchall()
+        entries = connection.execute(
+            """SELECT DISTINCT fragments.source_path FROM memory_fragments AS fragments
+               JOIN memory_nodes AS nodes
+                 ON nodes.current_revision_id = fragments.revision_id
+               WHERE nodes.source_type = 'agent_experience'
+                 AND fragments.source_path LIKE '%entries/%'"""
+        ).fetchall()
+    assert revisions == [("agent_experience", 1), ("fact", 1)]
+    assert [path for (path,) in entries] == [experience_entry_path(kept)]
+    assert "MEMORY_OUTCOMES_LOOK_BACK_FAILED" in caplog.text
 
 
 class _AgentThatReplacesTheRoute(_ScriptedMemoryAgent):

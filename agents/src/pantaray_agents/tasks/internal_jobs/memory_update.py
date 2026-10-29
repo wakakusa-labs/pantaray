@@ -197,11 +197,13 @@ async def _look_back_on_outcomes(
 ) -> None:
     """Continue the accepted update into what the due items changed.
 
-    A failure is logged and the run publishes its draft as it stands: every edit
-    was checked when the tool applied it, so the draft is one the update itself
-    could have ended on, the look-back's finished edits included.
+    A failure is logged and the drafts go back to where the accepted update
+    left them, so the update still publishes. A look-back stopped midway can
+    leave edits each tool accepted but the tree as a whole fails, such as a new
+    Agent Experience entry whose superseded entry is not deleted yet.
     """
 
+    accepted = tuple(route.session.draft for route in prepared.router.routes)
     try:
         await agent.look_back_on_outcomes(
             conversation,
@@ -213,6 +215,8 @@ async def _look_back_on_outcomes(
     # RuntimeError (output refused, turns exhausted, context full, upstream
     # error). A deferred job is a BaseException and still ends the run.
     except RuntimeError as exc:
+        for route, draft in zip(prepared.router.routes, accepted, strict=True):
+            route.session.draft = draft
         log_structured_event(
             logger,
             level="error",

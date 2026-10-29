@@ -33,6 +33,7 @@ from .notebook import extract_ipynb
 from .page_render import (
     MAX_RENDERED_PAGES,
     RENDERED_PAGE_MEDIA_TYPE,
+    RENDERED_PAGE_SUFFIX,
     PageOutOfRangeError,
     PageRenderTimeoutError,
     RenderedPage,
@@ -167,6 +168,7 @@ __all__ = [
     "MAX_RENDERED_PAGES",
     "MAX_SHEET_ROWS",
     "RENDERED_PAGE_MEDIA_TYPE",
+    "RENDERED_PAGE_SUFFIX",
     "DocumentExtractionError",
     "DocumentFormat",
     "DocumentTooLargeError",

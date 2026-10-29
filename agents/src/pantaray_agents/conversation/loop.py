@@ -193,6 +193,10 @@ class ConversationRun[T]:
     the connection's."""
     images: Mapping[str, ToolImage] = field(default_factory=dict)
     """The images ``history`` shows by ref, as ``Ended.images`` gave them."""
+    steps_before: int = 0
+    """The tool steps ``history`` already ran, as ``Ended.steps`` gave them.
+    Tools are handed step numbers after them, so a step number names one call
+    across a continued conversation; ``max_tool_calls`` counts this run's."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,6 +211,8 @@ class Ended[T]:
     history: tuple[ConversationEntry, ...]
     images: Mapping[str, ToolImage]
     window: WindowState
+    # The last tool step number handed out, for a later run's ``steps_before``.
+    steps: int
 
 
 class ConversationOutputInvalid(RuntimeError):
@@ -291,6 +297,7 @@ class _Run[T]:
             for call in entry.item.calls
         }
         self.tool_calls = 0
+        self.steps = run.steps_before
         self.turn = _Turn(calls=())
         # By ref, as tools returned them.
         self.images: dict[str, ToolImage] = dict(run.images)
@@ -341,7 +348,11 @@ class _Run[T]:
                 raise
             if finished is not None:
                 return Ended(
-                    finished.value, tuple(self.history), dict(self.images), self.window
+                    finished.value,
+                    tuple(self.history),
+                    dict(self.images),
+                    self.window,
+                    self.steps,
                 )
         raise ConversationTurnsExhausted("the run has no turn to send")
 
@@ -524,8 +535,9 @@ class _Run[T]:
 
     def _start(self, call: LlmToolCall) -> asyncio.Future[ReactToolResult]:
         self.tool_calls += 1
+        self.steps += 1
         task = asyncio.ensure_future(
-            self.registry.execute(ReactToolCall.from_llm_call(call), self.tool_calls)
+            self.registry.execute(ReactToolCall.from_llm_call(call), self.steps)
         )
         self.turn.tasks[call.call_id] = task
         return task

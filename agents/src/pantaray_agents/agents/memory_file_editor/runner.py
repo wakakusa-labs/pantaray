@@ -118,6 +118,9 @@ class MemoryEditorConversation:
     images: Mapping[str, ToolImage]
     window: WindowState
     turn_store: ProviderTurnStore
+    # The last tool step number the run handed out; the continuation's start
+    # after it, since the draft tools key their idempotency by step number.
+    steps: int
 
     async def continue_with(
         self,
@@ -152,6 +155,7 @@ class MemoryEditorConversation:
             ending_tool=_completed_tool(()),
             history=(*self.history, *opening),
             images=self.images,
+            steps_before=self.steps,
             window=self.window,
             store=self.turn_store,
             decide=_completed_alone,
@@ -187,6 +191,7 @@ async def run_memory_file_editor(
         ending_tool=_completed_tool(run_input.memory_request_ids),
         history=(ConversationEntry(_user_text(run_input.task)),),
         images={},
+        steps_before=0,
         window=WindowState(
             budget=ContextBudget(
                 window_tokens=tunables.context_window_tokens,
@@ -208,6 +213,7 @@ async def run_memory_file_editor(
         images=ended.images,
         window=ended.window,
         turn_store=store,
+        steps=ended.steps,
     )
 
 
@@ -218,6 +224,7 @@ async def _converse[T](
     ending_tool: LlmToolDefinition,
     history: Sequence[ConversationEntry],
     images: Mapping[str, ToolImage],
+    steps_before: int,
     window: WindowState,
     store: ProviderTurnStore,
     decide: Callable[[IdleTurn], Finish[T] | Continue],
@@ -252,6 +259,7 @@ async def _converse[T](
             ending_tools=(ending_tool,),
             history=history,
             images=images,
+            steps_before=steps_before,
             provider_turns=store,
             inference_profile=MEMORY_UPDATE_PROFILE_ID,
             max_turns=max_turns,

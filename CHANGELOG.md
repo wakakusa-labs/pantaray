@@ -3,6 +3,39 @@
 Each release's section becomes its notes on GitHub Releases. Write for people who use Pantaray,
 in English and Japanese: one short sentence per change, saying what changed for them, not how.
 
+## 0.6.3
+
+- When a task looks over an HTML page it made, such as slides or a quote, or turns one into a PDF,
+  it no longer asks for your approval each time.
+- Fixed tasks started from the chat not being able to look at your screen or check HTML pages.
+- File previews fit the pane and zoom with a pinch, and an HTML file previews as it prints, charts
+  included.
+- History shows where each task stands, such as a suggestion waiting for your answer or an approval
+  it needs, and the files it made.
+- Suggestions are shorter: they lead with what they propose and what you need to decide.
+- Suggestions can prepare Word, Excel, PowerPoint and PDF files ahead, not only text.
+- Fixed the open file closing when you replied to a suggestion.
+- Pantaray now looks back 1, 7 and 30 days later at what its suggestions and tasks changed, and
+  learns from it.
+- ChatGPT connections can use gpt-6.1-terra; the gpt-5.6 models are no longer offered, though a
+  saved one keeps working.
+- The main window has a flat background and softer text.
+- Updated Electron for security fixes.
+
+---
+
+- タスクが作ったスライドや見積書などの HTML を見た目で確かめたり、PDF にしたりするとき、毎回承認を求めなくなりました。
+- チャットから頼んだタスクで、画面を見たり HTML を確かめたりできなかった不具合を直しました。
+- ファイルのプレビューが画面の幅に収まり、ピンチで拡大できるようになりました。HTML は印刷したときの見た目で表示し、グラフも出ます。
+- 履歴に、返事を待っている提案や承認が要るタスクなど、各タスクの状況と作ったファイルを出すようにしました。
+- 提案が短くなり、何を提案するのか、何を決めてほしいのかから話すようになりました。
+- 提案で、テキストだけでなく Word・Excel・PowerPoint・PDF のファイルも先に用意できるようになりました。
+- 提案に返事をすると、開いていたファイルが閉じてしまう不具合を直しました。
+- 提案とタスクで何が変わったかを 1・7・30 日後に振り返り、次に生かすようになりました。
+- ChatGPT の接続で gpt-6.1-terra を使えるようになりました。gpt-5.6 系は選べなくなりましたが、保存済みの設定はそのまま使えます。
+- メイン画面の背景を平らにし、文字をやわらかい色にしました。
+- セキュリティの修正のため、Electron を更新しました。
+
 ## 0.6.2
 
 - Pantaray starts again after updating to 0.6.1 with a large history; it no longer stays on loading.

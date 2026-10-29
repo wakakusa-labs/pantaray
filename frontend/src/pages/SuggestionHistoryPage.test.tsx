@@ -315,6 +315,20 @@ it('drops the handed-over file when the address moves away without a selection',
   expect(screen.getByRole('region', { name: 'action A9' })).not.toHaveTextContent('preview');
 });
 
+it('does not hand the file over again when the suggestion is shown after its Action', async () => {
+  renderPage(['/history?item=suggestion:S1']);
+  await userEvent.click(screen.getByRole('button', { name: 'reply with a file open' }));
+  expect(screen.getByRole('region', { name: 'action A9' })).toHaveTextContent(
+    'preview drafts/reply.md'
+  );
+
+  // A started suggestion shown again goes straight back to its Action.
+  await userEvent.click(await screen.findByRole('button', { name: /^請求書を作りましょうか/ }));
+  await userEvent.click(screen.getByRole('button', { name: 'accept' }));
+  expect(location()).toHaveTextContent('/history?item=action:A9');
+  expect(screen.getByRole('region', { name: 'action A9' })).not.toHaveTextContent('preview');
+});
+
 it('opens a new task from ✎ and replaces it with the Action its send opened', async () => {
   renderPage(['/history?item=chat']);
   await userEvent.click(await screen.findByRole('button', { name: NEW_TASK }));

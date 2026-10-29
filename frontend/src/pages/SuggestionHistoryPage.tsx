@@ -10,6 +10,7 @@ import { HISTORY_SIDEBAR_ID, HistorySidebar } from '@/components/history/History
 import { NewTaskPane } from '@/components/task/NewTaskPane';
 import { SuggestionTaskPane } from '@/components/task/SuggestionTaskPane';
 import { TaskWorkspace } from '@/components/task/TaskWorkspace';
+import type { TaskPreview } from '@/components/task/taskFiles';
 import { useI18n } from '@/context/useI18n';
 import { useWorkspaceSettingsController } from '@/pages/settings/useWorkspaceSettingsController';
 import {
@@ -99,6 +100,21 @@ const SuggestionHistoryPage = () => {
   }, [isMac, toggleSidebar]);
   const sidebarToggleLabel = t(sidebarHidden ? 'history.sidebar.show' : 'history.sidebar.hide');
 
+  // The file open beside a suggestion stays open in the Action that takes the pane over from it.
+  // It is handed over once: the suggestion it came from is spared only until the Action is shown,
+  // and showing anything else drops it, however the address changed, so the Action shown again
+  // later opens as the user left it.
+  const [handedPreview, setHandedPreview] = useState<{
+    from: HistorySelection | null;
+    actionId: string;
+    preview: TaskPreview;
+  } | null>(null);
+  if (handedPreview) {
+    const handedTo = `action:${handedPreview.actionId}`;
+    if (selection === handedTo && handedPreview.from !== null)
+      setHandedPreview({ ...handedPreview, from: null });
+    else if (selection !== handedTo && selection !== handedPreview.from) setHandedPreview(null);
+  }
   const select = (next: HistorySelection, options?: { replace: true }) => {
     // The chat already shown goes back to its newest message instead.
     if (next === 'chat' && selection === 'chat') {
@@ -149,14 +165,25 @@ const SuggestionHistoryPage = () => {
       history.items.find((item) => historyItemSelection(item) === selection)?.title ??
       UNLISTED_TITLE[language][kind];
     if (kind === 'action')
-      return <TaskWorkspace key={id} actionId={id} title={title} onAddProject={addProject} />;
+      return (
+        <TaskWorkspace
+          key={id}
+          actionId={id}
+          title={title}
+          initialPreview={handedPreview?.actionId === id ? handedPreview.preview : null}
+          onAddProject={addProject}
+        />
+      );
     return (
       <SuggestionTaskPane
         key={id}
         suggestionId={id}
         title={title}
         requestedFile={requestedFile}
-        onStarted={(actionId) => select(`action:${actionId}`, { replace: true })}
+        onStarted={(actionId, preview) => {
+          select(`action:${actionId}`, { replace: true });
+          if (preview) setHandedPreview({ from: selection, actionId, preview });
+        }}
         onAddProject={addProject}
       />
     );

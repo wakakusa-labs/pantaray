@@ -1,4 +1,5 @@
 import type { ActionConversationView } from '../../../electron/src/actions/actionConversationModel';
+import type { TaskFileTarget } from '../../../electron/src/actions/actionFileAccess';
 import { pantarayFilePaths } from '../../../electron/src/actions/pantarayFileLinks';
 
 /**
@@ -23,6 +24,9 @@ export type TaskFile = Readonly<{
   /** The chip's short type label, such as `HTML`. */
   label: string;
 }>;
+
+/** A file open in the preview, with its owner: main checks the file against that owner. */
+export type TaskPreview = Readonly<{ target: TaskFileTarget; file: TaskFile }>;
 
 const KIND_BY_EXTENSION: Readonly<Record<string, TaskFileKind>> = {
   md: 'markdown',

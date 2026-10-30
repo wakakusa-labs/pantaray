@@ -9,14 +9,26 @@ from pantaray_agents.local_runtime.memory_catalog.errors import (
     MemoryReferenceInputError,
     MemoryReferenceNotFoundError,
 )
-from pantaray_agents.local_runtime.memory_catalog.models import (
-    MemoryContextEpoch,
-    MemoryContextItem,
-    ResolvedContextItem,
-)
+from pantaray_agents.local_runtime.memory_catalog.models import MemoryContextEpoch
 from pantaray_agents.local_runtime.memory_catalog.resolver import (
+    _ReferenceSource,
     follow_memory_reference,
 )
+
+_RESOLVER = "pantaray_agents.local_runtime.memory_catalog.resolver."
+
+
+def _install_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        _RESOLVER + "_visible_reference_source",
+        lambda **_kwargs: _ReferenceSource(
+            node_id="node-source", revision_id="revision-source"
+        ),
+    )
+
+
+def _raise_not_found(**_kwargs: object) -> NoReturn:
+    raise MemoryReferenceNotFoundError("ref mapping is missing")
 
 
 def test_broken_reference_enqueues_source_revision_repair(
@@ -25,26 +37,18 @@ def test_broken_reference_enqueues_source_revision_repair(
     connection = MagicMock()
     connection.in_transaction = False
     repairs: list[dict[str, object]] = []
-
-    def raise_not_found(**_kwargs: object) -> NoReturn:
-        raise MemoryReferenceNotFoundError("ref mapping is missing")
-
+    _install_source(monkeypatch)
+    monkeypatch.setattr(_RESOLVER + "_resolve_memory_reference", _raise_not_found)
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.memory_catalog.resolver."
-        "_resolve_memory_reference",
-        raise_not_found,
-    )
-    monkeypatch.setattr(
-        "pantaray_agents.local_runtime.memory_catalog.resolver.enqueue_memory_repair",
-        lambda **kwargs: repairs.append(kwargs),
+        _RESOLVER + "enqueue_memory_repair", lambda **kwargs: repairs.append(kwargs)
     )
 
     with pytest.raises(MemoryReferenceNotFoundError):
         follow_memory_reference(
             connection=connection,
             epoch=_epoch(),
-            source_handle="ctx-source",
             local_ref_id="ref_1",
+            pinned_revisions=None,
             enqueue_repair_on_failure=True,
         )
 
@@ -60,7 +64,7 @@ def test_broken_reference_enqueues_source_revision_repair(
     connection.commit.assert_called_once_with()
 
 
-def test_invalid_reference_input_does_not_enqueue_repair(
+def test_ref_outside_visible_memory_does_not_enqueue_repair(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     connection = MagicMock()
@@ -68,24 +72,17 @@ def test_invalid_reference_input_does_not_enqueue_repair(
     enqueue = MagicMock()
 
     def raise_invalid_input(**_kwargs: object) -> NoReturn:
-        raise MemoryReferenceInputError("visible source does not contain the ref")
+        raise MemoryReferenceInputError("ref_unknown is not a ref in current memory")
 
-    monkeypatch.setattr(
-        "pantaray_agents.local_runtime.memory_catalog.resolver."
-        "_resolve_memory_reference",
-        raise_invalid_input,
-    )
-    monkeypatch.setattr(
-        "pantaray_agents.local_runtime.memory_catalog.resolver.enqueue_memory_repair",
-        enqueue,
-    )
+    monkeypatch.setattr(_RESOLVER + "_visible_reference_source", raise_invalid_input)
+    monkeypatch.setattr(_RESOLVER + "enqueue_memory_repair", enqueue)
 
     with pytest.raises(MemoryReferenceInputError):
         follow_memory_reference(
             connection=connection,
             epoch=_epoch(),
-            source_handle="ctx-source",
             local_ref_id="ref_unknown",
+            pinned_revisions=None,
             enqueue_repair_on_failure=True,
         )
 
@@ -99,26 +96,16 @@ def test_read_only_resolution_does_not_enqueue_broken_reference_repair(
     connection = MagicMock()
     connection.in_transaction = False
     enqueue = MagicMock()
-
-    def raise_not_found(**_kwargs: object) -> NoReturn:
-        raise MemoryReferenceNotFoundError("ref mapping is missing")
-
-    monkeypatch.setattr(
-        "pantaray_agents.local_runtime.memory_catalog.resolver."
-        "_resolve_memory_reference",
-        raise_not_found,
-    )
-    monkeypatch.setattr(
-        "pantaray_agents.local_runtime.memory_catalog.resolver.enqueue_memory_repair",
-        enqueue,
-    )
+    _install_source(monkeypatch)
+    monkeypatch.setattr(_RESOLVER + "_resolve_memory_reference", _raise_not_found)
+    monkeypatch.setattr(_RESOLVER + "enqueue_memory_repair", enqueue)
 
     with pytest.raises(MemoryReferenceNotFoundError):
         follow_memory_reference(
             connection=connection,
             epoch=_epoch(),
-            source_handle="ctx-source",
             local_ref_id="ref_1",
+            pinned_revisions=None,
             enqueue_repair_on_failure=False,
         )
 
@@ -128,25 +115,5 @@ def test_read_only_resolution_does_not_enqueue_broken_reference_repair(
 
 def _epoch() -> MemoryContextEpoch:
     return MemoryContextEpoch(
-        epoch_id="epoch-1",
-        run_id="run-1",
-        user_id="user-1",
-        items=(
-            ResolvedContextItem(
-                item=MemoryContextItem(
-                    context_handle="ctx-source",
-                    source="fact",
-                    label="fact",
-                    source_path="facts/index.md",
-                    heading_path=None,
-                    content='Claim. [[ref:ref_1 note:"related"]]',
-                    observed_at="2026-08-07T00:00:00Z",
-                ),
-                user_id="user-1",
-                fragment_id="fragment-source",
-                revision_id="revision-source",
-                node_id="node-source",
-                reference_depth=0,
-            ),
-        ),
+        epoch_id="epoch-1", run_id="run-1", user_id="user-1", items=()
     )

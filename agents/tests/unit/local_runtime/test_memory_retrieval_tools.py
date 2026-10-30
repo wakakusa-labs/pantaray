@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -268,7 +269,7 @@ async def test_memory_search_enforces_result_limit_at_execution_boundary(
 
 
 @pytest.mark.asyncio
-async def test_retrieval_budget_is_shared_and_reference_results_cannot_chain(
+async def test_retrieval_budget_is_shared_with_references(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _install_empty_memory_search(monkeypatch)
@@ -294,18 +295,11 @@ async def test_retrieval_budget_is_shared_and_reference_results_cannot_chain(
         assert result.status == "success"
 
     followed = await tools.follow_reference(
-        _tool_call(
-            "get_memory_reference",
-            {"source_handle": "ctx_source", "local_ref_id": "ref_1"},
-        ),
+        _tool_call("get_memory_reference", {"local_ref_id": "ref_1"}),
         MEMORY_RETRIEVAL_CALL_LIMIT,
     )
-    target_handle = followed.output["reference"]["target_context_handle"]
     chained = await tools.follow_reference(
-        _tool_call(
-            "get_memory_reference",
-            {"source_handle": target_handle, "local_ref_id": "ref_2"},
-        ),
+        _tool_call("get_memory_reference", {"local_ref_id": "ref_2"}),
         MEMORY_RETRIEVAL_CALL_LIMIT + 1,
     )
 
@@ -313,46 +307,6 @@ async def test_retrieval_budget_is_shared_and_reference_results_cannot_chain(
     assert followed.output["calls_remaining"] == 0
     assert chained.status == "error"
     assert chained.output["error_code"] == "MEMORY_RETRIEVAL_LIMIT_REACHED"
-
-
-@pytest.mark.asyncio
-async def test_reference_result_cannot_be_used_for_second_hop(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    source = _resolved_item(handle="ctx_source", fragment_id="fragment-source")
-    session = _memory_session(items=(source,))
-    connection = MagicMock()
-    connection.execute.return_value.fetchone.return_value = {"node_id": "node-target"}
-    connection_context = MagicMock()
-    connection_context.__enter__.return_value = connection
-    monkeypatch.setattr(
-        "pantaray_agents.tools.memory.retrieval.open_memory_catalog_connection",
-        lambda **_kwargs: connection_context,
-    )
-    monkeypatch.setattr(
-        "pantaray_agents.tools.memory.retrieval.follow_memory_reference",
-        lambda **kwargs: _followed_reference(epoch=kwargs["epoch"]),
-    )
-    tools = _retrieval_tools(tmp_path, session)
-    first = await tools.follow_reference(
-        _tool_call(
-            "get_memory_reference",
-            {"source_handle": "ctx_source", "local_ref_id": "ref_1"},
-        ),
-        1,
-    )
-    target_handle = first.output["reference"]["target_context_handle"]
-
-    second = await tools.follow_reference(
-        _tool_call(
-            "get_memory_reference",
-            {"source_handle": target_handle, "local_ref_id": "ref_2"},
-        ),
-        2,
-    )
-
-    assert second.status == "error"
-    assert second.output["error_code"] == "MEMORY_REFERENCE_DEPTH_EXCEEDED"
 
 
 @pytest.mark.asyncio
@@ -383,10 +337,7 @@ async def test_memory_reference_commits_epoch_only_after_result_presentation(
 
     with pytest.raises(ValueError, match="target_source"):
         await tools.follow_reference(
-            _tool_call(
-                "get_memory_reference",
-                {"source_handle": "ctx_source", "local_ref_id": "ref_1"},
-            ),
+            _tool_call("get_memory_reference", {"local_ref_id": "ref_1"}),
             1,
         )
 
@@ -394,44 +345,45 @@ async def test_memory_reference_commits_epoch_only_after_result_presentation(
 
 
 @pytest.mark.asyncio
-async def test_directly_visible_reference_target_keeps_root_provenance(
+async def test_reference_without_prior_search_resolves_in_the_pinned_memory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    source = _resolved_item(handle="ctx_source", fragment_id="fragment-source")
-    target = _resolved_item(handle="ctx_target", fragment_id="fragment-target")
-    session = _memory_session(items=(source, target))
-    connection = MagicMock()
-    connection.execute.return_value.fetchone.return_value = {"node_id": "node-target"}
-    connection_context = MagicMock()
-    connection_context.__enter__.return_value = connection
+    pinned: dict[MemorySource, str | None] = {"fact": "revision-1"}
+    context = MemoryContextSession(user_id="user-1", run_id="run-1")
+    scopes: list[object] = []
+
+    def follow(**kwargs) -> tuple[MemoryContextEpoch, ResolvedMemoryLink]:
+        scopes.append(kwargs["pinned_revisions"])
+        return _followed_reference(epoch=kwargs["epoch"])
+
     monkeypatch.setattr(
         "pantaray_agents.tools.memory.retrieval.open_memory_catalog_connection",
-        lambda **_kwargs: connection_context,
+        lambda **_kwargs: MagicMock(),
     )
     monkeypatch.setattr(
-        "pantaray_agents.tools.memory.retrieval.follow_memory_reference",
-        lambda **kwargs: _followed_reference(epoch=kwargs["epoch"]),
+        "pantaray_agents.tools.memory.retrieval.follow_memory_reference", follow
     )
-    tools = _retrieval_tools(tmp_path, session)
-
-    first = await tools.follow_reference(
-        _tool_call(
-            "get_memory_reference",
-            {"source_handle": "ctx_source", "local_ref_id": "ref_1"},
+    tools = MemoryRetrievalSession(
+        db_path=tmp_path / "runtime.sqlite3",
+        busy_timeout_ms=1_000,
+        context=context,
+        policy=replace(
+            _retrieval_tools(tmp_path, _memory_session()).policy,
+            pinned_revisions=pinned,
         ),
-        1,
-    )
-    second = await tools.follow_reference(
-        _tool_call(
-            "get_memory_reference",
-            {"source_handle": "ctx_target", "local_ref_id": "ref_2"},
-        ),
-        2,
     )
 
-    assert first.status == "success"
-    assert second.status == "success"
-    assert session.memory_context.require_epoch().items[1].reference_depth == 0
+    result = await tools.follow_reference(
+        _tool_call("get_memory_reference", {"local_ref_id": "ref_1"}), 1
+    )
+
+    assert result.status == "success"
+    # The ref is looked up where this run's memory_search looks.
+    assert scopes == [pinned]
+    assert (
+        context.require_epoch().items[0].item.context_handle
+        == (result.output["reference"]["target_context_handle"])
+    )
 
 
 def _resolved_item(

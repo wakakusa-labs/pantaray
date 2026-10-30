@@ -692,7 +692,8 @@ async def test_suggestion_memory_search_keeps_prior_handles_available(
     def follow_reference(**kwargs):
         epoch = kwargs["epoch"]
         assert [item.fragment_id for item in epoch.items] == ["first", "second"]
-        assert kwargs["source_handle"] == first_rows[0]["context_handle"]
+        # The ref is looked up in the memory the run's searches stay on.
+        assert kwargs["pinned_revisions"] == snapshot.memory_revisions
         return epoch, {
             "local_ref_id": "ref-1",
             "reference_note": "supports",
@@ -715,10 +716,11 @@ async def test_suggestion_memory_search_keeps_prior_handles_available(
         "pantaray_agents.tools.memory.retrieval.follow_memory_reference",
         follow_reference,
     )
+    snapshot = _snapshot(db_path=db_path)
     definitions = await LocalSuggestionResearchTools(
         db_path=db_path,
         busy_timeout_ms=BUSY_TIMEOUT_MS,
-        snapshot=_snapshot(db_path=db_path),
+        snapshot=snapshot,
         activity_start=None,
     ).build_tool_definitions(user_id="user-1", run_id="suggestion-1")
     registry = ReactToolRegistry(definitions)
@@ -741,10 +743,7 @@ async def test_suggestion_memory_search_keeps_prior_handles_available(
     reference = await registry.execute(
         _tool_call(
             "get_memory_reference",
-            {
-                "source_handle": first_rows[0]["context_handle"],
-                "local_ref_id": "ref-1",
-            },
+            {"local_ref_id": "ref-1"},
         ),
         3,
     )

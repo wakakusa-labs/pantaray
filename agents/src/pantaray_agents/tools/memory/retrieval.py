@@ -9,11 +9,10 @@ from pantaray_agents.local_runtime.memory_catalog.connection import (
     open_memory_catalog_connection,
 )
 from pantaray_agents.local_runtime.memory_catalog.epoch import (
-    require_reference_source,
+    build_memory_context_epoch,
 )
 from pantaray_agents.local_runtime.memory_catalog.errors import (
     MemoryContextExpiredError,
-    MemoryReferenceDepthError,
     MemoryReferenceInputError,
     MemoryReferenceNotFoundError,
 )
@@ -60,7 +59,7 @@ from .search_contract import (
 
 MEMORY_SEARCH_TOOL_NAME = "memory_search"
 GET_MEMORY_REFERENCE_TOOL_NAME = "get_memory_reference"
-# A search sets the run's context epoch, which a reference reads.
+# A search and a reference both extend the run's context epoch.
 _CONTEXT_EPOCH = ToolConcurrency("parallel", shared_state="memory_context_epoch")
 
 
@@ -84,6 +83,13 @@ class MemoryContextSession:
                 "Run memory_search before using a memory context handle."
             )
         return self.epoch
+
+    def epoch_or_empty(self) -> MemoryContextEpoch:
+        if self.epoch is not None:
+            return self.epoch
+        return build_memory_context_epoch(
+            run_id=self.run_id, user_id=self.user_id, visible=()
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,16 +175,21 @@ class MemoryRetrievalSession:
             ReactToolDefinition(
                 name=GET_MEMORY_REFERENCE_TOOL_NAME,
                 description=(
-                    "Follow one explicit [[ref:...]] from visible memory context. "
-                    "Reference traversal is limited to one hop."
+                    "Follow one [[ref:...]] tag seen in memory (a memory_search "
+                    "result, a memory file you read, the memory indexes, or an "
+                    "earlier reference) by its ID: returns the relationship note "
+                    "and the fragment it points to."
                 ),
                 request_schema={
                     "type": "object",
                     "additionalProperties": False,
-                    "required": ["source_handle", "local_ref_id"],
+                    "required": ["local_ref_id"],
                     "properties": {
-                        "source_handle": {"type": "string", "minLength": 1},
-                        "local_ref_id": {"type": "string", "minLength": 1},
+                        "local_ref_id": {
+                            "type": "string",
+                            "minLength": 1,
+                            "description": "The ID after ref: in the tag.",
+                        },
                     },
                 },
                 response_schema=react_tool_response_schema(
@@ -244,34 +255,21 @@ class MemoryRetrievalSession:
             return self._budget_error(call.tool_name)
         args = _arguments(call)
         try:
-            epoch = self.context.require_epoch()
-            source_handle = _required_string(args, "source_handle")
-            require_reference_source(epoch=epoch, context_handle=source_handle)
             with open_memory_catalog_connection(
                 db_path=self.db_path,
                 busy_timeout_ms=self.busy_timeout_ms,
             ) as connection:
                 epoch, resolved = follow_memory_reference(
                     connection=connection,
-                    epoch=epoch,
-                    source_handle=source_handle,
+                    epoch=self.context.epoch_or_empty(),
                     local_ref_id=_required_string(args, "local_ref_id"),
+                    pinned_revisions=self.policy.pinned_revisions,
                     enqueue_repair_on_failure=(
                         self.policy.enqueue_repair_on_reference_failure
                     ),
                 )
             reference = self._present_reference(cast(dict[str, JSONValue], resolved))
-        except MemoryReferenceDepthError as exc:
-            return tool_error_response(
-                tool_name=call.tool_name,
-                error_code="MEMORY_REFERENCE_DEPTH_EXCEEDED",
-                message=str(exc),
-            )
-        except (
-            MemoryContextExpiredError,
-            MemoryReferenceInputError,
-            MemoryReferenceNotFoundError,
-        ) as exc:
+        except (MemoryReferenceInputError, MemoryReferenceNotFoundError) as exc:
             return tool_error_response(
                 tool_name=call.tool_name,
                 error_code=type(exc).__name__,

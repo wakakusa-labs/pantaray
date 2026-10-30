@@ -99,7 +99,7 @@ def _args(tool_id: str, **args: JSONValue) -> str:
             "get_memory_reference",
             _args("get_memory_reference", local_ref_id="ref-1"),
             "ref-1",
-            id="memory-reference-falls-back-to-the-local-ref",
+            id="memory-reference-names-its-local-ref",
         ),
         pytest.param(
             "history_fetch", _args("history_fetch", refs=["h1", "h2"]), "h1, h2"

@@ -112,7 +112,7 @@ _TOOL_SUBJECTS: dict[str, _ArgsSubject] = {
     "web_crawl": _text("url"),
     "memory_search": lambda args: _joined("keywords")(args) or _text("query")(args),
     "memory_sql": _text("sql"),
-    "get_memory_reference": _text("source_handle", "local_ref_id"),
+    "get_memory_reference": _text("local_ref_id"),
     "link_memory": _text("target_handle"),
     "unlink_memory": _text("local_ref_id"),
     "remember": _text("note"),

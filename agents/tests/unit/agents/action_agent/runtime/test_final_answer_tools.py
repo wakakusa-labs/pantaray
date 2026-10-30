@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import NoReturn
@@ -59,7 +58,6 @@ from pantaray_agents.local_runtime.memory_catalog.epoch import (
     build_memory_context_epoch,
 )
 from pantaray_agents.local_runtime.memory_catalog.errors import (
-    MemoryReferenceDepthError,
     MemoryReferenceInputError,
 )
 from pantaray_agents.local_runtime.memory_catalog.models import (
@@ -141,70 +139,11 @@ async def test_unknown_local_ref_error_does_not_change_action_context(
         await run_get_memory_reference_tool(
             step_id="step-ref",
             tool_def=GET_MEMORY_REFERENCE_TOOL,
-            args={
-                "source_handle": epoch.items[0].item.context_handle,
-                "local_ref_id": "ref_missing",
-            },
+            args={"local_ref_id": "ref_missing"},
             state=state,
         )
 
     assert state["memory_context_epoch"] == serialize_memory_epoch(epoch)
-
-
-@pytest.mark.asyncio
-async def test_action_reference_tool_rejects_second_hop_before_database_access(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    state = create_state()
-    source_node = MemoryNode(
-        user_id=state["user_id"],
-        node_id="memory-source-1",
-        source="fact",
-        source_record_id="fact-1",
-        lifecycle="active",
-        integrity="healthy",
-        current_revision_id="revision-1",
-    )
-    source_fragment = MemoryFragment(
-        user_id=state["user_id"],
-        fragment_id="fragment-1",
-        revision_id="revision-1",
-        source_path="facts.md",
-        block_kind="paragraph",
-        block_index=1,
-        heading_path=None,
-        content_text="Reference-derived context.",
-        content_sha256="sha256",
-    )
-    root_epoch = build_memory_context_epoch(
-        run_id="run-1",
-        user_id=state["user_id"],
-        visible=((source_node, source_fragment, "followed reference"),),
-    )
-    reference_epoch = replace(
-        root_epoch,
-        items=(replace(root_epoch.items[0], reference_depth=1),),
-    )
-    state["memory_context_epoch"] = serialize_memory_epoch(reference_epoch)
-    read_config = MagicMock()
-    monkeypatch.setattr(
-        "pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime."
-        "memory_links.read_local_runtime_db_config",
-        read_config,
-    )
-
-    with pytest.raises(MemoryReferenceDepthError):
-        await run_get_memory_reference_tool(
-            step_id="step-ref",
-            tool_def=GET_MEMORY_REFERENCE_TOOL,
-            args={
-                "source_handle": reference_epoch.items[0].item.context_handle,
-                "local_ref_id": "ref_2",
-            },
-            state=state,
-        )
-
-    read_config.assert_not_called()
 
 
 @pytest.mark.asyncio

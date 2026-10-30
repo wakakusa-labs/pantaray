@@ -35,7 +35,7 @@ from pantaray_agents.local_runtime.memory_catalog.epoch import (
 )
 from pantaray_agents.local_runtime.memory_catalog.errors import (
     MemoryCatalogIntegrityError,
-    MemoryReferenceNotFoundError,
+    MemoryReferenceInputError,
 )
 from pantaray_agents.local_runtime.memory_catalog.fragments import (
     locate_memory_references,
@@ -335,8 +335,8 @@ def test_references_follow_current_files_and_drop_invalid_mappings(
         _, resolved = follow_memory_reference(
             connection=connection,
             epoch=epoch,
-            source_handle=epoch.items[0].item.context_handle,
             local_ref_id="r1",
+            pinned_revisions=None,
             enqueue_repair_on_failure=False,
         )
         assert resolved["target_content"] == (
@@ -356,12 +356,12 @@ def test_references_follow_current_files_and_drop_invalid_mappings(
         assert (
             connection.execute("SELECT count(*) FROM memory_links").fetchone()[0] == 0
         )
-        with pytest.raises(MemoryReferenceNotFoundError):
+        with pytest.raises(MemoryReferenceInputError):
             follow_memory_reference(
                 connection=connection,
                 epoch=epoch,
-                source_handle=epoch.items[0].item.context_handle,
                 local_ref_id="r1",
+                pinned_revisions=None,
                 enqueue_repair_on_failure=False,
             )
         assert (

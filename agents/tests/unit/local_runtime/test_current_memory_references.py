@@ -1,14 +1,22 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pytest
+from tests.unit.agents.action_agent.fixtures import create_state
 
+from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime import (
+    memory_links,
+)
+from pantaray_agents.agents.action_agent.tools import GET_MEMORY_REFERENCE_TOOL
 from pantaray_agents.local_runtime.memory_catalog import current_file_references as refs
+from pantaray_agents.local_runtime.memory_catalog.checkpoint import (
+    deserialize_memory_epoch,
+)
 from pantaray_agents.local_runtime.memory_catalog.connection import (
     open_memory_catalog_connection,
 )
@@ -33,6 +41,7 @@ from pantaray_agents.local_runtime.memory_catalog.errors import (
     MemoryCatalogIntegrityError,
     MemoryContextExpiredError,
     MemoryLinkValidationError,
+    MemoryReferenceInputError,
 )
 from pantaray_agents.local_runtime.memory_catalog.memory_run_binding import (
     MemoryRunBinding,
@@ -42,6 +51,8 @@ from pantaray_agents.local_runtime.memory_catalog.models import (
     MemoryBlockKind,
     MemoryContextEpoch,
     MemoryDocument,
+    MemorySource,
+    ResolvedMemoryLink,
 )
 from pantaray_agents.local_runtime.memory_catalog.repository import (
     list_revision_fragments,
@@ -205,34 +216,28 @@ def _refresh(state: State) -> None:
         refresh_current_memory_index(connection=state.connection, files=state.files)
 
 
+def _follow(
+    state: State,
+    local_ref_id: str,
+    pinned_revisions: Mapping[MemorySource, str | None] | None = None,
+) -> ResolvedMemoryLink:
+    # A ref read from a memory file or an index comes with no context handle.
+    _, result = follow_memory_reference(
+        connection=state.connection,
+        epoch=build_memory_context_epoch(
+            run_id="next-run", user_id="user-1", visible=()
+        ),
+        local_ref_id=local_ref_id,
+        pinned_revisions=pinned_revisions,
+        enqueue_repair_on_failure=False,
+    )
+    return result
+
+
 def _assert_resolves(
     state: State, local_ref_id: str, expected_content: str = "Observed evidence"
 ) -> None:
-    link = _links(state)[0]
-    fragment = next(
-        item
-        for item in list_revision_fragments(
-            connection=state.connection,
-            user_id="user-1",
-            revision_id=link["source_revision_id"],
-        )
-        if item.fragment_id == link["source_fragment_id"]
-    )
-    node_id = state.connection.execute(
-        "SELECT node_id FROM memory_revisions WHERE revision_id = ?",
-        (link["source_revision_id"],),
-    ).fetchone()[0]
-    node = require_node(connection=state.connection, user_id="user-1", node_id=node_id)
-    epoch = build_memory_context_epoch(
-        run_id="next-run", user_id="user-1", visible=((node, fragment, "Fact"),)
-    )
-    _, result = follow_memory_reference(
-        connection=state.connection,
-        epoch=epoch,
-        source_handle=epoch.items[0].item.context_handle,
-        local_ref_id=local_ref_id,
-        enqueue_repair_on_failure=False,
-    )
+    result = _follow(state, local_ref_id)
     assert result["target_content"] == expected_content
     assert result["reference_note"] == 'Observed "evidence"'
 
@@ -545,7 +550,7 @@ def test_changed_document_handle_requires_reobservation_before_new_link(
     _assert_resolves(state, ref_id, "- Updated experience\n")
 
 
-def test_unlink_rejects_revision_local_id_duplicated_across_current_categories(
+def test_ref_id_duplicated_across_current_categories_is_ambiguous(
     state: State,
 ) -> None:
     ref_id = _link(state)
@@ -571,6 +576,50 @@ def test_unlink_rejects_revision_local_id_duplicated_across_current_categories(
         )
     assert state.files.documents() == before
     assert len(_links(state)) == 2
+    with pytest.raises(MemoryReferenceInputError, match="ambiguous"):
+        _follow(state, ref_id)
+
+
+def test_ref_resolves_only_in_the_revisions_the_run_sees(state: State) -> None:
+    ref_id = _link(state)
+    revision_id = _links(state)[0]["source_revision_id"]
+
+    pinned = _follow(state, ref_id, {"fact": revision_id})
+    assert pinned["target_content"] == "Observed evidence"
+    # A run pinned before facts had a head does not see the ref.
+    with pytest.raises(MemoryReferenceInputError, match="not a ref in current memory"):
+        _follow(state, ref_id, {"fact": None})
+    with pytest.raises(MemoryReferenceInputError, match="not a ref in current memory"):
+        _follow(state, "ref_" + "0" * 24)
+
+
+@pytest.mark.asyncio
+async def test_action_follows_a_ref_it_read_without_memory_search(
+    state: State, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ref_id = _link(state)
+    action_state = create_state()
+    action_state["user_id"] = "user-1"
+    monkeypatch.setattr(
+        memory_links,
+        "read_local_runtime_db_config",
+        lambda: (tmp_path / "runtime.db", 1000),
+    )
+
+    result = await memory_links.run_get_memory_reference_tool(
+        step_id="step-ref",
+        tool_def=GET_MEMORY_REFERENCE_TOOL,
+        args={"local_ref_id": ref_id},
+        state=action_state,
+    )
+
+    assert isinstance(result.output, dict)
+    assert result.output["target_content"] == "Observed evidence"
+    epoch = deserialize_memory_epoch(action_state["memory_context_epoch"])
+    # link_memory can target the resolved fragment by the returned handle.
+    assert [item.item.context_handle for item in epoch.items] == [
+        result.output["target_context_handle"]
+    ]
 
 
 def test_self_reference_tracks_the_current_file_after_its_target_block_changes(

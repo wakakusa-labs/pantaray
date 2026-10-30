@@ -258,8 +258,8 @@ def test_link_publication_resolves_exact_observed_fragment(tmp_path: Path) -> No
         _, resolved = follow_memory_reference(
             connection=connection,
             epoch=source_epoch,
-            source_handle=source_epoch.items[0].item.context_handle,
             local_ref_id=command.local_ref_id,
+            pinned_revisions=None,
             enqueue_repair_on_failure=True,
         )
 

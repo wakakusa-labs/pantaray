@@ -285,8 +285,8 @@ def test_edited_artifact_reloads_only_surviving_refs_on_the_new_source_text(
         _, resolved = follow_memory_reference(
             connection=connection,
             epoch=reader_epoch,
-            source_handle=reader_epoch.items[0].item.context_handle,
             local_ref_id=surviving.local_ref_id,
+            pinned_revisions=None,
             enqueue_repair_on_failure=True,
         )
         assert resolved["target_fragment_id"] == target.fragment_id

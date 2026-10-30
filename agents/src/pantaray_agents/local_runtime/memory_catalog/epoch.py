@@ -6,7 +6,7 @@ from dataclasses import replace
 
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 
-from .errors import MemoryContextExpiredError, MemoryReferenceDepthError
+from .errors import MemoryContextExpiredError
 from .models import (
     MemoryContextEpoch,
     MemoryContextItem,
@@ -16,8 +16,6 @@ from .models import (
     MemorySource,
     ResolvedContextItem,
 )
-
-MAX_MEMORY_REFERENCE_DEPTH = 1
 
 
 def build_memory_context_epoch(
@@ -76,21 +74,6 @@ def resolve_context_handle(
     if len(matches) != 1:
         raise MemoryContextExpiredError("context handle is absent or expired")
     return matches[0]
-
-
-def require_reference_source(
-    *, epoch: MemoryContextEpoch, context_handle: str
-) -> ResolvedContextItem:
-    source = resolve_context_handle(
-        epoch=epoch,
-        user_id=epoch.user_id,
-        context_handle=context_handle,
-    )
-    if source.reference_depth >= MAX_MEMORY_REFERENCE_DEPTH:
-        raise MemoryReferenceDepthError(
-            "references returned by get_memory_reference cannot be traversed again"
-        )
-    return source
 
 
 def append_memory_context_item(

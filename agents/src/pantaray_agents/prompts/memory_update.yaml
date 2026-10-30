@@ -278,7 +278,7 @@ system_instruction: |
     evidence.
   - Use `memory_search` only for a concrete question the evidence raises or for
     the big picture of an endeavor this run touches, and `get_memory_reference`
-    only to follow an explicit visible ref, never beyond one hop.
+    only to follow an explicit ref you have seen.
   - Workspace structure supplies organization, project, and registered root
     names. Workspace file contents become evidence only after you read them.
   - Stop retrieving once the touched knowledge can be updated, preserved as

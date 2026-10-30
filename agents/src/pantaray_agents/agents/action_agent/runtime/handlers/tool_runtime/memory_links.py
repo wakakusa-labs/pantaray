@@ -20,7 +20,7 @@ from pantaray_agents.local_runtime.memory_catalog.draft import (
     unlink_memory,
 )
 from pantaray_agents.local_runtime.memory_catalog.epoch import (
-    require_reference_source,
+    build_memory_context_epoch,
 )
 from pantaray_agents.local_runtime.memory_catalog.resolver import (
     follow_memory_reference,
@@ -127,14 +127,14 @@ async def run_get_memory_reference_tool(
 ) -> UnprojectedToolExecutionResult:
     validate_tool_args(tool_def, args)
     epoch_model = state.get("memory_context_epoch")
-    if epoch_model is None:
-        raise ToolValidationError(
-            "get_memory_reference requires a context_handle from memory_search."
+    # A ref read from a file or the memory indexes needs no prior memory_search;
+    # the epoch then starts here, under the run ID memory_search would give it.
+    epoch = (
+        deserialize_memory_epoch(epoch_model)
+        if epoch_model is not None
+        else build_memory_context_epoch(
+            run_id=step_id, user_id=state["user_id"], visible=()
         )
-    epoch = deserialize_memory_epoch(epoch_model)
-    source_item = require_reference_source(
-        epoch=epoch,
-        context_handle=_required_string(args, "source_handle"),
     )
     db_path, busy_timeout_ms = read_local_runtime_db_config()
     with sqlite3.connect(db_path) as connection:
@@ -143,8 +143,8 @@ async def run_get_memory_reference_tool(
         extended_epoch, resolved = follow_memory_reference(
             connection=connection,
             epoch=epoch,
-            source_handle=source_item.item.context_handle,
             local_ref_id=_required_string(args, "local_ref_id"),
+            pinned_revisions=None,
             enqueue_repair_on_failure=True,
         )
     state["memory_context_epoch"] = serialize_memory_epoch(extended_epoch)

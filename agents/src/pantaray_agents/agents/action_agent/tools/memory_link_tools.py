@@ -19,6 +19,8 @@ def _tool(
     tool_id: str,
     name: str,
     description: str,
+    when: str,
+    pitfalls: str,
     fields: tuple[FieldSpec, ...],
     intent_class: ToolIntentClass,
     concurrency: ToolConcurrency,
@@ -30,15 +32,7 @@ def _tool(
             tool_id=tool_id,
             name=name,
             description=description,
-            guide=ToolGuideSpec(
-                what=description,
-                when="Use only when the relevant persisted memory is visible in this turn.",
-                pitfalls=(
-                    "Never write [[ref:...]] syntax yourself. Context handles come from "
-                    "memory_search and get_memory_reference results and must not be "
-                    "invented."
-                ),
-            ),
+            guide=ToolGuideSpec(what=description, when=when, pitfalls=pitfalls),
             concurrency=concurrency,
             execution_policy=tool_execution_policy(
                 intent_class=intent_class,
@@ -55,6 +49,12 @@ def _tool(
     )
 
 
+_LINK_WHEN = "Use only when the relevant persisted memory is visible in this turn."
+_LINK_PITFALLS = (
+    "Never write [[ref:...]] syntax yourself. Context handles come from "
+    "memory_search and get_memory_reference results and must not be invented."
+)
+
 LINK_MEMORY_TOOL = _tool(
     tool_id="link_memory",
     name="Link Memory",
@@ -62,6 +62,8 @@ LINK_MEMORY_TOOL = _tool(
         "Attach a note-bearing semantic ref to one exact block in the Supervisor "
         "final-answer draft, targeting a memory fragment visible in this turn."
     ),
+    when=_LINK_WHEN,
+    pitfalls=_LINK_PITFALLS,
     intent_class="surgical_edit",
     concurrency=ToolConcurrency("sequential"),
     fields=(
@@ -114,6 +116,8 @@ UNLINK_MEMORY_TOOL = _tool(
     tool_id="unlink_memory",
     name="Unlink Memory",
     description="Remove one complete semantic ref from the Supervisor final-answer draft.",
+    when=_LINK_WHEN,
+    pitfalls=_LINK_PITFALLS,
     intent_class="surgical_edit",
     concurrency=ToolConcurrency("sequential"),
     fields=(
@@ -141,25 +145,22 @@ GET_MEMORY_REFERENCE_TOOL = _tool(
     tool_id="get_memory_reference",
     name="Get Memory Reference",
     description=(
-        "Resolve one ref from an exact source memory fragment visible in this turn. "
-        "The relationship note is returned before the immutable target fragment."
+        "Resolve one [[ref:...]] tag seen in memory, such as in a memory file you "
+        "read, the memory indexes or a memory_search result, by its ID. The "
+        "relationship note is returned before the immutable target fragment."
     ),
+    when="Use when a ref in memory points to something the task needs.",
+    pitfalls="Pass the ID exactly as the tag shows it.",
     intent_class="read_only",
     # Reads memory_context_epoch and writes the extended epoch back; two at
     # once would lose one extension and leave later handles unresolvable.
     concurrency=ToolConcurrency("parallel", shared_state="memory_context_epoch"),
     fields=(
         field_spec(
-            name="source_handle",
-            schema={"type": "string", "minLength": 1},
-            required=True,
-            description="context_handle of the source fragment containing the ref.",
-        ),
-        field_spec(
             name="local_ref_id",
             schema={"type": "string", "pattern": "^ref_"},
             required=True,
-            description="Local ref ID shown in that source fragment.",
+            description="The ID after ref: in the tag.",
         ),
     ),
     output_properties={

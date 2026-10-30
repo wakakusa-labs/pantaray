@@ -35,15 +35,11 @@ class MemoryContextExpiredError(MemoryLinkValidationError):
 
 
 class MemoryReferenceInputError(MemoryLinkValidationError):
-    """The requested local ref is not present in the visible source fragment."""
-
-
-class MemoryReferenceDepthError(MemoryLinkValidationError):
-    """The requested source was reached through the maximum reference depth."""
+    """The requested local ref is not in the memory visible to the run."""
 
 
 class MemoryReferenceNotFoundError(MemoryCatalogError):
-    """A visible source ref does not have an intact immutable target."""
+    """A visible ref does not have an intact immutable target."""
 
 
 class MemoryCutoverError(MemoryCatalogError):

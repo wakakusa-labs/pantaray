@@ -42,6 +42,7 @@ from pantaray_agents.local_runtime.memory_catalog.errors import (
     MemoryContextExpiredError,
     MemoryLinkValidationError,
     MemoryReferenceInputError,
+    MemoryReferenceNotFoundError,
 )
 from pantaray_agents.local_runtime.memory_catalog.memory_run_binding import (
     MemoryRunBinding,
@@ -220,6 +221,8 @@ def _follow(
     state: State,
     local_ref_id: str,
     pinned_revisions: Mapping[MemorySource, str | None] | None = None,
+    *,
+    enqueue_repair: bool = False,
 ) -> ResolvedMemoryLink:
     # A ref read from a memory file or an index comes with no context handle.
     _, result = follow_memory_reference(
@@ -229,7 +232,7 @@ def _follow(
         ),
         local_ref_id=local_ref_id,
         pinned_revisions=pinned_revisions,
-        enqueue_repair_on_failure=False,
+        enqueue_repair_on_failure=enqueue_repair,
     )
     return result
 
@@ -587,10 +590,33 @@ def test_ref_resolves_only_in_the_revisions_the_run_sees(state: State) -> None:
     pinned = _follow(state, ref_id, {"fact": revision_id})
     assert pinned["target_content"] == "Observed evidence"
     # A run pinned before facts had a head does not see the ref.
-    with pytest.raises(MemoryReferenceInputError, match="not a ref in current memory"):
+    with pytest.raises(MemoryReferenceInputError, match="is not in memory now"):
         _follow(state, ref_id, {"fact": None})
-    with pytest.raises(MemoryReferenceInputError, match="not a ref in current memory"):
+    with pytest.raises(MemoryReferenceInputError, match="is not in memory now"):
         _follow(state, "ref_" + "0" * 24)
+
+
+def test_tag_that_lost_its_mapping_queues_repair_of_its_file(state: State) -> None:
+    ref_id = _link(state)
+    revision_id = _links(state)[0]["source_revision_id"]
+    # Deleting the target file drops the mapping but leaves this tag in place.
+    with immediate_transaction(state.connection):
+        state.connection.execute(
+            "DELETE FROM memory_links WHERE local_ref_id = ?", (ref_id,)
+        )
+
+    with pytest.raises(MemoryReferenceNotFoundError, match="no longer points"):
+        _follow(state, ref_id, enqueue_repair=True)
+
+    assert [
+        tuple(row)
+        for row in state.connection.execute(
+            """SELECT revisions.revision_id, queue.reason
+            FROM memory_repair_queue AS queue JOIN memory_revisions AS revisions
+              ON revisions.node_id = queue.node_id
+             AND revisions.revision_id = queue.detected_revision_id"""
+        )
+    ] == [(revision_id, "reference_resolution")]
 
 
 @pytest.mark.asyncio

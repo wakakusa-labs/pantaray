@@ -150,10 +150,7 @@ GET_MEMORY_REFERENCE_TOOL = _tool(
         "relationship note is returned before the immutable target fragment."
     ),
     when="Use when a ref in memory points to something the task needs.",
-    pitfalls=(
-        "Pass the ID exactly as the tag shows it; an ID that is not in current "
-        "memory returns an error."
-    ),
+    pitfalls="Pass the ID exactly as the tag shows it.",
     intent_class="read_only",
     # Reads memory_context_epoch and writes the extended epoch back; two at
     # once would lose one extension and leave later handles unresolvable.

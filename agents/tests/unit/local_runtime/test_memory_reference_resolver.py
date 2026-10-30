@@ -20,9 +20,9 @@ _RESOLVER = "pantaray_agents.local_runtime.memory_catalog.resolver."
 
 def _install_source(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        _RESOLVER + "_visible_reference_source",
-        lambda **_kwargs: _ReferenceSource(
-            node_id="node-source", revision_id="revision-source"
+        _RESOLVER + "_visible_reference_sources",
+        lambda **_kwargs: (
+            _ReferenceSource(node_id="node-source", revision_id="revision-source"),
         ),
     )
 
@@ -71,10 +71,8 @@ def test_ref_outside_visible_memory_does_not_enqueue_repair(
     connection.in_transaction = False
     enqueue = MagicMock()
 
-    def raise_invalid_input(**_kwargs: object) -> NoReturn:
-        raise MemoryReferenceInputError("ref_unknown is not a ref in current memory")
-
-    monkeypatch.setattr(_RESOLVER + "_visible_reference_source", raise_invalid_input)
+    monkeypatch.setattr(_RESOLVER + "_visible_reference_sources", lambda **_: ())
+    monkeypatch.setattr(_RESOLVER + "_visible_tag_owners", lambda **_: ())
     monkeypatch.setattr(_RESOLVER + "enqueue_memory_repair", enqueue)
 
     with pytest.raises(MemoryReferenceInputError):

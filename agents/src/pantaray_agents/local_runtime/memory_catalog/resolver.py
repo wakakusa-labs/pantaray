@@ -3,8 +3,11 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import get_args
+from typing import NoReturn, get_args
 
+from pantaray_agents.local_runtime.memory_references.reference_parser import (
+    extract_markdown_references,
+)
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.storage.transactions import (
     immediate_transaction,
@@ -13,7 +16,10 @@ from pantaray_agents.local_runtime.storage.transactions import (
 
 from .epoch import append_memory_context_item
 from .errors import MemoryReferenceInputError, MemoryReferenceNotFoundError
-from .fragment_visibility import revision_visibility_predicate
+from .fragment_visibility import (
+    VISIBLE_FRAGMENTS_FROM_NODES,
+    revision_visibility_predicate,
+)
 from .models import MemoryContextEpoch, MemorySource, ResolvedMemoryLink
 from .observability import emit_memory_catalog_event
 
@@ -38,38 +44,71 @@ def follow_memory_reference(
 
     The ref is looked up in the revisions memory_search shows the same run: the
     current ones, or the pinned one for each source in ``pinned_revisions``.
-    A broken target is optionally queued for repair of the ref's source node.
+    A broken ref is optionally queued for repair of the node that carries it.
     """
 
-    try:
-        source = _visible_reference_source(
+    user_id = epoch.user_id
+    sources = _visible_reference_sources(
+        connection=connection,
+        user_id=user_id,
+        local_ref_id=local_ref_id,
+        pinned_revisions=pinned_revisions,
+    )
+    # Writers give each new ref a fresh random ID and keep it within its node,
+    # so only a hand-copied mapping can put one ID in two visible revisions;
+    # neither target is then the right one, as unlink_memory also decides.
+    if len(sources) > 1:
+        _fail(
             connection=connection,
-            user_id=epoch.user_id,
+            epoch=epoch,
+            error=MemoryReferenceInputError(
+                f"{local_ref_id} is ambiguous: several memory files carry it"
+            ),
+            repair=(),
+        )
+    if not sources:
+        # A tag outlives its mapping when, for example, its target file is
+        # deleted; that tag is broken memory, not a mistyped ID.
+        owners = _visible_tag_owners(
+            connection=connection,
+            user_id=user_id,
             local_ref_id=local_ref_id,
             pinned_revisions=pinned_revisions,
         )
-    except MemoryReferenceInputError as exc:
-        _emit_resolution_failure(epoch=epoch, error=exc)
-        raise
+        if not owners:
+            _fail(
+                connection=connection,
+                epoch=epoch,
+                error=MemoryReferenceInputError(
+                    f"{local_ref_id} is not in memory now; a memory update may "
+                    "have removed it since you saw it, so read the file or index "
+                    "again and use the refs it carries now"
+                ),
+                repair=(),
+            )
+        _fail(
+            connection=connection,
+            epoch=epoch,
+            error=MemoryReferenceNotFoundError(
+                f"{local_ref_id} no longer points to anything in memory; skip it"
+            ),
+            repair=owners if enqueue_repair_on_failure else (),
+        )
+    source = sources[0]
     try:
         resolved, target_node_id = _resolve_memory_reference(
             connection=connection,
-            user_id=epoch.user_id,
+            user_id=user_id,
             source=source,
             local_ref_id=local_ref_id,
         )
     except MemoryReferenceNotFoundError as exc:
-        _emit_resolution_failure(epoch=epoch, error=exc)
-        if enqueue_repair_on_failure:
-            with immediate_transaction(connection):
-                enqueue_memory_repair(
-                    connection=connection,
-                    user_id=epoch.user_id,
-                    node_id=source.node_id,
-                    detected_revision_id=source.revision_id,
-                    reason="reference_resolution",
-                )
-        raise
+        _fail(
+            connection=connection,
+            epoch=epoch,
+            error=exc,
+            repair=(source,) if enqueue_repair_on_failure else (),
+        )
     extended_epoch, target_item = append_memory_context_item(
         epoch=epoch,
         source=resolved["target_source"],
@@ -86,13 +125,13 @@ def follow_memory_reference(
     return extended_epoch, resolved
 
 
-def _visible_reference_source(
+def _visible_reference_sources(
     *,
     connection: sqlite3.Connection,
     user_id: str,
     local_ref_id: str,
     pinned_revisions: Mapping[MemorySource, str | None] | None,
-) -> _ReferenceSource:
+) -> tuple[_ReferenceSource, ...]:
     revision_predicate, revision_parameters = revision_visibility_predicate(
         sources=_ALL_SOURCES, pinned_revisions=pinned_revisions
     )
@@ -116,20 +155,48 @@ def _visible_reference_source(
         """,
         (local_ref_id, user_id, *revision_parameters),
     ).fetchall()
-    # Writers give each new ref a fresh random ID and keep it within its node,
-    # so only a hand-copied mapping can put one ID in two visible revisions;
-    # neither target is then the right one, as unlink_memory also decides.
-    if not rows:
-        raise MemoryReferenceInputError(
-            f"{local_ref_id} is not a ref in current memory; copy the ID from a "
-            "[[ref:...]] tag you have seen"
+    return tuple(
+        _ReferenceSource(
+            node_id=str(row["node_id"]), revision_id=str(row["revision_id"])
         )
-    if len(rows) > 1:
-        raise MemoryReferenceInputError(
-            f"{local_ref_id} is ambiguous: several memory files carry it"
+        for row in rows
+    )
+
+
+def _visible_tag_owners(
+    *,
+    connection: sqlite3.Connection,
+    user_id: str,
+    local_ref_id: str,
+    pinned_revisions: Mapping[MemorySource, str | None] | None,
+) -> tuple[_ReferenceSource, ...]:
+    """The visible revisions whose text still carries the ref's tag."""
+
+    revision_predicate, revision_parameters = revision_visibility_predicate(
+        sources=_ALL_SOURCES, pinned_revisions=pinned_revisions
+    )
+    rows = connection.execute(
+        f"""
+        SELECT nodes.node_id, revisions.revision_id, fragments.content_text
+        FROM {VISIBLE_FRAGMENTS_FROM_NODES}
+        WHERE nodes.user_id = ?
+          AND nodes.lifecycle = 'active' AND nodes.integrity = 'healthy'
+          AND ({revision_predicate})
+          AND instr(fragments.content_text, ?) > 0
+        """,
+        (user_id, *revision_parameters, f"[[ref:{local_ref_id}"),
+    ).fetchall()
+    return tuple(
+        dict.fromkeys(
+            _ReferenceSource(
+                node_id=str(row["node_id"]), revision_id=str(row["revision_id"])
+            )
+            for row in rows
+            if any(
+                tag.local_ref_id == local_ref_id
+                for tag in extract_markdown_references(str(row["content_text"]))
+            )
         )
-    return _ReferenceSource(
-        node_id=str(rows[0]["node_id"]), revision_id=str(rows[0]["revision_id"])
     )
 
 
@@ -204,17 +271,30 @@ def _resolve_memory_reference(
     return resolved, str(row["target_node_id"])
 
 
-def _emit_resolution_failure(
+def _fail(
     *,
+    connection: sqlite3.Connection,
     epoch: MemoryContextEpoch,
     error: MemoryReferenceInputError | MemoryReferenceNotFoundError,
-) -> None:
+    repair: tuple[_ReferenceSource, ...],
+) -> NoReturn:
     emit_memory_catalog_event(
         "memory_link_resolution_failed",
         user_id=epoch.user_id,
         run_id=epoch.run_id,
         fault_code=type(error).__name__,
     )
+    if repair:
+        with immediate_transaction(connection):
+            for source in repair:
+                enqueue_memory_repair(
+                    connection=connection,
+                    user_id=epoch.user_id,
+                    node_id=source.node_id,
+                    detected_revision_id=source.revision_id,
+                    reason="reference_resolution",
+                )
+    raise error
 
 
 def enqueue_memory_repair(

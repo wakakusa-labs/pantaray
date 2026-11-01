@@ -217,7 +217,10 @@ class ReadOnlyFileTools:
             "Any local path is readable"
             if self.scope.read_access_scope == READ_ACCESS_SCOPE_FULL_ACCESS
             else "Readable paths are inside the registered folders"
-        ) + "; Pantaray's own storage is hidden."
+        ) + (
+            "; Pantaray's own storage is hidden, and files holding secrets (such "
+            "as .env and credential stores) are withheld."
+        )
         notes = f"{where} {self.memory_note} {_SPILL_NOTE}"
         return (
             _definition(

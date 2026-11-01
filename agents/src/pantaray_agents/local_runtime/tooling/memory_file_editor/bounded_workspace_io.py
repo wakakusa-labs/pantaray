@@ -19,6 +19,10 @@ from pantaray_agents.local_runtime.tooling.fs_sandbox import (
     resolve_sandbox_path,
 )
 from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files.secret_paths import (
+    refuse_withheld_paths,
+    withheld_reason,
+)
 from pantaray_agents.tools.files.text_lines import read_text_descriptor_lines
 
 DEFAULT_READ_LINE_LIMIT = 400
@@ -92,6 +96,8 @@ def read_text_page(
         must_be_file=True,
     )
     try:
+        # The name asked for, and the real path opened below.
+        refuse_withheld_paths(resolved.root / resolved.relative_path, resolved.path)
         # The checked real path is opened again from the root without following
         # any link, so a directory swapped for one after the check fails here.
         descriptor = open_regular_file_descriptor(
@@ -199,6 +205,15 @@ def search_text(
                         directories.append(relative_path)
                         continue
                     if not entry.is_file(follow_symlinks=False):
+                        continue
+                    # Silent on purpose: a note that a withheld file matched
+                    # would answer the query about its content.
+                    if (
+                        withheld_reason(
+                            root / relative_path, credentials_readable=False
+                        )
+                        is not None
+                    ):
                         continue
                     observed_size = entry.stat(follow_symlinks=False).st_size
                 except OSError:

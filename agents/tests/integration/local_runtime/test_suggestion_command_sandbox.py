@@ -31,12 +31,8 @@ from .support import (
 pytestmark = pytest.mark.skipif(not seatbelt_available(), reason=SEATBELT_SKIP_REASON)
 
 
-def _call(command: str, *, cwd: Path | None = None, login: bool = False):
-    args = {
-        "command": command,
-        "cwd": None if cwd is None else str(cwd),
-        "use_login_environment": login,
-    }
+def _call(command: str, *, cwd: Path | None = None):
+    args = {"command": command, "cwd": None if cwd is None else str(cwd)}
     return ReactToolCall(
         tool_name="bash",
         tool_args=args,  # type: ignore[arg-type]
@@ -117,7 +113,7 @@ async def test_every_write_is_denied(
 
 @pytest.mark.parametrize("enabled", [True, False])
 @pytest.mark.asyncio
-async def test_the_network_follows_the_command_setting(
+async def test_the_network_is_off_whatever_the_command_setting(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, workspace: Path, enabled: bool
 ) -> None:
     testbed = bootstrap_runtime_testbed(tmp_path=tmp_path, monkeypatch=monkeypatch)
@@ -136,7 +132,7 @@ async def test_the_network_follows_the_command_setting(
     finally:
         server.close()
 
-    assert (result.output["exit_code"] == 0) is enabled, result.output
+    assert result.output["exit_code"] != 0, result.output
 
 
 @pytest.mark.asyncio
@@ -148,7 +144,7 @@ async def test_full_read_access_still_hides_pantaray_storage(
     )
 
     result = await _session(testbed, workspace, scope="full_access").run(
-        _call(f"head -c 16 {testbed.db_path}", login=True), 1
+        _call(f"head -c 16 {testbed.db_path}"), 1
     )
 
     assert result.output["exit_code"] != 0

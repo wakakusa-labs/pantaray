@@ -106,8 +106,8 @@ def _call(args: dict[str, object]) -> ReactToolCall:
     )
 
 
-def _command(command: str, *, cwd: str | None = None, login: bool = False):
-    return _call({"command": command, "cwd": cwd, "use_login_environment": login})
+def _command(command: str, *, cwd: str | None = None):
+    return _call({"command": command, "cwd": cwd})
 
 
 def _session(db_path: Path, root: Path, *, scope: str = "workspace"):
@@ -212,7 +212,7 @@ _EXITED = BashToolOutput(status="success", exit_code=0, stdout="", stderr="")
 
 @pytest.mark.parametrize("network_enabled", [True, False])
 @pytest.mark.asyncio
-async def test_a_command_gets_no_writable_folder_and_the_network_setting(
+async def test_a_command_gets_no_writable_folder_network_or_sign_ins(
     allowed_db: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -235,7 +235,9 @@ async def test_a_command_gets_no_writable_folder_and_the_network_setting(
     assert request.real_write_roots == []
     assert request.action_storage is None
     assert request.cwd == str(temp_dir)
-    assert request.network_policy == ("allow" if network_enabled else "deny")
+    # Off even where the user lets Actions' commands reach the network.
+    assert request.network_policy == "deny"
+    assert request.use_login_environment is False
     profile = render_seatbelt_profile(request)
     # Only the template's leading deny-all may lack a filter; another one after
     # the allows would deny that operation everywhere.
@@ -253,28 +255,20 @@ async def test_a_command_gets_no_writable_folder_and_the_network_setting(
 
 
 @pytest.mark.parametrize(
-    ("login", "scope", "whole_disk"),
-    [
-        (True, "full_access", True),
-        (False, "full_access", True),
-        (True, "workspace", False),
-        (False, "workspace", False),
-    ],
+    ("scope", "whole_disk"),
+    [("full_access", True), ("workspace", False)],
 )
 @pytest.mark.asyncio
 async def test_command_reads_follow_the_read_access_setting(
     allowed_db: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    login: bool,
     scope: str,
     whole_disk: bool,
 ) -> None:
     requests = _capture_request(monkeypatch, tmp_path / "temp", _EXITED)
 
-    await _session(allowed_db, tmp_path, scope=scope).run(
-        _command("gh pr view 1", login=login), 1
-    )
+    await _session(allowed_db, tmp_path, scope=scope).run(_command("git log -1"), 1)
 
     assert ("/" in requests[0].real_read_roots) is whole_disk
 

@@ -25,6 +25,10 @@ from pantaray_agents.tools.files.private_storage import (
 )
 from pantaray_agents.tools.files.read_paths import READ_PATH_DENIED, resolve_read_path
 from pantaray_agents.tools.files.read_scope import ReadScope
+from pantaray_agents.tools.files.secret_paths import (
+    secret_path_error,
+    withheld_reason,
+)
 
 from ..outside_workspace_grant import app_owned_roots
 from .broker_common import BrokerContext
@@ -98,6 +102,16 @@ def resolve_write_tool_path(
             f"tool {context.tool_definition.tool_id} is not a workspace write tool",
             code=WRITE_PATH_DENIED,
         )
+    # Before any root is chosen: a secret is refused inside and outside the
+    # workspace alike, before an approval could be asked for it.
+    withheld = withheld_reason(
+        candidate_path(
+            raw_path=raw_path, cwd_path=Path(context.execution_session.cwd_path)
+        ),
+        credentials_readable=False,
+    )
+    if withheld is not None:
+        raise secret_path_error(withheld)
     is_private_storage = _private_storage(context).hides
     try:
         resolved = resolve_local_path(

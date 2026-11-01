@@ -120,7 +120,8 @@ READ_TOOL = ToolDefinition.from_spec(
                 "every entry in the directory's own order, and offset counts the "
                 "entries it skips too: symlinks without full read access, "
                 "Pantaray's private app storage, and its .runtime-temp folder in "
-                "the scratch workspace. warning says what a page skipped."
+                "the scratch workspace. warning says what a page skipped. Files "
+                "holding secrets (such as .env and credential stores) are withheld."
             ),
         ),
         concurrency=ToolConcurrency("parallel"),

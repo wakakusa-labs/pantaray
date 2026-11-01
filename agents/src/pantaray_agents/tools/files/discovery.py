@@ -49,6 +49,7 @@ from .ripgrep import (
     run_ripgrep_files,
     run_ripgrep_grep,
 )
+from .secret_paths import withheld_reason
 from .workspace_descriptor_access import scan_skip_notes
 
 GREP_MAX_OUTPUT_BYTES = 50 * 1024
@@ -249,6 +250,7 @@ def _build_grep_outcome(
     lines_excerpted: bool,
     truncation_reason: DiscoveryTruncationReason | None,
     include_file_references: bool,
+    withheld_files: int,
 ) -> ReadToolResult:
     file_values: list[JSONValue] = []
     search_lines: list[str] = []
@@ -273,6 +275,7 @@ def _build_grep_outcome(
             str(_backend_path(base, relative_path))
             for relative_path in backend_result.binary_match_paths
         ),
+        withheld_files=withheld_files,
     )
     return ReadToolResult(
         output={
@@ -296,6 +299,16 @@ def run_grep(*, scope: ReadScope, request: GrepToolArgs) -> ReadToolResult:
     if request.include_glob is not None:
         _reject_unsafe_glob_pattern(request.include_glob, field_name="include_glob")
     search_scope = scope.private_storage.search_scope(base.path)
+    withheld_files: set[Path] = set()
+
+    def include_path(path: Path) -> bool:
+        if scope.hides(path) or path in withheld_files:
+            return False
+        if withheld_reason(path, credentials_readable=False) is None:
+            return True
+        withheld_files.add(path)
+        return False
+
     backend_result = run_ripgrep_grep(
         cwd=base.path,
         sandbox_profile=_discovery_sandbox_profile(scope=scope, base=base),
@@ -310,7 +323,7 @@ def run_grep(*, scope: ReadScope, request: GrepToolArgs) -> ReadToolResult:
                 scope=scope, raw_path=str(_backend_path(base, relative_path))
             )
         ),
-        include_path=lambda path: not scope.hides(path),
+        include_path=include_path,
     )
     files: dict[str, list[tuple[int, str]]] = {}
     truncation_reason: DiscoveryTruncationReason | None = (
@@ -340,6 +353,7 @@ def run_grep(*, scope: ReadScope, request: GrepToolArgs) -> ReadToolResult:
         lines_excerpted=lines_excerpted,
         truncation_reason=truncation_reason,
         include_file_references=base.root in scope.manifest_roots,
+        withheld_files=len(withheld_files),
     )
 
 
@@ -402,6 +416,7 @@ def _grep_notes(
     skipped_files: int,
     first_skip_error: str | None,
     binary_match_paths: tuple[str, ...],
+    withheld_files: int,
 ) -> tuple[list[str], list[str]]:
     """Warnings and retry hints naming every grep limit that applied."""
 
@@ -445,4 +460,9 @@ def _grep_notes(
     if binary_match_paths:
         warnings.append(binary_match_warning(binary_match_paths))
         hints.append("Use read on a binary file that matched, such as a PDF.")
+    if withheld_files > 0:
+        warnings.append(
+            f"{withheld_files} matching file(s) hold secrets (such as .env) and "
+            "are withheld on purpose; their lines are not shown."
+        )
     return warnings, hints

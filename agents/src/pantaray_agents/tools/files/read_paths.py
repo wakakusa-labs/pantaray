@@ -28,6 +28,10 @@ from pantaray_agents.tools.files.manifest_paths import (
     resolve_local_path,
 )
 from pantaray_agents.tools.files.private_storage import private_app_storage_error
+from pantaray_agents.tools.files.secret_paths import (
+    secret_path_error,
+    withheld_reason,
+)
 
 from .read_scope import ReadScope
 
@@ -74,6 +78,12 @@ def resolve_read_path(
         ) from exc
     if scope.private_storage.hides(resolved.path):
         raise private_app_storage_error(code=READ_PATH_DENIED)
+    withheld = withheld_reason(
+        candidate_path(raw_path=raw_path, cwd_path=scope.cwd_path),
+        credentials_readable=False,
+    )
+    if withheld is not None:
+        raise secret_path_error(withheld)
     return resolved
 
 

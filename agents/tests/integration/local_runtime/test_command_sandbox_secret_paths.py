@@ -87,6 +87,8 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         ".aws/config",
         ".ssh/config",
         ".ssh/id_ed25519_x",
+        # security, and gh and git through it, read this file themselves.
+        "Library/Keychains/login.keychain-db",
     ):
         (home / relative).parent.mkdir(parents=True, exist_ok=True)
         (home / relative).write_text(f"{SECRET}\n", encoding="utf-8")
@@ -108,6 +110,7 @@ def test_secret_files_are_withheld_and_everything_around_them_works(
         subprocess.run(["/usr/bin/git", *args], cwd=project, check=True)
     aws = shlex.quote(str(home / ".aws"))
     ssh = shlex.quote(str(home / ".ssh"))
+    keychains = shlex.quote(str(home / "Library" / "Keychains"))
     probes = {
         "env": "cat .env",
         "upper": "cat .ENV.local",
@@ -125,6 +128,7 @@ def test_secret_files_are_withheld_and_everything_around_them_works(
         "aws-config": f"cat {aws}/config",
         "ssh-config": f"cat {ssh}/config",
         "ssh-key": f"cat {ssh}/id_ed25519_x",
+        "keychain": f"cat {keychains}/login.keychain-db",
     }
 
     stdout = _run_sandboxed(
@@ -150,6 +154,7 @@ def test_secret_files_are_withheld_and_everything_around_them_works(
         "aws-config=yes",
         "ssh-config=yes",
         f"ssh-key={credentials}",
+        f"keychain={credentials}",
     ]
     assert (project / ".env").read_text(encoding="utf-8") == f"TOKEN={SECRET}\n"
     assert not (project / "new" / ".env").exists()

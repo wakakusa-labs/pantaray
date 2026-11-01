@@ -1,8 +1,8 @@
 """Files that hold secrets, which no agent may read or write.
 
-One closed rule set in two tiers. App secrets (env files, the macOS Keychains)
-are always withheld. CLI credentials (SSH keys, cloud CLI logins, ...) are
-withheld too, except from a command that runs with the user's login
+One closed rule set in two tiers. App secrets (env files) are always
+withheld. CLI credentials (the macOS Keychains, SSH keys, cloud CLI logins, ...)
+are withheld too, except from a command that runs with the user's login
 environment, which needs them to sign in as the user does in a terminal.
 
 The rules are written once, as POSIX extended regular expressions over an
@@ -204,8 +204,9 @@ def _rules(home: Path) -> tuple[SecretPathPattern, ...]:
             directories_exempt=True,
             description="its name marks it as an env secrets file",
         ),
+        # `security`, and gh and git through it, read these files themselves.
         SecretPathPattern(
-            tier="app_secret",
+            tier="cli_credential",
             withheld=under("Library/Keychains"),
             excepted=None,
             directories_exempt=False,

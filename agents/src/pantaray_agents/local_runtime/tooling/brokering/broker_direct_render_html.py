@@ -4,9 +4,9 @@ Electron prints the HTML with its own Chromium (``runtime.html_render_relay``),
 so no browser has to be started outside the command sandbox. The PDF it returns
 is drawn and stored like ``render_pdf_page``'s. What this module owns is what
 the page may load: the same folders ``read`` may open, never Pantaray's private
-storage, and the network only when the user lets commands use it. A
-Suggestion's make stage prints and draws through the same functions, with the
-network always off.
+storage or a file holding secrets, and the network only when the user lets
+commands use it. A Suggestion's make stage prints and draws through the same
+functions, with the network always off.
 """
 
 from __future__ import annotations
@@ -42,6 +42,7 @@ from pantaray_agents.tools.files.render_pages import (
     RENDER_FORMAT_UNSUPPORTED,
     draw_pdf,
 )
+from pantaray_agents.tools.files.secret_paths import secret_path_patterns
 
 from ..repository.command_network_settings import load_command_network_enabled
 from .action_path_policy import read_scope
@@ -218,6 +219,11 @@ async def print_html_target(
         file_roots=_file_roots(scope),
         private_roots=scope.private_storage.storage_roots,
         private_root_exceptions=scope.private_storage.readable_roots,
+        # A page is loaded by a file tool, so both tiers apply, as for read.
+        secret_paths=(
+            *secret_path_patterns("app_secret"),
+            *secret_path_patterns("cli_credential"),
+        ),
         allow_network=allow_network,
     )
     if isinstance(rendered, HtmlRenderFailed):

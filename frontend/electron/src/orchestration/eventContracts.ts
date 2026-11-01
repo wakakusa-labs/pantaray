@@ -373,6 +373,7 @@ export type HtmlRenderRequestedEvent = OrchestrationEventEnvelope<
     file_roots: string[];
     private_roots: string[];
     private_root_exceptions: string[];
+    secret_paths: { withheld: string; excepted: string | null }[];
     allow_network: boolean;
   }
 >;

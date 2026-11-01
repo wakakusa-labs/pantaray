@@ -38,6 +38,7 @@ from pantaray_agents.tasks.internal_jobs.action_subagent_broker import (
     _CHILD_BROKER_TOOLS,
 )
 from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files.secret_paths import secret_path_patterns
 
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
@@ -160,6 +161,12 @@ async def test_render_prints_in_electron_and_draws_the_pages_it_has(
     assert any(html.is_relative_to(root) for root in file_roots)
     assert Path(payload["private_roots"][0]) == db_path.parent  # type: ignore[index]
     assert str(_workspace(runtime)) in payload["private_root_exceptions"]  # type: ignore[operator]
+    # Every file tool withholds both tiers, CLI credentials included.
+    assert payload["secret_paths"] == [
+        {"withheld": rule.withheld, "excepted": rule.excepted}
+        for tier in ("app_secret", "cli_credential")
+        for rule in secret_path_patterns(tier)
+    ]
     assert payload["allow_network"] is True
 
     assert outcome.status == "success"  # type: ignore[attr-defined]

@@ -26,11 +26,21 @@ import { writeFileAtomic } from '../atomicFile';
 import { LocalBackendRequestError } from '../localBackend/client';
 import { keepWindowOnItsDocument } from '../security/windowOpenPolicy';
 
-/** The local files a page may load: under a file root, and not in private app storage. */
+/**
+ * One of the runtime's rules for files that hold secrets (`secret_paths`): a path matching
+ * `withheld` and not `excepted`, POSIX EREs that read the same as JavaScript regexes.
+ */
+export type SecretPathRule = { withheld: string; excepted: string | null };
+
+/**
+ * The local files a page may load: under a file root, not in private app storage, and not
+ * holding secrets.
+ */
 export type FileAccessScope = {
   fileRoots: string[];
   privateRoots: string[];
   privateRootExceptions: string[];
+  secretPaths: SecretPathRule[];
 };
 
 /** One page to print and what it may load. */
@@ -177,6 +187,39 @@ export function decideNetworkRequest(
   return isWeb && isRead && request.resourceType !== 'subFrame' ? null : 'not_allowed';
 }
 
+/** U+0131 uppercases to `I`, yet its case fold is itself. */
+const DOTLESS_I = '\u0131';
+
+/**
+ * A path as APFS compares names, the runtime's `_folded`: NFD, case fold, NFD. JavaScript has
+ * no case fold; lower, upper, then lower again gives the fold's ASCII letters (`ſ` to `s`, `ß`
+ * and `ẞ` to `ss`, `ﬁ` to `fi`, the Kelvin sign to `k`), and mapping each character alone folds
+ * a final sigma to `σ` as the case fold does. Scripts whose fold is uppercase (Cherokee) fold
+ * apart from Python's; no rule depends on that, since the rules bracket only ASCII letters and
+ * the home folder in them is folded here as the paths are.
+ */
+export function foldPath(text: string): string {
+  const fold = (char: string) =>
+    char === DOTLESS_I ? char : char.toLowerCase().toUpperCase().toLowerCase();
+  return Array.from(text.normalize('NFD'), fold).join('').normalize('NFD');
+}
+
+/**
+ * Whether a file holds secrets by the name the page asked for or the real path it resolves to,
+ * as the runtime's `withheld_reason` judges both. Each rule is folded like the paths: it spells
+ * the home folder as the OS stores it, so `/Users/José` matches in either Unicode form, and
+ * folding leaves its regex syntax alone. A directory is never served, so `directories_exempt`
+ * changes nothing here and is not sent.
+ */
+export function isSecretPath(paths: string[], rules: SecretPathRule[]): boolean {
+  const folded = paths.map(foldPath);
+  return rules.some((rule) => {
+    const withheld = new RegExp(foldPath(rule.withheld));
+    const excepted = rule.excepted === null ? null : new RegExp(foldPath(rule.excepted));
+    return folded.some((text) => withheld.test(text) && excepted?.test(text) !== true);
+  });
+}
+
 /** Where the PDF goes; the runtime derives the same path from the same id. */
 export function htmlRenderPdfPath(localArtifactRoot: string, renderRequestId: string): string {
   if (!RENDER_REQUEST_ID.test(renderRequestId)) {
@@ -228,7 +271,9 @@ async function serveFile(
   try {
     const opened = await file.stat();
     const realPath = await fs.promises.realpath(requestedPath);
-    const reason = decideFileAccess(realPath, scope, sameDirectoryOnDisk);
+    const reason = isSecretPath([requestedPath, realPath], scope.secretPaths)
+      ? 'not_allowed'
+      : decideFileAccess(realPath, scope, sameDirectoryOnDisk);
     const checked = await fs.promises.stat(realPath);
     if (reason !== null || checked.dev !== opened.dev || checked.ino !== opened.ino) {
       block(reason ?? 'outside_read_scope', url);

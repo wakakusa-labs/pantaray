@@ -23,7 +23,9 @@ from pantaray_agents.local_runtime.descriptor_access import (
 )
 from pantaray_agents.schema.websocket.server_messages import (
     HtmlRenderRequestedMessage,
+    SecretPathRule,
 )
+from pantaray_agents.tools.files.secret_paths import SecretPathPattern
 
 from .deliverable_sessions import deliver_desktop_request
 from .one_shot_requests import OneShotRequests
@@ -105,13 +107,14 @@ async def request_html_render(
     file_roots: Sequence[Path],
     private_roots: Sequence[Path],
     private_root_exceptions: Sequence[Path],
+    secret_paths: Sequence[SecretPathPattern],
     allow_network: bool,
 ) -> HtmlRenderOutcome:
     """Render ``html_path`` in Electron and return the verified PDF.
 
     The caller has already authorized ``html_path`` and decided what the page may
-    load: ``file_roots`` and the private roots mirror the read policy, and
-    ``allow_network`` is the user's command network setting.
+    load: ``file_roots``, the private roots and ``secret_paths`` mirror the read
+    policy, and ``allow_network`` is the user's command network setting.
     """
 
     artifact_root = read_local_runtime_artifact_root()
@@ -131,6 +134,10 @@ async def request_html_render(
                 file_roots=[str(root) for root in file_roots],
                 private_roots=[str(root) for root in private_roots],
                 private_root_exceptions=[str(root) for root in private_root_exceptions],
+                secret_paths=[
+                    SecretPathRule(withheld=rule.withheld, excepted=rule.excepted)
+                    for rule in secret_paths
+                ],
                 allow_network=allow_network,
             ),
         )

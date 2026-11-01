@@ -68,6 +68,8 @@ export function previewFileScope(
     fileRoots: [folder],
     privateRoots,
     privateRootExceptions: inPrivateStorage ? [folder] : [],
+    // The user reads the preview, not an agent; files holding secrets are kept from agents.
+    secretPaths: [],
   };
 }
 

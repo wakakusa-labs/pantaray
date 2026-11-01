@@ -1363,6 +1363,7 @@ test('an HTML render request goes to the desktop renderer only, never to a windo
       file_roots: ['/work'],
       private_roots: ['/work/.pantaray'],
       private_root_exceptions: ['/work/.pantaray/published'],
+      secret_paths: [{ withheld: '/[.][eE][nN][vV]$', excepted: null }],
       allow_network: true,
     },
   });
@@ -1377,6 +1378,7 @@ test('an HTML render request goes to the desktop renderer only, never to a windo
       fileRoots: ['/work'],
       privateRoots: ['/work/.pantaray'],
       privateRootExceptions: ['/work/.pantaray/published'],
+      secretPaths: [{ withheld: '/[.][eE][nN][vV]$', excepted: null }],
       allowNetwork: true,
     },
   ]);

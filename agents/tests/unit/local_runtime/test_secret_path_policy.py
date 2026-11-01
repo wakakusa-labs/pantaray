@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import unicodedata
 from dataclasses import replace
 from pathlib import Path
 
@@ -118,6 +119,24 @@ def test_unicode_aliases_that_apfs_opens_as_the_same_file_are_withheld(
         withheld_reason(Path(f"{home_alias}/notes.txt"), credentials_readable=False)
         is None
     )
+
+
+@pytest.mark.parametrize("name", ["jos\u00e9", "Je\u0301r\u00f4me", "\ubbfc\uc218"])
+def test_a_home_with_non_ascii_letters_keeps_its_credentials_withheld(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    home = tmp_path / name
+    monkeypatch.setattr(secret_paths, "_home", lambda: home)
+
+    for spelled in (
+        unicodedata.normalize("NFC", str(home)),
+        unicodedata.normalize("NFD", str(home)),
+    ):
+        for relative in (".aws/credentials", "Library/Keychains/login.keychain-db"):
+            assert (
+                withheld_reason(Path(spelled, relative), credentials_readable=False)
+                is not None
+            ), (spelled, relative)
 
 
 @pytest.mark.skipif(shutil.which("grep") is None, reason="needs a POSIX grep -E")

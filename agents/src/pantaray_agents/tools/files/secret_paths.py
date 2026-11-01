@@ -66,7 +66,7 @@ class SecretWithheld:
 def secret_path_patterns(tier: SecretTier) -> tuple[SecretPathPattern, ...]:
     """The rules of one tier, for the current OS account's home folder."""
 
-    return tuple(rule for rule, _, _ in _compiled(_home()) if rule.tier == tier)
+    return tuple(rule for rule in _rules(_home()) if rule.tier == tier)
 
 
 def withheld_reason(path: Path, *, credentials_readable: bool) -> SecretWithheld | None:
@@ -80,7 +80,7 @@ def withheld_reason(path: Path, *, credentials_readable: bool) -> SecretWithheld
 
     for candidate in dict.fromkeys((path, path.resolve(strict=False))):
         text = _folded(candidate.as_posix())
-        for rule, withheld, excepted in _compiled(_home()):
+        for rule, withheld, excepted in _compiled(_folded_home()):
             if credentials_readable and rule.tier == "cli_credential":
                 continue
             if not withheld.search(text):
@@ -99,7 +99,7 @@ def withheld_folder_reason(folder: Path) -> SecretWithheld | None:
     # A trailing slash stands for "something in this folder": only the folder
     # rules match it, never a file-name rule.
     text = _folded(f"{folder.as_posix().rstrip('/')}/")
-    for rule, withheld, _ in _compiled(_home()):
+    for rule, withheld, _ in _compiled(_folded_home()):
         if withheld.search(text):
             return SecretWithheld(path=folder, reason=rule.description)
     return None
@@ -129,6 +129,12 @@ def secret_path_error(withheld: SecretWithheld) -> BrokerPolicyError:
 def _folded(text: str) -> str:
     # Canonical caseless form, which APFS uses to compare names.
     return unicodedata.normalize("NFD", unicodedata.normalize("NFD", text).casefold())
+
+
+def _folded_home() -> Path:
+    # Folded like the paths it is matched against, so a home such as
+    # /Users/José matches in whichever Unicode form a path spells it.
+    return Path(_folded(_home().as_posix()))
 
 
 def _home() -> Path:

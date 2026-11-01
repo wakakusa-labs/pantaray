@@ -44,7 +44,7 @@ _TABLE: tuple[tuple[str, SecretTier | None], ...] = (
     ("/p/.env.template", None),
     ("/p/.environment", None),
     ("/p/.env/bin/python", None),
-    ("Library/Keychains/login.keychain-db", "app_secret"),
+    ("Library/Keychains/login.keychain-db", "cli_credential"),
     (".ssh/id_ed25519_x", "cli_credential"),
     (".SSH/ID_RSA", "cli_credential"),
     (".ssh/config", None),

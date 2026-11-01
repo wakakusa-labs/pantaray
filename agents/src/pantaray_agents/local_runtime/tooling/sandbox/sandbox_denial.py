@@ -9,6 +9,14 @@ hint says "may" and the exit status and output stay exactly as they were.
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
+from pantaray_agents.tools.files.secret_paths import (
+    secret_path_error,
+    withheld_reason,
+)
+
 from ..repository.command_invocation_audits import TerminalOutcome
 
 # Usage errors, a file that cannot be executed, and a missing command: none is a
@@ -37,6 +45,48 @@ WRITE_FOLDER_REQUEST_HINT = (
 )
 
 
+# What an error line can name a path as: `cat: .env: ...`, `[Errno 1] ...: '.env'`.
+_PATH_TOKEN = re.compile(r"[^\s:'\"`]+")
+
+
+def sandbox_denial_hint(
+    *,
+    terminal_outcome: TerminalOutcome,
+    exit_code: int,
+    stdout: str,
+    stderr: str,
+    cwd: Path,
+    credentials_readable: bool,
+) -> str | None:
+    """What to tell the model about a command the sandbox likely blocked.
+
+    A denial that names a file holding secrets gets the file tools' refusal,
+    whatever the exit status (grep exits 2): asking for write folders cannot
+    fix it, and the model must not look for another way in.
+    """
+
+    if terminal_outcome != "exited" or exit_code == 0:
+        return None
+    for line in f"{stderr}\n{stdout}".splitlines():
+        if not any(keyword in line.lower() for keyword in _DENIAL_KEYWORDS):
+            continue
+        for token in _PATH_TOKEN.findall(line):
+            withheld = withheld_reason(
+                cwd / token, credentials_readable=credentials_readable
+            )
+            if withheld is not None:
+                error = secret_path_error(withheld)
+                return f"{error} {error.fix_hint}"
+    if is_likely_sandbox_denied(
+        terminal_outcome=terminal_outcome,
+        exit_code=exit_code,
+        stdout=stdout,
+        stderr=stderr,
+    ):
+        return WRITE_FOLDER_REQUEST_HINT
+    return None
+
+
 def is_likely_sandbox_denied(
     *, terminal_outcome: TerminalOutcome, exit_code: int, stdout: str, stderr: str
 ) -> bool:
@@ -53,4 +103,8 @@ def is_likely_sandbox_denied(
     return any(keyword in output for keyword in _DENIAL_KEYWORDS)
 
 
-__all__ = ["WRITE_FOLDER_REQUEST_HINT", "is_likely_sandbox_denied"]
+__all__ = [
+    "WRITE_FOLDER_REQUEST_HINT",
+    "is_likely_sandbox_denied",
+    "sandbox_denial_hint",
+]

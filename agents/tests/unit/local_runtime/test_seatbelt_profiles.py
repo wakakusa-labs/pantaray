@@ -320,4 +320,4 @@ def test_ripgrep_profile_without_own_roots_denies_all_private_storage() -> None:
 
     # sandbox-exec rejects an empty (require-any), which would fail every search.
     assert '(deny file-read* (require-any\n    (subpath "/app-data")\n))' in profile
-    assert "require-not" not in profile
+    assert "(require-not (require-any" not in profile

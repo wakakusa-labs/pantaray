@@ -45,7 +45,7 @@ from .command_sandbox_protocol import (
     iter_decoded_messages,
 )
 from .command_sandbox_request import build_sandbox_request
-from .sandbox_denial import WRITE_FOLDER_REQUEST_HINT, is_likely_sandbox_denied
+from .sandbox_denial import sandbox_denial_hint
 
 SANDBOX_TEMP_DIR_PREFIX = "pantaray-command-sandbox-"
 type CreateSubprocessExec = Callable[..., Awaitable[asyncio.subprocess.Process]]
@@ -516,17 +516,15 @@ async def run_command_via_sandbox(
     # command cannot, and a subagent is refused them without asking (its
     # failed call shows the error message alone, without this feedback). An
     # unsandboxed run was blocked by something other than the sandbox.
-    if (
-        output.error is not None
-        and not request.run_outside_sandbox
-        and is_likely_sandbox_denied(
+    if output.error is not None and not request.run_outside_sandbox:
+        output.error.llm_feedback = sandbox_denial_hint(
             terminal_outcome=terminal_outcome,
             exit_code=output.exit_code,
             stdout=stdout_text,
             stderr=stderr_text,
+            cwd=Path(request.cwd),
+            credentials_readable=request.use_login_environment,
         )
-    ):
-        output.error.llm_feedback = WRITE_FOLDER_REQUEST_HINT
     _write_command_invocation_audit(
         context=context,
         request=request,

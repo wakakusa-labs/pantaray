@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from pantaray_agents.local_runtime.tooling.repository.command_invocation_audits import (
     TerminalOutcome,
 )
 from pantaray_agents.local_runtime.tooling.sandbox.sandbox_denial import (
+    WRITE_FOLDER_REQUEST_HINT,
     is_likely_sandbox_denied,
+    sandbox_denial_hint,
 )
+from pantaray_agents.tools.files import secret_paths
 
 CODEX_EXEC_STDERR = (
     "Error: failed to initialize in-process app-server client: "
@@ -76,3 +81,55 @@ def test_a_command_the_runtime_stopped_is_not_denied(
         stdout="",
         stderr=CODEX_EXEC_STDERR,
     )
+
+
+def _hint(
+    *, cwd: Path, stderr: str, exit_code: int = 1, credentials_readable: bool = False
+) -> str | None:
+    return sandbox_denial_hint(
+        terminal_outcome="exited",
+        exit_code=exit_code,
+        stdout="",
+        stderr=stderr,
+        cwd=cwd,
+        credentials_readable=credentials_readable,
+    )
+
+
+@pytest.mark.parametrize(
+    ("stderr", "exit_code"),
+    [
+        ("cat: .env: Operation not permitted\n", 1),
+        # grep's exit status for an unreadable file, which write folders skip.
+        ("grep: ./sub/.ENV.local: Operation not permitted\n", 2),
+        ("PermissionError: [Errno 1] Operation not permitted: '.env'\n", 1),
+        ("mv: rename .env to x: Operation not permitted\n", 1),
+    ],
+)
+def test_a_denied_secret_file_is_called_withheld_not_a_write_folder(
+    tmp_path: Path, stderr: str, exit_code: int
+) -> None:
+    hint = _hint(cwd=tmp_path, stderr=stderr, exit_code=exit_code)
+
+    assert hint is not None
+    assert "withheld" in hint
+    assert "additional_write_folders" not in hint
+
+
+def test_a_denied_ordinary_file_still_asks_for_write_folders(tmp_path: Path) -> None:
+    hint = _hint(cwd=tmp_path, stderr="touch: out.env.txt: Operation not permitted\n")
+
+    assert hint == WRITE_FOLDER_REQUEST_HINT
+
+
+def test_credentials_are_withheld_only_without_the_login_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(secret_paths, "_home", lambda: tmp_path)
+    stderr = f"cat: {tmp_path}/.aws/credentials: Operation not permitted\n"
+
+    withheld = _hint(cwd=tmp_path, stderr=stderr)
+    readable = _hint(cwd=tmp_path, stderr=stderr, credentials_readable=True)
+
+    assert withheld is not None and "withheld" in withheld
+    assert readable == WRITE_FOLDER_REQUEST_HINT

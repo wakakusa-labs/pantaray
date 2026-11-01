@@ -188,3 +188,25 @@ async def test_folder_swapped_for_link_into_app_storage_reads_nothing_with_full_
 
     assert SENTINEL_LINE not in visible
     assert SENTINEL_NAME not in visible
+
+
+@pytest.mark.parametrize("ignore_name", [".ignore", ".gitignore", ".rgignore"])
+@pytest.mark.asyncio
+async def test_an_ignore_file_linked_to_an_env_file_does_not_quote_it(
+    tmp_path: Path, ignore_name: str
+) -> None:
+    db_path, context, repo, _folder = _bootstrap_runtime_db_with_registered_folder(
+        tmp_path
+    )
+    # ripgrep parses an ignore file itself and quotes a line it cannot parse.
+    secret = "TOKEN=s3cr3t-value{unclosed"
+    (repo / ".env").write_text(f"{secret}\n", encoding="utf-8")
+    (repo / ignore_name).symlink_to(repo / ".env")
+    (repo / "inside.txt").write_text("needle inside\n", encoding="utf-8")
+
+    visible = await _visible_text(
+        db_path=db_path, context=context, tool_id="grep", base_path=str(repo)
+    )
+
+    assert "needle inside" in visible
+    assert "s3cr3t-value" not in visible

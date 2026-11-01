@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from pathlib import Path, PurePosixPath
 
+from pantaray_agents.tools.files.secret_paths import SecretTier, secret_path_patterns
+
 from .command_sandbox_protocol import BrokerToSandboxCommandRequest
 from .macos_runtime import toolchain_read_roots
 
@@ -60,7 +62,14 @@ def render_seatbelt_profile(
         rendered = rendered.replace(placeholder, value)
     if PLACEHOLDER_START in rendered or PLACEHOLDER_END in rendered:
         raise RuntimeError("seatbelt profile contains an unresolved placeholder")
-    return rendered
+    # Last, so that no read or write root allowed above can reopen them. Writes
+    # are denied too: renaming .env to x would make it readable as x.
+    return rendered + _render_secret_path_denies(
+        "file-read-data file-write*",
+        tiers=("app_secret",)
+        if request.use_login_environment
+        else ("app_secret", "cli_credential"),
+    )
 
 
 def _render_system_runtime_read_roots() -> str:
@@ -202,11 +211,39 @@ def render_ripgrep_seatbelt_profile(
                 _render_subpath_block(private_storage_roots),
                 (*readable_private_roots, *runtime_roots),
             ),
+            # File tools never get the login environment's credentials.
+            _render_secret_path_denies(
+                "file-read-data", tiers=("app_secret", "cli_credential")
+            ),
             "(deny file-write*)",
             "(deny network*)",
             "",
         )
     )
+
+
+def _render_secret_path_denies(operations: str, *, tiers: Sequence[SecretTier]) -> str:
+    """Deny ``operations`` on the paths the secret rules of ``tiers`` withhold.
+
+    Only the content is denied for reading: stat, ls and git status still see
+    the files. The kernel matches the name it stores, and the rules already
+    spell every letter in both cases.
+    """
+
+    denies = []
+    for tier in tiers:
+        for rule in secret_path_patterns(tier):
+            filters = [f'(regex "{_escape_seatbelt_string(rule.withheld)}")']
+            if rule.excepted is not None:
+                filters.append(
+                    f'(require-not (regex "{_escape_seatbelt_string(rule.excepted)}"))'
+                )
+            if rule.directories_exempt:
+                # Creating a directory there is checked as one, so a venv
+                # named .env can be made; creating a file cannot.
+                filters.append("(require-not (vnode-type DIRECTORY))")
+            denies.append(f"(deny {operations} (require-all {' '.join(filters)}))")
+    return "\n".join(denies)
 
 
 def _render_login_environment_clause(request: BrokerToSandboxCommandRequest) -> str:

@@ -291,8 +291,8 @@ def test_an_action_is_due_from_its_first_completed_turn_with_what_was_asked(
         db_path,
         "s-offer",
         age=timedelta(days=9),
-        summary="## Why\nSlow reviews.\n### Hypothesis\nReviews close sooner.\n"
-        "### Signals\nPR age.",
+        summary="### Why This Suggestion\nSlow reviews.\n"
+        "### Signs It Worked\nReviews close within two days, within a week.\n",
         contract="action_offer",
     )
     _deliver(db_path, "s-note", age=timedelta(days=9))
@@ -336,6 +336,9 @@ def test_an_action_is_due_from_its_first_completed_turn_with_what_was_asked(
         ("action", "own", 7, None),
     ]
     expectations = {item.item_id: item.expectation for item in due}
-    assert expectations["s-offer"] == "Reviews close sooner."
+    assert expectations["s-offer"] == (
+        "### Why This Suggestion\nSlow reviews.\n"
+        "### Signs It Worked\nReviews close within two days, within a week."
+    )
     assert expectations["s-note"] == ""
     assert expectations["own"] == "Summarize the contract."

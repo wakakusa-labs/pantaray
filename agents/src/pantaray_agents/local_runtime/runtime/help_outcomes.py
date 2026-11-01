@@ -33,8 +33,6 @@ OUTCOME_WINDOW_DAYS = 45
 # checkpoint; raise the cap when runs regularly have more due than this, and
 # carry failed items over when MEMORY_OUTCOMES_LOOK_BACK_FAILED recurs.
 MAX_OUTCOMES_PER_RUN = 5
-# A hypothesis section a suggestion's summary opens; older ones have none.
-_HYPOTHESIS_HEADING = "### Hypothesis"
 
 type DueKind = Literal["suggestion", "action"]
 
@@ -48,8 +46,8 @@ class DueOutcome:
     item_id: str
     checkpoint_days: int
     delivered_at: str
-    # What it was meant to change: a suggestion's hypothesis, or what the user
-    # asked the Action for.
+    # What it was meant to change: a suggestion's summary, with the signs it
+    # named in advance, or what the user asked the Action for.
     expectation: str
     # The suggestion an Action came from, read beside it; None otherwise.
     source_suggestion_id: str | None
@@ -66,17 +64,6 @@ def latest_checkpoint_between(
         if after < delivered_at + timedelta(days=days) <= through
     ]
     return passed[-1] if passed else None
-
-
-def hypothesis_of(summary: str) -> str:
-    """The summary's hypothesis section, or the whole summary without one."""
-
-    start = summary.find(_HYPOTHESIS_HEADING)
-    if start < 0:
-        return summary.strip()
-    body = summary[start + len(_HYPOTHESIS_HEADING) :]
-    ends = [index for index in (body.find("\n## "), body.find("\n### ")) if index >= 0]
-    return body[: min(ends)].strip() if ends else body.strip()
 
 
 # The start of the last Memory update that completed, before this run was
@@ -154,7 +141,7 @@ def load_due_outcomes(
             "suggestion",
             str(row["suggestion_id"]),
             str(row["delivered_at"]),
-            hypothesis_of(str(row["suggestion_summary"] or "")),
+            str(row["suggestion_summary"] or "").strip(),
             None,
         )
         for row in connection.execute(_SUGGESTIONS_SQL, (user_id, earliest))
@@ -198,7 +185,6 @@ __all__ = [
     "OUTCOME_WINDOW_DAYS",
     "DueKind",
     "DueOutcome",
-    "hypothesis_of",
     "latest_checkpoint_between",
     "load_due_outcomes",
 ]

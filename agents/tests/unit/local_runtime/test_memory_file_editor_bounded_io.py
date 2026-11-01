@@ -27,6 +27,7 @@ from pantaray_agents.local_runtime.tooling.memory_file_editor.bounded_workspace_
     search_text,
 )
 from pantaray_agents.tools.contract import ReactToolCall, ToolCallEnvelope
+from pantaray_agents.tools.files.secret_paths import SECRET_PATH_WITHHELD
 from pantaray_agents.tools.memory.retrieval import (
     MemoryContextSession,
 )
@@ -314,3 +315,53 @@ async def test_memory_draft_late_page_is_readable_without_splitting() -> None:
     assert result.status == "success"
     assert result.output["text"] == "LAST MARKER"
     assert result.output["next_offset"] is None
+
+
+def _read_page(workspace: Path, path: str) -> str:
+    return read_text_page(
+        sandbox_root=workspace,
+        canonical_sandbox_root=None,
+        path=path,
+        offset=1,
+        column=1,
+        limit=20,
+    ).text
+
+
+@pytest.mark.parametrize("name", [".env", ".ENV", "notes.md"])
+def test_read_page_refuses_a_secret_file_by_name_or_link(
+    tmp_path: Path, name: str
+) -> None:
+    secret = tmp_path / (".ENV" if name == ".ENV" else ".env")
+    secret.write_text("API_KEY=private-token\n", encoding="utf-8")
+    if name == "notes.md":
+        (tmp_path / "notes.md").symlink_to(secret)
+
+    with pytest.raises(TextFileError) as exc_info:
+        _read_page(tmp_path, name)
+
+    assert exc_info.value.code == SECRET_PATH_WITHHELD
+    assert "private-token" not in str(exc_info.value)
+
+
+def test_read_page_reads_an_env_template(tmp_path: Path) -> None:
+    (tmp_path / ".env.example").write_text("API_KEY=\n", encoding="utf-8")
+
+    assert _read_page(tmp_path, ".env.example") == "API_KEY=\n"
+
+
+def test_search_skips_a_secret_file_without_mentioning_it(tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text("API_KEY=private-token\n", encoding="utf-8")
+    (tmp_path / ".env.example").write_text("API_KEY=\n", encoding="utf-8")
+
+    result = search_text(
+        sandbox_root=tmp_path,
+        canonical_sandbox_root=None,
+        query="API_KEY",
+        limit=20,
+        match_paths=True,
+    )
+
+    assert [match.path for match in result.matches] == [".env.example"]
+    assert result.truncation_reason is None
+    assert result.skipped_files == 0

@@ -224,7 +224,8 @@ class LocalMemoryFileEditorTools:
         )
         return (
             f"{prefix} Allowed roots: memory_draft=editable memory draft; {roots}. "
-            "Only memory_draft is editable."
+            "Only memory_draft is editable. Files holding secrets (such as .env "
+            "and credential stores) are withheld."
         )
 
     @property

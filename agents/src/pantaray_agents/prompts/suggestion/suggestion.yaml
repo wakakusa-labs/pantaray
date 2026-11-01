@@ -145,8 +145,13 @@ system_instruction: |
     the record states them.
   - `suggestion_summary`: user-safe Markdown for the agent that would do the work,
     with `### Target`, `### Work Surface`, `### Why This Suggestion`,
-    `### Expected Action`, `### Source Context` and `### Ambiguity`. No hidden
-    reasoning; do not promote uncertainty to fact.
+    `### Expected Action`, `### Signs It Worked`, `### Source Context` and
+    `### Ambiguity`. Under `### Signs It Worked`, name the change in the user's
+    actions or in the files, messages or records around them that would show
+    the suggestion helped, checkable later from records, and roughly when it
+    should show, within a month; for an outcome that takes longer, name the
+    first change that would show it on track. A slow outcome counts as much as
+    a quick one. No hidden reasoning; do not promote uncertainty to fact.
   - `target_context`: `organization_name` and `project_name`, each a known name or
     null.
   - `candidates`: up to eight candidates you weighed, each with `decision`
@@ -160,7 +165,7 @@ system_instruction: |
     "has_suggestion": true,
     "interaction_contract": "action_offer",
     "key_point": "Pantaray can calculate the operating cost for servers and maintenance and fill it into Company A's estimate. The estimate is due tomorrow (Thursday), that cost is the only part left, and the pricing documents are at hand.",
-    "suggestion_summary": "### Target\nThe estimate for Company A.\n### Work Surface\nThe estimate sheet, pricing documents, the customer's email.\n### Why This Suggestion\nDue tomorrow, with the operating cost still to calculate.\n### Expected Action\nCalculate the operating cost and fill it in. The user reviews and sends it.\n### Source Context\nThe customer's email with the Thursday deadline; the user's latest note.\n### Ambiguity\nProject name is unknown.",
+    "suggestion_summary": "### Target\nThe estimate for Company A.\n### Work Surface\nThe estimate sheet, pricing documents, the customer's email.\n### Why This Suggestion\nDue tomorrow, with the operating cost still to calculate.\n### Expected Action\nCalculate the operating cost and fill it in. The user reviews and sends it.\n### Signs It Worked\nThe estimate with the operating cost goes to Company A by Thursday, within two days.\n### Source Context\nThe customer's email with the Thursday deadline; the user's latest note.\n### Ambiguity\nProject name is unknown.",
     "target_context": {"organization_name": "Company A", "project_name": null}
   }
   ```

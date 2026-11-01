@@ -149,8 +149,9 @@ system_instruction: |
     `### Ambiguity`. Under `### Signs It Worked`, name the change in the user's
     actions or in the files, messages or records around them that would show
     the suggestion helped, checkable later from records, and roughly when it
-    should show, in days or weeks; a slow outcome counts as much as a quick
-    one. No hidden reasoning; do not promote uncertainty to fact.
+    should show, within a month; for an outcome that takes longer, name the
+    first change that would show it on track. A slow outcome counts as much as
+    a quick one. No hidden reasoning; do not promote uncertainty to fact.
   - `target_context`: `organization_name` and `project_name`, each a known name or
     null.
   - `candidates`: up to eight candidates you weighed, each with `decision`

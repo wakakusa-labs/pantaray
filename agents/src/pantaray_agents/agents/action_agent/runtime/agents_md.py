@@ -49,6 +49,7 @@ from pantaray_agents.tools.contract import BrokerPolicyError
 from pantaray_agents.tools.files.manifest_paths import (
     ResolvedManifestPath,
 )
+from pantaray_agents.tools.files.secret_paths import withheld_reason
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,10 @@ def load_pantaray_agents_md() -> str:
     """The Pantaray-wide instructions block, or ``""`` when there is none."""
 
     path = Path.home() / ".pantaray" / AGENTS_MD_FILENAME
+    # A link to .env or ~/.aws/credentials would put the secret in the prompt.
+    if withheld_reason(path, credentials_readable=False) is not None:
+        logger.warning("Skipping AGENTS.md that leads to a secrets file: %s", path)
+        return ""
     try:
         # O_NONBLOCK so a FIFO planted under the name cannot block the open.
         descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK)

@@ -68,6 +68,7 @@ from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tasks.internal_jobs import (
     action_subagent_broker as subagent_broker,
 )
+from pantaray_agents.tools.files import secret_paths
 from pantaray_agents.utils.trace_context import TraceContextManager
 
 
@@ -431,6 +432,24 @@ def test_the_pantaray_wide_file_is_wrapped_and_absent_is_empty(
     (tmp_path / ".pantaray" / "AGENTS.md").write_text("Be brief.\n", encoding="utf-8")
 
     assert load_pantaray_agents_md() == _block(Path("~/.pantaray"), "Be brief.\n")
+
+
+def test_a_pantaray_wide_file_leading_to_a_secret_is_skipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    (home / ".pantaray").mkdir(parents=True)
+    (home / ".aws").mkdir()
+    (home / ".aws" / "credentials").write_text("aws_secret\n", encoding="utf-8")
+    (tmp_path / ".env").write_text("API_KEY=secret\n", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(secret_paths, "_home", lambda: home.resolve())
+    agents_md = home / ".pantaray" / "AGENTS.md"
+
+    for target in (tmp_path / ".env", home / ".aws" / "credentials"):
+        agents_md.unlink(missing_ok=True)
+        agents_md.symlink_to(target)
+        assert load_pantaray_agents_md() == "", target
 
 
 def test_attached_instructions_survive_output_omission() -> None:

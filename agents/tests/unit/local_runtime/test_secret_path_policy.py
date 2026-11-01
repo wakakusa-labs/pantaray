@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -9,12 +10,17 @@ from tests.unit.local_runtime.ripgrep_backend_test_support import (
     install_fake_ripgrep_backend,
 )
 
+from pantaray_agents.local_runtime.tooling.brokering import action_path_policy
 from pantaray_agents.local_runtime.tooling.outside_workspace_grant import (
     folder_can_be_granted,
 )
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import BrokerPolicyError
-from pantaray_agents.tools.files import secret_paths
+from pantaray_agents.tools.files import read_paths, secret_paths
+from pantaray_agents.tools.files.manifest_paths import (
+    ResolvedManifestPath,
+    resolve_local_path,
+)
 from pantaray_agents.tools.files.secret_paths import (
     SECRET_PATH_WITHHELD,
     SecretTier,
@@ -89,6 +95,29 @@ def test_the_python_check_follows_the_rule_table(home: Path) -> None:
         assert (withheld_reason(absolute, credentials_readable=True) is not None) == (
             tier == "app_secret"
         ), path
+
+
+def test_unicode_aliases_that_apfs_opens_as_the_same_file_are_withheld(
+    home: Path,
+) -> None:
+    long_s = "\u017f"  # ſ, which APFS folds to s
+    kelvin = "\u212a"  # Kelvin sign, which APFS folds to k
+    # The home folder itself spelled another way, as /Uſers would be.
+    home_alias = str(home).replace("s", long_s, 1)
+    assert home_alias != str(home)
+
+    for path in (
+        f"{home_alias}/.aws/credentials",
+        f"{home}/.{long_s}{long_s}h/id_rsa",
+        f"{home}/.{kelvin}ube/config",
+        f"/p/.git-credential{long_s}",
+        "/p/.\u0045NV",
+    ):
+        assert withheld_reason(Path(path), credentials_readable=False) is not None, path
+    assert (
+        withheld_reason(Path(f"{home_alias}/notes.txt"), credentials_readable=False)
+        is None
+    )
 
 
 @pytest.mark.skipif(shutil.which("grep") is None, reason="needs a POSIX grep -E")
@@ -218,6 +247,38 @@ async def test_action_tools_neither_read_nor_patch_an_env_file(tmp_path: Path) -
 
     assert env.read_text(encoding="utf-8") == "kept\n"
     assert not (workspace / ".env.production").exists()
+
+
+@pytest.mark.asyncio
+async def test_a_link_swapped_to_a_secret_between_the_two_resolutions_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path, context = bootstrap_path_policy_runtime_db(
+        tmp_path, allowed_tool_ids=("read", "apply_patch")
+    )
+    _grant_workspace_full_access(db_path=db_path, capability="scoped_write")
+    workspace = context.workspace_path  # type: ignore[attr-defined]
+    (workspace / "notes.txt").write_text("kept\n", encoding="utf-8")
+    env = workspace / ".env"
+    env.write_text("kept\n", encoding="utf-8")
+
+    # notes.txt resolves to .env for the root lookup the I/O uses, as when a
+    # link is swapped after the name was checked.
+    def swapped(**kwargs: object) -> ResolvedManifestPath:
+        resolved = resolve_local_path(**kwargs)  # type: ignore[arg-type]
+        return replace(resolved, path=env, root_relative_path=".env")
+
+    monkeypatch.setattr(read_paths, "resolve_local_path", swapped)
+    monkeypatch.setattr(action_path_policy, "resolve_local_path", swapped)
+
+    for tool_id, args in (
+        ("read", {"path": "notes.txt"}),
+        ("apply_patch", _patch_args("update", "notes.txt")),
+    ):
+        with pytest.raises(BrokerPolicyError) as caught:
+            await _run(db_path=db_path, context=context, tool_id=tool_id, args=args)
+        assert caught.value.code == SECRET_PATH_WITHHELD, tool_id
+    assert env.read_text(encoding="utf-8") == "kept\n"
 
 
 def test_a_folder_inside_a_credentials_folder_is_never_allowed_for_writing(

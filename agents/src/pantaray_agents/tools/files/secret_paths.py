@@ -11,6 +11,12 @@ desktop app's page renderer that use ``secret_path_patterns`` all match the
 same text, so they cannot drift apart. Every letter is written as a bracket
 pair such as ``[eE]``, because APFS opens ``.ENV`` as ``.env`` and seatbelt's
 ``(regex #"...")`` has no case-insensitive flag.
+
+APFS also opens ``/Uſers`` (long s) or a Kelvin sign as ``/Users`` and ``k``:
+it compares names after Unicode NFD and case folding. Seatbelt matches the
+name the kernel stored, but a consumer matching a path as it was asked for
+must fold it the same way first (``unicodedata`` NFD, casefold, NFD again), as
+the Python check here does.
 """
 
 from __future__ import annotations
@@ -18,6 +24,7 @@ from __future__ import annotations
 import os
 import pwd
 import re
+import unicodedata
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
@@ -72,7 +79,7 @@ def withheld_reason(path: Path, *, credentials_readable: bool) -> SecretWithheld
     """
 
     for candidate in dict.fromkeys((path, path.resolve(strict=False))):
-        text = candidate.as_posix()
+        text = _folded(candidate.as_posix())
         for rule, withheld, excepted in _compiled(_home()):
             if credentials_readable and rule.tier == "cli_credential":
                 continue
@@ -91,11 +98,20 @@ def withheld_folder_reason(folder: Path) -> SecretWithheld | None:
 
     # A trailing slash stands for "something in this folder": only the folder
     # rules match it, never a file-name rule.
-    text = f"{folder.as_posix().rstrip('/')}/"
+    text = _folded(f"{folder.as_posix().rstrip('/')}/")
     for rule, withheld, _ in _compiled(_home()):
         if withheld.search(text):
             return SecretWithheld(path=folder, reason=rule.description)
     return None
+
+
+def refuse_withheld_paths(*paths: Path) -> None:
+    """Raise a file tool's refusal when any of these paths is withheld."""
+
+    for path in paths:
+        withheld = withheld_reason(path, credentials_readable=False)
+        if withheld is not None:
+            raise secret_path_error(withheld)
 
 
 def secret_path_error(withheld: SecretWithheld) -> BrokerPolicyError:
@@ -108,6 +124,11 @@ def secret_path_error(withheld: SecretWithheld) -> BrokerPolicyError:
             "project has one."
         ),
     )
+
+
+def _folded(text: str) -> str:
+    # Canonical caseless form, which APFS uses to compare names.
+    return unicodedata.normalize("NFD", unicodedata.normalize("NFD", text).casefold())
 
 
 def _home() -> Path:
@@ -258,6 +279,7 @@ __all__ = [
     "SecretPathPattern",
     "SecretTier",
     "SecretWithheld",
+    "refuse_withheld_paths",
     "secret_path_error",
     "secret_path_patterns",
     "withheld_folder_reason",

@@ -25,10 +25,7 @@ from pantaray_agents.tools.files.private_storage import (
 )
 from pantaray_agents.tools.files.read_paths import READ_PATH_DENIED, resolve_read_path
 from pantaray_agents.tools.files.read_scope import ReadScope
-from pantaray_agents.tools.files.secret_paths import (
-    secret_path_error,
-    withheld_reason,
-)
+from pantaray_agents.tools.files.secret_paths import refuse_withheld_paths
 
 from ..outside_workspace_grant import app_owned_roots
 from .broker_common import BrokerContext
@@ -103,15 +100,13 @@ def resolve_write_tool_path(
             code=WRITE_PATH_DENIED,
         )
     # Before any root is chosen: a secret is refused inside and outside the
-    # workspace alike, before an approval could be asked for it.
-    withheld = withheld_reason(
+    # workspace alike, before an approval could be asked for it. The path the
+    # write will use is checked again once resolved.
+    refuse_withheld_paths(
         candidate_path(
             raw_path=raw_path, cwd_path=Path(context.execution_session.cwd_path)
-        ),
-        credentials_readable=False,
+        )
     )
-    if withheld is not None:
-        raise secret_path_error(withheld)
     is_private_storage = _private_storage(context).hides
     try:
         resolved = resolve_local_path(
@@ -144,6 +139,7 @@ def resolve_write_tool_path(
                 context=context, candidate=candidate
             )
             if outside is not None:
+                refuse_withheld_paths(outside.path)
                 return outside
             if is_private_storage(candidate.resolve(strict=False)):
                 raise private_app_storage_error(code=WRITE_PATH_DENIED) from exc
@@ -152,6 +148,7 @@ def resolve_write_tool_path(
     # Action's own storage roots resolves to them and gets their permissions.
     if is_private_storage(resolved.path):
         raise private_app_storage_error(code=WRITE_PATH_DENIED)
+    refuse_withheld_paths(resolved.path)
     return resolved
 
 

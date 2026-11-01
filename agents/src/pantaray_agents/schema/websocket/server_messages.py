@@ -177,6 +177,17 @@ class ScreenCaptureRequestedMessage(BaseModel):
     app_name: str = Field(description="承認された撮影対象のアプリ名")
 
 
+class SecretPathRule(BaseModel):
+    """A file holding secrets: a path matching ``withheld`` and not ``excepted``.
+
+    POSIX EREs over an absolute path from ``tools.files.secret_paths``, which
+    JavaScript reads as they are.
+    """
+
+    withheld: str = Field(description="ERE of the withheld paths")
+    excepted: str | None = Field(description="ERE of the paths it leaves loadable")
+
+
 class HtmlRenderRequestedMessage(BaseModel):
     """An HTML render tool asks the desktop client to print one page to PDF.
 
@@ -203,6 +214,9 @@ class HtmlRenderRequestedMessage(BaseModel):
     )
     private_root_exceptions: list[str] = Field(
         description="Paths under private_roots that stay loadable"
+    )
+    secret_paths: list[SecretPathRule] = Field(
+        description="Files the page may never load, by name or by real path"
     )
     allow_network: bool = Field(
         description="Whether the page may load http(s) sub-resources"

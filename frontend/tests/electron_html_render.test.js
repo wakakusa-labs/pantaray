@@ -83,8 +83,17 @@ function loadWithElectron(electron, modulePath = MODULE_PATH) {
 
 const loadHtmlRender = (electron) => loadWithElectron(electron);
 
-const { decideFileAccess, decideNetworkRequest, htmlRenderPdfPath, isWithinRoot } = loadHtmlRender(
-  fakeElectron().electron
+const {
+  decideFileAccess,
+  decideNetworkRequest,
+  foldPath,
+  htmlRenderPdfPath,
+  isSecretPath,
+  isWithinRoot,
+} = loadHtmlRender(fakeElectron().electron);
+/** The runtime's rules for one home folder, its folds and its verdicts (Python reads it too). */
+const SECRET_PATHS = JSON.parse(
+  fs.readFileSync(path.join(__dirname, '../shared/secret_paths.fixtures.json'), 'utf8')
 );
 
 function harness(scripts = {}, postAnswer = async () => ({})) {
@@ -114,6 +123,7 @@ function request(overrides = {}) {
     fileRoots: ['/work'],
     privateRoots: [],
     privateRootExceptions: [],
+    secretPaths: [],
     allowNetwork: false,
     ...overrides,
   };
@@ -165,6 +175,71 @@ test('a private root reached under another letter case is still private', () => 
   assert.equal(
     isWithinRoot('/other/pantaray/x', '/Users/me/Library/Pantaray', () => false),
     false
+  );
+});
+
+test('a path folds as the runtime folds it', () => {
+  for (const [text, folded] of SECRET_PATHS.folds) {
+    assert.equal(foldPath(text), folded, JSON.stringify(text));
+  }
+});
+
+test("the runtime's secret rules withhold here what its file tools withhold", () => {
+  for (const [target, withheld] of SECRET_PATHS.cases) {
+    assert.equal(isSecretPath([target], SECRET_PATHS.rules), withheld, JSON.stringify(target));
+  }
+});
+
+test('a page never loads a file holding secrets, by its name or by where it leads', async () => {
+  const work = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-html-secret-')));
+  fs.writeFileSync(path.join(work, 'deck.html'), '<p>deck</p>');
+  fs.writeFileSync(path.join(work, '.env'), 'API_KEY=secret');
+  fs.writeFileSync(path.join(work, '.env.example'), 'API_KEY=');
+  fs.writeFileSync(path.join(work, 'plain.css'), 'p{}');
+  fs.symlinkSync(path.join(work, '.env'), path.join(work, 'notes.txt'));
+  fs.symlinkSync(path.join(work, 'plain.css'), path.join(work, '.Env.Local'));
+  fs.mkdirSync(path.join(work, 'venv', '.env'), { recursive: true });
+  fs.writeFileSync(path.join(work, 'venv', '.env', 'site.js'), '1');
+  const files = [
+    'deck.html',
+    '.env',
+    '.env.example',
+    'notes.txt',
+    '.Env.Local',
+    'venv/.env/site.js',
+  ];
+  const served = [];
+  const h = harness({
+    load: async (_url, { ses }) => {
+      for (const file of files) {
+        const response = await ses.fileHandler.handler({
+          url: pathToFileURL(path.join(work, file)).href,
+        });
+        served.push([file, response.type]);
+      }
+    },
+  });
+  await h.respond(
+    request({
+      htmlPath: path.join(work, 'deck.html'),
+      fileRoots: [work],
+      secretPaths: SECRET_PATHS.rules,
+    })
+  );
+  assert.deepEqual(served, [
+    ['deck.html', 'default'],
+    ['.env', 'error'],
+    ['.env.example', 'default'],
+    ['notes.txt', 'error'],
+    ['.Env.Local', 'error'],
+    ['venv/.env/site.js', 'default'],
+  ]);
+  assert.deepEqual(
+    h.posted[0].body.result.blocked_requests,
+    ['.env', 'notes.txt', '.Env.Local'].map((file) => ({
+      reason: 'not_allowed',
+      url: pathToFileURL(path.join(work, file)).href,
+    }))
   );
 });
 
@@ -558,6 +633,7 @@ test('the preview loads its own folder in private storage, and no private storag
     fileRoots: [workspace],
     privateRoots,
     privateRootExceptions: [workspace],
+    secretPaths: [],
   });
   const decide = (scope, target) => decideFileAccess(target, scope, notSameDirectory);
   assert.equal(decide(inWorkspace, `${workspace}/img/chart.png`), null);

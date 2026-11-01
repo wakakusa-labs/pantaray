@@ -399,6 +399,7 @@ export function createOrchestrationManager(params: {
         fileRoots: data.file_roots,
         privateRoots: data.private_roots,
         privateRootExceptions: data.private_root_exceptions,
+        secretPaths: data.secret_paths,
         allowNetwork: data.allow_network,
       });
       return;

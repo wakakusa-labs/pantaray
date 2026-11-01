@@ -23,10 +23,12 @@ from pantaray_agents.local_runtime.runtime.html_render_relay import (
 )
 from pantaray_agents.local_runtime.runtime.one_shot_requests import OneShotRequests
 from pantaray_agents.schema.events import OutboundEvent
+from pantaray_agents.tools.files.secret_paths import secret_path_patterns
 
 PDF_BYTES = b"%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n"
 PDF_SHA256 = hashlib.sha256(PDF_BYTES).hexdigest()
 BLOCKED = (BlockedRequest(reason="network_off", url="https://example.com/a.css"),)
+SECRET_RULE = secret_path_patterns("app_secret")[0]
 CLAIMED = HtmlRenderClaimed(
     byte_size=len(PDF_BYTES), sha256=PDF_SHA256, blocked_requests=BLOCKED
 )
@@ -62,6 +64,7 @@ async def _start_render(runtime: Runtime, data: bytes | None):
             file_roots=[Path("/work")],
             private_roots=[Path("/app-data")],
             private_root_exceptions=[Path("/app-data/attachments")],
+            secret_paths=[SECRET_RULE],
             allow_network=False,
         )
     )
@@ -110,6 +113,9 @@ async def test_a_rendered_pdf_is_verified_returned_and_removed(
         "file_roots": ["/work"],
         "private_roots": ["/app-data"],
         "private_root_exceptions": ["/app-data/attachments"],
+        "secret_paths": [
+            {"withheld": SECRET_RULE.withheld, "excepted": SECRET_RULE.excepted}
+        ],
         "allow_network": False,
     }
 

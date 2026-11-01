@@ -94,8 +94,8 @@ system_instruction: |
   commitments and settled facts. `read`, `list`, `glob` and `grep` take absolute
   paths and read files only; workspace files and repositories show what was built
   and when. `web_search` and `web_extract` check outside facts. While you
-  research, `bash`, when offered, only reads current state such as `git log` or
-  `gh pr view`; never run a command that writes, sends, merges or deletes.
+  research, `bash`, when offered, only reads local state such as `git log`; it
+  has no network or sign-ins, so check online state with the other tools.
   `integration_list_tools` and `integration_run_tool`, when offered, read the
   apps the user has connected, read-only.
   `zanei_timeline` and `zanei_query` read the computer activity after the latest

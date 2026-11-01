@@ -2,10 +2,11 @@
 
 A Suggestion has nobody to ask for approval, so it runs commands only while the
 user's default lets Actions run them without asking. Each command runs in the
-Action's command sandbox with the Action's read scope and limits. A research
-command has no writable folder at all and follows the user's network setting;
-a make-stage command writes only into the Suggestion's artifact folder and its
-own temp dir, with the network off. The make stage's ``run_python`` is such a
+Action's command sandbox with the Action's read scope and limits, never with
+the network or the user's sign-ins: a Suggestion reads text it was not asked to
+trust, so nothing it reads may leave the computer through a command. A research
+command has no writable folder at all; a make-stage command writes only into the
+Suggestion's artifact folder and its own temp dir. The make stage's ``run_python`` is such a
 command: the app runtime Python, run on its program as the Action's is.
 """
 
@@ -48,7 +49,6 @@ from ..repository import (
     load_effective_approval_preference,
 )
 from ..repository.command_invocation_audits import TerminalOutcome
-from ..repository.command_network_settings import load_command_network_enabled
 from ..sandbox.command_sandbox_protocol import (
     ActionSandboxStorage,
     BrokerToSandboxCommandRequest,
@@ -179,10 +179,9 @@ class SuggestionCommandSession:
         if self.artifact_folder is None:
             purpose = (
                 "Run one non-interactive shell command to check current state, "
-                "for example `git log` or `gh pr view`. No file can be written; "
-                "the network follows the user's command network setting. Never "
-                "run a command that changes something elsewhere, such as "
-                "merging, pushing, sending or deleting."
+                "for example `git log` or `git status`. No file can be written, "
+                "the network is off and the user's sign-ins are unavailable, so "
+                "check anything online with the web or integration tools."
             )
         else:
             purpose = (
@@ -206,7 +205,7 @@ class SuggestionCommandSession:
                 request_schema={
                     "type": "object",
                     "additionalProperties": False,
-                    "required": ["command", "cwd", "use_login_environment"],
+                    "required": ["command", "cwd"],
                     "properties": {
                         "command": {"type": "string", "minLength": 1, "pattern": r"\S"},
                         "cwd": {
@@ -219,13 +218,6 @@ class SuggestionCommandSession:
                                     if self.artifact_folder is None
                                     else "the artifact folder."
                                 )
-                            ),
-                        },
-                        "use_login_environment": {
-                            "type": "boolean",
-                            "description": (
-                                "true to use the user's sign-ins (real HOME, "
-                                "Keychain, ssh-agent), for CLIs such as gh."
                             ),
                         },
                     },
@@ -324,13 +316,9 @@ class SuggestionCommandSession:
         args = call.tool_args
         assert isinstance(args, dict)  # Validated against request_schema.
         command = args["command"]
-        use_login_environment = args["use_login_environment"]
-        assert isinstance(command, str) and isinstance(use_login_environment, bool)
+        assert isinstance(command, str)
         return await self._run_sandboxed(
-            call,
-            raw_cwd=args.get("cwd"),
-            bash_command=command,
-            use_login_environment=use_login_environment,
+            call, raw_cwd=args.get("cwd"), bash_command=command
         )
 
     async def run_python(
@@ -341,7 +329,7 @@ class SuggestionCommandSession:
         code = args["code"]
         assert isinstance(code, str)
         return await self._run_sandboxed(
-            call, raw_cwd=args.get("cwd"), python_code=code, use_login_environment=False
+            call, raw_cwd=args.get("cwd"), python_code=code
         )
 
     async def _run_sandboxed(
@@ -349,7 +337,6 @@ class SuggestionCommandSession:
         call: ReactToolCall,
         *,
         raw_cwd: JSONValue,
-        use_login_environment: bool,
         bash_command: str | None = None,
         python_code: str | None = None,
     ) -> ReactToolResult:
@@ -382,11 +369,6 @@ class SuggestionCommandSession:
                 error_code="CWD_DENIED",
                 message=str(exc),
             )
-        network_enabled = self.artifact_folder is None and load_command_network_enabled(
-            db_path=self.db_path,
-            busy_timeout_ms=self.busy_timeout_ms,
-            user_id=self.user_id,
-        )
         full_disk_read = self.read_access_scope == READ_ACCESS_SCOPE_FULL_ACCESS
         app_runtime_python = load_and_verify_app_runtime_python_from_env()
         if python_code is None:
@@ -438,15 +420,15 @@ class SuggestionCommandSession:
                     execution_kind=execution_kind,
                     workspace_root=execution_root,
                     resolved_executable=executable,
-                    use_login_environment=use_login_environment,
+                    use_login_environment=False,
                     full_disk_read=full_disk_read,
                 ),
                 timeout_ms=budget.timeout_ms,
                 stdout_max_bytes=budget.stdout_max_bytes,
                 stderr_max_bytes=budget.stderr_max_bytes,
                 temp_storage_limit_bytes=budget.temp_storage_limit_bytes,
-                network_policy="allow" if network_enabled else "deny",
-                use_login_environment=use_login_environment,
+                network_policy="deny",
+                use_login_environment=False,
                 run_outside_sandbox=False,
             )
 

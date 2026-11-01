@@ -46,6 +46,7 @@ _TABLE: tuple[tuple[str, SecretTier | None], ...] = (
     (".ssh/id_ed25519.pub", None),
     ("/p/keys/id_rsa_github", "cli_credential"),
     ("/p/keys/id_rsa_github.pub", None),
+    ("/p/src/id_rsa_parser.py", None),
     (".aws/credentials", "cli_credential"),
     (".aws/config", None),
     (".kube/config", "cli_credential"),
@@ -176,7 +177,7 @@ async def test_read_withholds_ssh_keys_but_not_what_ssh_reads(
 
 
 @pytest.mark.asyncio
-async def test_grep_skips_a_withheld_file_and_says_how_many(
+async def test_grep_skips_a_withheld_file_without_saying_it_matched(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     install_fake_ripgrep_backend(monkeypatch)
@@ -191,7 +192,8 @@ async def test_grep_skips_a_withheld_file_and_says_how_many(
     assert result.status == "success"
     assert [entry["path"] for entry in result.output["files"]] == ["notes.txt"]
     assert "TOKEN" not in str(result.output)
-    assert "1 matching file(s) hold secrets" in str(result.output["warning"])
+    # A note that a secret matched would let repeated patterns read it out.
+    assert ".env" not in str(result.output)
 
 
 @pytest.mark.asyncio

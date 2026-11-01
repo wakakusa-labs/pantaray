@@ -194,8 +194,10 @@ def _rules(home: Path) -> tuple[SecretPathPattern, ...]:
         ),
         SecretPathPattern(
             tier="cli_credential",
-            withheld=f"/{ssh_key}[^/]*$",
-            excepted=f"/{ssh_key}[^/]*{_literal('.pub')}$",
+            # A key file has no extension (id_ed25519_sk, id_rsa_github), so
+            # id_rsa.pub and a source file such as id_rsa_parser.py stay readable.
+            withheld=f"/{ssh_key}(_[^/.]*)?$",
+            excepted=None,
             directories_exempt=False,
             description="its name marks it as an SSH private key",
         ),

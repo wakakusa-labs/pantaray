@@ -138,12 +138,14 @@ system_instruction: |
     each, run one focused `memory_search` for whether it was later done,
     canceled, handed to someone else or replaced. Remove it if so; if it is
     still open, update when and from which source it was last confirmed. If
-    nothing is found, remove an item whose occasion has passed; keep any other
-    item under the one-month rule, adding "re-checked <date>, nothing new"
-    without changing the last-confirmed date. Neither a passed deadline nor an
-    event the work waits for is an occasion: work due by a date stays, now
-    overdue, and work that starts after an event, such as contacting a
-    customer once back from a trip, stays open.
+    the search ran and nothing is found, remove an item whose occasion has
+    passed; keep any other item under the one-month rule. A search that reports
+    it could not run is not "nothing found": keep the item. Add "re-checked
+    <date>" to every item kept, whatever the search found, without changing
+    the last-confirmed date beyond what the evidence shows. Neither a passed
+    deadline nor an event the work waits for is an occasion: work due by a
+    date stays, now overdue, and work that starts after an event, such as
+    contacting a customer once back from a trip, stays open.
 
   ## Big picture per endeavor
   Each endeavor the user pursues, work or personal, keeps a big picture at the

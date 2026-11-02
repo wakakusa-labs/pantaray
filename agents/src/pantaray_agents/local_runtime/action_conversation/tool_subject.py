@@ -36,7 +36,9 @@ _STRUCTURE_OPENERS = ("{", "[")
 # of ``{"host", "port", ...}`` the runtime itself writes. Only these are read: another
 # tool's result can carry an outside service's data, whose ``network`` says nothing about
 # where this call went.
-_NETWORK_REPORTING_TOOLS = frozenset({"render_html_page", "save_html_as_pdf"})
+_NETWORK_REPORTING_TOOLS = frozenset(
+    {"render_html_page", "save_html_as_pdf", "bash", "run_python"}
+)
 # A host is named without the port its scheme reaches by default.
 _DEFAULT_PORTS = frozenset({80, 443})
 # Hidden internal reasoning never reaches a row. `thinking` returns "detailed thinking and a
@@ -184,7 +186,7 @@ def project_tool_output_preview(
 def project_tool_network_hosts(tool_id: str, output: JSONValue) -> tuple[str, ...]:
     """Name, once each and in the order reached, the hosts one Tool step reached.
 
-    A spilled result keeps only its reference inline, so it names none.
+    A result spilled whole keeps its ``network`` beside the reference.
     """
 
     if tool_id not in _NETWORK_REPORTING_TOOLS or not isinstance(output, dict):

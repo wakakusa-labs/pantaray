@@ -119,6 +119,7 @@ def finalize_canceled_broker_invocation(
             "exit_code": -1,
             "stdout": partial.stdout,
             "stderr": partial.stderr,
+            "network": list(partial.network),
         }
     return finalize_local_tool_result(
         db_path=db_path,

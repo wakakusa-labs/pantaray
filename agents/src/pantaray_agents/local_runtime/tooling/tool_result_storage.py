@@ -47,6 +47,7 @@ class ActionFileToolResultMetadata(TypedDict):
     preview: NotRequired[str]
     retry_hint: NotRequired[str]
     status: NotRequired[str]
+    network: NotRequired[list[JSONValue]]
 
 
 class ActionBinaryToolResultMetadata(TypedDict):
@@ -142,6 +143,11 @@ def store_tool_result(
     # did without opening the file.
     if isinstance(output, dict) and isinstance(status := output.get("status"), str):
         reference["status"] = status
+    # Where a call connected is a record, not content: the row names the hosts
+    # of a large result too. Design limit: kept whole, so a command reaching
+    # thousands of hosts overruns the inline limit; cap it if such results occur.
+    if isinstance(output, dict) and isinstance(network := output.get("network"), list):
+        reference["network"] = network
 
     def with_preview(window: int) -> JSONValue:
         preview, retry_hint = previewer(window)

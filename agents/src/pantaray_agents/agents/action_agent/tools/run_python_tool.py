@@ -13,7 +13,10 @@ from .base import (
     ToolSpec,
     tool_execution_policy,
 )
-from .bash_tool import WRITE_FOLDER_REQUEST_FIELD_PRESENTATION
+from .bash_tool import (
+    COMMAND_OUTPUT_SCHEMA,
+    WRITE_FOLDER_REQUEST_FIELD_PRESENTATION,
+)
 from .broker_tool_input_schema import (
     BrokerToolFieldPresentation,
     broker_tool_input_spec_from_model,
@@ -87,7 +90,11 @@ RUN_PYTHON_TOOL = ToolDefinition.from_spec(
             pitfalls=(
                 "The code is approval-gated and sandboxed. Keep code minimal and "
                 "deterministic. Network access follows the user's command network "
-                "setting. Avoid long-running processes, background processes, and paths outside "
+                "setting; with it on, HTTP(S) requests go through Pantaray's proxy, "
+                "which urllib and requests pick up from the environment, and direct "
+                "connections (raw sockets, database clients, UDP) are blocked, so "
+                "run such a client with bash and run_outside_sandbox. Avoid "
+                "long-running processes, background processes, and paths outside "
                 "registered workspaces unless the user asked for that location. "
                 "Do not use run_python as a fallback to "
                 "bypass a rejected apply_patch; for direct known-content edits, "
@@ -105,16 +112,6 @@ RUN_PYTHON_TOOL = ToolDefinition.from_spec(
             fields=RUN_PYTHON_TOOL_FIELD_PRESENTATION,
             description="Run generated Python in the broker sandbox.",
         ),
-        output_schema={
-            "type": "object",
-            "properties": {
-                "status": {"type": "string"},
-                "exit_code": {"type": "integer"},
-                "stdout": {"type": "string"},
-                "stderr": {"type": "string"},
-            },
-            "required": ["status", "exit_code", "stdout", "stderr"],
-            "additionalProperties": False,
-        },
+        output_schema=COMMAND_OUTPUT_SCHEMA,
     )
 )

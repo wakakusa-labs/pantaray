@@ -8,6 +8,7 @@ from pantaray_agents.local_runtime.tooling.repository.command_invocation_audits 
     TerminalOutcome,
 )
 from pantaray_agents.local_runtime.tooling.sandbox.sandbox_denial import (
+    NETWORK_DENIAL_HINT,
     WRITE_FOLDER_REQUEST_HINT,
     is_likely_sandbox_denied,
     sandbox_denial_hint,
@@ -84,7 +85,12 @@ def test_a_command_the_runtime_stopped_is_not_denied(
 
 
 def _hint(
-    *, cwd: Path, stderr: str, exit_code: int = 1, credentials_readable: bool = False
+    *,
+    cwd: Path,
+    stderr: str,
+    exit_code: int = 1,
+    credentials_readable: bool = False,
+    network_allowed: bool = False,
 ) -> str | None:
     return sandbox_denial_hint(
         terminal_outcome="exited",
@@ -93,6 +99,7 @@ def _hint(
         stderr=stderr,
         cwd=cwd,
         credentials_readable=credentials_readable,
+        network_allowed=network_allowed,
     )
 
 
@@ -133,3 +140,45 @@ def test_credentials_are_withheld_only_without_the_login_environment(
 
     assert withheld is not None and "withheld" in withheld
     assert readable == WRITE_FOLDER_REQUEST_HINT
+
+
+# What clients print, under the network-on profile, for a direct connection or a
+# name lookup the sandbox refused (seen with sandbox-exec on macOS 26).
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "ssh: Could not resolve hostname github.com: nodename nor servname "
+        "provided, or not known\n",
+        "curl: (6) Could not resolve host: example.com\n",
+        "Error: getaddrinfo ENOTFOUND registry.example\n",
+        "Error: connect EPERM 192.0.2.1:5432\n",
+        "dial tcp: lookup api.example.com: no such host\n",
+        ";; connection timed out; no servers could be reached\n",
+        "ping: sendto: Operation not permitted\n",
+    ],
+)
+def test_a_refused_direct_connection_points_to_the_proxy(
+    tmp_path: Path, stderr: str
+) -> None:
+    assert _hint(cwd=tmp_path, stderr=stderr, network_allowed=True) == (
+        NETWORK_DENIAL_HINT
+    )
+
+
+def test_a_refused_connection_is_not_called_a_network_block_with_network_off(
+    tmp_path: Path,
+) -> None:
+    # With network off the proxy is not there to point to.
+    stderr = "ping: sendto: Operation not permitted\n"
+
+    assert _hint(cwd=tmp_path, stderr=stderr) == WRITE_FOLDER_REQUEST_HINT
+
+
+def test_a_denied_write_with_network_on_still_asks_for_write_folders(
+    tmp_path: Path,
+) -> None:
+    stderr = "touch: out.txt: Operation not permitted\n"
+
+    assert _hint(cwd=tmp_path, stderr=stderr, network_allowed=True) == (
+        WRITE_FOLDER_REQUEST_HINT
+    )

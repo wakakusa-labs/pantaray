@@ -44,6 +44,29 @@ WRITE_FOLDER_REQUEST_HINT = (
     "instead."
 )
 
+NETWORK_DENIAL_HINT = (
+    "This may have been blocked because the command tried to connect directly. "
+    "Commands reach the network only through Pantaray's proxy, which HTTP(S) "
+    "clients use from the HTTPS_PROXY and ALL_PROXY environment variables (git "
+    "over ssh too); direct connections such as ssh to a host, database clients, "
+    "raw sockets, UDP, and DNS lookups are blocked. If the task needs one, run "
+    "that command with bash and run_outside_sandbox."
+)
+# How a direct connection the sandbox refused reads in a client's error: a name
+# lookup with no resolver (getaddrinfo, curl and git, Node, Go, dig/nslookup),
+# or Node's refused connect().
+_NETWORK_DENIAL_MARKERS = (
+    "nodename nor servname provided",
+    "could not resolve host",
+    "getaddrinfo enotfound",
+    "no such host",
+    "no servers could be reached",
+    "connect eperm",
+)
+# A refused connect() or sendto() is EPERM; on the same line as one of these it
+# is a socket call, not a file write.
+_SOCKET_CALL_WORDS = ("connect", "sendto", "socket")
+
 
 # What an error line can name a path as: `cat: .env: ...`, `[Errno 1] ...: '.env'`.
 _PATH_TOKEN = re.compile(r"[^\s:'\"`]+")
@@ -57,16 +80,21 @@ def sandbox_denial_hint(
     stderr: str,
     cwd: Path,
     credentials_readable: bool,
+    network_allowed: bool,
 ) -> str | None:
     """What to tell the model about a command the sandbox likely blocked.
 
     A denial that names a file holding secrets gets the file tools' refusal,
     whatever the exit status (grep exits 2): asking for write folders cannot
-    fix it, and the model must not look for another way in.
+    fix it, and the model must not look for another way in. With network on, a
+    refused direct connection is told apart from a refused write first: both
+    can say "Operation not permitted".
     """
 
     if terminal_outcome != "exited" or exit_code == 0:
         return None
+    if network_allowed and _is_likely_network_denied(f"{stderr}\n{stdout}"):
+        return NETWORK_DENIAL_HINT
     for line in f"{stderr}\n{stdout}".splitlines():
         if not any(keyword in line.lower() for keyword in _DENIAL_KEYWORDS):
             continue
@@ -87,6 +115,17 @@ def sandbox_denial_hint(
     return None
 
 
+def _is_likely_network_denied(output: str) -> bool:
+    for line in output.lower().splitlines():
+        if any(marker in line for marker in _NETWORK_DENIAL_MARKERS):
+            return True
+        if "operation not permitted" in line and any(
+            word in line for word in _SOCKET_CALL_WORDS
+        ):
+            return True
+    return False
+
+
 def is_likely_sandbox_denied(
     *, terminal_outcome: TerminalOutcome, exit_code: int, stdout: str, stderr: str
 ) -> bool:
@@ -104,6 +143,7 @@ def is_likely_sandbox_denied(
 
 
 __all__ = [
+    "NETWORK_DENIAL_HINT",
     "WRITE_FOLDER_REQUEST_HINT",
     "is_likely_sandbox_denied",
     "sandbox_denial_hint",

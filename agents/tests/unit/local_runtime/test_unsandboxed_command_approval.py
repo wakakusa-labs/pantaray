@@ -112,6 +112,7 @@ def test_only_an_unsandboxed_request_starts_without_the_profile(
     sandbox_request = build_sandbox_request(
         request=request.model_copy(update={"run_outside_sandbox": run_outside_sandbox}),
         temp_dir=tmp_path,
+        egress=None,
     )
     argv = _launch_argv(sandbox_request)
 

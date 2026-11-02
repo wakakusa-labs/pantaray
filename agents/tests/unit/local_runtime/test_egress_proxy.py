@@ -14,6 +14,8 @@ import http.client
 import ipaddress
 import os
 import shutil
+import signal
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -498,3 +500,34 @@ async def test_connection_cap_closes_extra_connections_and_frees_slots(
         assert await _echoes(second) and await _echoes(third)
         second[1].close()
         third[1].close()
+
+
+# The fork under test is from a process running the proxy thread, as the
+# backend's own forks are.
+@pytest.mark.filterwarnings("ignore:This process .* is multi-threaded")
+async def test_a_forked_child_leases_a_proxy_of_its_own() -> None:
+    # Catches: a child forked after the proxy started inheriting its loop but
+    # not the thread running it, so leaving its first lease waits forever.
+    async with command_egress_lease() as parent_lease:
+        parent_port = _proxy(parent_lease)[1]
+
+    async def lease_in_child() -> int:
+        async with command_egress_lease() as lease:
+            return _proxy(lease)[1]
+
+    pid = os.fork()
+    if pid == 0:  # pragma: no cover - the child reports through its status
+        signal.alarm(10)
+        try:
+            port = asyncio.run(asyncio.wait_for(lease_in_child(), IO_TIMEOUT_S))
+            os._exit(0 if port != parent_port else 2)
+        except BaseException:
+            os._exit(1)
+    deadline = time.monotonic() + 15
+    while (waited := os.waitpid(pid, os.WNOHANG))[0] == 0:
+        if time.monotonic() > deadline:
+            os.kill(pid, signal.SIGKILL)
+            os.waitpid(pid, 0)
+            pytest.fail("the forked child hung leaving its lease")
+        await asyncio.sleep(0.05)
+    assert os.waitstatus_to_exitcode(waited[1]) == 0

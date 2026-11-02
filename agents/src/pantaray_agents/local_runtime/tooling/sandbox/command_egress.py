@@ -73,6 +73,7 @@ async def run_command_via_sandbox(
     if request.network_policy == "deny" or request.run_outside_sandbox:
         return await run(None)
     lease: EgressLease | None = None
+    outcome: UnprojectedBrokerToolOutcome | None = None
     try:
         async with command_egress_lease() as lease:
             outcome = await run(lease)
@@ -98,14 +99,23 @@ async def run_command_via_sandbox(
             "commands cannot reach the network right now.",
         ) from exc
     except asyncio.CancelledError as canceled:
+        # Canceled while the command ran, the cancellation carries what it had
+        # written; canceled while the lease was closing, after the command had
+        # returned, its finished output stands in for that.
         partial = canceled_command_output(canceled)
-        if partial is not None and lease is not None:
-            attach_canceled_command_output(
-                canceled,
-                stdout=partial.stdout,
-                stderr=partial.stderr,
-                network=tuple(_network_output(lease.destinations())),
-            )
+        if partial is not None:
+            written = (partial.stdout, partial.stderr)
+        elif outcome is not None:
+            written = (outcome.stdout_text or "", outcome.stderr_text or "")
+        else:
+            raise
+        assert lease is not None  # The command ran, so its lease was taken.
+        attach_canceled_command_output(
+            canceled,
+            stdout=written[0],
+            stderr=written[1],
+            network=tuple(_network_output(lease.destinations())),
+        )
         raise
     assert isinstance(outcome.output, dict)  # A command's result is a JSON object.
     return replace(

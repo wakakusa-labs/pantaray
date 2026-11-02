@@ -103,6 +103,7 @@ _ACTION_FILE_JSON_RESULT_SCHEMA: JsonSchema = {
         "preview": {"type": "string"},
         "retry_hint": {"type": "string"},
         "status": {"type": "string"},
+        "network": {"type": "array"},
     },
 }
 _APPROVAL_DENIED_RESULT_SCHEMA: JsonSchema = {

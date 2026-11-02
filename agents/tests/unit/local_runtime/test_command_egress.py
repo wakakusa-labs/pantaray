@@ -81,16 +81,17 @@ def test_network_on_profile_reaches_loopback_alone() -> None:
 
     profile = render_seatbelt_profile(request)
 
-    # No resolver socket, no network services, no outbound rule past loopback.
-    assert "mDNSResponder" not in profile
+    # The resolver's socket, and no outbound rule past loopback.
     assert "(system-network)" not in profile
-    assert '(remote tcp "*:*")' not in profile
     outbound = [
         line for line in profile.splitlines() if "(allow network-outbound" in line
     ]
-    assert outbound == ['(allow network-outbound (remote ip "localhost:*"))']
+    assert outbound == [
+        '(allow network-outbound (literal "/private/var/run/mDNSResponder"))',
+        '(allow network-outbound (remote ip "localhost:*"))',
+    ]
     backend = '(deny network-outbound (remote tcp "localhost:49152"))'
-    assert profile.index(outbound[0]) < profile.index(backend)
+    assert profile.index(outbound[1]) < profile.index(backend)
 
 
 async def test_proxy_env_names_the_lease_and_survives_paths_with_spaces(
@@ -309,3 +310,48 @@ async def test_a_canceled_command_keeps_where_it_went(
             "bytes_received": 20,
         },
     )
+
+
+async def test_a_command_canceled_while_its_lease_closes_keeps_its_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    closing = asyncio.Event()
+
+    async def command(**_: object) -> Any:
+        return UnprojectedBrokerToolOutcome(
+            status="success",
+            output={
+                "status": "success",
+                "exit_code": 0,
+                "stdout": "done",
+                "stderr": "",
+            },
+            stdout_text="done",
+            stderr_text="",
+        )
+
+    @asynccontextmanager
+    async def slowly_closing_lease() -> AsyncIterator[Any]:
+        class _Lease:
+            http_proxy_url = "http://token:x@127.0.0.1:9"
+
+            def destinations(self) -> tuple[NetworkDestination, ...]:
+                return (NetworkDestination("example.com", 443, 1, 0, 10, 20),)
+
+        yield _Lease()
+        closing.set()
+        await asyncio.sleep(60)
+
+    monkeypatch.setattr(command_egress, "run_command_in_sandbox", command)
+    monkeypatch.setattr(command_egress, "command_egress_lease", slowly_closing_lease)
+
+    call = asyncio.ensure_future(_call({}))
+    await asyncio.wait_for(closing.wait(), 5)
+    call.cancel()
+    with pytest.raises(asyncio.CancelledError) as canceled:
+        await call
+
+    partial = canceled_command_output(canceled.value)
+    assert partial is not None
+    assert (partial.stdout, partial.stderr) == ("done", "")
+    assert [entry["host"] for entry in partial.network] == ["example.com"]  # type: ignore[index]

@@ -344,6 +344,7 @@ def _validate_json_metadata(metadata: JSONValue) -> ActionFileToolResultMetadata
         or not isinstance(metadata.get("preview", ""), str)
         or not isinstance(metadata.get("retry_hint", ""), str)
         or not isinstance(metadata.get("status", ""), str)
+        or not isinstance(metadata.get("network", []), list)
         or any(
             not isinstance(metadata.get(field), int)
             or isinstance(metadata.get(field), bool)

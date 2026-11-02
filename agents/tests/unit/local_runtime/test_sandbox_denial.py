@@ -142,17 +142,19 @@ def test_credentials_are_withheld_only_without_the_login_environment(
     assert readable == WRITE_FOLDER_REQUEST_HINT
 
 
-# What clients print, under the network-on profile, for a direct connection or a
-# name lookup the sandbox refused (seen with sandbox-exec on macOS 26).
+# What clients print, under the network-on profile, for a direct connection the
+# sandbox refused (seen with sandbox-exec on macOS 26; Node's from its docs).
 @pytest.mark.parametrize(
     "stderr",
     [
-        "ssh: Could not resolve hostname github.com: nodename nor servname "
-        "provided, or not known\n",
-        "curl: (6) Could not resolve host: example.com\n",
-        "Error: getaddrinfo ENOTFOUND registry.example\n",
+        "ssh: connect to host github.com port 22: Operation not permitted\n",
+        "nc: connectx to example.com port 80 (tcp) failed: Operation not permitted\n",
+        'psql: error: connection to server at "db.example" (192.0.2.1), port 5432 '
+        "failed: Operation not permitted\n",
+        "fatal: unable to connect to github.com:\n"
+        "github.com[0: 20.27.177.113]: errno=Operation not permitted\n",
+        "urllib.error.URLError: <urlopen error [Errno 1] Operation not permitted>\n",
         "Error: connect EPERM 192.0.2.1:5432\n",
-        "dial tcp: lookup api.example.com: no such host\n",
         ";; connection timed out; no servers could be reached\n",
         "ping: sendto: Operation not permitted\n",
     ],
@@ -172,6 +174,15 @@ def test_a_refused_connection_is_not_called_a_network_block_with_network_off(
     stderr = "ping: sendto: Operation not permitted\n"
 
     assert _hint(cwd=tmp_path, stderr=stderr) == WRITE_FOLDER_REQUEST_HINT
+
+
+def test_a_name_that_does_not_resolve_is_not_called_a_network_block(
+    tmp_path: Path,
+) -> None:
+    # Names resolve in the sandbox, so this is the name's own failure.
+    stderr = "curl: (6) Could not resolve host: no-such-host.example\n"
+
+    assert _hint(cwd=tmp_path, stderr=stderr, network_allowed=True) is None
 
 
 def test_a_denied_write_with_network_on_still_asks_for_write_folders(

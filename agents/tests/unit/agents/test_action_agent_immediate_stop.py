@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
@@ -40,6 +41,12 @@ from pantaray_agents.agents.action_agent.runtime.handlers.nodes.act.failures imp
 from pantaray_agents.agents.action_agent.runtime.stop_watch import (
     ActionStopRequested,
     ActionStopWatch,
+)
+from pantaray_agents.local_runtime.action_conversation.entry_projection import (
+    project_action_tool_entry,
+)
+from pantaray_agents.local_runtime.action_conversation.history_queries import (
+    ActionHistoryToolRow,
 )
 from pantaray_agents.local_runtime.tooling.sandbox.command_sandbox_client import (
     attach_canceled_command_output,
@@ -481,3 +488,75 @@ async def test_stop_watch_hands_the_call_its_own_cancellation() -> None:
     partial = canceled_command_output(stopped.value.cancellation)
     assert partial is not None
     assert partial.stdout == "half"
+
+
+_REACHED = (
+    {
+        "host": "registry.npmjs.org",
+        "port": 443,
+        "connections": 1,
+        "failed": 0,
+        "bytes_sent": 512,
+        "bytes_received": 4096,
+    },
+)
+
+
+def _projected_network_hosts(step: dict) -> tuple[str, ...]:
+    entry = project_action_tool_entry(
+        ActionHistoryToolRow(
+            step["step_id"],
+            step["step_number"],
+            BASH_TOOL,
+            step["status"],
+            json.dumps(step["tool_output"]),
+            None,
+            "run-1",
+        )
+    )
+    return entry.network_hosts
+
+
+async def _killed_after_connecting(_agent, tool_def, _args, _state, **kwargs):
+    del tool_def, kwargs
+    try:
+        await asyncio.sleep(60)
+    except asyncio.CancelledError as canceled:
+        attach_canceled_command_output(
+            canceled, stdout="fetching\n", stderr="", network=_REACHED
+        )
+        raise
+    raise AssertionError("the killed call must not return a result")
+
+
+@pytest.mark.asyncio
+async def test_a_stopped_command_row_names_where_it_connected(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    agent, runtime, state, request = await _build_fixture(
+        monkeypatch,
+        tmp_path,
+        action_id="act-stop-network",
+        allowed_tool_ids=(BASH_TOOL,),
+    )
+    agent._generate_llm_action_turn = AsyncMock(  # type: ignore[attr-defined]
+        return_value=_turn((BASH_TOOL, {"command": "npm install"}))
+    )
+    state = await _think(agent, runtime, state)
+    started = asyncio.Event()
+
+    async def run_tool(*args, **kwargs):
+        started.set()
+        return await _killed_after_connecting(*args, **kwargs)
+
+    monkeypatch.setattr(call_execution, "run_tool", run_tool)
+
+    with TraceContextManager(local_job_id=_JOB_ID):
+        act_task = asyncio.ensure_future(_act(agent, runtime, state))
+        await _stop_after(
+            started, db_path=tmp_path / "runtime.db", action_id=request.action_id
+        )
+        await asyncio.wait_for(act_task, timeout=10)
+
+    [step] = _persisted_tool_steps(agent, request.action_id)
+    assert _projected_network_hosts(step) == ("registry.npmjs.org",)

@@ -46,26 +46,23 @@ WRITE_FOLDER_REQUEST_HINT = (
 
 NETWORK_DENIAL_HINT = (
     "This may have been blocked because the command tried to connect directly. "
-    "Commands reach the network only through Pantaray's proxy, which HTTP(S) "
+    "Commands reach other hosts only through Pantaray's proxy, which HTTP(S) "
     "clients use from the HTTPS_PROXY and ALL_PROXY environment variables (git "
     "over ssh too); direct connections such as ssh to a host, database clients, "
-    "raw sockets, UDP, and DNS lookups are blocked. If the task needs one, run "
-    "that command with bash and run_outside_sandbox."
+    "raw sockets, and UDP are blocked. If the task needs one, run that command "
+    "with bash and run_outside_sandbox."
 )
-# How a direct connection the sandbox refused reads in a client's error: a name
-# lookup with no resolver (getaddrinfo, curl and git, Node, Go, dig/nslookup),
-# or Node's refused connect().
+# How a direct connection the sandbox refused reads in a client's error where
+# no line pairs "Operation not permitted" with the call: Node's connect(), git's
+# connect, and dig or nslookup asking a DNS server themselves over UDP.
 _NETWORK_DENIAL_MARKERS = (
-    "nodename nor servname provided",
-    "could not resolve host",
-    "getaddrinfo enotfound",
-    "no such host",
-    "no servers could be reached",
     "connect eperm",
+    "errno=operation not permitted",
+    "no servers could be reached",
 )
 # A refused connect() or sendto() is EPERM; on the same line as one of these it
-# is a socket call, not a file write.
-_SOCKET_CALL_WORDS = ("connect", "sendto", "socket")
+# is a socket call, not a file write (ssh, nc, psql, ping, Python's urllib).
+_SOCKET_CALL_WORDS = ("connect", "sendto", "socket", "urlopen")
 
 
 # What an error line can name a path as: `cat: .env: ...`, `[Errno 1] ...: '.env'`.

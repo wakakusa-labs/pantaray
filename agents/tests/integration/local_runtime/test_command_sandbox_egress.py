@@ -191,19 +191,22 @@ async def test_a_direct_connection_to_another_host_is_refused(
 
 
 @pytest.mark.asyncio
-async def test_a_name_lookup_in_the_command_fails_and_points_to_the_proxy(
+async def test_names_resolve_but_a_direct_connection_to_the_address_is_refused(
     networked: RuntimeIntegrationTestbed,
 ) -> None:
+    # nc names the host it resolved; it fails at connect, not at the lookup.
     outcome = await execute_bash(
-        testbed=networked,
-        command="curl -sS --noproxy '*' --max-time 10 https://example.com/",
+        testbed=networked, command="/usr/bin/nc -vz -w5 example.com 80"
     )
 
     assert outcome.status == "error"
     assert isinstance(outcome.output, dict)
-    assert "Could not resolve host" in str(outcome.output["stderr"])
+    stderr = str(outcome.output["stderr"])
+    assert "connectx to example.com port 80" in stderr, stderr
+    assert "Operation not permitted" in stderr
     error = outcome.output["error"]
     assert isinstance(error, dict) and error["llm_feedback"] == NETWORK_DENIAL_HINT
+    assert _network(outcome) == []
 
 
 @pytest.mark.parametrize("route", ["direct", "proxy"])

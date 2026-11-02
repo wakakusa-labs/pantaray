@@ -36,7 +36,9 @@ HTML_RENDER_TEMP_DIRECTORY = ".tmp/html-renders"
 # render and the answer's round trip.
 HTML_RENDER_TIMEOUT_SECONDS = 30.0
 
-BlockedRequestReason = Literal["outside_read_scope", "network_off", "not_allowed"]
+BlockedRequestReason = Literal[
+    "outside_read_scope", "network_off", "not_allowed", "too_many_hosts"
+]
 
 HtmlRendererFailureCode = Literal[
     "HTML_LOAD_FAILED",

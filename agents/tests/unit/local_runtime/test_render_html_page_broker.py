@@ -29,6 +29,9 @@ from pantaray_agents.local_runtime.runtime.html_render_relay import (
     html_render_broker,
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker import execute_broker_tool
+from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
+    FinalizedBrokerPolicyError,
+)
 from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
     RenderHtmlPageOutput,
 )
@@ -246,8 +249,12 @@ async def test_electron_failure_reaches_the_model_with_its_code_and_requests(
     assert error.code == "HTML_LOAD_FAILED"
     assert "The page did not load." in str(error)
     assert "file:///etc/x.css" in str(error)
-    assert "Reached: cdn.example:443." in str(error)
     assert error.fix_hint
+    # The page reached the network before it failed; the step's output says where,
+    # as a successful one does, so the row names the host.
+    assert isinstance(error, FinalizedBrokerPolicyError)
+    assert isinstance(error.finalized_output, dict)
+    assert error.finalized_output["network"] == [{"host": "cdn.example", "port": 443}]
 
 
 async def test_an_unanswered_render_times_out_as_a_tool_error(

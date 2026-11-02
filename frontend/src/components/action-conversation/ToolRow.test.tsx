@@ -292,6 +292,34 @@ describe('ToolRow', () => {
     ).toBeVisible();
   });
 
+  it('lists every host the line only counts once the row opens, even with no output', async () => {
+    const loader: ActionToolOutputLoader = { load: vi.fn(), retry: vi.fn(), clear: vi.fn() };
+    const hosts = ['a.example', 'b.example', 'c.example:8443', 'd.example', 'e.example'];
+    render(row(loader, 'ja', { outputKey: null, networkHosts: hosts }));
+
+    expect(
+      screen.getByText('通信先: a.example, b.example, c.example:8443 ほか 2 件')
+    ).toBeVisible();
+    expect(screen.queryByRole('list', { name: '通信先' })).toBeNull();
+    await userEvent.click(screen.getByRole('button', { expanded: false }));
+
+    const list = screen.getByRole('list', { name: '通信先' });
+    expect(
+      within(list)
+        .getAllByRole('listitem')
+        .map((item) => item.textContent)
+    ).toEqual(hosts);
+    expect(loader.load).not.toHaveBeenCalled();
+  });
+
+  it('keeps a row whose hosts are all named on its line closed when it has nothing else to open', () => {
+    const loader: ActionToolOutputLoader = { load: vi.fn(), retry: vi.fn(), clear: vi.fn() };
+    render(row(loader, 'en', { outputKey: null, networkHosts: ['a.example', 'b.example'] }));
+
+    expect(screen.getByText('Connected to a.example, b.example')).toBeVisible();
+    expect(screen.queryByRole('button')).toBeNull();
+  });
+
   it('keeps output in one wrapping box and follows the rendered overflow for focusability', () => {
     let resized: (() => void) | null = null;
     vi.stubGlobal(

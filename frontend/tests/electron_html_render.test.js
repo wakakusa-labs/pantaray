@@ -134,6 +134,7 @@ function assertTornDown(fake) {
   assert.equal(fake.ses.unhandled, 'file');
   assert.equal(fake.ses.beforeRequest, null);
   assert.equal(fake.ses.listenerCount('will-download'), 0);
+  assert.equal(fake.ses.listenerCount('preconnect'), 0);
   assert.deepEqual(fake.ses.cleared.sort(), ['cache', 'storage']);
   assert.deepEqual(fake.ses.proxies.at(-1), { mode: 'system' });
 }
@@ -403,6 +404,47 @@ test('a render prints in a closed hidden window, writes the PDF and reports bloc
   assert.ok(!JSON.stringify(h.posted).includes('SECRET'));
   assert.deepEqual(fs.readFileSync(h.pdfPathOf('render-1')), PDF);
   assertTornDown(h);
+});
+
+test('a preconnected host is reported, and only with the network allowed', async () => {
+  for (const allowNetwork of [true, false]) {
+    const h = harness({
+      load: async (_url, { ses }) => {
+        // A resource hint opens a connection without passing webRequest.
+        ses.emit('preconnect', {}, 'https://fonts.gstatic.com/', true);
+      },
+    });
+    await h.respond(request({ allowNetwork }));
+    assert.deepEqual(
+      h.posted[0].body.result.network,
+      allowNetwork ? [{ host: 'fonts.gstatic.com', port: 443 }] : []
+    );
+    assertTornDown(h);
+  }
+});
+
+test('past 50 hosts a new host is refused, and a reported one still loads', async () => {
+  const decisions = [];
+  const h = harness({
+    load: async (_url, { ses }) => {
+      const hosts = [...Array.from({ length: 51 }, (_, i) => `h${i}.example`), 'h0.example'];
+      for (const host of hosts) {
+        ses.beforeRequest({ url: `https://${host}/a.js`, method: 'GET' }, (decision) =>
+          decisions.push([host, decision.cancel])
+        );
+      }
+    },
+  });
+  await h.respond(request({ allowNetwork: true }));
+  const result = h.posted[0].body.result;
+  assert.equal(result.network.length, 50);
+  assert.deepEqual(decisions.slice(-2), [
+    ['h50.example', true],
+    ['h0.example', false],
+  ]);
+  assert.deepEqual(result.blocked_requests, [
+    { reason: 'too_many_hosts', url: 'https://h50.example/a.js' },
+  ]);
 });
 
 test('a file swapped after it was opened is not served', async (t) => {

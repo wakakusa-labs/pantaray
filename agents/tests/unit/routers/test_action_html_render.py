@@ -64,14 +64,21 @@ async def _post(
                 "status": "failed",
                 "code": "HTML_PDF_TOO_LARGE",
                 "message": "The PDF is over 100 MB.",
-                "blocked_requests": [],
+                # Electron refuses a new host once it has reported as many as it may.
+                "blocked_requests": [
+                    {"reason": "too_many_hosts", "url": "https://h51.example/x"}
+                ],
                 # A page that failed may still have reached the network first.
                 "network": [{"host": "cdn.example", "port": 8443}],
             },
             HtmlRenderFailed(
                 code="HTML_PDF_TOO_LARGE",
                 message="The PDF is over 100 MB.",
-                blocked_requests=(),
+                blocked_requests=(
+                    BlockedRequest(
+                        reason="too_many_hosts", url="https://h51.example/x"
+                    ),
+                ),
                 network=(ContactedHost(host="cdn.example", port=8443),),
             ),
         ),

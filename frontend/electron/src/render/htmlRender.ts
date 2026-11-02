@@ -58,7 +58,11 @@ export type HtmlRenderRequest = HtmlRenderInput & {
   toolRequestId: string;
 };
 
-export type BlockedRequestReason = 'outside_read_scope' | 'network_off' | 'not_allowed';
+export type BlockedRequestReason =
+  | 'outside_read_scope'
+  | 'network_off'
+  | 'not_allowed'
+  | 'too_many_hosts';
 
 export type BlockedRequest = { reason: BlockedRequestReason; url: string };
 
@@ -100,7 +104,10 @@ export type SameDirectory = (left: string, right: string) => boolean;
 const RENDER_BUDGET_MS = 20_000;
 const MAX_PDF_BYTES = 100 * 1024 * 1024;
 const MAX_BLOCKED_REPORTED = 10;
-/** The runtime accepts this many; a deck reaches a handful (fonts, a chart library). */
+/**
+ * The runtime accepts this many; a deck reaches a handful (fonts, a chart library). Past it
+ * a request to a new host is refused, so every host a page reaches is reported.
+ */
 const MAX_HOSTS_REPORTED = 50;
 const DEFAULT_PORTS: Readonly<Record<string, number>> = { 'http:': 80, 'https:': 443 };
 /** No `persist:` prefix: the session lives in memory only. */
@@ -378,22 +385,31 @@ async function renderHtml(request: HtmlRenderInput): Promise<HtmlRenderOutcome> 
     if (blocked.length < MAX_BLOCKED_REPORTED) blocked.push({ reason, url });
   };
   const network = new Map<string, ContactedHost>();
-  // Only an allowed http(s) request leaves the machine; a local scheme is allowed too.
-  const reach = (url: string) => {
+  /** Records an allowed URL's host; a local scheme reaches none. Refuses a host past the cap. */
+  const reach = (url: string): BlockedRequestReason | null => {
     const { protocol, hostname, port } = new URL(url);
     const defaultPort = DEFAULT_PORTS[protocol];
-    if (defaultPort === undefined || network.size >= MAX_HOSTS_REPORTED) return;
+    if (defaultPort === undefined) return null;
     const contacted = { host: hostname, port: port === '' ? defaultPort : Number(port) };
-    network.set(`${contacted.host}:${contacted.port}`, contacted);
+    const key = `${contacted.host}:${contacted.port}`;
+    if (!network.has(key) && network.size >= MAX_HOSTS_REPORTED) return 'too_many_hosts';
+    network.set(key, contacted);
+    return null;
   };
   const ses = session.fromPartition(RENDER_PARTITION);
   ses.protocol.handle('file', (req) => serveFile(req.url, request, block));
   ses.webRequest.onBeforeRequest((details, callback) => {
-    const reason = decideNetworkRequest(details, request.allowNetwork);
-    if (reason === null) reach(details.url);
-    else block(reason, details.url);
+    const reason = decideNetworkRequest(details, request.allowNetwork) ?? reach(details.url);
+    if (reason !== null) block(reason, details.url);
     callback({ cancel: reason !== null });
   });
+  // A resource hint (`<link rel="preconnect">`) opens a connection without passing
+  // webRequest, and Electron has no way to refuse it. It sends no request, only the host
+  // name; the request that follows passes webRequest. Past the cap it is not recorded.
+  const recordPreconnect = (_event: Electron.Event, url: string) => {
+    if (request.allowNetwork) reach(url);
+  };
+  ses.on('preconnect', recordPreconnect);
   ses.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   ses.setPermissionCheckHandler(() => false);
   ses.setDevicePermissionHandler(() => false);
@@ -443,6 +459,7 @@ async function renderHtml(request: HtmlRenderInput): Promise<HtmlRenderOutcome> 
     ses.protocol.unhandle('file');
     ses.webRequest.onBeforeRequest(null);
     ses.removeListener('will-download', refuseDownload);
+    ses.removeListener('preconnect', recordPreconnect);
     await Promise.all([ses.setProxy({ mode: 'system' }), ses.clearCache(), ses.clearStorageData()]);
   }
 }

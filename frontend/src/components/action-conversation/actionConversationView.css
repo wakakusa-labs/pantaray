@@ -390,13 +390,22 @@
   opacity: 0.7;
 }
 
-/* データを送った先。開かずに見えるよう行の下に置き、本文の位置に揃える。 */
-.action-conversation__tool-network {
+/*
+ * データを送った先。開かずに見えるよう行の下に置き、本文の位置に揃える。名前で見せきれない分は、
+ * 開いた中に全部並べる。
+ */
+.action-conversation__tool-network,
+.action-conversation__tool-network-list {
   margin: 0;
   padding-left: calc(1em + 12px + 2 * var(--space-xs));
   color: var(--text-secondary);
   font-size: var(--text-meta-size);
   overflow-wrap: anywhere;
+}
+
+.action-conversation__tool-network-list {
+  margin-bottom: var(--space-xs);
+  list-style: none;
 }
 
 .action-conversation__tool-line > .action-conversation__state {

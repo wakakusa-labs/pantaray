@@ -52,6 +52,7 @@ from .broker_direct_render_pdf import (
     rendered_documents_dir,
     rendered_pages_outcome,
 )
+from .broker_failure_finalization import NetworkReachedPolicyError
 from .broker_outcome import UnprojectedBrokerToolOutcome
 from .broker_protocol import ValidatedRenderHtmlPageRequest
 
@@ -298,22 +299,18 @@ def _file_roots(scope: ReadScope) -> tuple[Path, ...]:
     )
 
 
-def _render_failed(target: ReadTarget, failure: HtmlRenderFailed) -> BrokerPolicyError:
+def _render_failed(
+    target: ReadTarget, failure: HtmlRenderFailed
+) -> NetworkReachedPolicyError:
     blocked = "".join(
         f" Refused ({request.reason}): {request.url}"
         for request in failure.blocked_requests
     )
-    contacted = (
-        " Reached: "
-        + ", ".join(f"{host.host}:{host.port}" for host in failure.network)
-        + "."
-        if failure.network
-        else ""
-    )
-    return BrokerPolicyError(
-        f"Could not print {target.display_path}: {failure.message}{blocked}{contacted}",
+    return NetworkReachedPolicyError(
+        f"Could not print {target.display_path}: {failure.message}{blocked}",
         code=failure.code,
         fix_hint=_FAILURE_HINTS[failure.code],
+        network=network_output(failure.network),
     )
 
 

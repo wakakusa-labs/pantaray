@@ -40,6 +40,7 @@ const COPY = {
     truncated: 'Output is truncated.',
     network: (hosts: string, rest: number) =>
       `Connected to ${hosts}${rest > 0 ? ` and ${rest} more` : ''}`,
+    networkList: 'Connected to',
     unavailable: {
       no_output: 'No output is available.',
       binary: 'Binary output cannot be displayed.',
@@ -57,6 +58,7 @@ const COPY = {
     truncated: '出力は途中まで表示されています。',
     network: (hosts: string, rest: number) =>
       `通信先: ${hosts}${rest > 0 ? ` ほか ${rest} 件` : ''}`,
+    networkList: '通信先',
     unavailable: {
       no_output: '表示できる出力はありません。',
       binary: 'バイナリ出力は表示できません。',
@@ -163,7 +165,9 @@ export function ToolRow({
   ]
     .filter((part) => part !== null && part !== undefined)
     .join(', ');
-  const expandable = outputKey !== null || images.length > 0;
+  // 名前で見せきれない通信先は、開くと全部並ぶ。出力を持たない行もそのために開けるようにする。
+  const hiddenHosts = networkHosts.length > SHOWN_HOSTS;
+  const expandable = outputKey !== null || images.length > 0 || hiddenHosts;
   // 途中で切れた出力は JSON として読めないので、diff を探さずにそのまま見せる。
   const diff = useMemo(
     () =>
@@ -270,6 +274,13 @@ export function ToolRow({
       {expandable && expanded ? (
         <div className="action-conversation__tool-output-detail">
           {/* 畳んだ行は 1 行のまま。撮ったもの・返ってきたものはこの中にだけ置く。 */}
+          {hiddenHosts ? (
+            <ul className="action-conversation__tool-network-list" aria-label={copy.networkList}>
+              {networkHosts.map((host) => (
+                <li key={host}>{host}</li>
+              ))}
+            </ul>
+          ) : null}
           {images.length > 0 ? <AttachedImages images={images} copy={imagesCopy} /> : null}
           {outputKey === null ? null : state.kind === 'idle' || state.kind === 'loading' ? (
             <span className="action-conversation__state" role="status">

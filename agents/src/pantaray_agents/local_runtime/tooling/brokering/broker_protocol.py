@@ -224,6 +224,13 @@ class HtmlBlockedRequest(BaseModel):
     url: str
 
 
+class HtmlContactedHost(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    host: str
+    port: int
+
+
 class RenderHtmlPageOutput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -232,6 +239,7 @@ class RenderHtmlPageOutput(BaseModel):
     message: str
     page_count: int
     blocked_requests: list[HtmlBlockedRequest]
+    network: list[HtmlContactedHost]
     attachments: list[RenderedPdfPageAttachment]
 
 
@@ -244,6 +252,7 @@ class SaveHtmlAsPdfOutput(BaseModel):
     byte_size: int
     replaced: bool
     blocked_requests: list[HtmlBlockedRequest]
+    network: list[HtmlContactedHost]
     message: str
 
 

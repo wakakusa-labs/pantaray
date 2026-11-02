@@ -51,7 +51,11 @@ from pantaray_agents.schema.agent.image import ImageInput
 from pantaray_agents.schema.tool_result import FormalToolStepOutput
 
 from .history_queries import ActionHistoryToolRow, ActionHistoryUserRow
-from .tool_subject import project_tool_output_preview, project_tool_subject
+from .tool_subject import (
+    project_tool_network_hosts,
+    project_tool_output_preview,
+    project_tool_subject,
+)
 
 # The durable tool output is the only per-step record of what a tool attached; the
 # runtime attachment itself lives in the checkpoint, which this projection does not read.
@@ -284,6 +288,7 @@ def project_action_tool_entry(row: ActionHistoryToolRow) -> ToolEntry:
     images: tuple[ImageInput, ...] = ()
     outcome: ToolEntryOutcome = "completed"
     file_edit: ToolEntryFileEdit | None = None
+    network_hosts: tuple[str, ...] = ()
     if row.tool_output is not None:
         try:
             output = FormalToolStepOutput.model_validate_json(row.tool_output)
@@ -313,6 +318,7 @@ def project_action_tool_entry(row: ActionHistoryToolRow) -> ToolEntry:
         images = _tool_entry_images(output.output)
         outcome = _tool_entry_outcome(output)
         file_edit = _tool_entry_file_edit(row, output)
+        network_hosts = project_tool_network_hosts(row.tool_id, output.output)
         if output_available:
             output_preview = project_tool_output_preview(
                 row.tool_id, output.output, output.output_storage_kind
@@ -331,6 +337,7 @@ def project_action_tool_entry(row: ActionHistoryToolRow) -> ToolEntry:
             output_available=output_available,
             images=images,
             file_edit=file_edit,
+            network_hosts=network_hosts,
         )
     except ValidationError as exc:
         raise ActionConversationEntryIntegrityError(

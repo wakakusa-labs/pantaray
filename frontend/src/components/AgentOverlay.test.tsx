@@ -2249,7 +2249,7 @@ describe('AgentOverlay broader E2E', () => {
     // ツールは一瞬で終わる。最初のツールが出たら、以降は作業の件数が進みを示す。
     const withTool = createConversationUpdate(null, true);
     // prettier-ignore
-    withTool.snapshot.page.runs[0].entries.push({ step_kind: 'tool', step_id: 'step-2', step_number: 2, label: 'Read file', status: 'success', outcome: 'completed', output_available: false, images: [], subject: null, output_preview: null, file_edit: null });
+    withTool.snapshot.page.runs[0].entries.push({ step_kind: 'tool', step_id: 'step-2', step_number: 2, label: 'Read file', status: 'success', outcome: 'completed', output_available: false, images: [], subject: null, output_preview: null, file_edit: null, network_hosts: [] });
     await act(async () => conversationListener?.(withTool));
     expect(screen.queryByText('Thinking')).toBeNull();
 
@@ -2274,7 +2274,7 @@ describe('AgentOverlay broader E2E', () => {
     const update = createConversationUpdate();
     update.snapshot.page.runs[0].entries.push(
       // prettier-ignore
-      { step_kind: 'tool', step_id: 'step-2', step_number: 2, label: 'Read file', status: 'success', outcome: 'completed', output_available: false, images: [], subject: null, output_preview: null, file_edit: null },
+      { step_kind: 'tool', step_id: 'step-2', step_number: 2, label: 'Read file', status: 'success', outcome: 'completed', output_available: false, images: [], subject: null, output_preview: null, file_edit: null, network_hosts: [] },
       // prettier-ignore
       { step_kind: 'user',
     chat_note: null, approved_suggestion: null, step_id: 'step-1', step_number: 1, message_id: '00000000-0000-4000-8000-000000000044', accepted_sequence: 1, content: 'Do the thing', images: [], project_refs: [], status: 'adopted' }
@@ -2311,7 +2311,7 @@ describe('AgentOverlay broader E2E', () => {
       update.snapshot.page.action.latest_run_id = runId;
       update.snapshot.page.runs[0].run_id = runId;
       // prettier-ignore
-      update.snapshot.page.runs[0].entries.push({ step_kind: 'tool', step_id: `step-${label}`, step_number: 2, label, status: 'success', outcome: 'completed', output_available: false, images: [], subject: null, output_preview: null, file_edit: null });
+      update.snapshot.page.runs[0].entries.push({ step_kind: 'tool', step_id: `step-${label}`, step_number: 2, label, status: 'success', outcome: 'completed', output_available: false, images: [], subject: null, output_preview: null, file_edit: null, network_hosts: [] });
       Object.defineProperty(scroll, 'scrollHeight', { ...scrollHeight, value: 1000 + pageVersion });
       return act(async () => conversationListener?.(update));
     };

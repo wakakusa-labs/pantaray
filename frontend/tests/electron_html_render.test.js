@@ -300,6 +300,11 @@ test('a render prints in a closed hidden window, writes the PDF and reports bloc
       for (const [url, method, resourceType] of [
         ['https://example.com/font.woff2', 'GET', 'font'],
         ['https://example.com/api', 'POST', 'xhr'],
+        // Reached hosts are reported by host and port only: a query can carry a token.
+        ['https://example.com/data.json?token=SECRET', 'GET', 'xhr'],
+        ['https://charts.example:8443/chart.js', 'GET', 'script'],
+        ['http://example.com/logo.png', 'GET', 'image'],
+        ['data:image/png;base64,AA==', 'GET', 'image'],
       ]) {
         ses.beforeRequest({ url, method, resourceType }, (decision) =>
           served.push([url, decision])
@@ -360,6 +365,10 @@ test('a render prints in a closed hidden window, writes the PDF and reports bloc
     ['missing.png', 'error', null, null, ''],
     ['https://example.com/font.woff2', { cancel: false }],
     ['https://example.com/api', { cancel: true }],
+    ['https://example.com/data.json?token=SECRET', { cancel: false }],
+    ['https://charts.example:8443/chart.js', { cancel: false }],
+    ['http://example.com/logo.png', { cancel: false }],
+    ['data:image/png;base64,AA==', { cancel: false }],
     'download refused',
   ]);
   // With the network allowed, connections go as the system routes them.
@@ -381,11 +390,17 @@ test('a render prints in a closed hidden window, writes the PDF and reports bloc
             { reason: 'not_allowed', url: pathToFileURL(work).href },
             { reason: 'not_allowed', url: 'https://example.com/api' },
           ],
+          network: [
+            { host: 'example.com', port: 443 },
+            { host: 'charts.example', port: 8443 },
+            { host: 'example.com', port: 80 },
+          ],
         },
       },
       fileExists: true,
     },
   ]);
+  assert.ok(!JSON.stringify(h.posted).includes('SECRET'));
   assert.deepEqual(fs.readFileSync(h.pdfPathOf('render-1')), PDF);
   assertTornDown(h);
 });

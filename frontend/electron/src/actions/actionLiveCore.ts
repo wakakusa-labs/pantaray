@@ -213,9 +213,10 @@ export function routeActionLiveEvent(event: OrchestrationServerEvent): ActionLiv
               subject: event.data.subject ?? null,
               output_preview: null,
               output_available: false,
-              // Attachments and line counts arrive with the durable page.
+              // Attachments, line counts and reached hosts arrive with the durable page.
               images: [],
               file_edit: null,
+              network_hosts: [],
             },
           },
         },

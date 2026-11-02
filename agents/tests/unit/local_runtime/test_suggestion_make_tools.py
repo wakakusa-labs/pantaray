@@ -353,7 +353,7 @@ async def _electron(desktop: RecordingDesktopSession, artifact_root: Path) -> No
     pdf_path.parent.mkdir(parents=True, exist_ok=True)
     write_pdf(pdf_path, marks=[(0, 0, 0)] * 2)
     pdf = pdf_path.read_bytes()
-    claimed = HtmlRenderClaimed(len(pdf), hashlib.sha256(pdf).hexdigest(), ())
+    claimed = HtmlRenderClaimed(len(pdf), hashlib.sha256(pdf).hexdigest(), (), ())
     assert (
         html_render_broker().answer(
             request_id=render_request_id, user_id="user-1", outcome=claimed

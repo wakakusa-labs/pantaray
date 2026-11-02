@@ -63,6 +63,7 @@ function row(
         })}
         preview={null}
         fileEdit={null}
+        networkHosts={[]}
         stepNumber={1}
         runLabel={language === 'ja' ? '実行 1: 2026/8/30' : 'Run 1: 8/30/2026'}
         status={null}
@@ -120,6 +121,7 @@ describe('ToolRow', () => {
             output_available: true,
             images: [],
             file_edit: null,
+            network_hosts: [],
           },
         },
       ],

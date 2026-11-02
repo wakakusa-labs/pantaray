@@ -15,6 +15,7 @@ from tests.unit.local_runtime.broker_test_support import (
 from pantaray_agents.local_runtime.runtime import html_render_relay as relay_module
 from pantaray_agents.local_runtime.runtime.html_render_relay import (
     BlockedRequest,
+    ContactedHost,
     HtmlRenderAnswer,
     HtmlRenderClaimed,
     HtmlRendered,
@@ -29,8 +30,12 @@ PDF_BYTES = b"%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n"
 PDF_SHA256 = hashlib.sha256(PDF_BYTES).hexdigest()
 BLOCKED = (BlockedRequest(reason="network_off", url="https://example.com/a.css"),)
 SECRET_RULE = secret_path_patterns("app_secret")[0]
+NETWORK = (ContactedHost(host="fonts.googleapis.com", port=443),)
 CLAIMED = HtmlRenderClaimed(
-    byte_size=len(PDF_BYTES), sha256=PDF_SHA256, blocked_requests=BLOCKED
+    byte_size=len(PDF_BYTES),
+    sha256=PDF_SHA256,
+    blocked_requests=BLOCKED,
+    network=NETWORK,
 )
 
 type Runtime = tuple[RecordingDesktopSession, Path, OneShotRequests[HtmlRenderAnswer]]
@@ -100,7 +105,9 @@ async def test_a_rendered_pdf_is_verified_returned_and_removed(
 ) -> None:
     outcome = await _render(runtime, data=PDF_BYTES, answer=CLAIMED)
 
-    assert outcome == HtmlRendered(pdf=PDF_BYTES, blocked_requests=BLOCKED)
+    assert outcome == HtmlRendered(
+        pdf=PDF_BYTES, blocked_requests=BLOCKED, network=NETWORK
+    )
     assert runtime[0].events == [OutboundEvent.HTML_RENDER_REQUESTED]
     [payload] = runtime[0].requests
     assert payload == {
@@ -124,8 +131,11 @@ async def test_a_rendered_pdf_is_verified_returned_and_removed(
 @pytest.mark.parametrize(
     ("data", "claimed"),
     [
-        (PDF_BYTES, HtmlRenderClaimed(len(PDF_BYTES), "0" * 64, BLOCKED)),
-        (PDF_BYTES, HtmlRenderClaimed(len(PDF_BYTES) + 1, PDF_SHA256, BLOCKED)),
+        (PDF_BYTES, HtmlRenderClaimed(len(PDF_BYTES), "0" * 64, BLOCKED, NETWORK)),
+        (
+            PDF_BYTES,
+            HtmlRenderClaimed(len(PDF_BYTES) + 1, PDF_SHA256, BLOCKED, NETWORK),
+        ),
         (None, CLAIMED),
     ],
     ids=["sha256_differs", "byte_size_differs", "no_file"],
@@ -138,6 +148,8 @@ async def test_a_pdf_that_does_not_match_the_claim_fails_integrity(
     assert isinstance(outcome, HtmlRenderFailed)
     assert outcome.code == "HTML_RENDER_INTEGRITY_FAILED"
     assert outcome.blocked_requests == BLOCKED
+    # The page reached these hosts whether or not its PDF holds up.
+    assert outcome.network == NETWORK
 
 
 @pytest.mark.asyncio
@@ -146,6 +158,7 @@ async def test_an_electron_failure_is_returned_as_answered(runtime: Runtime) -> 
         code="HTML_RENDERER_CRASHED",
         message="The page's renderer process exited.",
         blocked_requests=BLOCKED,
+        network=NETWORK,
     )
 
     # A partial file Electron left behind is removed all the same.

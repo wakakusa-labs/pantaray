@@ -2,7 +2,8 @@
 
 A conversation row says what the step acted on, so the projection publishes the one
 salient argument (the subject) and, when the step has no such argument, the head of the
-result it produced. Both are data only: the sentence around them belongs to the UI.
+result it produced. A step that let data leave the machine also names the hosts it
+reached. All are data only: the sentence around them belongs to the UI.
 """
 
 from __future__ import annotations
@@ -31,6 +32,13 @@ _ENCODED_PAYLOAD = re.compile(
 # Neither is a serialized object or list: a row that ends in `{ "status": "draft_updated" }`
 # shows the result's shape instead of saying anything. Only prose is worth a preview.
 _STRUCTURE_OPENERS = ("{", "[")
+# The tools whose result reports the hosts they reached, as a top-level ``network`` list
+# of ``{"host", "port", ...}`` the runtime itself writes. Only these are read: another
+# tool's result can carry an outside service's data, whose ``network`` says nothing about
+# where this call went.
+_NETWORK_REPORTING_TOOLS = frozenset({"render_html_page", "save_html_as_pdf"})
+# A host is named without the port its scheme reaches by default.
+_DEFAULT_PORTS = frozenset({80, 443})
 # Hidden internal reasoning never reaches a row. `thinking` returns "detailed thinking and a
 # concise answer (not shown to the user)" by its own definition, so its result is withheld
 # here rather than left to depend on the shape its output happens to take.
@@ -122,6 +130,9 @@ _TOOL_SUBJECTS: dict[str, _ArgsSubject] = {
     "send_message_to_subagent": _text("content"),
     "wait_subagents": _joined("child_process_ids"),
     "cancel_subagent": _text("child_process_id"),
+    "integration_list_tools": _text("toolkit"),
+    # A Composio slug names its toolkit and the action, as in GMAIL_SEND_EMAIL.
+    "integration_run_tool": _text("slug"),
 }
 
 
@@ -170,6 +181,28 @@ def project_tool_output_preview(
     return collapsed
 
 
+def project_tool_network_hosts(tool_id: str, output: JSONValue) -> tuple[str, ...]:
+    """Name, once each and in the order reached, the hosts one Tool step reached.
+
+    A spilled result keeps only its reference inline, so it names none.
+    """
+
+    if tool_id not in _NETWORK_REPORTING_TOOLS or not isinstance(output, dict):
+        return ()
+    network = output.get("network")
+    if not isinstance(network, list):
+        return ()
+    # A dict keeps the first-reached order while dropping repeats.
+    hosts: dict[str, None] = {}
+    for contacted in network:
+        if isinstance(contacted, dict) and isinstance(
+            host := contacted.get("host"), str
+        ):
+            port = contacted.get("port")
+            hosts.setdefault(host if port in _DEFAULT_PORTS else f"{host}:{port}", None)
+    return tuple(hosts)
+
+
 def _first_line(value: str, limit: int) -> str | None:
     """Keep the first line, and say with an ellipsis that the rest was cut."""
 
@@ -185,6 +218,7 @@ def _first_line(value: str, limit: int) -> str | None:
 __all__ = [
     "OUTPUT_PREVIEW_MAX_CHARACTERS",
     "SUBJECT_MAX_CHARACTERS",
+    "project_tool_network_hosts",
     "project_tool_output_preview",
     "project_tool_subject",
 ]

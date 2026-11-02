@@ -13,7 +13,8 @@
  * in an in-memory session, no Node, no preload, no new windows or navigation away,
  * no downloads, permissions or dialogs, and only the local files and network the
  * caller allowed. Each refused request is reported so the agent can see why a
- * picture or font is missing.
+ * picture or font is missing, and each host the page was let to reach is reported so
+ * the user can see where it went.
  */
 
 import { BrowserWindow, session, type WebContents } from 'electron';
@@ -61,6 +62,9 @@ export type BlockedRequestReason = 'outside_read_scope' | 'network_off' | 'not_a
 
 export type BlockedRequest = { reason: BlockedRequestReason; url: string };
 
+/** A host the page reached; never the URL, whose path and query can carry tokens. */
+export type ContactedHost = { host: string; port: number };
+
 export type HtmlRenderFailureCode =
   | 'HTML_LOAD_FAILED'
   | 'HTML_RENDER_TIMED_OUT'
@@ -69,12 +73,19 @@ export type HtmlRenderFailureCode =
   | 'HTML_PDF_TOO_LARGE';
 
 export type HtmlRenderAnswer =
-  | { status: 'rendered'; byte_size: number; sha256: string; blocked_requests: BlockedRequest[] }
+  | {
+      status: 'rendered';
+      byte_size: number;
+      sha256: string;
+      blocked_requests: BlockedRequest[];
+      network: ContactedHost[];
+    }
   | {
       status: 'failed';
       code: HtmlRenderFailureCode;
       message: string;
       blocked_requests: BlockedRequest[];
+      network: ContactedHost[];
     };
 
 /** The answer, with the PDF when one was printed. */
@@ -89,6 +100,9 @@ export type SameDirectory = (left: string, right: string) => boolean;
 const RENDER_BUDGET_MS = 20_000;
 const MAX_PDF_BYTES = 100 * 1024 * 1024;
 const MAX_BLOCKED_REPORTED = 10;
+/** The runtime accepts this many; a deck reaches a handful (fonts, a chart library). */
+const MAX_HOSTS_REPORTED = 50;
+const DEFAULT_PORTS: Readonly<Record<string, number>> = { 'http:': 80, 'https:': 443 };
 /** No `persist:` prefix: the session lives in memory only. */
 const RENDER_PARTITION = 'html-render';
 /** The id becomes a file name, so it may not carry a separator or a dot segment. */
@@ -363,11 +377,21 @@ async function renderHtml(request: HtmlRenderInput): Promise<HtmlRenderOutcome> 
   const block = (reason: BlockedRequestReason, url: string) => {
     if (blocked.length < MAX_BLOCKED_REPORTED) blocked.push({ reason, url });
   };
+  const network = new Map<string, ContactedHost>();
+  // Only an allowed http(s) request leaves the machine; a local scheme is allowed too.
+  const reach = (url: string) => {
+    const { protocol, hostname, port } = new URL(url);
+    const defaultPort = DEFAULT_PORTS[protocol];
+    if (defaultPort === undefined || network.size >= MAX_HOSTS_REPORTED) return;
+    const contacted = { host: hostname, port: port === '' ? defaultPort : Number(port) };
+    network.set(`${contacted.host}:${contacted.port}`, contacted);
+  };
   const ses = session.fromPartition(RENDER_PARTITION);
   ses.protocol.handle('file', (req) => serveFile(req.url, request, block));
   ses.webRequest.onBeforeRequest((details, callback) => {
     const reason = decideNetworkRequest(details, request.allowNetwork);
-    if (reason !== null) block(reason, details.url);
+    if (reason === null) reach(details.url);
+    else block(reason, details.url);
     callback({ cancel: reason !== null });
   });
   ses.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
@@ -393,7 +417,13 @@ async function renderHtml(request: HtmlRenderInput): Promise<HtmlRenderOutcome> 
     }
     const sha256 = createHash('sha256').update(pdf).digest('hex');
     return {
-      answer: { status: 'rendered', byte_size: pdf.byteLength, sha256, blocked_requests: blocked },
+      answer: {
+        status: 'rendered',
+        byte_size: pdf.byteLength,
+        sha256,
+        blocked_requests: blocked,
+        network: [...network.values()],
+      },
       pdf,
     };
   } catch (error) {
@@ -404,6 +434,7 @@ async function renderHtml(request: HtmlRenderInput): Promise<HtmlRenderOutcome> 
         code: error.code,
         message: error.message,
         blocked_requests: blocked,
+        network: [...network.values()],
       },
       pdf: null,
     };

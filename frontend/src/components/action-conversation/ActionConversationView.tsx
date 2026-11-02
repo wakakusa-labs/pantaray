@@ -217,6 +217,7 @@ export function StepItem({
         // 引数を持たないツールは、結果の頭を添えて何が返ったかだけでも見せる。
         preview={entry.subject === null ? entry.output_preview : null}
         fileEdit={entry.file_edit}
+        networkHosts={entry.network_hosts}
         stepNumber={entry.step_number}
         runLabel={runLabel}
         status={

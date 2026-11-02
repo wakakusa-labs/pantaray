@@ -86,8 +86,12 @@ export type ToolGroupLine = {
 function groupable(
   line: ActionConversationRunLine | ToolGroupLine | undefined
 ): line is ActionConversationToolItem {
+  // A step that sent data off the machine keeps its own row, so its hosts stay in view.
   return (
-    line?.kind === 'tool' && line.entry.status === 'success' && line.entry.outcome === 'completed'
+    line?.kind === 'tool' &&
+    line.entry.status === 'success' &&
+    line.entry.outcome === 'completed' &&
+    line.entry.network_hosts.length === 0
   );
 }
 

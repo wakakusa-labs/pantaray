@@ -461,6 +461,37 @@ def test_rejects_processing_tool_with_terminal_output() -> None:
         )
 
 
+@pytest.mark.parametrize("tool_id", ["render_html_page", "save_html_as_pdf"])
+def test_names_each_host_a_page_reached_once_and_its_port_only_when_unusual(
+    tool_id: str,
+) -> None:
+    network = [
+        {"host": "fonts.googleapis.com", "port": 443},
+        {"host": "fonts.gstatic.com", "port": 443},
+        # The same host over plain http is the same destination on the row.
+        {"host": "fonts.googleapis.com", "port": 80},
+        {"host": "charts.example", "port": 8443},
+    ]
+
+    entry = project_action_tool_entry(
+        ActionHistoryToolRow(
+            "step-1",
+            1,
+            tool_id,
+            "success",
+            _tool_output(output={"status": "saved", "network": network}),
+            None,
+            "run-1",
+        )
+    )
+
+    assert entry.network_hosts == (
+        "fonts.googleapis.com",
+        "fonts.gstatic.com",
+        "charts.example:8443",
+    )
+
+
 def test_projects_the_row_subject_and_result_preview_together() -> None:
     entry = project_action_tool_entry(
         ActionHistoryToolRow(

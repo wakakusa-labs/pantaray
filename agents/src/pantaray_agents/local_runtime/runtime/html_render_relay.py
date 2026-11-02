@@ -61,12 +61,22 @@ class BlockedRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class ContactedHost:
+    """A host the page was let to reach over the network. Never the URL: its path
+    and query can carry tokens."""
+
+    host: str
+    port: int
+
+
+@dataclass(frozen=True, slots=True)
 class HtmlRenderClaimed:
     """Electron's account of the PDF it wrote; every field is a claim."""
 
     byte_size: int
     sha256: str
     blocked_requests: tuple[BlockedRequest, ...]
+    network: tuple[ContactedHost, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +84,7 @@ class HtmlRenderFailed:
     code: HtmlRenderFailureCode
     message: str
     blocked_requests: tuple[BlockedRequest, ...]
+    network: tuple[ContactedHost, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +93,7 @@ class HtmlRendered:
 
     pdf: bytes
     blocked_requests: tuple[BlockedRequest, ...]
+    network: tuple[ContactedHost, ...]
 
 
 type HtmlRenderAnswer = HtmlRenderClaimed | HtmlRenderFailed
@@ -153,6 +165,7 @@ async def request_html_render(
                     f"{int(HTML_RENDER_TIMEOUT_SECONDS)}s."
                 ),
                 blocked_requests=(),
+                network=(),
             )
         if isinstance(answer, HtmlRenderFailed):
             return answer
@@ -183,6 +196,7 @@ def _read_claimed_pdf(
                 f"The rendered PDF does not match the desktop app's answer: {reason}."
             ),
             blocked_requests=claimed.blocked_requests,
+            network=claimed.network,
         )
 
     try:
@@ -203,7 +217,9 @@ def _read_claimed_pdf(
         os.close(descriptor)
     if hashlib.sha256(pdf).hexdigest() != claimed.sha256:
         return integrity_failed("sha256 differs")
-    return HtmlRendered(pdf=pdf, blocked_requests=claimed.blocked_requests)
+    return HtmlRendered(
+        pdf=pdf, blocked_requests=claimed.blocked_requests, network=claimed.network
+    )
 
 
 __all__ = [
@@ -211,6 +227,7 @@ __all__ = [
     "HTML_RENDER_TIMEOUT_SECONDS",
     "BlockedRequest",
     "BlockedRequestReason",
+    "ContactedHost",
     "HtmlRenderAnswer",
     "HtmlRenderClaimed",
     "HtmlRenderFailed",

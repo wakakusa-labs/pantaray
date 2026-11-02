@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Final, Literal
 
 from pantaray_agents.local_runtime.runtime.html_render_relay import (
+    ContactedHost,
     HtmlRendered,
     HtmlRenderFailed,
     HtmlRenderFailureCode,
@@ -114,6 +115,7 @@ async def run_render_html_page_executor(
             "path": target.display_path,
             "page_count": drawn.page_count,
             "blocked_requests": blocked_requests_output(rendered),
+            "network": network_output(rendered.network),
         },
     )
 
@@ -238,6 +240,13 @@ def blocked_requests_output(rendered: HtmlRendered) -> list[JSONValue]:
     ]
 
 
+def network_output(network: tuple[ContactedHost, ...]) -> list[JSONValue]:
+    """The hosts the page reached, in the ``network`` shape every tool that lets
+    data leave the machine reports and the conversation row shows."""
+
+    return [{"host": contacted.host, "port": contacted.port} for contacted in network]
+
+
 def resolve_html_file(*, scope: ReadScope, raw_path: str) -> ReadTarget:
     """Resolve the regular .html/.htm file ``read`` may open, refusing a huge one."""
 
@@ -294,8 +303,15 @@ def _render_failed(target: ReadTarget, failure: HtmlRenderFailed) -> BrokerPolic
         f" Refused ({request.reason}): {request.url}"
         for request in failure.blocked_requests
     )
+    contacted = (
+        " Reached: "
+        + ", ".join(f"{host.host}:{host.port}" for host in failure.network)
+        + "."
+        if failure.network
+        else ""
+    )
     return BrokerPolicyError(
-        f"Could not print {target.display_path}: {failure.message}{blocked}",
+        f"Could not print {target.display_path}: {failure.message}{blocked}{contacted}",
         code=failure.code,
         fix_hint=_FAILURE_HINTS[failure.code],
     )
@@ -305,6 +321,7 @@ __all__ = [
     "BLOCKED_REQUESTS_NOTE",
     "blocked_requests_output",
     "draw_printed_html",
+    "network_output",
     "print_html_file",
     "print_html_target",
     "resolve_html_file",

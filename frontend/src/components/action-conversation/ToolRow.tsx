@@ -18,6 +18,9 @@ import type { ToolDisplay, ToolLine } from './toolDisplayName';
 
 type FileEdit = NonNullable<ActionConversationToolItem['entry']['file_edit']>;
 
+/** 通信先はこの数だけ名前で見せ、残りは件数で言う。行を 1 行に近く保つため。 */
+const SHOWN_HOSTS = 3;
+
 type LoadState =
   | Readonly<{ kind: 'idle' }>
   | Readonly<{ kind: 'loading' }>
@@ -35,6 +38,8 @@ const COPY = {
     added: (count: number) => `${count} line${count === 1 ? '' : 's'} added`,
     removed: (count: number) => `${count} line${count === 1 ? '' : 's'} removed`,
     truncated: 'Output is truncated.',
+    network: (hosts: string, rest: number) =>
+      `Connected to ${hosts}${rest > 0 ? ` and ${rest} more` : ''}`,
     unavailable: {
       no_output: 'No output is available.',
       binary: 'Binary output cannot be displayed.',
@@ -50,6 +55,8 @@ const COPY = {
     added: (count: number) => `${count} 行追加`,
     removed: (count: number) => `${count} 行削除`,
     truncated: '出力は途中まで表示されています。',
+    network: (hosts: string, rest: number) =>
+      `通信先: ${hosts}${rest > 0 ? ` ほか ${rest} 件` : ''}`,
     unavailable: {
       no_output: '表示できる出力はありません。',
       binary: 'バイナリ出力は表示できません。',
@@ -94,6 +101,7 @@ export function ToolRow({
   line,
   preview,
   fileEdit,
+  networkHosts,
   stepNumber,
   runLabel,
   status,
@@ -110,6 +118,8 @@ export function ToolRow({
   preview: string | null;
   /** 当てたパッチの行数。見出しの文の後ろに +N −M で添える。 */
   fileEdit: FileEdit | null;
+  /** この回がデータを送った先。開かなくても見えるよう、行の下に添える。 */
+  networkHosts: readonly string[];
   stepNumber: number;
   runLabel: string;
   status: ToolRowStatus | null;
@@ -249,6 +259,14 @@ export function ToolRow({
         )}
         <ToolRowStatusLabel status={status} announce={announceStatus} />
       </div>
+      {networkHosts.length > 0 ? (
+        <p className="action-conversation__tool-network">
+          {copy.network(
+            networkHosts.slice(0, SHOWN_HOSTS).join(', '),
+            networkHosts.length - SHOWN_HOSTS
+          )}
+        </p>
+      ) : null}
       {expandable && expanded ? (
         <div className="action-conversation__tool-output-detail">
           {/* 畳んだ行は 1 行のまま。撮ったもの・返ってきたものはこの中にだけ置く。 */}

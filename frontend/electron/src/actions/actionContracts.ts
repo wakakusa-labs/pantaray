@@ -316,6 +316,9 @@ const ToolEntrySchema = z
       .strict()
       .nullable()
       .default(null),
+    // The hosts the step let data reach, host or host:port, once each in the order reached.
+    // A step recorded before its tool reported them names none.
+    network_hosts: z.array(NonBlankTextSchema).default([]),
   })
   .strict()
   .superRefine((entry, context) => {

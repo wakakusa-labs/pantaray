@@ -299,6 +299,8 @@ class ToolEntry(_ActionConversationModel):
     images: tuple[ImageInput, ...]
     # Set only for an applied patch whose diff the durable row holds inline.
     file_edit: ToolEntryFileEdit | None
+    # The hosts this step let data reach, host or host:port, once each in the order reached.
+    network_hosts: tuple[NonBlankText, ...]
 
     @model_validator(mode="after")
     def validate_output_availability(self) -> Self:

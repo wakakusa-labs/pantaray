@@ -39,6 +39,8 @@ const REGISTERED_TOOL_IDS = [
   'send_message_to_subagent',
   'wait_subagents',
   'cancel_subagent',
+  'integration_list_tools',
+  'integration_run_tool',
 ] as const;
 
 describe('resolveToolDisplay', () => {

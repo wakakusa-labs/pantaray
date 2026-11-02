@@ -11,6 +11,9 @@ from typing import cast
 import pytest
 
 import pantaray_agents.local_runtime.tooling.tool_result_recovery as tool_result_recovery
+from pantaray_agents.local_runtime.tooling.tool_result_reading import (
+    load_action_file_result,
+)
 from pantaray_agents.local_runtime.tooling.tool_result_recovery import (
     ToolResultRecoveryError,
     reconcile_tool_results_for_startup,
@@ -523,6 +526,50 @@ def test_recovery_keeps_every_moved_text_and_removes_unreferenced_ones(
     assert not orphan.exists()
     assert result.preserved_file_count == 3
     assert result.removed_file_count == 1
+
+
+def test_a_command_result_stored_whole_with_its_network_loads_and_recovers(
+    tmp_path: Path,
+) -> None:
+    # NUL-separated output (find -print0) does not page as text, so the whole
+    # result is stored, with its network kept beside the reference.
+    db_path = tmp_path / "runtime.db"
+    _create_reference_db(db_path)
+    root = _tool_results_root(db_path)
+    root.mkdir(parents=True)
+    output = {
+        "status": "success",
+        "exit_code": 0,
+        "stdout": "./build/file\0" * 3_000,
+        "stderr": "",
+        "network": [{"host": "pypi.org", "port": 443}],
+    }
+    stored = store_tool_result(
+        action_tool_results_path=root, invocation_id="invocation-1", output=output
+    )
+    release_stored_tool_result(stored)
+    reference = stored.output_json
+    assert isinstance(reference, dict) and "network" in reference
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "INSERT INTO tool_invocations VALUES (?, ?, ?, ?)",
+            ("invocation-1", "user-1", "action-1", "step-1"),
+        )
+        connection.execute(
+            "INSERT INTO tool_outputs VALUES (?, ?, ?, 'action_file')",
+            ("output-1", "invocation-1", json.dumps(reference)),
+        )
+
+    loaded = load_action_file_result(
+        action_tool_results_path=root,
+        invocation_id="invocation-1",
+        output=reference,
+        max_bytes=cast(int, reference["byte_size"]),
+    )
+    result = reconcile_tool_results_for_startup(db_path=db_path, busy_timeout_ms=1_000)
+
+    assert loaded == output
+    assert result.preserved_file_count == 1
 
 
 def _pending_approval_named_only_inside_json(db_path: Path) -> tuple[Path, Path]:

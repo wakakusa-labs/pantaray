@@ -74,6 +74,7 @@ def test_render_workspace_profile_is_limited_to_declared_roots() -> None:
     request = build_sandbox_request(
         request=_validated_command_request(network_policy="deny"),
         temp_dir=Path("/system-temp/worker-temp"),
+        egress=None,
     )
     profile = render_seatbelt_profile(request)
 
@@ -99,6 +100,7 @@ def test_render_workspace_profile_includes_toolchain_read_roots(
     request = build_sandbox_request(
         request=_validated_command_request(network_policy="deny"),
         temp_dir=Path("/system-temp/worker-temp"),
+        egress=None,
     )
     profile = render_seatbelt_profile(request)
     assert '(subpath "/xcode/usr/share/git-core")' in profile
@@ -128,6 +130,7 @@ def test_render_profile_escapes_every_path_authority(
     request = build_sandbox_request(
         request=validated_request,
         temp_dir=Path(temp_dir),
+        egress=None,
     )
 
     profile = render_seatbelt_profile(request)
@@ -157,6 +160,7 @@ def test_render_profile_rejects_unresolved_placeholders(
     request = build_sandbox_request(
         request=_validated_command_request(network_policy="deny"),
         temp_dir=Path("/system-temp/worker-temp"),
+        egress=None,
     )
 
     monkeypatch.setattr(seatbelt_profiles, "PROFILE_TEMPLATE_PATH", template_path)
@@ -203,7 +207,9 @@ async def test_command_spawn_failure_includes_os_reason(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     request = build_sandbox_request(
-        request=_validated_command_request(network_policy="deny"), temp_dir=tmp_path
+        request=_validated_command_request(network_policy="deny"),
+        temp_dir=tmp_path,
+        egress=None,
     )
     messages: list[object] = []
     monkeypatch.setattr(command_sandbox_worker, "_emit_message", messages.append)
@@ -229,7 +235,7 @@ def test_private_storage_deny_overrides_broad_read_and_write_grants() -> None:
         update={"real_read_roots": ["/"], "real_write_roots": ["/"]}
     )
     request = build_sandbox_request(
-        request=validated, temp_dir=Path("/system-temp/worker-temp")
+        request=validated, temp_dir=Path("/system-temp/worker-temp"), egress=None
     )
     profile = render_seatbelt_profile(request)
     assert (
@@ -255,7 +261,9 @@ def test_system_temp_roots_open_to_commands_beneath_private_storage_deny() -> No
     )
     profile = render_seatbelt_profile(
         build_sandbox_request(
-            request=validated, temp_dir=Path("/system-temp/worker-temp")
+            request=validated,
+            temp_dir=Path("/system-temp/worker-temp"),
+            egress=None,
         )
     )
 
@@ -280,6 +288,7 @@ def test_login_environment_profile_adds_keychain_and_agent() -> None:
     normal = build_sandbox_request(
         request=_validated_command_request(network_policy="deny"),
         temp_dir=Path("/system-temp/worker-temp"),
+        egress=None,
     )
     login = build_sandbox_request(
         request=_validated_command_request(network_policy="deny").model_copy(
@@ -290,6 +299,7 @@ def test_login_environment_profile_adds_keychain_and_agent() -> None:
             }
         ),
         temp_dir=Path("/system-temp/worker-temp"),
+        egress=None,
     )
     normal_profile = render_seatbelt_profile(normal)
     login_profile = render_seatbelt_profile(login)

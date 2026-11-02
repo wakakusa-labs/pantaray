@@ -28,6 +28,7 @@ from pantaray_agents.tools.files.render_pages import (
 )
 
 from ..models import BrokerNetworkPolicy
+from ..sandbox.egress_proxy import NetworkDestination
 
 BrokerExecutionPath = Literal[
     "broker_direct_read",
@@ -360,6 +361,9 @@ class BashToolOutput(BaseModel):
     stderr: str
     signal: int | None = None
     error: ToolError | None = None
+    # Where the command connected through its egress lease; set once the lease
+    # has ended, and empty when its network is off.
+    network: list[NetworkDestination] = Field(default_factory=list)
 
 
 class RunPythonToolOutput(BaseModel):
@@ -371,6 +375,7 @@ class RunPythonToolOutput(BaseModel):
     stderr: str
     signal: int | None = None
     error: ToolError | None = None
+    network: list[NetworkDestination] = Field(default_factory=list)
 
 
 type BrokerToolArgs = (

@@ -16,6 +16,7 @@ import asyncio
 import concurrent.futures
 import hashlib
 import ipaddress
+import os
 import secrets
 import socket
 import threading
@@ -171,6 +172,9 @@ def _token_key(token: str) -> bytes:
 
 class _EgressProxy:
     def __init__(self) -> None:
+        self._reset()
+
+    def _reset(self) -> None:
         self._start_lock = threading.Lock()
         self._running: tuple[asyncio.AbstractEventLoop, int] | None = None
         self._lock = threading.Lock()
@@ -348,6 +352,10 @@ async def _abort_connections(state: _LeaseState) -> None:
 
 
 _PROCESS_PROXY = _EgressProxy()
+# A forked child inherits the proxy's state but not its thread, and possibly a
+# lock some other thread held: its first lease would wait forever on a loop
+# nobody runs. The child starts a proxy of its own instead.
+os.register_at_fork(after_in_child=_PROCESS_PROXY._reset)
 
 
 def command_egress_lease() -> AbstractAsyncContextManager[EgressLease]:

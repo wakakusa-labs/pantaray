@@ -299,6 +299,7 @@ def _interrupted_output(
         "exit_code": -1,
         "stdout": partial_output.stdout,
         "stderr": partial_output.stderr,
+        "network": list(partial_output.network),
     }
 
 

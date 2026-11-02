@@ -46,6 +46,7 @@ def test_command_environment_keeps_trusted_path_and_isolates_cache_home(
             update={"env": env}
         ),
         temp_dir=temp_dir,
+        egress=None,
     )
     assert request.env["HOME"] == request.env["TMPDIR"] == str(temp_dir)
     assert request.env["RUSTUP_HOME"] == str(tmp_path / "installed-rust")
@@ -86,6 +87,7 @@ def test_login_environment_adds_identity_and_real_home_only(
             update={"env": env, "use_login_environment": True}
         ),
         temp_dir=temp_dir,
+        egress=None,
     )
     assert request.env["HOME"] == str(home)
     assert request.env["TMPDIR"] == str(temp_dir)
@@ -104,6 +106,7 @@ def test_command_outside_the_sandbox_gets_the_real_home(
             update={"run_outside_sandbox": True}
         ),
         temp_dir=temp_dir,
+        egress=None,
     )
     assert request.env["HOME"] == str(home)
     assert request.env["TMPDIR"] == str(temp_dir)

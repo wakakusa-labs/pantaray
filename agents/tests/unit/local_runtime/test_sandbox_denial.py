@@ -8,6 +8,7 @@ from pantaray_agents.local_runtime.tooling.repository.command_invocation_audits 
     TerminalOutcome,
 )
 from pantaray_agents.local_runtime.tooling.sandbox.sandbox_denial import (
+    NETWORK_DENIAL_HINT,
     WRITE_FOLDER_REQUEST_HINT,
     is_likely_sandbox_denied,
     sandbox_denial_hint,
@@ -84,7 +85,12 @@ def test_a_command_the_runtime_stopped_is_not_denied(
 
 
 def _hint(
-    *, cwd: Path, stderr: str, exit_code: int = 1, credentials_readable: bool = False
+    *,
+    cwd: Path,
+    stderr: str,
+    exit_code: int = 1,
+    credentials_readable: bool = False,
+    network_allowed: bool = False,
 ) -> str | None:
     return sandbox_denial_hint(
         terminal_outcome="exited",
@@ -93,6 +99,7 @@ def _hint(
         stderr=stderr,
         cwd=cwd,
         credentials_readable=credentials_readable,
+        network_allowed=network_allowed,
     )
 
 
@@ -133,3 +140,56 @@ def test_credentials_are_withheld_only_without_the_login_environment(
 
     assert withheld is not None and "withheld" in withheld
     assert readable == WRITE_FOLDER_REQUEST_HINT
+
+
+# What clients print, under the network-on profile, for a direct connection the
+# sandbox refused (seen with sandbox-exec on macOS 26; Node's from its docs).
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "ssh: connect to host github.com port 22: Operation not permitted\n",
+        "nc: connectx to example.com port 80 (tcp) failed: Operation not permitted\n",
+        'psql: error: connection to server at "db.example" (192.0.2.1), port 5432 '
+        "failed: Operation not permitted\n",
+        "fatal: unable to connect to github.com:\n"
+        "github.com[0: 20.27.177.113]: errno=Operation not permitted\n",
+        "urllib.error.URLError: <urlopen error [Errno 1] Operation not permitted>\n",
+        "Error: connect EPERM 192.0.2.1:5432\n",
+        ";; connection timed out; no servers could be reached\n",
+        "ping: sendto: Operation not permitted\n",
+    ],
+)
+def test_a_refused_direct_connection_points_to_the_proxy(
+    tmp_path: Path, stderr: str
+) -> None:
+    assert _hint(cwd=tmp_path, stderr=stderr, network_allowed=True) == (
+        NETWORK_DENIAL_HINT
+    )
+
+
+def test_a_refused_connection_is_not_called_a_network_block_with_network_off(
+    tmp_path: Path,
+) -> None:
+    # With network off the proxy is not there to point to.
+    stderr = "ping: sendto: Operation not permitted\n"
+
+    assert _hint(cwd=tmp_path, stderr=stderr) == WRITE_FOLDER_REQUEST_HINT
+
+
+def test_a_name_that_does_not_resolve_is_not_called_a_network_block(
+    tmp_path: Path,
+) -> None:
+    # Names resolve in the sandbox, so this is the name's own failure.
+    stderr = "curl: (6) Could not resolve host: no-such-host.example\n"
+
+    assert _hint(cwd=tmp_path, stderr=stderr, network_allowed=True) is None
+
+
+def test_a_denied_write_with_network_on_still_asks_for_write_folders(
+    tmp_path: Path,
+) -> None:
+    stderr = "touch: out.txt: Operation not permitted\n"
+
+    assert _hint(cwd=tmp_path, stderr=stderr, network_allowed=True) == (
+        WRITE_FOLDER_REQUEST_HINT
+    )

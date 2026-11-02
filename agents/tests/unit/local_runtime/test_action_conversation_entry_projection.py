@@ -472,6 +472,18 @@ def test_rejects_processing_tool_with_terminal_output() -> None:
             {"status": "error", "error": {"message": "timed out"}},
             id="failed-after-reaching-the-network",
         ),
+        pytest.param(
+            "bash",
+            "error",
+            {"status": "error", "exit_code": 1, "stdout": "", "stderr": "x"},
+            id="command-that-failed-after-connecting",
+        ),
+        pytest.param(
+            "run_python",
+            "success",
+            {"status": "success", "exit_code": 0, "stdout": "", "stderr": ""},
+            id="python",
+        ),
     ],
 )
 def test_names_each_host_a_page_reached_once_and_its_port_only_when_unusual(

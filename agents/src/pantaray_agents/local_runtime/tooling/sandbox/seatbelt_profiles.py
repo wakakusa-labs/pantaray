@@ -275,11 +275,16 @@ def _render_network_clause(request: BrokerToSandboxCommandRequest) -> str:
     if request.network_policy == "deny":
         return "(deny network*)"
     protected = _escape_seatbelt_string(request.protected_backend_address)
+    # Names resolve through the system resolver's socket (local servers are
+    # often reached as localhost), but connections go to loopback only: every
+    # other host is reached through the egress proxy, which listens there.
+    # (system-network) is left out; resolving needs none of it. "localhost"
+    # matches 127.0.0.1 and ::1 but not ::ffff:127.0.0.1, so a dual-stack IPv6
+    # socket cannot reach loopback.
     return (
         "(deny network*)\n"
-        "(system-network)\n"
         '(allow network-outbound (literal "/private/var/run/mDNSResponder"))\n'
-        '(allow network-outbound (remote tcp "*:*") (remote udp "*:*"))\n'
+        '(allow network-outbound (remote ip "localhost:*"))\n'
         '(allow network-bind (local ip "localhost:*"))\n'
         '(allow network-inbound (local tcp "localhost:*") (local udp "localhost:*"))\n'
         f'(deny network-outbound (remote tcp "{protected}"))'

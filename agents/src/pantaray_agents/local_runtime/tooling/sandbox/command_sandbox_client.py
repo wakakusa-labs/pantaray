@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import cast
 
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
+from pantaray_agents.schema.agent.base import JSONValue
 
 from ...storage.migrations import MigrationError
 from ..action_session_temp_paths import create_private_temp_dir
@@ -35,8 +36,6 @@ from ..resources.cleanup import CleanupFailure, terminate_process_group
 from ..resources.resource_tracking import (
     mark_resource_cleaned_if_tracked,
     mark_resource_cleanup_failed_if_tracked,
-    register_path_resource,
-    register_process_group_resource,
 )
 from .command_sandbox_protocol import (
     BrokerToSandboxCommandRequest,
@@ -45,6 +44,7 @@ from .command_sandbox_protocol import (
     iter_decoded_messages,
 )
 from .command_sandbox_request import build_sandbox_request
+from .egress_proxy import EgressLease
 from .sandbox_denial import sandbox_denial_hint
 
 SANDBOX_TEMP_DIR_PREFIX = "pantaray-command-sandbox-"
@@ -60,6 +60,8 @@ class CanceledCommandOutput:
 
     stdout: str
     stderr: str
+    # Where it had connected, when it ran with network on.
+    network: tuple[JSONValue, ...] = ()
 
 
 _CANCELED_OUTPUT_ATTR = "pantaray_canceled_command_output"
@@ -70,6 +72,7 @@ def attach_canceled_command_output(
     *,
     stdout: str,
     stderr: str,
+    network: tuple[JSONValue, ...] = (),
 ) -> None:
     """Carry the partial output out on the cancellation that ends the command.
 
@@ -81,7 +84,7 @@ def attach_canceled_command_output(
     setattr(
         error,
         _CANCELED_OUTPUT_ATTR,
-        CanceledCommandOutput(stdout=stdout, stderr=stderr),
+        CanceledCommandOutput(stdout=stdout, stderr=stderr, network=network),
     )
 
 
@@ -124,7 +127,7 @@ def _finalize_temp_dir_resource(
     )
 
 
-def _write_command_invocation_audit(
+def write_command_invocation_audit(
     *,
     context: BrokerContext,
     request: ValidatedCommandRequest,
@@ -329,14 +332,17 @@ def classify_command_outcome(
     )
 
 
-async def run_command_via_sandbox(
+async def run_command_in_sandbox(
     *,
     context: BrokerContext,
     request: ValidatedCommandRequest,
-    create_subprocess_exec: CreateSubprocessExec = asyncio.create_subprocess_exec,
-    register_process_group_resource_fn: RegisterResource = register_process_group_resource,
-    register_path_resource_fn: RegisterResource = register_path_resource,
+    egress: EgressLease | None,
+    create_subprocess_exec: CreateSubprocessExec,
+    register_process_group_resource_fn: RegisterResource,
+    register_path_resource_fn: RegisterResource,
 ) -> UnprojectedBrokerToolOutcome:
+    """Run one Action command; ``egress`` is its network lease, if it has one."""
+
     tool_invocation_id = request.tool_invocation_id
     if tool_invocation_id is None:
         raise BrokerExecutionError("command execution requires an invocation id")
@@ -362,7 +368,9 @@ async def run_command_via_sandbox(
             ) from exc
         raise
     try:
-        sandbox_request = build_sandbox_request(request=request, temp_dir=temp_dir)
+        sandbox_request = build_sandbox_request(
+            request=request, temp_dir=temp_dir, egress=egress
+        )
     except (MigrationError, OSError, ValueError):
         _finalize_temp_dir_resource(
             context=context, temp_dir=temp_dir, temp_resource_id=temp_resource_id
@@ -371,7 +379,7 @@ async def run_command_via_sandbox(
     try:
         process = await spawn_sandbox_helper(create_subprocess_exec)
     except Exception as exc:
-        _write_command_invocation_audit(
+        write_command_invocation_audit(
             context=context,
             request=request,
             terminal_outcome="broker_failed",
@@ -410,7 +418,7 @@ async def run_command_via_sandbox(
             )
         except CleanupFailure as cleanup_exc:
             process_cleanup_error = str(cleanup_exc)
-        _write_command_invocation_audit(
+        write_command_invocation_audit(
             context=context,
             request=request,
             terminal_outcome="broker_failed",
@@ -466,7 +474,7 @@ async def run_command_via_sandbox(
         canceled_stdout = "".join(captured.stdout)
         canceled_stderr = "".join(captured.stderr)
         try:
-            _write_command_invocation_audit(
+            write_command_invocation_audit(
                 context=context,
                 request=request,
                 terminal_outcome="canceled",
@@ -524,8 +532,9 @@ async def run_command_via_sandbox(
             stderr=stderr_text,
             cwd=Path(request.cwd),
             credentials_readable=request.use_login_environment,
+            network_allowed=request.network_policy == "allow",
         )
-    _write_command_invocation_audit(
+    write_command_invocation_audit(
         context=context,
         request=request,
         terminal_outcome=terminal_outcome,

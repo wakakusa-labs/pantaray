@@ -9,6 +9,9 @@ from pathlib import Path
 
 import pytest
 
+from pantaray_agents.local_runtime.action_conversation.tool_subject import (
+    project_tool_network_hosts,
+)
 from pantaray_agents.local_runtime.tooling import tool_result_storage
 from pantaray_agents.local_runtime.tooling.tool_result_reading import (
     ToolResultLoadError,
@@ -189,6 +192,30 @@ def test_large_result_without_long_texts_is_stored_whole_with_exact_metadata(
             max_bytes=result.output_json["byte_size"],
         )
         assert loaded == output
+
+
+def test_a_command_result_stored_whole_still_names_where_it_connected(
+    tmp_path: Path,
+) -> None:
+    # NUL-separated output (find -print0) does not page as text, so the whole
+    # result moves to a file, leaving the reference inline.
+    network = [{"host": "pypi.org", "port": 443, "connections": 1, "failed": 0}]
+    output = {
+        "status": "success",
+        "exit_code": 0,
+        "stdout": "./build/file\0" * 3_000,
+        "stderr": "",
+        "network": network,
+    }
+
+    result = store_tool_result(
+        action_tool_results_path=tmp_path, invocation_id="find", output=output
+    )
+    release_stored_tool_result(result)
+
+    assert result.output_json["storage"] == "action_file"
+    assert result.output_json["media_type"] == "application/json"
+    assert project_tool_network_hosts("bash", result.output_json) == ("pypi.org",)
 
 
 def test_outline_of_a_result_stored_whole_names_every_short_value(

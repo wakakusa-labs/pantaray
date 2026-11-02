@@ -8,6 +8,7 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
     BashToolArgs,
     SandboxedBashToolArgs,
 )
+from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import ToolConcurrency
 
 from .base import (
@@ -130,6 +131,34 @@ BASH_TOOL_FIELD_PRESENTATION = (
     *WRITE_FOLDER_REQUEST_FIELD_PRESENTATION,
 )
 
+# Shared with run_python, which returns the same command result.
+COMMAND_OUTPUT_SCHEMA: dict[str, JSONValue] = {
+    "type": "object",
+    "properties": {
+        "status": {"type": "string"},
+        "exit_code": {"type": "integer"},
+        "stdout": {"type": "string"},
+        "stderr": {"type": "string"},
+        # Where the command connected through Pantaray's proxy.
+        "network": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "host": {"type": "string"},
+                    "port": {"type": "integer"},
+                    "connections": {"type": "integer"},
+                    "failed": {"type": "integer"},
+                    "bytes_sent": {"type": "integer"},
+                    "bytes_received": {"type": "integer"},
+                },
+            },
+        },
+    },
+    "required": ["status", "exit_code", "stdout", "stderr"],
+    "additionalProperties": False,
+}
+
 _BASH_INPUT_DESCRIPTION = "Run a non-interactive workspace shell command or script."
 
 BASH_TOOL = ToolDefinition.from_spec(
@@ -163,7 +192,12 @@ BASH_TOOL = ToolDefinition.from_spec(
                 "use_login_environment is set or the command runs outside the "
                 "sandbox, are temporary and removed after this call. Commands "
                 "and descendants follow the user's command network setting and "
-                "workspace file permissions. Commands cannot read or write files "
+                "workspace file permissions. With network on, connections go "
+                "through Pantaray's proxy, which HTTP(S) clients and git (also "
+                "over ssh) pick up from the environment; clients that connect "
+                "directly (ssh to a host, database clients, raw sockets, UDP) are "
+                "blocked, so set run_outside_sandbox when one is needed. "
+                "Commands cannot read or write files "
                 "that hold secrets, such as .env files and credential stores "
                 "(~/.ssh keys, ~/.aws/credentials); with use_login_environment "
                 "the credential stores become readable, .env files never. "
@@ -183,17 +217,7 @@ BASH_TOOL = ToolDefinition.from_spec(
             fields=BASH_TOOL_FIELD_PRESENTATION,
             description=_BASH_INPUT_DESCRIPTION,
         ),
-        output_schema={
-            "type": "object",
-            "properties": {
-                "status": {"type": "string"},
-                "exit_code": {"type": "integer"},
-                "stdout": {"type": "string"},
-                "stderr": {"type": "string"},
-            },
-            "required": ["status", "exit_code", "stdout", "stderr"],
-            "additionalProperties": False,
-        },
+        output_schema=COMMAND_OUTPUT_SCHEMA,
     )
 )
 

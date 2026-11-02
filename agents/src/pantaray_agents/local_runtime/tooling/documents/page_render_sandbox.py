@@ -26,8 +26,8 @@ _SANDBOX_EXEC: Final = "/usr/bin/sandbox-exec"
 _FONT_READ_ROOTS: Final = ("/Library/Fonts",)
 # macOS refuses to resolve a path through more links than this (MAXSYMLINKS).
 _MAX_SYMLINK_HOPS: Final = 32
-# Outbound connections and the resolver, as the command sandbox grants them
-# when command networking is on.
+# Outbound connections and the resolver, for a worker that fetches web pages
+# itself.
 _NETWORK_RULES: Final = (
     "(system-network)",
     '(allow network-outbound (literal "/private/var/run/mDNSResponder"))',

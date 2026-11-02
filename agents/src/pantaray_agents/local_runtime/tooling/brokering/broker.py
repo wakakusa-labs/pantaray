@@ -22,9 +22,7 @@ from ..resources.resource_tracking import (
     register_path_resource,
     register_process_group_resource,
 )
-from ..sandbox.command_sandbox_client import (
-    run_command_via_sandbox,
-)
+from ..sandbox.command_egress import run_command_via_sandbox
 from ..tool_result_finalization import (
     InvocationToolResultOwner,
     ToolResultFinalizationRequest,

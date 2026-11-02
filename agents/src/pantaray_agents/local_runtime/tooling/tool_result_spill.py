@@ -39,8 +39,10 @@ TOOL_RESULT_JSON_METADATA_KEYS = frozenset(
 )
 # A result spilled before previews existed has neither of these.
 TOOL_RESULT_PREVIEW_KEYS = frozenset({"preview", "retry_hint"})
-# The result's own status, kept beside the reference only when the result has one.
+# The result's own status and where it connected, each kept beside the reference
+# only when the result has one.
 TOOL_RESULT_STATUS_KEY = "status"
+TOOL_RESULT_NETWORK_KEY = "network"
 SPILLED_TEXT_KEYS = TOOL_RESULT_JSON_METADATA_KEYS | TOOL_RESULT_PREVIEW_KEYS
 # A text this short is not moved out alone: a result whose bulk is in many such
 # values is stored whole, and its outline shows them better than many previews
@@ -56,7 +58,7 @@ OUTLINE_VALUE_CHARS = 200
 
 
 def is_json_spill_shape(keys: Set[str]) -> bool:
-    return keys - {TOOL_RESULT_STATUS_KEY} in (
+    return keys - {TOOL_RESULT_STATUS_KEY, TOOL_RESULT_NETWORK_KEY} in (
         TOOL_RESULT_JSON_METADATA_KEYS,
         TOOL_RESULT_JSON_METADATA_KEYS | TOOL_RESULT_PREVIEW_KEYS,
     )

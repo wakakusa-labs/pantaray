@@ -32,6 +32,10 @@ PROXY_HOST = "127.0.0.1"
 HANDSHAKE_TIMEOUT_S = 10.0
 # Caps a request head (and a response head of a forwarded request).
 HEAD_LIMIT_BYTES = 64 * 1024
+# Process-wide cap on open client connections, each holding up to two FDs: it
+# fits parallel downloaders (uv opens 50, npm up to 50) and keeps the proxy from
+# exhausting the backend's descriptors.
+MAX_OPEN_CONNECTIONS = 128
 _START_TIMEOUT_S = 5.0
 _TOKEN_BYTES = 32
 # "This network" (RFC 1122): 0.0.0.0 reaches the local host on common stacks.
@@ -51,7 +55,7 @@ class NetworkDestination:
     """Connections one lease made to one (host, port), as the client named it.
 
     ``connections`` counts every attempt; ``failed`` those refused by policy or
-    not reached. Bytes are what crossed the proxy in each direction.
+    not reached. Bytes are what the proxy delivered to each side's socket.
     """
 
     host: str
@@ -78,10 +82,14 @@ class _Tally:
 
 @dataclass(eq=False, slots=True)
 class _LeaseState:
-    # Counters are written only on the proxy thread. The proxy lock guards the
-    # dict and task set, which other threads read.
+    # Counters are written only on the proxy thread; the proxy lock guards the
+    # destinations dict, which lease holders read from other threads.
     destinations: dict[wire.ProxyTarget, _Tally] = field(default_factory=dict)
-    tasks: set[asyncio.Task[object]] = field(default_factory=set)
+    # Authorized connections and their client and upstream writers. Touched
+    # only on the proxy loop.
+    connections: dict[asyncio.Task[object], list[asyncio.StreamWriter]] = field(
+        default_factory=dict
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,6 +175,7 @@ class _EgressProxy:
         self._running: tuple[asyncio.AbstractEventLoop, int] | None = None
         self._lock = threading.Lock()
         self._leases: dict[bytes, _LeaseState] = {}
+        self._open_connections = 0  # proxy loop only
 
     def _ensure_started(self) -> tuple[asyncio.AbstractEventLoop, int]:
         with self._start_lock:
@@ -216,28 +225,25 @@ class _EgressProxy:
         finally:
             with self._lock:
                 del self._leases[key]
-                open_connections = tuple(state.tasks)
-            if open_connections:
-                closed = asyncio.run_coroutine_threadsafe(
-                    _cancel_and_wait(open_connections), loop
-                )
-                # Shielded so a canceled caller still leaves no tunnel open.
-                await asyncio.shield(asyncio.wrap_future(closed))
+            # Runs on the proxy loop, where connections are registered, so none
+            # authorized before the token was removed can be missed.
+            closed = asyncio.run_coroutine_threadsafe(_abort_connections(state), loop)
+            # Shielded so a canceled caller still leaves no tunnel open.
+            await asyncio.shield(asyncio.wrap_future(closed))
 
     def _authorize(
-        self, token: str | None, task: asyncio.Task[object]
+        self,
+        token: str | None,
+        task: asyncio.Task[object],
+        writer: asyncio.StreamWriter,
     ) -> _LeaseState | None:
         if token is None:
             return None
         with self._lock:
             state = self._leases.get(_token_key(token))
-            if state is not None:
-                state.tasks.add(task)
-            return state
-
-    def _release(self, state: _LeaseState, task: asyncio.Task[object]) -> None:
-        with self._lock:
-            state.tasks.discard(task)
+        if state is not None:
+            state.connections[task] = [writer]
+        return state
 
     def _tally(self, state: _LeaseState, target: wire.ProxyTarget) -> _Tally:
         with self._lock:
@@ -248,6 +254,10 @@ class _EgressProxy:
     async def _serve(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
+        if self._open_connections >= MAX_OPEN_CONNECTIONS:
+            writer.transport.abort()
+            return
+        self._open_connections += 1
         task = asyncio.current_task()
         assert task is not None  # start_server runs each connection as a task
         state: _LeaseState | None = None
@@ -257,29 +267,34 @@ class _EgressProxy:
                 request: wire.ProxyRequest
                 if first_byte[0] == wire.SOCKS_VERSION:
                     token = await wire.read_socks_token(reader, writer)
-                    state = self._authorize(token, task)
+                    state = self._authorize(token, task, writer)
                     writer.write(wire.socks_auth_reply(accepted=state is not None))
                     if state is None:
                         return
                     request = wire.SocksConnect(await wire.read_socks_target(reader))
                 else:
                     request = await wire.read_http_request(first_byte, reader)
-                    state = self._authorize(request.token, task)
+                    state = self._authorize(request.token, task, writer)
                     if state is None:
                         writer.write(wire.PROXY_AUTH_REQUIRED)
                         return
-            await self._connect(state, request, (reader, writer))
+            await self._connect(state, task, request, (reader, writer))
         except wire.HandshakeRejected as exc:
             writer.write(exc.reply)
         except (EOFError, OSError):
             pass  # The client left, reset, or stalled past the handshake timeout.
         finally:
+            self._open_connections -= 1
             writer.close()
             if state is not None:
-                self._release(state, task)
+                del state.connections[task]
 
     async def _connect(
-        self, state: _LeaseState, request: wire.ProxyRequest, client: _Stream
+        self,
+        state: _LeaseState,
+        task: asyncio.Task[object],
+        request: wire.ProxyRequest,
+        client: _Stream,
     ) -> None:
         tally = self._tally(state, request.target)
         upstream = await _open_upstream(request.target)
@@ -287,6 +302,7 @@ class _EgressProxy:
             tally.failed += 1
             client[1].write(_failure_reply(request, upstream))
             return
+        state.connections[task].append(upstream[1])
         try:
             if isinstance(request, wire.HttpForward):
                 responded = await forward(
@@ -315,10 +331,20 @@ class _EgressProxy:
             upstream[1].close()
 
 
-async def _cancel_and_wait(tasks: tuple[asyncio.Task[object], ...]) -> None:
-    for task in tasks:
+async def _abort_connections(state: _LeaseState) -> None:
+    """End a lease's connections now, discarding anything still unsent.
+
+    ``close()`` would keep a socket open until a peer that stopped reading drains
+    its buffer, so data would keep flowing after the lease ended.
+    """
+
+    tasks = tuple(state.connections)
+    for task, writers in state.connections.items():
+        for writer in writers:
+            writer.transport.abort()
         task.cancel()
-    await asyncio.wait(tasks)
+    if tasks:
+        await asyncio.wait(tasks)
 
 
 _PROCESS_PROXY = _EgressProxy()

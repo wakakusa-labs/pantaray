@@ -22,8 +22,10 @@ type CountBytes = Callable[[int], None]
 
 async def _send(writer: asyncio.StreamWriter, data: bytes, count: CountBytes) -> None:
     writer.write(data)
-    count(len(data))
+    # Counted once drained to the socket: a buffer discarded when a lease ends
+    # was never sent.
     await writer.drain()
+    count(len(data))
 
 
 async def _pipe(
@@ -56,6 +58,7 @@ async def tunnel(
     finally:
         for direction in directions:
             direction.cancel()
+        await asyncio.wait(directions)
     for direction in done:
         error = direction.exception()
         # A reset or broken pipe ends the tunnel; anything else is a defect.
@@ -160,10 +163,11 @@ async def forward(
                 response_head = await upstream[0].readuntil(HEAD_END)
         except (EOFError, asyncio.LimitOverrunError):
             return False
-        count_received(len(response_head))
         await _send(client[1], _close_response_head(response_head), lambda _n: None)
+        count_received(len(response_head))
         while chunk := await upstream[0].read(RELAY_CHUNK_BYTES):
             await _send(client[1], chunk, count_received)
         return True
     finally:
         upload.cancel()
+        await asyncio.wait([upload])

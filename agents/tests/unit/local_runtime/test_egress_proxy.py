@@ -390,3 +390,111 @@ async def test_handshake_bounds_end_stalled_or_huge_requests_not_quiet_tunnels(
         assert await reader.readexactly(10) == b"still open"
         stalled_writer.close()
         writer.close()
+
+
+type _Stream = tuple[asyncio.StreamReader, asyncio.StreamWriter]
+
+
+async def _ended(reader: asyncio.StreamReader) -> bool:
+    try:
+        return await _read_all(reader) == b""
+    except ConnectionError:
+        return True
+
+
+async def _tunnel(lease: EgressLease, target: str) -> _Stream | None:
+    """A CONNECT tunnel, or None when the proxy closed the connection."""
+
+    reader, writer = await _open(lease)
+    writer.write(_connect_head(target, _proxy(lease)[0]))
+    try:
+        head = await asyncio.wait_for(reader.readuntil(HEAD_END), IO_TIMEOUT_S)
+    except (asyncio.IncompleteReadError, ConnectionError):
+        writer.close()
+        return None
+    assert head.startswith(b"HTTP/1.1 200")
+    return reader, writer
+
+
+async def _tunnel_once_free(lease: EgressLease, target: str) -> _Stream:
+    async with asyncio.timeout(IO_TIMEOUT_S):
+        while (stream := await _tunnel(lease, target)) is None:
+            await asyncio.sleep(0.05)
+    return stream
+
+
+async def _echoes(stream: _Stream) -> bool:
+    stream[1].write(b"ping")
+    return await asyncio.wait_for(stream[0].readexactly(4), IO_TIMEOUT_S) == b"ping"
+
+
+async def test_lease_end_discards_unsent_bytes_when_the_peer_stops_reading(
+    allow_loopback: None,
+) -> None:
+    # Catches: closing rather than aborting at lease end. close() keeps both
+    # sockets open while a peer that stopped reading holds the send buffer, so
+    # once it reads again the proxy delivers bytes after the lease ended that
+    # its record never counted.
+    reading = asyncio.Event()
+    delivered: list[int] = []
+
+    async def sink(
+        state: _Server, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        state.connections += 1
+        await reading.wait()
+        total = 0
+        try:
+            while chunk := await reader.read(65536):
+                total += len(chunk)
+        except ConnectionError:
+            pass
+        delivered.append(total)
+        writer.close()
+
+    async def flood(writer: asyncio.StreamWriter) -> None:
+        while True:
+            writer.write(b"x" * 65536)
+            await writer.drain()
+
+    async with _listening(sink) as server:
+        async with command_egress_lease() as lease:
+            reader, writer = await _tunnel_once_free(lease, f"{LOOPBACK}:{server.port}")
+            flooding = asyncio.create_task(flood(writer))
+            sent = -1
+            while sent != (sent := lease.destinations()[0].bytes_sent):
+                await asyncio.sleep(0.2)  # until every buffer on the way is full
+        reading.set()
+        async with asyncio.timeout(IO_TIMEOUT_S):
+            while not delivered:
+                await asyncio.sleep(0.05)
+        assert await _ended(reader)
+        flooding.cancel()
+        await asyncio.wait([flooding])
+        writer.close()
+    assert 0 < delivered[0] <= lease.destinations()[0].bytes_sent
+
+
+async def test_connection_cap_closes_extra_connections_and_frees_slots(
+    allow_loopback: None, echo_server: _Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Catches: idle unauthenticated connections piling up until the backend
+    # runs out of descriptors, a cap that cuts connections already open, and
+    # slots that never come back after a timeout or a close.
+    monkeypatch.setattr(egress_proxy, "MAX_OPEN_CONNECTIONS", 2)
+    monkeypatch.setattr(egress_proxy, "HANDSHAKE_TIMEOUT_S", 0.5)
+    target = f"{LOOPBACK}:{echo_server.port}"
+    async with command_egress_lease() as idle_lease, command_egress_lease() as lease:
+        idle_reader, idle_writer = await _open(idle_lease)
+        first = await _tunnel(lease, target)
+        assert first is not None
+        assert await _tunnel(lease, target) is None
+        assert await _echoes(first)
+        assert await _ended(idle_reader)
+        idle_writer.close()
+        second = await _tunnel_once_free(lease, target)
+        first[1].close()
+        third = await _tunnel_once_free(lease, target)
+        assert await _echoes(second) and await _echoes(third)
+        second[1].close()
+        third[1].close()

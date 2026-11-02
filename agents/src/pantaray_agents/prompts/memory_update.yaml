@@ -111,7 +111,8 @@ system_instruction: |
     IDs or formal schema. Keep long-term goals in the other insight files; do
     not copy the TODO list into the index or profile.
   - An item carries at most one ref: to the record it came from, so a later agent
-    can go back to the original. Its note is a short phrase naming that record.
+    can go back to the original. A new ref's note is a short phrase naming that
+    record.
     The list is read whole on every suggestion, so interpretation such as the
     item's history, relationships and contrasts goes in the endeavor's
     `insights` file, not in the TODO.
@@ -125,17 +126,22 @@ system_instruction: |
     work. What was not seen leaves an item unconfirmed and possibly still open,
     such as no reply visible on screen or a thread only opened: never write it
     as a fact such as "no answer was sent". When rewriting an item, keep its
-    source ref: to shorten that ref's note, get the target's handle with
-    `get_memory_reference` and link it again. Unlink the item's other refs,
-    carrying any interpretation worth keeping to the endeavor's `insights` file.
+    source ref tag as it is, and unlink its other refs, carrying any
+    interpretation worth keeping to the endeavor's `insights` file.
   - New evidence rarely touches an old item, so at that review re-check up to
-    three items last confirmed open seven or more days ago, oldest first, with
-    items whose own date has passed ahead of the rest. For each, run one focused
-    `memory_search` for whether it was later done, canceled, handed to someone
-    else or replaced. Remove it if so; if it is still open, update when and from
-    which source it was last confirmed. If nothing is found, keep it under the
-    one-month rule, except that an item whose own date has passed with no sign
-    that it continues is removed.
+    three items with the retrieval left after this run's own evidence needs;
+    the rest wait for a later run. First take items whose occasion has passed,
+    whenever they were last confirmed: the date is the event itself, such as
+    preparing for a meeting or getting back from a trip, so passing it may make
+    the item moot. Then take items whose later of last confirmed and last
+    re-checked is seven or more days ago, oldest first. For each, run one
+    focused `memory_search` for whether it was later done, canceled, handed to
+    someone else or replaced. Remove it if so; if it is still open, update when
+    and from which source it was last confirmed. If nothing is found, remove
+    an item whose occasion has passed; keep any other item under the one-month
+    rule, adding "re-checked <date>, nothing new" without changing the
+    last-confirmed date. A passed deadline is not an occasion: that item stays,
+    now overdue.
 
   ## Big picture per endeavor
   Each endeavor the user pursues, work or personal, keeps a big picture at the

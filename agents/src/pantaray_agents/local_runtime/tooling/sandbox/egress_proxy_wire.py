@@ -1,4 +1,4 @@
-"""Client handshakes the egress proxy accepts: HTTP CONNECT and SOCKS5.
+"""Client handshakes the egress proxy accepts: HTTP proxy requests and SOCKS5.
 
 Parsing only: every function here reads what the client sent and turns it into
 a typed request, or raises ``HandshakeRejected`` with the reply to send back.
@@ -13,6 +13,7 @@ import binascii
 import ipaddress
 import re
 from dataclasses import dataclass
+from typing import Literal
 
 SOCKS_VERSION = 0x05
 _SOCKS_USERPASS_METHOD = 0x02
@@ -31,8 +32,14 @@ SOCKS_COMMAND_NOT_SUPPORTED = 0x07
 SOCKS_ADDRESS_TYPE_NOT_SUPPORTED = 0x08
 
 HEAD_END = b"\r\n\r\n"
+_HTTP_DEFAULT_PORT = 80
 # ASCII names only: an internationalized name reaches a proxy as punycode.
 _HOSTNAME = re.compile(r"[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*\.?")
+# Hop-by-hop headers this proxy owns. Host is replaced by the request-target's
+# authority (RFC 9112 section 3.2.2) so the server sees the host that was dialed.
+_REQUEST_HEADERS_REPLACED = frozenset(
+    b"connection keep-alive proxy-connection proxy-authorization te upgrade host".split()
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +50,10 @@ class ProxyTarget:
     port: int
 
 
+# Body framing of a forwarded request: an exact length, or chunked coding.
+type RequestBody = int | Literal["chunked"]
+
+
 @dataclass(frozen=True, slots=True)
 class HttpConnect:
     token: str | None
@@ -50,11 +61,21 @@ class HttpConnect:
 
 
 @dataclass(frozen=True, slots=True)
+class HttpForward:
+    """A plain ``http://`` request, rewritten to origin form for the server."""
+
+    token: str | None
+    target: ProxyTarget
+    head: bytes
+    body: RequestBody
+
+
+@dataclass(frozen=True, slots=True)
 class SocksConnect:
     target: ProxyTarget
 
 
-type ProxyRequest = HttpConnect | SocksConnect
+type ProxyRequest = HttpConnect | HttpForward | SocksConnect
 
 
 class HandshakeRejected(Exception):
@@ -100,7 +121,7 @@ def proxy_target(host: str, port: int) -> ProxyTarget:
     return ProxyTarget(host.lower(), port)
 
 
-def _parse_authority(authority: str) -> ProxyTarget:
+def _parse_authority(authority: str, default_port: int | None) -> ProxyTarget:
     if authority.startswith("["):
         host, closed, rest = authority[1:].partition("]")
         if not closed or ":" not in host:
@@ -108,10 +129,14 @@ def _parse_authority(authority: str) -> ProxyTarget:
     else:
         host, colon, port_text = authority.partition(":")
         rest = colon + port_text
-    port_text = rest.removeprefix(":")
-    if port_text == rest or not (port_text.isascii() and port_text.isdigit()):
-        raise ValueError("invalid port")
-    return proxy_target(host, int(port_text))
+    if rest:
+        port_text = rest.removeprefix(":")
+        if port_text == rest or not (port_text.isascii() and port_text.isdigit()):
+            raise ValueError("invalid port")
+        return proxy_target(host, int(port_text))
+    if default_port is None:
+        raise ValueError("port required")
+    return proxy_target(host, default_port)
 
 
 def _parse_head(head: bytes) -> tuple[list[bytes], list[tuple[bytes, bytes]]]:
@@ -126,10 +151,12 @@ def _parse_head(head: bytes) -> tuple[list[bytes], list[tuple[bytes, bytes]]]:
     return start_line, headers
 
 
+def _values(headers: list[tuple[bytes, bytes]], name: bytes) -> list[bytes]:
+    return [value for key, value in headers if key.lower() == name]
+
+
 def _basic_auth_user(headers: list[tuple[bytes, bytes]]) -> str | None:
-    values = [
-        value for name, value in headers if name.lower() == b"proxy-authorization"
-    ]
+    values = _values(headers, b"proxy-authorization")
     if len(values) != 1:
         return None
     scheme, _, encoded = values[0].partition(b" ")
@@ -142,9 +169,58 @@ def _basic_auth_user(headers: list[tuple[bytes, bytes]]) -> str | None:
     return credentials.partition(":")[0]
 
 
+def _request_body(headers: list[tuple[bytes, bytes]]) -> RequestBody:
+    codings = _values(headers, b"transfer-encoding")
+    lengths = _values(headers, b"content-length")
+    if codings:
+        # Anything but a lone "chunked" cannot be framed, and a request carrying
+        # both framings is the classic smuggling shape.
+        if lengths or len(codings) != 1 or codings[0].lower() != b"chunked":
+            raise ValueError("unsupported request framing")
+        return "chunked"
+    if not lengths:
+        return 0
+    if len(set(lengths)) != 1 or not lengths[0].isdigit():
+        raise ValueError("invalid Content-Length")
+    return int(lengths[0])
+
+
+def _forward_request(
+    method: bytes, target: str, version: bytes, headers: list[tuple[bytes, bytes]]
+) -> HttpForward:
+    if target[:7].lower() != "http://":
+        raise ValueError("only absolute http:// targets are forwarded")
+    rest = target[7:]
+    cut = min((i for i in map(rest.find, "/?#") if i >= 0), default=len(rest))
+    authority, path = rest[:cut], rest[cut:].partition("#")[0]
+    if "@" in authority:
+        raise ValueError("userinfo in request target")
+    if not path.startswith("/"):
+        path = "/" + path
+    kept = [
+        name + b": " + value
+        for name, value in headers
+        if name.lower() not in _REQUEST_HEADERS_REPLACED
+    ]
+    # One request per proxy connection: Connection: close keeps a reused client
+    # connection from carrying a second request to the first host.
+    lines = [
+        b" ".join((method, path.encode("ascii"), version)),
+        b"Host: " + authority.encode("ascii"),
+        *kept,
+        b"Connection: close",
+    ]
+    return HttpForward(
+        token=_basic_auth_user(headers),
+        target=_parse_authority(authority, _HTTP_DEFAULT_PORT),
+        head=b"\r\n".join(lines) + HEAD_END,
+        body=_request_body(headers),
+    )
+
+
 async def read_http_request(
     first_byte: bytes, reader: asyncio.StreamReader
-) -> HttpConnect:
+) -> HttpConnect | HttpForward:
     """Read one proxy request head; the reader's limit caps its size."""
 
     try:
@@ -155,13 +231,13 @@ async def read_http_request(
         start_line, headers = _parse_head(head)
         if len(start_line) != 3 or not start_line[2].startswith(b"HTTP/1."):
             raise ValueError("malformed request line")
-        method, target, _version = start_line
-        if method != b"CONNECT":
-            raise ValueError("only CONNECT is proxied")
-        return HttpConnect(
-            token=_basic_auth_user(headers),
-            target=_parse_authority(target.decode("ascii")),
-        )
+        method, target, version = start_line
+        if method == b"CONNECT":
+            return HttpConnect(
+                token=_basic_auth_user(headers),
+                target=_parse_authority(target.decode("ascii"), None),
+            )
+        return _forward_request(method, target.decode("ascii"), version, headers)
     except ValueError as exc:
         raise HandshakeRejected(BAD_REQUEST) from exc
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import http.client
 import ipaddress
 import os
 import shutil
@@ -73,7 +74,7 @@ async def _echo(
     writer.close()
 
 
-def _http(name: str) -> _Handler:
+def _http(name: str, *, honor_close: bool = True) -> _Handler:
     """A keep-alive HTTP/1.1 server that answers ``<name> <request-target>``."""
 
     async def serve(
@@ -90,6 +91,8 @@ def _http(name: str) -> _Handler:
             writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: %d\r\n\r\n" % len(body))
             writer.write(body)
             await writer.drain()
+            if honor_close and b"\r\nconnection: close" in head.lower():
+                break
         writer.close()
 
     return serve
@@ -153,6 +156,80 @@ async def test_connect_tunnel_relays_bytes_and_records_destination(
     )
 
 
+async def test_forward_requests_to_two_hosts_over_one_client_connection(
+    allow_loopback: None,
+) -> None:
+    # Catches: a reused client connection carrying the second request to the
+    # first host or recording it there, a response that does not tell the
+    # client to reconnect, and proxy credentials leaking to the server.
+    async with (
+        _listening(_http("A")) as a,
+        _listening(_http("B")) as b,
+        command_egress_lease() as lease,
+    ):
+        token, port = _proxy(lease)
+        auth = "Basic " + base64.b64encode(f"{token}:x".encode()).decode()
+
+        def fetch_both() -> tuple[bytes, bytes]:
+            connection = http.client.HTTPConnection(LOOPBACK, port, timeout=5)
+            headers = {"Proxy-Authorization": auth, "Proxy-Connection": "keep-alive"}
+            connection.request(
+                "GET", f"http://{LOOPBACK}:{a.port}/one", headers=headers
+            )
+            first = connection.getresponse().read()
+            # "localhost" also resolves to ::1, where nothing listens here.
+            connection.request(
+                "GET", f"http://localhost:{b.port}/two?q=1", headers=headers
+            )
+            second = connection.getresponse().read()
+            connection.close()
+            return first, second
+
+        assert await asyncio.to_thread(fetch_both) == (b"A /one", b"B /two?q=1")
+    assert (a.connections, len(a.heads), b.connections, len(b.heads)) == (1, 1, 1, 1)
+    for head in (*a.heads, *b.heads):
+        assert b"proxy-" not in head.lower()
+        assert head.lower().count(b"connection:") == 1
+        assert b"\r\nConnection: close\r\n" in head
+    assert b.heads[0].startswith(b"GET /two?q=1 HTTP/1.1\r\nHost: localhost:")
+    assert [
+        (d.host, d.port, d.connections, d.failed) for d in lease.destinations()
+    ] == [
+        (LOOPBACK, a.port, 1, 0),
+        ("localhost", b.port, 1, 0),
+    ]
+
+
+async def test_pipelined_second_request_never_reaches_the_first_host(
+    allow_loopback: None,
+) -> None:
+    # Catches: relaying the rest of the client stream after the first request,
+    # which would deliver a request meant for host B to host A when A ignores
+    # Connection: close, and the client's close not reaching such a server.
+    async with (
+        _listening(_http("A", honor_close=False)) as a,
+        _listening(_http("B")) as b,
+        command_egress_lease() as lease,
+    ):
+        token = _proxy(lease)[0]
+        reader, writer = await _open(lease)
+        writer.write(
+            b"".join(
+                f"GET http://{LOOPBACK}:{server.port}/x HTTP/1.1\r\n".encode()
+                + _basic(token)
+                + HEAD_END
+                for server in (a, b)
+            )
+        )
+        writer.write_eof()
+        response = await _read_all(reader)
+        writer.close()
+    assert response.endswith(b"\r\n\r\nA /x")
+    assert response.count(b"HTTP/1.1 200") == 1
+    assert (len(a.heads), b.connections) == (1, 0)
+    assert [d.port for d in lease.destinations()] == [a.port]
+
+
 @pytest.mark.skipif(shutil.which("curl") is None, reason="curl is not installed")
 async def test_curl_reaches_server_through_http_connect_and_socks5h(
     allow_loopback: None,
@@ -163,6 +240,7 @@ async def test_curl_reaches_server_through_http_connect_and_socks5h(
         http_url, socks_url = lease.http_proxy_url, lease.socks_proxy_url
         outputs = []
         for args in (
+            f"-x {http_url} http://{LOOPBACK}:{state.port}/forward",
             f"-p -x {http_url} http://{LOOPBACK}:{state.port}/tunnel",
             f"-x {socks_url} http://localhost:{state.port}/socks",
         ):
@@ -175,9 +253,9 @@ async def test_curl_reaches_server_through_http_connect_and_socks5h(
             stdout, stderr = await curl.communicate()
             assert curl.returncode == 0, stderr
             outputs.append(stdout)
-    assert outputs == [b"S /tunnel", b"S /socks"]
+    assert outputs == [b"S /forward", b"S /tunnel", b"S /socks"]
     assert [(d.host, d.connections, d.failed) for d in lease.destinations()] == [
-        (LOOPBACK, 1, 0),
+        (LOOPBACK, 2, 0),
         ("localhost", 1, 0),
     ]
 
@@ -298,7 +376,7 @@ async def test_handshake_bounds_end_stalled_or_huge_requests_not_quiet_tunnels(
     monkeypatch.setattr(egress_proxy, "HANDSHAKE_TIMEOUT_S", 0.3)
     async with command_egress_lease() as lease:
         huge_reader, huge_writer = await _open(lease)
-        huge_writer.write(b"CONNECT example.com:443 HTTP/1.1\r\nX: " + b"a" * 70_000)
+        huge_writer.write(b"GET http://example.com/ HTTP/1.1\r\nX: " + b"a" * 70_000)
         assert (await _read_all(huge_reader)).startswith(b"HTTP/1.1 431")
         huge_writer.close()
         stalled_reader, stalled_writer = await _open(lease)

@@ -1,7 +1,8 @@
 """Loopback proxy that records where sandboxed commands connect.
 
 Every network connection of a sandboxed command is meant to go through this
-proxy: HTTP CONNECT and SOCKS5 tunnels share one port on 127.0.0.1. It records destination host, port, bytes and success per
+proxy: HTTP (CONNECT tunnels and plain ``http://`` forwarding) and SOCKS5 share
+one port on 127.0.0.1. It records destination host, port, bytes and success per
 command lease. It does not intercept TLS, record URLs or content, or prompt.
 
 One proxy serves the whole process. Commands run on many threads, each with its
@@ -24,12 +25,12 @@ from dataclasses import astuple, dataclass, field
 from typing import Literal
 
 from . import egress_proxy_wire as wire
-from .egress_proxy_relay import tunnel
+from .egress_proxy_relay import forward, tunnel
 
 PROXY_HOST = "127.0.0.1"
 # Bounds the request/handshake phase only; established tunnels have no timeout.
 HANDSHAKE_TIMEOUT_S = 10.0
-# Caps a CONNECT request head.
+# Caps a request head (and a response head of a forwarded request).
 HEAD_LIMIT_BYTES = 64 * 1024
 _START_TIMEOUT_S = 5.0
 _TOKEN_BYTES = 32
@@ -135,7 +136,9 @@ async def _open_upstream(target: wire.ProxyTarget) -> _Stream | _DialFailure:
         return "refused"
     for address in allowed:
         try:
-            return await asyncio.open_connection(str(address), target.port)
+            return await asyncio.open_connection(
+                str(address), target.port, limit=HEAD_LIMIT_BYTES
+            )
         except OSError:
             continue
     return "unreachable"
@@ -285,6 +288,18 @@ class _EgressProxy:
             client[1].write(_failure_reply(request, upstream))
             return
         try:
+            if isinstance(request, wire.HttpForward):
+                responded = await forward(
+                    client,
+                    upstream,
+                    head=request.head,
+                    body=request.body,
+                    count_sent=tally.count_sent,
+                    count_received=tally.count_received,
+                )
+                if not responded:
+                    client[1].write(wire.BAD_GATEWAY)
+                return
             client[1].write(
                 wire.CONNECT_ESTABLISHED
                 if isinstance(request, wire.HttpConnect)

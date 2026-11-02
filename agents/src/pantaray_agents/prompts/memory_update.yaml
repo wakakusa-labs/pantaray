@@ -130,18 +130,20 @@ system_instruction: |
     interpretation worth keeping to the endeavor's `insights` file.
   - New evidence rarely touches an old item, so at that review re-check up to
     three items with the retrieval left after this run's own evidence needs;
-    the rest wait for a later run. First take items whose occasion has passed,
-    whenever they were last confirmed: the date is the event itself, such as
-    preparing for a meeting or getting back from a trip, so passing it may make
-    the item moot. Then take items whose later of last confirmed and last
-    re-checked is seven or more days ago, oldest first. For each, run one
-    focused `memory_search` for whether it was later done, canceled, handed to
-    someone else or replaced. Remove it if so; if it is still open, update when
-    and from which source it was last confirmed. If nothing is found, remove
-    an item whose occasion has passed; keep any other item under the one-month
-    rule, adding "re-checked <date>, nothing new" without changing the
-    last-confirmed date. A passed deadline is not an occasion: that item stays,
-    now overdue.
+    the rest wait for a later run. First take items whose occasion has passed
+    and that have not been re-checked since: the work is for or at a dated
+    event, such as preparing for a meeting or getting back from a trip, so the
+    event passing may make the item moot. Then take items whose later of last
+    confirmed and last re-checked is seven or more days ago, oldest first. For
+    each, run one focused `memory_search` for whether it was later done,
+    canceled, handed to someone else or replaced. Remove it if so; if it is
+    still open, update when and from which source it was last confirmed. If
+    nothing is found, remove an item whose occasion has passed; keep any other
+    item under the one-month rule, adding "re-checked <date>, nothing new"
+    without changing the last-confirmed date. Neither a passed deadline nor an
+    event the work waits for is an occasion: work due by a date stays, now
+    overdue, and work that starts after an event, such as contacting a
+    customer once back from a trip, stays open.
 
   ## Big picture per endeavor
   Each endeavor the user pursues, work or personal, keeps a big picture at the

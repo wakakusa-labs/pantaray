@@ -26,6 +26,7 @@ import {
   History,
   MessageSquare,
   Pencil,
+  Plug,
   Search,
   Terminal,
   Users,
@@ -366,6 +367,28 @@ const TOOL_DISPLAY_NAMES = {
     jaRunning: '{subject} の停止を要求しています',
     enDone: 'Requested a stop for {subject}',
     enRunning: 'Requesting a stop for {subject}',
+  },
+  integration_list_tools: {
+    agentName: 'List Integration Tools',
+    icon: Plug,
+    // subject は連携アプリの toolkit（gmail など）。
+    ja: '連携アプリのツールを確認',
+    en: 'List app tools',
+    jaDone: '{subject} のツールを確認しました',
+    jaRunning: '{subject} のツールを確認しています',
+    enDone: 'Listed {subject} tools',
+    enRunning: 'Listing {subject} tools',
+  },
+  integration_run_tool: {
+    agentName: 'Run Integration Tool',
+    icon: Plug,
+    // subject は GMAIL_SEND_EMAIL のように連携アプリと操作の両方を名指す slug。
+    ja: '連携アプリで実行',
+    en: 'Run an app tool',
+    jaDone: '{subject} を実行しました',
+    jaRunning: '{subject} を実行しています',
+    enDone: 'Ran {subject}',
+    enRunning: 'Running {subject}',
   },
 } as const satisfies Readonly<Record<string, ToolDisplayNames>>;
 

@@ -17,6 +17,7 @@ from pantaray_agents.auth_http import get_current_user_id_from_token
 from pantaray_agents.local_runtime.runtime.html_render_relay import (
     BlockedRequest,
     BlockedRequestReason,
+    ContactedHost,
     HtmlRenderAnswer,
     HtmlRenderClaimed,
     HtmlRendererFailureCode,
@@ -26,8 +27,9 @@ from pantaray_agents.local_runtime.runtime.html_render_relay import (
 
 router = APIRouter(prefix="/local", tags=["Action HTML Render"])
 
-# The relay contract caps the blocked sub-resources Electron reports.
+# The relay contract caps the blocked sub-resources and the hosts Electron reports.
 _MAX_BLOCKED_REQUESTS = 10
+_MAX_CONTACTED_HOSTS = 50
 
 
 class BlockedRequestBody(BaseModel):
@@ -37,6 +39,13 @@ class BlockedRequestBody(BaseModel):
     url: str
 
 
+class ContactedHostBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    host: str = Field(min_length=1, pattern=r"^\S+$")
+    port: int = Field(ge=1, le=65_535)
+
+
 class RenderedHtmlResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -44,6 +53,7 @@ class RenderedHtmlResult(BaseModel):
     byte_size: int = Field(gt=0)
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     blocked_requests: list[BlockedRequestBody] = Field(max_length=_MAX_BLOCKED_REQUESTS)
+    network: list[ContactedHostBody] = Field(max_length=_MAX_CONTACTED_HOSTS)
 
 
 class FailedHtmlRenderResult(BaseModel):
@@ -53,6 +63,7 @@ class FailedHtmlRenderResult(BaseModel):
     code: HtmlRendererFailureCode
     message: str
     blocked_requests: list[BlockedRequestBody] = Field(max_length=_MAX_BLOCKED_REQUESTS)
+    network: list[ContactedHostBody] = Field(max_length=_MAX_CONTACTED_HOSTS)
 
 
 class ActionHtmlRenderRequest(BaseModel):
@@ -102,16 +113,22 @@ def _build_answer(
         BlockedRequest(reason=blocked.reason, url=blocked.url)
         for blocked in result.blocked_requests
     )
+    network = tuple(
+        ContactedHost(host=contacted.host, port=contacted.port)
+        for contacted in result.network
+    )
     if isinstance(result, FailedHtmlRenderResult):
         return HtmlRenderFailed(
             code=result.code,
             message=result.message,
             blocked_requests=blocked_requests,
+            network=network,
         )
     return HtmlRenderClaimed(
         byte_size=result.byte_size,
         sha256=result.sha256,
         blocked_requests=blocked_requests,
+        network=network,
     )
 
 

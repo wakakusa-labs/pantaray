@@ -22,6 +22,25 @@ from ..tool_result_finalization import (
 BROKER_CANCELED_MESSAGE = "canceled before completion"
 
 
+class NetworkReachedPolicyError(BrokerPolicyError):
+    """A refusal raised after the call had already reached hosts over the network.
+
+    Its error output keeps them as the top-level ``network`` a successful result
+    reports, so the conversation row names them for a failure too.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str,
+        fix_hint: str | None,
+        network: list[JSONValue],
+    ) -> None:
+        super().__init__(message, code=code, fix_hint=fix_hint)
+        self.network = network
+
+
 def broker_error_output(error: BaseException) -> dict[str, JSONValue]:
     """The tool output of a broker call that raised, as the model reads it.
 
@@ -39,6 +58,8 @@ def broker_error_output(error: BaseException) -> dict[str, JSONValue]:
             error_payload["fix_hint"] = error.fix_hint
         if error.examples:
             error_payload["examples"] = list(error.examples)
+    if isinstance(error, NetworkReachedPolicyError) and error.network:
+        output["network"] = error.network
     return output
 
 

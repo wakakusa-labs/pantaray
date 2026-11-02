@@ -108,6 +108,10 @@ async def test_saves_in_the_workspace_without_asking_under_always_allow(
     assert [(b.reason, b.url) for b in saved.blocked_requests] == [
         ("network_off", "https://cdn.example/a.css")
     ]
+    assert [(h.host, h.port) for h in saved.network] == [
+        ("fonts.googleapis.com", 443),
+        ("charts.example", 8443),
+    ]
     # Approved by the setting, under apply_patch's summary naming the file.
     assert _approval_rows(runtime[0]) == [
         (
@@ -191,7 +195,10 @@ async def test_a_failed_print_writes_nothing(
     deck: Path,
 ) -> None:
     failure = HtmlRenderFailed(
-        code="HTML_PRINT_FAILED", message="Printing failed.", blocked_requests=()
+        code="HTML_PRINT_FAILED",
+        message="Printing failed.",
+        blocked_requests=(),
+        network=(),
     )
 
     results = await asyncio.gather(

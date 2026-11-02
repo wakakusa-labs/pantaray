@@ -23,11 +23,15 @@ from pantaray_agents.local_runtime.runtime import html_render_relay as relay_mod
 from pantaray_agents.local_runtime.runtime.html_render_relay import (
     HTML_RENDER_TEMP_DIRECTORY,
     BlockedRequest,
+    ContactedHost,
     HtmlRenderClaimed,
     HtmlRenderFailed,
     html_render_broker,
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker import execute_broker_tool
+from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
+    FinalizedBrokerPolicyError,
+)
 from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
     RenderHtmlPageOutput,
 )
@@ -51,6 +55,10 @@ from .test_pdf_page_render import write_pdf
 _USER_ID = "user-1"
 _TOOL_ID = "render_html_page"
 _BLOCKED = (BlockedRequest(reason="network_off", url="https://cdn.example/a.css"),)
+_NETWORK = (
+    ContactedHost(host="fonts.googleapis.com", port=443),
+    ContactedHost(host="charts.example", port=8443),
+)
 
 type Runtime = tuple[Path, Path, object, RecordingDesktopSession]
 
@@ -121,6 +129,7 @@ async def _electron(
             byte_size=len(pdf),
             sha256=hashlib.sha256(pdf).hexdigest(),
             blocked_requests=_BLOCKED,
+            network=_NETWORK,
         )
     else:
         answer = failure
@@ -177,6 +186,11 @@ async def test_render_prints_in_electron_and_draws_the_pages_it_has(
     assert [(b.reason, b.url) for b in parsed.blocked_requests] == [
         ("network_off", "https://cdn.example/a.css")
     ]
+    # The hosts the page was let to reach are reported, not only the refused ones.
+    assert [(h.host, h.port) for h in parsed.network] == [
+        ("fonts.googleapis.com", 443),
+        ("charts.example", 8443),
+    ]
     for page in parsed.attachments:
         assert page.ref in parsed.message
     if past_the_end is None:
@@ -221,6 +235,7 @@ async def test_electron_failure_reaches_the_model_with_its_code_and_requests(
         blocked_requests=(
             BlockedRequest(reason="outside_read_scope", url="file:///etc/x.css"),
         ),
+        network=(ContactedHost(host="cdn.example", port=443),),
     )
 
     results = await asyncio.gather(
@@ -235,6 +250,11 @@ async def test_electron_failure_reaches_the_model_with_its_code_and_requests(
     assert "The page did not load." in str(error)
     assert "file:///etc/x.css" in str(error)
     assert error.fix_hint
+    # The page reached the network before it failed; the step's output says where,
+    # as a successful one does, so the row names the host.
+    assert isinstance(error, FinalizedBrokerPolicyError)
+    assert isinstance(error.finalized_output, dict)
+    assert error.finalized_output["network"] == [{"host": "cdn.example", "port": 443}]
 
 
 async def test_an_unanswered_render_times_out_as_a_tool_error(

@@ -26,6 +26,7 @@ const tool = (step: number, status: ToolEntry['status'], subject = 'notes.md'): 
   output_available: status !== 'processing',
   images: [],
   file_edit: null,
+  network_hosts: [],
 });
 /** Entries are given oldest first and stored newest first, as the backend pages them. */
 const runningRun = (id: string, entries: Entry[]): Run => ({

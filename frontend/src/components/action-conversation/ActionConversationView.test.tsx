@@ -67,6 +67,7 @@ const tool = (
     output_available: status !== 'processing',
     images,
     file_edit: null,
+    network_hosts: [],
   },
 });
 
@@ -1366,6 +1367,34 @@ describe('ActionConversationView', () => {
     expect(screen.getByText('Drafted 3 sections')).toHaveClass('action-conversation__tool-preview');
     // 実行中の行は進行形で、コマンドはそのまま等幅で出る。
     expect(command).toHaveClass('action-conversation__tool-text--mono');
+  });
+
+  it('names where each step sent data on its row and the app an integration ran', async () => {
+    const reached = (key: string, stepNumber: number, hosts: string[]) => {
+      const line = tool(key, 'render_html_page', 'success', stepNumber, [], 'deck.html');
+      return { ...line, entry: { ...line.entry, network_hosts: hosts } };
+    };
+    const run: ActionConversationRunItem = {
+      kind: 'run',
+      runId: 'run-1',
+      status: 'success',
+      startedAt: '2026-08-30T00:00:00.000000Z',
+      completedAt: '2026-08-30T00:00:30.000000Z',
+      lines: [
+        reached('p1', 1, ['fonts.googleapis.com']),
+        // 同じツールが続いても、送り先を持つ行は畳んだまとまりに隠さない。
+        reached('p2', 2, ['a.example', 'b.example', 'c.example:8443', 'd.example', 'e.example']),
+        tool('i1', 'integration_run_tool', 'success', 3, [], 'GMAIL_SEND_EMAIL'),
+      ],
+    };
+    renderView(viewWith([run], 'success'), 'ja');
+    await userEvent.click(screen.getByRole('button', { name: /^Pantarayの作業 3, 実行 1:/ }));
+
+    expect(screen.getByText('通信先: fonts.googleapis.com')).toBeVisible();
+    expect(
+      screen.getByText('通信先: a.example, b.example, c.example:8443 ほか 2 件')
+    ).toBeVisible();
+    expect(screen.getByText('GMAIL_SEND_EMAIL を実行しました')).toBeVisible();
   });
 
   it('keeps a captured screenshot inside the expanded tool step, never on the collapsed line', async () => {

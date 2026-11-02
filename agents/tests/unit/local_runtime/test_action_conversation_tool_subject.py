@@ -129,6 +129,22 @@ def _args(tool_id: str, **args: JSONValue) -> str:
         pytest.param(
             "cancel_subagent", _args("cancel_subagent", child_process_id="p-1"), "p-1"
         ),
+        pytest.param(
+            "integration_list_tools",
+            _args("integration_list_tools", toolkit="gmail", access="write"),
+            "gmail",
+        ),
+        # The slug names the app and the action; the account and arguments do not.
+        pytest.param(
+            "integration_run_tool",
+            _args(
+                "integration_run_tool",
+                slug="GMAIL_SEND_EMAIL",
+                account="ca_1",
+                arguments='{"to": "a@example.com"}',
+            ),
+            "GMAIL_SEND_EMAIL",
+        ),
     ],
 )
 def test_projects_the_one_salient_argument(

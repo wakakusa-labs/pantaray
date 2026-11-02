@@ -46,6 +46,7 @@ from .broker_direct import (
 from .broker_direct_render_html import (
     BLOCKED_REQUESTS_NOTE,
     blocked_requests_output,
+    network_output,
     print_html_file,
     resolve_html_file,
 )
@@ -144,6 +145,7 @@ async def run_save_html_as_pdf_executor(
         "byte_size": len(rendered.pdf),
         "replaced": replaced,
         "blocked_requests": blocked_requests_output(rendered),
+        "network": network_output(rendered.network),
         "message": " ".join(notes),
     }
     return UnprojectedBrokerToolOutcome(

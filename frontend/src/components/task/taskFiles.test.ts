@@ -25,6 +25,7 @@ function patch(
     output_available: true,
     images: [],
     file_edit: { operation, added_lines: 3, removed_lines: 0 },
+    network_hosts: [],
   };
 }
 

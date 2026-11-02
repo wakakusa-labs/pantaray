@@ -151,6 +151,7 @@ describe('ActionTaskPane', () => {
         output_available: false,
         images: [],
         file_edit: null,
+        network_hosts: [],
       },
     ];
     emit(update(running, 1));

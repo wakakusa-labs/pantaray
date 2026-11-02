@@ -26,7 +26,8 @@
           "output_preview": "src/app.py, src/main.py",
           "output_available": true,
           "images": [],
-          "file_edit": null
+          "file_edit": null,
+          "network_hosts": []
         },
         {
           "step_kind": "user",

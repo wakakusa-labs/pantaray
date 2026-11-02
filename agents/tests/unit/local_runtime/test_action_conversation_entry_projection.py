@@ -461,6 +461,49 @@ def test_rejects_processing_tool_with_terminal_output() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("tool_id", "status", "reported"),
+    [
+        pytest.param("render_html_page", "success", {"kind": "html_pages"}, id="drawn"),
+        pytest.param("save_html_as_pdf", "success", {"status": "saved"}, id="saved"),
+        pytest.param(
+            "render_html_page",
+            "error",
+            {"status": "error", "error": {"message": "timed out"}},
+            id="failed-after-reaching-the-network",
+        ),
+    ],
+)
+def test_names_each_host_a_page_reached_once_and_its_port_only_when_unusual(
+    tool_id: str, status: ActionStepStatus, reported: dict[str, object]
+) -> None:
+    network = [
+        {"host": "fonts.googleapis.com", "port": 443},
+        {"host": "fonts.gstatic.com", "port": 443},
+        # The same host over plain http is the same destination on the row.
+        {"host": "fonts.googleapis.com", "port": 80},
+        {"host": "charts.example", "port": 8443},
+    ]
+
+    entry = project_action_tool_entry(
+        ActionHistoryToolRow(
+            "step-1",
+            1,
+            tool_id,
+            status,
+            _tool_output(status=status, output={**reported, "network": network}),
+            None,
+            "run-1",
+        )
+    )
+
+    assert entry.network_hosts == (
+        "fonts.googleapis.com",
+        "fonts.gstatic.com",
+        "charts.example:8443",
+    )
+
+
 def test_projects_the_row_subject_and_result_preview_together() -> None:
     entry = project_action_tool_entry(
         ActionHistoryToolRow(

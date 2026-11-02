@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from pantaray_agents.local_runtime.runtime.html_render_relay import (
     BlockedRequest,
+    ContactedHost,
     HtmlRenderAnswer,
     HtmlRenderClaimed,
     HtmlRenderFailed,
@@ -22,6 +23,7 @@ RENDERED = {
     "byte_size": 2048,
     "sha256": SHA256,
     "blocked_requests": [BLOCKED],
+    "network": [{"host": "fonts.googleapis.com", "port": 443}],
 }
 
 
@@ -54,6 +56,7 @@ async def _post(
                 blocked_requests=(
                     BlockedRequest(reason="outside_read_scope", url=BLOCKED["url"]),
                 ),
+                network=(ContactedHost(host="fonts.googleapis.com", port=443),),
             ),
         ),
         (
@@ -61,12 +64,22 @@ async def _post(
                 "status": "failed",
                 "code": "HTML_PDF_TOO_LARGE",
                 "message": "The PDF is over 100 MB.",
-                "blocked_requests": [],
+                # Electron refuses a new host once it has reported as many as it may.
+                "blocked_requests": [
+                    {"reason": "too_many_hosts", "url": "https://h51.example/x"}
+                ],
+                # A page that failed may still have reached the network first.
+                "network": [{"host": "cdn.example", "port": 8443}],
             },
             HtmlRenderFailed(
                 code="HTML_PDF_TOO_LARGE",
                 message="The PDF is over 100 MB.",
-                blocked_requests=(),
+                blocked_requests=(
+                    BlockedRequest(
+                        reason="too_many_hosts", url="https://h51.example/x"
+                    ),
+                ),
+                network=(ContactedHost(host="cdn.example", port=8443),),
             ),
         ),
     ],
@@ -121,12 +134,31 @@ async def test_another_users_token_cannot_answer_the_request(
 @pytest.mark.parametrize(
     "result",
     [
-        {"status": "failed", "code": "OTHER", "message": "", "blocked_requests": []},
-        {"status": "rendered", "byte_size": 1, "sha256": SHA256},
+        {
+            "status": "failed",
+            "code": "OTHER",
+            "message": "",
+            "blocked_requests": [],
+            "network": [],
+        },
+        {"status": "rendered", "byte_size": 1, "sha256": SHA256, "network": []},
         {**RENDERED, "blocked_requests": [BLOCKED] * 11},
         {**RENDERED, "path": "/tmp/elsewhere.pdf"},
+        # Only the host and port: a URL's path and query can carry tokens.
+        {
+            **RENDERED,
+            "network": [
+                {"host": "a.example", "port": 443, "url": "https://a.example/?t=1"}
+            ],
+        },
     ],
-    ids=["unknown_code", "no_blocked_requests", "too_many_blocked", "extra_field"],
+    ids=[
+        "unknown_code",
+        "no_blocked_requests",
+        "too_many_blocked",
+        "extra_field",
+        "url_with_the_host",
+    ],
 )
 def test_an_answer_outside_the_contract_is_rejected_at_the_boundary(
     result: dict[str, object],

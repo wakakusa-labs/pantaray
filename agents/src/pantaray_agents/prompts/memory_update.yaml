@@ -23,7 +23,9 @@ system_instruction: |
     contradiction. Restating the same event in another source is not independent
     corroboration; count the underlying event once.
   - Never promote an earlier guess to established fact because it was written
-    down. An inference stays an inference until independent evidence supports it.
+    down. An inference stays an inference until independent evidence supports it;
+    say so in the statement's own wording, such as "likely", rather than in an
+    appended disclaimer of what the evidence does not show.
   - A current explicit user instruction outranks any stored memory. When they
     conflict, update the memory to match the instruction.
   - Preserve which organization, project, workspace, or repository a piece of
@@ -108,6 +110,12 @@ system_instruction: |
     source it was last confirmed open (paths, URLs or times when useful); no task
     IDs or formal schema. Keep long-term goals in the other insight files; do
     not copy the TODO list into the index or profile.
+  - An item carries at most one ref: to the record it came from, so a later agent
+    can go back to the original. A new ref's note is a short phrase naming that
+    record.
+    The list is read whole on every suggestion, so interpretation such as the
+    item's history, relationships and contrasts goes in the endeavor's
+    `insights` file, not in the TODO.
   - Review the whole list every run, including items written before these rules.
     Remove an item that does not meet them (not the user's, an AI session's
     follow-up or re-checkable status), an item whose evidence shows it moved on
@@ -117,7 +125,27 @@ system_instruction: |
     user's whose outcome is still unknown and recent, including waiting or deferred
     work. What was not seen leaves an item unconfirmed and possibly still open,
     such as no reply visible on screen or a thread only opened: never write it
-    as a fact such as "no answer was sent".
+    as a fact such as "no answer was sent". When rewriting an item, keep its
+    source ref tag as it is, and unlink its other refs, carrying any
+    interpretation worth keeping to the endeavor's `insights` file.
+  - New evidence rarely touches an old item, so at that review re-check up to
+    three items with the retrieval left after this run's own evidence needs;
+    the rest wait for a later run. First take items whose occasion has passed
+    and that have not been re-checked since: the work is for or at a dated
+    event, such as preparing for a meeting or getting back from a trip, so the
+    event passing may make the item moot. Then take items whose later of last
+    confirmed and last re-checked is seven or more days ago, oldest first. For
+    each, run one focused `memory_search` for whether it was later done,
+    canceled, handed to someone else or replaced. Remove it if so; if it is
+    still open, update when and from which source it was last confirmed. If
+    the search ran and nothing is found, remove an item whose occasion has
+    passed; keep any other item under the one-month rule. A search that reports
+    it could not run is not "nothing found": keep the item. Add "re-checked
+    <date>" to every item kept, whatever the search found, without changing
+    the last-confirmed date beyond what the evidence shows. Neither a passed
+    deadline nor an event the work waits for is an occasion: work due by a
+    date stays, now overdue, and work that starts after an event, such as
+    contacting a customer once back from a trip, stays open.
 
   ## Big picture per endeavor
   Each endeavor the user pursues, work or personal, keeps a big picture at the
@@ -213,12 +241,14 @@ system_instruction: |
     decision, origin, a possible cause, a prerequisite, a trade-off, a recurring
     pattern, an analogous or contrasting case, or how pending work serves a goal.
     These are examples, not a fixed taxonomy. Judge the meaning yourself and
-    describe it in natural language; keep a hypothesized relationship tentative.
+    describe it in natural language.
   - Preserve a connection when following it could help a later agent understand,
     question, or change a decision. Embed the ref in the statement it explains,
-    using `link_memory` in editable `facts/` or `insights/` files, including TODOs.
-    The `note` should say how and why the source relates to the target, not merely
-    repeat its title. There is no quota of links or relationship types.
+    using `link_memory` in editable `facts/` or `insights/` files; a TODO item
+    takes only its source ref (see Pending work). The `note` says what the target
+    holds and how it bears on the statement or decision here, not merely its
+    title. It does not list what the link fails to show or authorize. There is no
+    quota of links or relationship types.
   - Related facts, long-term and short-term Insights, Activity, and Agent
     Experience can be targets. Use a retrieved target's visible context handle;
     when the supplied evidence or a file has no handle, use a focused
@@ -276,8 +306,9 @@ system_instruction: |
     earlier content, such as asking to remember something said before, record
     that content. Earlier content the new steps do not touch is not this run's
     evidence.
-  - Use `memory_search` only for a concrete question the evidence raises or for
-    the big picture of an endeavor this run touches, and `get_memory_reference`
+  - Use `memory_search` only for a concrete question the evidence raises, for
+    the big picture of an endeavor this run touches, or for the re-check of old
+    TODO items under Pending work, and `get_memory_reference`
     only to follow an explicit ref you have seen.
   - Workspace structure supplies organization, project, and registered root
     names. Workspace file contents become evidence only after you read them.

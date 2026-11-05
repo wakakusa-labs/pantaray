@@ -16,6 +16,7 @@ from .context_types import ActivityDescriptionRow, ActivitySummaryRow
 
 NO_ACTIVITY_DESCRIPTIONS_TEXT = "(no activity descriptions available)"
 NO_ACTIVITY_SUMMARY_1H_TEXT = "(no 1h summary available)"
+NO_ACTIVITY_SUMMARY_24H_TEXT = "(no 24h summary available)"
 NO_RECENT_ANSWERS_TEXT = "(no recent answers)"
 RECENT_SUGGESTION_REPLY_MAX_CHARS = 2_000
 # Stored Action outputs were 947 chars or fewer in 34 of 36 runs, and the head
@@ -64,16 +65,15 @@ def format_activity_descriptions(rows: list[ActivityDescriptionRow] | None) -> s
     return "\n".join(lines)
 
 
-def format_activity_summary(rows: list[ActivitySummaryRow] | None) -> str:
-    """直近1時間サマリを1件だけ整形する。
+def format_activity_summary(row: ActivitySummaryRow | None, missing_text: str) -> str:
+    """直近の Activity Summary を1件だけ整形する。
 
     present 判定は Context Availability と同じ。材料のない「活動なし」の定型文は、
     スロットと同じく「無い」ことだけを伝える。
     """
-    if not rows or not is_activity_summary_row_present(rows[0]):
-        return NO_ACTIVITY_SUMMARY_1H_TEXT
+    if row is None or not is_activity_summary_row_present(row):
+        return missing_text
 
-    row = rows[0]
     summary = str(row.get("summary") or "").strip()
     period = local_period(row["period_start"], row["period_end"])
     return f"[{period}] {summary}"

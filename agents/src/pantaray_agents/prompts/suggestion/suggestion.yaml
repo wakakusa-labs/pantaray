@@ -202,8 +202,8 @@ prompt: |
   ## Recent Activity Summary (1-hour)
   {recent_activity_summary_1h}
 
-  ## Recent Activity Summaries (24h/1w/1m)
-  {recent_activity_summaries_24h_1w_1m}
+  ## Recent Activity Summary (24-hour)
+  {recent_activity_summary_24h}
 
   ## Recent Suggestions and their Actions (up to the latest 20)
   Recorded proposals, reactions and first replies, with each Action's status, the

@@ -27,13 +27,11 @@ from pantaray_agents.agents.suggestion_agent.context_density import (
 from pantaray_agents.agents.suggestion_agent.context_density import (
     build_context_density_signal,
     build_context_density_slot_status,
-    build_recent_activity_summaries_24h_1w_1m,
     classify_context_density,
 )
-from pantaray_agents.agents.suggestion_agent.context_fetch import (
-    fetch_summary_rows_by_type,
-)
 from pantaray_agents.agents.suggestion_agent.context_formatters import (
+    NO_ACTIVITY_SUMMARY_1H_TEXT,
+    NO_ACTIVITY_SUMMARY_24H_TEXT,
     RECENT_SUGGESTIONS_SHOWN,
     SUGGESTION_HISTORY_DAYS,
     format_activity_descriptions,
@@ -43,7 +41,6 @@ from pantaray_agents.agents.suggestion_agent.context_formatters import (
 )
 from pantaray_agents.agents.suggestion_agent.context_types import (
     ActivityDescriptionRow,
-    ActivitySummaryRow,
     SuggestionFetchedContext,
     SuggestionStableMemoryContext,
     normalize_activity_description_rows,
@@ -227,10 +224,6 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
         """直近のActivity Descriptionログをプロンプト用に整形（新しい順）。"""
         return format_activity_descriptions(rows)
 
-    def _format_activity_summary(self, rows: list[ActivitySummaryRow] | None) -> str:
-        """直近1時間サマリを1件だけ整形。"""
-        return format_activity_summary(rows)
-
     def _get_reference_time(self) -> datetime:
         """コンテキスト構築の基準時刻（UTC）を返す。
 
@@ -307,25 +300,25 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
             safe_message="failed to fetch recent 1h activity summary",
         )
         summary_1h_rows = normalize_activity_summary_rows(recent_summary_1h_rows)
-        activity_summary_text = self._format_activity_summary(summary_1h_rows)
         summary_1h_row = summary_1h_rows[0] if summary_1h_rows else None
 
-        # 追加: Activity Summary（24h/1w/1m）を取得し、ended_ago 付きで整形する
-        rows_by_type = await fetch_summary_rows_by_type(
-            repository=self.repository,
-            user_id=suggestion_request.user_id,
+        # Longer summaries stay out of the prompt: the research tools read older
+        # periods from their source records when a suggestion needs them.
+        recent_summary_24h_rows = repository_data_or_raise(
+            await self.repository.get_recent_activity_summary(
+                suggestion_request.user_id, summary_type="24h", limit=1
+            ),
+            safe_message="failed to fetch recent 24h activity summary",
         )
+        summary_24h_rows = normalize_activity_summary_rows(recent_summary_24h_rows)
+        summary_24h_row = summary_24h_rows[0] if summary_24h_rows else None
 
-        activity_summaries_24h_1w_1m = build_recent_activity_summaries_24h_1w_1m(
-            reference_time=reference_time,
-            rows_by_type=rows_by_type,
-        )
         slot_status = build_context_density_slot_status(
             has_long_term_insight=self.stable_memory.has_insights,
             has_long_term_facts=self.stable_memory.has_facts,
             activity_desc_rows=activity_desc_rows,
             summary_1h_row=summary_1h_row,
-            rows_by_type=rows_by_type,
+            summary_24h_row=summary_24h_row,
         )
         present_count = sum(1 for is_present in slot_status.values() if is_present)
         density = classify_context_density(present_count)
@@ -342,8 +335,12 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
             "action_agent_capabilities": (self._action_agent_capabilities_prompt_text),
             "recent_suggestions": recent_suggestions_text,
             "recent_activity_descriptions": activity_desc_text,
-            "recent_activity_summary_1h": activity_summary_text,
-            "recent_activity_summaries_24h_1w_1m": activity_summaries_24h_1w_1m,
+            "recent_activity_summary_1h": format_activity_summary(
+                summary_1h_row, NO_ACTIVITY_SUMMARY_1H_TEXT
+            ),
+            "recent_activity_summary_24h": format_activity_summary(
+                summary_24h_row, NO_ACTIVITY_SUMMARY_24H_TEXT
+            ),
             "context_density_signal": context_density_signal,
             "workspace_context_prompt": suggestion_request.workspace_context_prompt
             or "",
@@ -365,9 +362,7 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
                 "recent_activity_descriptions"
             ],
             "recent_activity_summary_1h": context_data["recent_activity_summary_1h"],
-            "recent_activity_summaries_24h_1w_1m": context_data[
-                "recent_activity_summaries_24h_1w_1m"
-            ],
+            "recent_activity_summary_24h": context_data["recent_activity_summary_24h"],
             "context_density_signal": context_data["context_density_signal"],
             "workspace_context_prompt": context_data["workspace_context_prompt"],
             "answer_language": self._answer_language_label(),

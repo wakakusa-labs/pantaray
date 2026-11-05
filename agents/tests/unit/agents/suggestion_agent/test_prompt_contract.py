@@ -56,7 +56,7 @@ def test_real_prompt_renders_context_and_answer_language(
         "recent_suggestions": "suggestions-with-user-responses",
         "recent_activity_descriptions": "observed-activity-evidence",
         "recent_activity_summary_1h": "hourly-summary-evidence",
-        "recent_activity_summaries_24h_1w_1m": "longer-summary-evidence",
+        "recent_activity_summary_24h": "daily-summary-evidence",
         "context_density_signal": "context-availability-signal",
         "workspace_context_prompt": "registered-workspace-context",
     }

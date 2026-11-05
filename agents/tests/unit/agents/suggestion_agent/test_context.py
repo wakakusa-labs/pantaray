@@ -14,21 +14,18 @@ from pantaray_agents.agents.suggestion_agent import SuggestionAgent
 from pantaray_agents.agents.suggestion_agent.context_density import (
     build_context_density_signal,
     build_context_density_slot_status,
-    build_recent_activity_summaries_24h_1w_1m,
     classify_context_density,
-    format_ended_ago,
 )
 from pantaray_agents.agents.suggestion_agent.context_formatters import (
     NO_ACTIVITY_SUMMARY_1H_TEXT,
+    NO_ACTIVITY_SUMMARY_24H_TEXT,
     format_activity_descriptions,
     format_activity_summary,
     format_recent_suggestions,
     normalize_recent_suggestion_entry,
 )
 from pantaray_agents.agents.suggestion_agent.context_types import (
-    ActivitySummaryRow,
     SuggestionStableMemoryContext,
-    SummaryType,
     normalize_activity_description_rows,
     normalize_activity_summary_row,
 )
@@ -181,37 +178,6 @@ def test_normalize_recent_suggestion_entry_skips_non_mapping_row() -> None:
     assert entry is None
 
 
-def test_format_ended_ago_minutes() -> None:
-    reference_time = datetime(2025, 1, 1, 0, 0, 0, tzinfo=UTC)
-    period_end = reference_time - timedelta(seconds=660)
-    assert format_ended_ago(reference_time, period_end) == "11m (660s)"
-
-
-def test_format_ended_ago_hours() -> None:
-    reference_time = datetime(2025, 1, 1, 0, 0, 0, tzinfo=UTC)
-    period_end = reference_time - timedelta(seconds=68400)
-    assert format_ended_ago(reference_time, period_end) == "19h (68400s)"
-
-
-def test_format_ended_ago_days() -> None:
-    reference_time = datetime(2025, 1, 1, 0, 0, 0, tzinfo=UTC)
-    period_end = reference_time - timedelta(seconds=1036800)
-    assert format_ended_ago(reference_time, period_end) == "12d (1036800s)"
-
-
-@pytest.mark.usefixtures("tokyo_local_zone")
-def test_build_recent_activity_summaries_24h_1w_1m_missing() -> None:
-    reference_time = datetime(2025, 1, 1, 0, 0, 0, tzinfo=UTC)
-    text = build_recent_activity_summaries_24h_1w_1m(
-        reference_time=reference_time,
-        rows_by_type={"24h": None, "1w": None, "1m": None},
-    )
-    assert "Reference time: 2025-01-01T09:00+09:00 (Asia/Tokyo)" in text
-    assert "- [24h] MISSING (no summary available)" in text
-    assert "- [1w] MISSING (no summary available)" in text
-    assert "- [1m] MISSING (no summary available)" in text
-
-
 def test_normalize_activity_summary_row_non_string_fields_treated_missing(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -255,26 +221,16 @@ def test_context_density_slot_status_blank_and_invalid_timestamp_are_missing() -
             "period_end": "invalid",
             "source_ids": ["log-1h"],
         },
-        rows_by_type={
-            "24h": {
-                "summary": " ",
-                "period_end": "2025-01-01T00:00:00Z",
-                "source_ids": ["sum-1h"],
-            },
-            "1w": {
-                "summary": "weekly",
-                "period_end": "invalid",
-                "source_ids": ["sum-24h"],
-            },
-            "1m": None,
+        summary_24h_row={
+            "summary": " ",
+            "period_end": "2025-01-01T00:00:00Z",
+            "source_ids": ["sum-1h"],
         },
     )
     assert slot_status == {
         "activity_descriptions": False,
         "activity_summary_1h": False,
         "activity_summary_24h": False,
-        "activity_summary_1w": False,
-        "activity_summary_1m": False,
         "long_term_insight": False,
         "long_term_facts": False,
     }
@@ -292,22 +248,10 @@ def test_context_density_slot_status_valid_rows_are_present() -> None:
             "period_end": "2025-01-02T00:00:00Z",
             "source_ids": ["log-1h"],
         },
-        rows_by_type={
-            "24h": {
-                "summary": "daily",
-                "period_end": "2025-01-01T00:00:00Z",
-                "source_ids": ["sum-1h"],
-            },
-            "1w": {
-                "summary": "weekly",
-                "period_end": "2025-01-01T00:00:00Z",
-                "source_ids": ["sum-24h"],
-            },
-            "1m": {
-                "summary": "monthly",
-                "period_end": "2024-12-01T00:00:00Z",
-                "source_ids": ["sum-1w"],
-            },
+        summary_24h_row={
+            "summary": "daily",
+            "period_end": "2025-01-01T00:00:00Z",
+            "source_ids": ["sum-1h"],
         },
     )
     assert all(slot_status.values())
@@ -330,30 +274,13 @@ def test_context_density_slot_status_no_activity_summary_is_missing() -> None:
             "source_ids": [],
         }
 
-    rows_by_type: dict[SummaryType, ActivitySummaryRow | None] = {
-        "24h": normalize_activity_summary_row(
-            {
-                "summary": "S24",
-                "period_start": "2026-09-15T00:00:00Z",
-                "period_end": "2026-09-16T00:00:00Z",
-                "source_ids": ["sum-1h"],
-            }
-        ),
-        "1w": normalize_activity_summary_row(
-            _no_activity_summary(
-                summary_type="1w",
-                period_start="2026-09-09T00:00:00Z",
-                period_end="2026-09-16T00:00:00Z",
-            )
-        ),
-        "1m": normalize_activity_summary_row(
-            _no_activity_summary(
-                summary_type="1m",
-                period_start="2026-08-16T00:00:00Z",
-                period_end="2026-09-16T00:00:00Z",
-            )
-        ),
-    }
+    summary_24h_row = normalize_activity_summary_row(
+        _no_activity_summary(
+            summary_type="24h",
+            period_start="2026-09-15T00:00:00Z",
+            period_end="2026-09-16T00:00:00Z",
+        )
+    )
     slot_status = build_context_density_slot_status(
         has_long_term_insight=True,
         has_long_term_facts=True,
@@ -368,25 +295,19 @@ def test_context_density_slot_status_no_activity_summary_is_missing() -> None:
                 "source_ids": ["log-1h"],
             }
         ),
-        rows_by_type=rows_by_type,
+        summary_24h_row=summary_24h_row,
     )
 
-    assert slot_status["activity_summary_1w"] is False
-    assert slot_status["activity_summary_1m"] is False
+    assert slot_status["activity_summary_24h"] is False
     present_count = sum(1 for is_present in slot_status.values() if is_present)
-    assert present_count == 5
-    assert classify_context_density(present_count) == "high"
+    assert present_count == 4
+    assert classify_context_density(present_count) == "medium"
 
     # スロットが missing なら、プロンプトの本文にも「活動なし」の定型文を載せない。
-    body = build_recent_activity_summaries_24h_1w_1m(
-        reference_time=datetime(2026, 9, 16, 0, 20, tzinfo=UTC),
-        rows_by_type=rows_by_type,
+    assert (
+        format_activity_summary(summary_24h_row, NO_ACTIVITY_SUMMARY_24H_TEXT)
+        == NO_ACTIVITY_SUMMARY_24H_TEXT
     )
-    assert "- [24h] period:" in body
-    assert "- [1w] MISSING (no summary available)" in body
-    assert "- [1m] MISSING (no summary available)" in body
-    assert "No activity was recorded" not in body
-    assert format_activity_summary([rows_by_type["1m"]]) == NO_ACTIVITY_SUMMARY_1H_TEXT
 
 
 @pytest.mark.parametrize(
@@ -397,8 +318,6 @@ def test_context_density_slot_status_no_activity_summary_is_missing() -> None:
         (3, "medium"),
         (4, "medium"),
         (5, "high"),
-        (6, "high"),
-        (7, "high"),
     ],
 )
 def test_classify_context_density_boundaries(present_count: int, expected: str) -> None:
@@ -410,8 +329,6 @@ def test_build_context_density_signal_does_not_include_policy() -> None:
         "activity_descriptions": True,
         "activity_summary_1h": True,
         "activity_summary_24h": False,
-        "activity_summary_1w": False,
-        "activity_summary_1m": False,
         "long_term_insight": True,
         "long_term_facts": False,
     }
@@ -422,7 +339,7 @@ def test_build_context_density_signal_does_not_include_policy() -> None:
     )
     assert "policy:" not in signal
     assert "context_density: medium" in signal
-    assert "present_count: 3/7" in signal
+    assert "present_count: 3/5" in signal
     assert "- Activity Summary (24h): missing" in signal
 
 
@@ -431,8 +348,6 @@ def test_build_context_density_signal_raises_on_slot_key_mismatch() -> None:
         "activity_descriptions": True,
         "activity_summary_1h": True,
         "activity_summary_24h": False,
-        "activity_summary_1w": False,
-        "activity_summary_1m": False,
         "long_term_insight": False,
         "unexpected_slot": True,
     }
@@ -448,8 +363,8 @@ def test_build_context_density_signal_raises_on_slot_key_mismatch() -> None:
 @pytest.mark.parametrize(
     ("summary_types", "expected_density", "expected_present_count"),
     [
-        (("1h", "24h"), "high", "5/7"),
-        (("1h", "24h", "1w", "1m"), "high", "7/7"),
+        (("1h",), "medium", "4/5"),
+        (("1h", "24h"), "high", "5/5"),
     ],
 )
 async def test_suggestion_agent_process_includes_context_density_in_prompt(
@@ -504,26 +419,6 @@ async def test_suggestion_agent_process_includes_context_density_in_prompt(
                 "status": "success",
                 "source_ids": ["sum-1h"],
             },
-            "1w": {
-                "summary_id": "sum-1w",
-                "user_id": "user-test",
-                "summary_type": "1w",
-                "summary": "S1W",
-                "period_start": "2024-12-25T00:00:00Z",
-                "period_end": "2025-01-01T00:00:00Z",
-                "status": "success",
-                "source_ids": ["sum-24h"],
-            },
-            "1m": {
-                "summary_id": "sum-1m",
-                "user_id": "user-test",
-                "summary_type": "1m",
-                "summary": "S1M",
-                "period_start": "2024-12-01T00:00:00Z",
-                "period_end": "2025-01-01T00:00:00Z",
-                "status": "success",
-                "source_ids": ["sum-1w"],
-            },
         }
         mock_repository.data["activity_summaries"] = [
             summary_rows_by_type[summary_type] for summary_type in summary_types
@@ -548,15 +443,13 @@ def test_context_density_slot_status_with_facts_only_marks_facts_present() -> No
         has_long_term_facts=True,
         activity_desc_rows=None,
         summary_1h_row=None,
-        rows_by_type={"24h": None, "1w": None, "1m": None},
+        summary_24h_row=None,
     )
 
     assert slot_status == {
         "activity_descriptions": False,
         "activity_summary_1h": False,
         "activity_summary_24h": False,
-        "activity_summary_1w": False,
-        "activity_summary_1m": False,
         "long_term_insight": False,
         "long_term_facts": True,
     }
@@ -602,22 +495,21 @@ async def test_fetch_context_data_counts_facts_in_context_density(
 
         assert context["stable_memory_context"] == "Stable memory summary"
         assert "context_density: low" in context["context_density_signal"]
-        assert "present_count: 2/7" in context["context_density_signal"]
+        assert "present_count: 2/5" in context["context_density_signal"]
         assert "- Long-term Facts: present" in context["context_density_signal"]
 
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("tokyo_local_zone")
-async def test_suggestion_agent_builds_recent_activity_summaries_24h_1w_1m_context(
+async def test_suggestion_agent_builds_recent_activity_summary_24h_context(
     suggestion_agent: SuggestionAgent,
     mock_repository: MockSuggestionAgentRepository,
     mock_llm_client: MockLLMClient,
 ) -> None:
-    """24h/1w/1m の Activity Summary を ended_ago 付きでコンテキストに含めること。"""
+    """直近の 24h Activity Summary を1件、対象期間つきでコンテキストに含めること。"""
 
     fixed_now = datetime(2025, 1, 2, 0, 0, 0, tzinfo=UTC)
 
-    # 1hは既存のキー（recent_activity_summary_1h）でそのまま使う
     mock_repository.data["activity_summaries"] = [
         {
             "summary_id": "sum-1h",
@@ -649,20 +541,10 @@ async def test_suggestion_agent_builds_recent_activity_summaries_24h_1w_1m_conte
             "status": "success",
             "source_ids": ["sum-24h"],
         },
-        {
-            "summary_id": "sum-1m",
-            "user_id": "user-test",
-            "summary_type": "1m",
-            "summary": "S1M",
-            "period_start": "2024-11-21T00:00:00Z",
-            "period_end": "2024-12-21T00:00:00Z",
-            "status": "success",
-            "source_ids": ["sum-1w"],
-        },
     ]
 
     request = SuggestionAgentRequest(
-        suggestion_id="sug-ctx-24h-1w-1m",
+        suggestion_id="sug-ctx-24h",
         user_id="user-test",
         short_term_insight="# Insight\nThe user is fixing a parser bug.",
         reconsideration_reason="The user switched goals.",
@@ -680,15 +562,12 @@ async def test_suggestion_agent_builds_recent_activity_summaries_24h_1w_1m_conte
         _ = await suggestion_agent.process(request)
 
         ctx = mock_build_prompt.call_args[0][0]
-        assert "recent_activity_summary_1h" in ctx
-        assert "recent_activity_summaries_24h_1w_1m" in ctx
-
-        extended = ctx["recent_activity_summaries_24h_1w_1m"]
-        assert "Reference time: 2025-01-02T09:00+09:00 (Asia/Tokyo)" in extended
-        assert "period: 2024-12-31T14:00+09:00 .. 2025-01-01T14:00+09:00" in extended
-        assert "ended_ago: 19h (68400s)" in extended
-        assert "ended_ago: 24h (86400s)" in extended
-        assert "ended_ago: 12d (1036800s)" in extended
+        assert ctx["recent_activity_summary_1h"] == (
+            "[2025-01-02T08:00+09:00 - 2025-01-02T09:00+09:00] S1H"
+        )
+        assert ctx["recent_activity_summary_24h"] == (
+            "[2024-12-31T14:00+09:00 - 2025-01-01T14:00+09:00] S24"
+        )
 
 
 @pytest.mark.asyncio
@@ -922,7 +801,8 @@ def test_suggestion_context_shows_the_local_date_of_each_stored_instant() -> Non
         [{"description": "Editing the estimate", **period}]
     ) == (f"- [{local_period}] Editing the estimate")
     assert format_activity_summary(
-        [{"summary": "S1H", "source_ids": ["log-1"], **period}]
+        {"summary": "S1H", "source_ids": ["log-1"], **period},
+        NO_ACTIVITY_SUMMARY_1H_TEXT,
     ) == (f"[{local_period}] S1H")
     entry = normalize_recent_suggestion_entry(
         {
@@ -936,25 +816,6 @@ def test_suggestion_context_shows_the_local_date_of_each_stored_instant() -> Non
         "\n- [2026-09-27T06:50+09:00] answer: A suggestion\n"
         in format_recent_suggestions([entry], _NOW)
     )
-
-    body = build_recent_activity_summaries_24h_1w_1m(
-        reference_time=datetime(2026, 9, 26, 21, 50, tzinfo=UTC),
-        rows_by_type={
-            "24h": {
-                "summary": "S24",
-                "source_ids": ["sum-1h"],
-                "period_start": "2026-09-25T21:00:00Z",
-                "period_end": "2026-09-26T21:00:00Z",
-            },
-            "1w": None,
-            "1m": None,
-        },
-    )
-    assert body.splitlines()[:2] == [
-        "Reference time: 2026-09-27T06:50+09:00 (Asia/Tokyo)",
-        "- [24h] period: 2026-09-26T06:00+09:00 .. 2026-09-27T06:00+09:00"
-        " | ended_ago: 50m (3000s) | summary: S24",
-    ]
 
 
 @pytest.mark.asyncio

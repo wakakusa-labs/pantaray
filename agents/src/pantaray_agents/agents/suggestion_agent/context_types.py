@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Literal, TypedDict
+from typing import TypedDict
 
 from pantaray_agents.schema.repositories.repository import DBRow, JSONValue
 
@@ -45,18 +45,12 @@ class ActivitySummaryRow(TypedDict, total=False):
     source_ids: list[str]
 
 
-type SummaryType = Literal["24h", "1w", "1m"]
-type ActivitySummaryRowsByType = dict[SummaryType, ActivitySummaryRow | None]
-
-
 class ContextDensitySlotStatus(TypedDict):
-    """Context density 7スロットの present/missing 判定。"""
+    """Context density 5スロットの present/missing 判定。"""
 
     activity_descriptions: bool
     activity_summary_1h: bool
     activity_summary_24h: bool
-    activity_summary_1w: bool
-    activity_summary_1m: bool
     long_term_insight: bool
     long_term_facts: bool
 
@@ -71,7 +65,7 @@ class SuggestionFetchedContext(TypedDict):
     recent_suggestions: str
     recent_activity_descriptions: str
     recent_activity_summary_1h: str
-    recent_activity_summaries_24h_1w_1m: str
+    recent_activity_summary_24h: str
     context_density_signal: str
     workspace_context_prompt: str
 

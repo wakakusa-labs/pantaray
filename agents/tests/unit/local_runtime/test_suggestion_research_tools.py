@@ -1260,7 +1260,7 @@ def test_oversized_todo_file_is_cut_and_does_not_block_the_suggestion_prompt(
             "recent_suggestions": "suggestions",
             "recent_activity_descriptions": "activities",
             "recent_activity_summary_1h": "hourly",
-            "recent_activity_summaries_24h_1w_1m": "summaries",
+            "recent_activity_summary_24h": "summaries",
             "context_density_signal": "context_density: high",
             "workspace_context_prompt": "w" * 50_000,
         }

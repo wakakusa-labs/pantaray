@@ -52,7 +52,7 @@ def _prompt_context() -> SuggestionFetchedContext:
         "recent_suggestions": "suggestions",
         "recent_activity_descriptions": "activities",
         "recent_activity_summary_1h": "hourly",
-        "recent_activity_summaries_24h_1w_1m": "summaries",
+        "recent_activity_summary_24h": "summaries",
         "context_density_signal": "context_density: low",
         "workspace_context_prompt": "workspace",
     }
@@ -171,8 +171,6 @@ async def test_suggestion_agent_sends_large_activity_context_without_truncation(
     summaries = {
         "1h": "直近一時間の活動。" * 400,
         "24h": "一日の活動要約。" * 600,
-        "1w": "一週間の活動要約。" * 250,
-        "1m": "一か月の活動要約。" * 250,
     }
     description = "直近の作業を調査しています。" * 100
     mock_repository.data["activity_summaries"] = [
@@ -216,7 +214,7 @@ async def test_suggestion_agent_sends_large_activity_context_without_truncation(
     assert response.status == StatusType.SUCCESS
     prompt = mock_llm_client.last_prompt
     assert prompt is not None
-    assert 16_000 < len(prompt) < 124_000
+    assert 12_000 < len(prompt) < 124_000
     for summary in summaries.values():
         assert summary in prompt
     for i in range(3):

@@ -132,8 +132,8 @@ body {
   line-height: var(--text-body-leading);
   letter-spacing: var(--text-body-tracking);
   font-synthesis: none; /* 偽bold/偽italicで字面が揺れるのを抑える */
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  /* Font smoothing stays at the platform default: `antialiased` turns off the stem thickening
+     macOS gives light text on dark ground, and the text then reads thin. */
   background: var(--app-background);
   color: var(--text-primary);
   min-height: 100vh;

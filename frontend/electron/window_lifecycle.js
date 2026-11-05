@@ -378,7 +378,8 @@ function createMainWindow(options = {}) {
       : {}),
   });
 
-  runWindowStartupStepWithRetry('center', () => win.center(), { optional: true });
+  // The window opens filling the screen; zooming out restores the size above, centered.
+  runWindowStartupStepWithRetry('maximize', () => win.maximize(), { optional: true });
   // Before the first load, so no link in the window can ever replace the app.
   keepWindowOnItsDocument(win.webContents);
 

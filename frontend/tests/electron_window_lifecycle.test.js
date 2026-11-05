@@ -225,13 +225,13 @@ test('waitForWindowLoad rejects renderer load failures', async () => {
   );
 });
 
-test('createMainWindow continues when centering is interrupted by EINTR', () => {
+test('createMainWindow continues when maximizing is interrupted by EINTR', () => {
   const calls = [];
   const handlers = new Map();
   function BrowserWindow(options) {
     this.options = options;
-    this.center = () => {
-      calls.push('center');
+    this.maximize = () => {
+      calls.push('maximize');
       throw createInterruptedReadError();
     };
     this.on = (event, handler) => {
@@ -259,15 +259,15 @@ test('createMainWindow continues when centering is interrupted by EINTR', () => 
   // The first click after an overlay took keyboard focus acts instead of only refocusing.
   assert.equal(win.options.acceptFirstMouse, true);
   assert.deepEqual(calls, [
-    'center',
-    'center',
-    'center',
-    'center',
-    'center',
-    'center',
-    'center',
-    'center',
-    'center',
+    'maximize',
+    'maximize',
+    'maximize',
+    'maximize',
+    'maximize',
+    'maximize',
+    'maximize',
+    'maximize',
+    'maximize',
     'headers',
   ]);
   assert.equal(handlers.has('close'), true);
@@ -308,7 +308,7 @@ test('createMainWindow retries webContents listener registration after EINTR', (
   let didFailAttempts = 0;
   function BrowserWindow(options) {
     this.options = options;
-    this.center = () => calls.push('center');
+    this.maximize = () => calls.push('maximize');
     this.on = (event) => calls.push(`window:${event}`);
     this.webContents = {
       session: {
@@ -337,7 +337,7 @@ test('createMainWindow retries webContents listener registration after EINTR', (
   assert.equal(win.options.width, 1280);
   assert.equal(didFailAttempts, 3);
   assert.deepEqual(calls, [
-    'center',
+    'maximize',
     // The navigation guard is in place before anything loads.
     'web:will-navigate',
     'web:did-fail-load',
@@ -353,7 +353,7 @@ test('createMainWindow retries webContents listener registration after EINTR', (
 
 function createEntryWindow() {
   const win = new EventEmitter();
-  win.center = () => {};
+  win.maximize = () => {};
   win.webContents = new EventEmitter();
   win.webContents.session = { webRequest: { onHeadersReceived: () => {} } };
   return win;

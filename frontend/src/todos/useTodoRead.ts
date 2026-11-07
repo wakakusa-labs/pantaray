@@ -7,6 +7,7 @@ export type TodoRead<T> = {
   data: T | null;
   /** The last read failed; `data` is what an earlier read returned. */
   error: boolean;
+  /** Resolves once a read started at or after the call has landed or failed. */
   reload: () => Promise<void>;
 };
 
@@ -15,8 +16,9 @@ const CHANGE_REFRESH_DELAY_MS = 150;
 
 /**
  * Reads from the TODO bridge, and again after `todos:changed` and, when asked, `history:changed`.
- * Only the latest read lands, so an answer to an earlier query or change never replaces a newer
- * one. `read` names what is read: a new function reads again.
+ * A WS session that started over may have missed changes (the relay does not replay them), so
+ * `session_started` reads again too. Only the latest read lands, so an answer to an earlier query
+ * or change never replaces a newer one. `read` names what is read: a new function reads again.
  */
 export function useTodoRead<T>(
   read: (todos: TodosBridge) => Promise<T>,
@@ -26,21 +28,39 @@ export function useTodoRead<T>(
   const [error, setError] = useState(false);
   const generationRef = useRef(0);
   const reloadRef = useRef<() => Promise<void>>(async () => undefined);
+  // Each `reload()` waits for a read started at or after it to land or fail: a read a later one
+  // superseded never lands, so its caller waits for the later one.
+  const waitersRef = useRef<{ generation: number; resolve: () => void }[]>([]);
 
   useEffect(() => {
-    const reload = async () => {
+    const settle = (generation: number) => {
+      waitersRef.current = waitersRef.current.filter((waiter) => {
+        if (waiter.generation > generation) return true;
+        waiter.resolve();
+        return false;
+      });
+    };
+    const reload = () => {
       const generation = ++generationRef.current;
-      try {
-        const todos = window.electron?.todos;
-        if (!todos) throw new Error('TODO bridge is unavailable.');
-        const next = await read(todos);
-        if (generation !== generationRef.current) return;
-        setData(next);
-        setError(false);
-      } catch {
-        // The screen keeps what it last read and says the read failed; the next change reads again.
-        if (generation === generationRef.current) setError(true);
-      }
+      const settled = new Promise<void>((resolve) =>
+        waitersRef.current.push({ generation, resolve })
+      );
+      void (async () => {
+        try {
+          const todos = window.electron?.todos;
+          if (!todos) throw new Error('TODO bridge is unavailable.');
+          const next = await read(todos);
+          if (generation !== generationRef.current) return;
+          setData(next);
+          setError(false);
+        } catch {
+          if (generation !== generationRef.current) return;
+          // The screen keeps what it last read and says the read failed; the next change reads again.
+          setError(true);
+        }
+        settle(generation);
+      })();
+      return settled;
     };
     reloadRef.current = reload;
     void reload();
@@ -56,6 +76,9 @@ export function useTodoRead<T>(
     const unsubscribes = [
       window.electron?.todos?.onChanged(onChange),
       rereadOnHistory ? window.electron?.history?.onChanged?.(onChange) : undefined,
+      window.electron?.orchestration?.onStatus?.((status) => {
+        if (status.status === 'session_started') void reload();
+      }),
     ];
     return () => {
       for (const unsubscribe of unsubscribes) unsubscribe?.();
@@ -64,6 +87,15 @@ export function useTodoRead<T>(
       generationRef.current += 1;
     };
   }, [read, rereadOnHistory]);
+
+  // Nothing reads once the screen is gone, so no caller is left waiting for a read.
+  useEffect(
+    () => () => {
+      for (const waiter of waitersRef.current) waiter.resolve();
+      waitersRef.current = [];
+    },
+    []
+  );
 
   // Stable across queries, so a caller can hand it down without reading again.
   const reload = useCallback(() => reloadRef.current(), []);

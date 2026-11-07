@@ -151,6 +151,7 @@ def load_default_migrations() -> tuple[MigrationSpec, ...]:
         "0133_suggestion_outcome_verdicts.sql",
         "0134_drop_suggestion_outcome_verdicts.sql",
         "0135_todo_items.sql",
+        "0136_todo_progress.sql",
     )
     return tuple(
         MigrationSpec(

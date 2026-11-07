@@ -142,6 +142,8 @@ files = [
     "src/pantaray_agents/local_runtime/todos",
     "src/pantaray_agents/schema/todos.py",
     "src/pantaray_agents/routers/todos.py",
+    "src/pantaray_agents/schema/todo_progress.py",
+    "src/pantaray_agents/routers/todo_progress.py",
     "src/pantaray_agents/orchestration/ws/todo_relay.py",
 ]
 warn_return_any = true

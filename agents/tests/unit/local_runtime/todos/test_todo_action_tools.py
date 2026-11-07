@@ -10,6 +10,9 @@ import pytest
 from pantaray_agents.agents.action_agent.runtime.handlers.nodes.act.helpers import (
     _resolve_act_tool_contract,
 )
+from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime import (
+    todo as todo_runtime,
+)
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.todo import (
     run_todo_tool,
 )
@@ -43,6 +46,7 @@ def _fixed_clock(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(store, "read_todo_clock", lambda: NOW)
     monkeypatch.setattr(pickup, "read_todo_clock", lambda: NOW)
+    monkeypatch.setattr(todo_runtime, "read_todo_clock", lambda: NOW)
 
 
 def _write(text: str, *, due: TodoDue | None = None) -> Todo:

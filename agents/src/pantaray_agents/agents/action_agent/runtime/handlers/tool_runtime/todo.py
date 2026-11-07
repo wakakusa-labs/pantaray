@@ -23,6 +23,11 @@ from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.todos import core
 from pantaray_agents.local_runtime.todos.core import Rejected
 from pantaray_agents.local_runtime.todos.model import AiReport, TodoId
+from pantaray_agents.local_runtime.todos.store import (
+    read_todo_clock,
+    set_todo_check,
+    update_todo,
+)
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.utils.trace_context import get_trace_context
 
@@ -66,14 +71,6 @@ def run_todo_tool(
 def _update_todo(
     *, user_id: str, todo_id: TodoId, status: TodoStatus, note: str
 ) -> dict[str, JSONValue]:
-    # The TODO store reads Action conversations through modules that import the
-    # Action agent, so importing it when this module loads closes a cycle.
-    from pantaray_agents.local_runtime.todos.store import (
-        read_todo_clock,
-        set_todo_check,
-        update_todo,
-    )
-
     clock = read_todo_clock()
     if status == "done":
         checked = set_todo_check(
@@ -98,9 +95,6 @@ def _update_todo(
 def _request_deletion(
     *, user_id: str, todo_id: TodoId, reason: str
 ) -> dict[str, JSONValue]:
-    # Deferred for the same import cycle as in `_update_todo`.
-    from pantaray_agents.local_runtime.todos.store import read_todo_clock, update_todo
-
     clock = read_todo_clock()
     request_id = str(uuid.uuid4())
     requested = update_todo(

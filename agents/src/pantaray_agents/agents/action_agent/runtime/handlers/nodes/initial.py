@@ -43,6 +43,7 @@ from pantaray_agents.local_runtime.runtime.bootstrap import (
     read_local_runtime_artifact_root,
     read_local_runtime_db_config,
 )
+from pantaray_agents.local_runtime.todos.store import read_todo_for_action
 from pantaray_agents.local_runtime.tooling.repository.manifests import (
     pin_action_memory_roots,
 )
@@ -130,7 +131,7 @@ async def initialize_context(
     if "integration_tools_exposed" not in context:
         context["integration_tools_exposed"] = await integration_tools_available()
     if "served_todo_id" not in context:
-        context["served_todo_id"] = _read_served_todo_id(
+        context["served_todo_id"] = read_todo_for_action(
             user_id=str(request.user_id), action_id=request.action_id
         )
 
@@ -183,14 +184,6 @@ async def initialize_context(
             images=current_user_message.images,
         ),
     )
-
-
-def _read_served_todo_id(*, user_id: str, action_id: str) -> str | None:
-    # The TODO store reads Action conversations through modules that import the
-    # Action agent, so importing it when this module loads closes a cycle.
-    from pantaray_agents.local_runtime.todos.store import read_todo_for_action
-
-    return read_todo_for_action(user_id=user_id, action_id=action_id)
 
 
 def ensure_memory_indexes(state: ActionAgentState, *, user_id: str) -> None:

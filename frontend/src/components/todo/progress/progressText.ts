@@ -15,6 +15,9 @@ export type ProgressI18n = Pick<UiLanguageContextValue, 't' | 'language'>;
 /** The project's name as the user wrote it; the page that mounts the view knows the projects. */
 export type ProjectNameOf = (projectId: string) => string;
 
+/** The no-goal block's 「目標を設定」, which the goal form gives focus back to once it closes. */
+export const setGoalButtonId = (projectId: string) => `todo-progress-set-goal:${projectId}`;
+
 /** A recorded share below this reads as one significant digit, so a real step never reads 0%. */
 const WHOLE_PERCENT = 1;
 /** Rounding is downward, and float error must not push 29% (0.29 × 100 = 28.999…) to 28%. */

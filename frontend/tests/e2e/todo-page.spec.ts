@@ -3,6 +3,14 @@ import { createServer, type ViteDevServer } from 'vite';
 import type { OverlaySnapshot } from '../../src/components/agent-overlay/model/overlayTypes';
 import type {
   DeletedTodoView,
+  GoalProgress,
+  GoalView,
+  ProgressPeriodView,
+  ProgressRecordView,
+  TodoGoalRequest,
+  TodoProgressPage,
+  TodoProgressQuery,
+  TodoProjectRefRequest,
   TodoScopeQuery,
   TodoView,
   TodoWeekPage,
@@ -120,6 +128,81 @@ const DELETED: DeletedTodoView[] = [
   },
 ];
 
+/** 見積もり's goal; the other projects start without one. */
+const GOALS: GoalView[] = [
+  {
+    project_id: 'estimate',
+    text: '受注',
+    target: 10,
+    unit: '件',
+    deadline: '2026-12-25',
+    set_at: '2026-10-01T03:00:00.000Z',
+  },
+];
+
+const progressRecord = (
+  recordId: string,
+  todoId: string,
+  projectId: string | null,
+  quantity: number,
+  unit: string,
+  note: string,
+  recordedAt: string,
+  evidence: ProgressRecordView['evidence']
+): ProgressRecordView => ({
+  record_id: recordId,
+  todo_id: todoId,
+  project_id: projectId,
+  quantity,
+  unit,
+  note,
+  evidence,
+  recorded_at: recordedAt,
+});
+
+const RECORDS: ProgressRecordView[] = [
+  progressRecord(
+    'r-maruwa',
+    't-resubmit',
+    'estimate',
+    1,
+    '件',
+    '丸和商事から受注',
+    '2026-11-03T03:00:00.000Z',
+    { kind: 'action_steps', action_id: 'action-resubmit', step_ids: ['step-1'] }
+  ),
+  progressRecord(
+    'r-hokusei',
+    't-cards',
+    'estimate',
+    2,
+    '件',
+    '北星と東和から受注',
+    '2026-10-28T03:00:00.000Z',
+    { kind: 'user' }
+  ),
+  progressRecord(
+    'r-yamato',
+    't-resubmit',
+    'estimate',
+    1,
+    '件',
+    '大和製作所から受注',
+    '2026-10-14T03:00:00.000Z',
+    { kind: 'action_steps', action_id: 'action-resubmit', step_ids: ['step-2'] }
+  ),
+  progressRecord(
+    'r-notes',
+    't-notes',
+    'product',
+    1,
+    '本',
+    '10 月分のリリースノートを公開',
+    '2026-11-02T03:00:00.000Z',
+    { kind: 'action_steps', action_id: 'action-notes', step_ids: ['step-3'] }
+  ),
+];
+
 const SUGGESTION: OverlaySnapshot = {
   suggestionId: 'suggestion-questions',
   commandId: 'command-1',
@@ -142,7 +225,7 @@ const SUGGESTION: OverlaySnapshot = {
 
 async function openHome(page: Page, search = '') {
   await page.addInitScript(
-    ({ organizations, projects, items, deleted, suggestion }) => {
+    ({ organizations, projects, items, deleted, suggestion, initialGoals, records }) => {
       localStorage.setItem('pantaray_ui_language', 'ja');
       const noop = () => {};
       const CURRENT = '2026-11-02';
@@ -155,6 +238,101 @@ async function openHome(page: Page, search = '') {
         return query.scope === 'no_organization'
           ? ids.length === 0
           : ids.includes(query.organization_id!);
+      };
+      const TODAY = '2026-11-04';
+      // Goals the form writes stay for the page's later reads, as the backend's do.
+      const goals = new Map(initialGoals.map((goal) => [goal.project_id, goal]));
+      const inFilter = (projectId: string | null, query: TodoProgressQuery) =>
+        query.project === 'any' ||
+        (query.project === 'no_project' ? projectId === null : projectId === query.project_id);
+      // The rows up to today, newest first: 7 days, 4 weeks or 2 months.
+      const rowBounds = (period: TodoProgressQuery['period']) => {
+        if (period === 'day')
+          return Array.from({ length: 7 }, (_, i) => ({
+            start: shift(TODAY, -i),
+            end: shift(TODAY, -i),
+          }));
+        if (period === 'week')
+          return Array.from({ length: 4 }, (_, i) => ({
+            start: shift(CURRENT, -7 * i),
+            end: shift(CURRENT, 6 - 7 * i),
+          }));
+        return [
+          { start: '2026-11-01', end: '2026-11-30' },
+          { start: '2026-10-01', end: '2026-10-31' },
+        ];
+      };
+      const goalProgress = (projectId: string, shown: ProgressRecordView[]): GoalProgress => {
+        const goal = goals.get(projectId);
+        if (!goal) return { kind: 'no_goal', project_id: projectId };
+        const counted = shown.filter(
+          (record) => record.project_id === projectId && record.unit === goal.unit
+        );
+        if (counted.length === 0) return { kind: 'no_records', goal, other_unit_record_ids: [] };
+        const total = counted.reduce((sum, record) => sum + record.quantity, 0);
+        return {
+          kind: 'measured',
+          goal,
+          total,
+          share: total / goal.target,
+          record_ids: counted.map((record) => record.record_id),
+          other_unit_record_ids: [],
+          expected_share: 0.4,
+          deadline_passed: false,
+          pace: {
+            kind: 'projected',
+            window_start: '2026-10-07',
+            record_ids: counted.map((record) => record.record_id),
+            per_day: 0.14,
+            projected_on: '2026-12-15',
+          },
+        };
+      };
+      const progressPage = (query: TodoProgressQuery): TodoProgressPage => {
+        const shown = records.filter(
+          (record) => inScope(record.project_id, query) && inFilter(record.project_id, query)
+        );
+        const rows: ProgressPeriodView[] = rowBounds(query.period).map(({ start, end }) => {
+          const within = (at: string) => at.slice(0, 10) >= start && at.slice(0, 10) <= end;
+          return {
+            start,
+            end,
+            record_ids: shown
+              .filter((record) => within(record.recorded_at))
+              .map((record) => record.record_id),
+            checked: items.flatMap((item) =>
+              item.state.kind === 'done' &&
+              within(item.state.at) &&
+              inScope(item.project_id, query) &&
+              inFilter(item.project_id, query)
+                ? [
+                    {
+                      todo_id: item.todo_id,
+                      project_id: item.project_id,
+                      text: item.text,
+                      checked_at: item.state.at,
+                    },
+                  ]
+                : []
+            ),
+          };
+        });
+        // One project's goal with or without one; otherwise each project in scope with one.
+        const goalProjects =
+          query.project === 'project'
+            ? [query.project_id!]
+            : query.project === 'any'
+              ? projects
+                  .filter((p) => goals.has(p.project_id) && inScope(p.project_id, query))
+                  .map((p) => p.project_id)
+              : [];
+        return {
+          today: TODAY,
+          period: query.period,
+          rows,
+          goals: goalProjects.map((projectId) => goalProgress(projectId, shown)),
+          records: shown,
+        };
       };
       Object.defineProperty(window, 'electron', {
         value: {
@@ -237,6 +415,21 @@ async function openHome(page: Page, search = '') {
             },
             listDeleted: async (query: TodoScopeQuery) =>
               deleted.filter((item) => inScope(item.project_id, query)),
+            progress: async (query: TodoProgressQuery) => progressPage(query),
+            setGoal: async ({ project_id, ...goal }: TodoGoalRequest) => {
+              const saved = {
+                ...goal,
+                project_id,
+                set_at: goals.get(project_id)?.set_at ?? '2026-11-04T03:00:00.000Z',
+              };
+              goals.set(project_id, saved);
+              return { kind: 'ok', result: saved };
+            },
+            clearGoal: async ({ project_id }: TodoProjectRefRequest) => {
+              goals.delete(project_id);
+              return { kind: 'ok', result: null };
+            },
+            deleteProgressRecord: async () => undefined,
             onChanged: () => noop,
           },
           suggestions: {
@@ -264,6 +457,8 @@ async function openHome(page: Page, search = '') {
       items: ITEMS,
       deleted: DELETED,
       suggestion: SUGGESTION,
+      initialGoals: GOALS,
+      records: RECORDS,
     }
   );
   await installTaskDrafts(page);
@@ -449,4 +644,169 @@ test('a narrow window stacks the conversation under the list header, with nothin
   await capture(page, info, 'narrow-conversation');
   await page.getByRole('button', { name: '会話を閉じる' }).click();
   await expect(page.getByRole('checkbox', { name: '完了: 名刺 40 枚を入れておく' })).toBeVisible();
+});
+
+test('進み具合 shows the progress in view, keeps its period in the address, and opens where a number came from', async ({
+  page,
+}, info) => {
+  await openHome(page);
+  const sidebar = sidebarOf(page);
+  await sidebar.getByRole('button', { name: '見積もり', exact: true }).click();
+  await sidebar.getByRole('button', { name: '進み具合' }).click();
+  await expect(page).toHaveURL(/#\/history\?project=project:estimate&view=progress$/);
+  await expect(sidebar.getByRole('button', { name: '進み具合' })).toHaveAttribute(
+    'aria-current',
+    'true'
+  );
+  // The progress is of the project in view, which stays marked.
+  await expect(sidebar.getByRole('button', { name: '見積もり', exact: true })).toHaveAttribute(
+    'aria-current',
+    'true'
+  );
+  await expect(page.getByRole('heading', { level: 1, name: '見積もり' })).toBeVisible();
+
+  const goal = page.getByRole('region', { name: '見積もりの目標' });
+  await expect(goal).toContainText('12/25 までに 受注 10 件。10/1 に決めました。');
+  await expect(goal).toContainText('いま 40%（4 件）');
+  await expect(goal).toContainText('このペースなら 2026 年 12 月のなかばに届きます。');
+  await expect(page.locator('.todo-progress__lead')).toHaveText(
+    '今週は、見積もりが 1 件進みました。済んだ TODO は 1 件です。受注 10 件の目標に対して、いまは 40% です。このペースなら 2026 年 12 月のなかばに届きます。'
+  );
+
+  // A period's count opens onto its records, each with who wrote it.
+  const rows = page.getByRole('region', { name: '週ごと' }).getByRole('listitem');
+  const lastWeek = rows.filter({ hasText: '10/26 の週' }).first();
+  await expect(lastWeek).toContainText('見積もり +1');
+  await lastWeek.getByText('この期間の記録（1 件）').click();
+  await expect(lastWeek.getByText('北星と東和から受注')).toBeVisible();
+  await expect(lastWeek).toContainText('あなたが記録');
+  const thisWeek = rows.filter({ hasText: '11/2 の週' }).first();
+  await thisWeek.getByText('この期間の記録（1 件）').click();
+  await expect(thisWeek).toContainText('Pantaray が会話の中の結果から記録');
+  expect(await hasNoSideScroll(page)).toBe(true);
+  await capture(page, info, 'progress-week');
+
+  // The period is the address's: a reload keeps it.
+  await page.getByRole('button', { name: '月ごと' }).click();
+  await expect(page).toHaveURL(/#\/history\?project=project:estimate&view=progress&period=month$/);
+  await expect(page.getByRole('region', { name: '月ごと' })).toContainText('11 月（11/4 まで）');
+  await page.reload();
+  await expect(page.getByRole('button', { name: '月ごと' })).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  );
+
+  // The record's conversation opens as any conversation does, and back returns to the progress.
+  const current = page.getByRole('region', { name: '月ごと' }).getByRole('listitem').first();
+  await current.getByText('この期間の記録（1 件）').click();
+  await current.getByRole('button', { name: '会話を開く: 丸和商事から受注' }).click();
+  await expect(page).toHaveURL(/#\/history\?item=action:action-resubmit$/);
+  await page.goBack();
+  await expect(page).toHaveURL(/#\/history\?project=project:estimate&view=progress&period=month$/);
+  await expect(page.getByRole('region', { name: '見積もりの目標' })).toBeVisible();
+
+  // Every organization's progress, with each goal there is.
+  await sidebar.getByRole('button', { name: 'すべての TODO' }).click();
+  await sidebar.getByRole('button', { name: '進み具合' }).click();
+  await expect(page).toHaveURL(/#\/history\?view=progress$/);
+  await expect(page.locator('.todo-progress__lead')).toContainText(
+    '今週は、見積もりが 1 件、プロダクトが 1 件進みました。'
+  );
+  await capture(page, info, 'progress-all');
+});
+
+test('a project’s goal is set from its menu or from its progress, opening on the goal it has', async ({
+  page,
+}, info) => {
+  await openHome(page);
+  const sidebar = sidebarOf(page);
+  const menu = (name: string) => sidebar.getByRole('button', { name: `${name} のメニュー` });
+
+  // A project with a goal opens on it.
+  await menu('見積もり').click();
+  await page.getByRole('menuitem', { name: '目標を設定' }).click();
+  const editing = page.getByRole('dialog', { name: '見積もりの目標を直す' });
+  await expect(editing.getByLabel('目標', { exact: true })).toHaveValue('受注');
+  await expect(editing.getByLabel('量')).toHaveValue('10');
+  await expect(editing.getByLabel('期限')).toHaveValue('2026-12-25');
+  await capture(page, info, 'goal-form-edit');
+  await editing.getByRole('button', { name: 'キャンセル' }).click();
+  await expect(editing).toHaveCount(0);
+  await expect(menu('見積もり')).toBeFocused();
+
+  // One without a goal opens empty, and the goal saved is the one it opens on next.
+  await menu('採用').click();
+  await page.getByRole('menuitem', { name: '目標を設定' }).click();
+  const setting = page.getByRole('dialog', { name: '採用の目標を決める' });
+  await expect(setting.getByLabel('目標', { exact: true })).toHaveValue('');
+  await setting.getByLabel('目標', { exact: true }).fill('採用');
+  await setting.getByLabel('量').fill('3');
+  await setting.getByLabel('単位').fill('人');
+  await setting.getByLabel('期限').fill('2027-03-31');
+  await capture(page, info, 'goal-form-set');
+  await setting.getByRole('button', { name: '保存' }).click();
+  await expect(setting).toHaveCount(0);
+  await expect(menu('採用')).toBeFocused();
+  await menu('採用').click();
+  await page.getByRole('menuitem', { name: '目標を設定' }).click();
+  const saved = page.getByRole('dialog', { name: '採用の目標を直す' });
+  await expect(saved.getByLabel('単位')).toHaveValue('人');
+  await saved.getByRole('button', { name: '目標を外す' }).click();
+  await expect(saved).toHaveCount(0);
+
+  // The progress of a project without a goal offers to set one.
+  await sidebar.getByRole('button', { name: '採用', exact: true }).click();
+  await sidebar.getByRole('button', { name: '進み具合' }).click();
+  const goal = page.getByRole('region', { name: '採用の目標' });
+  await expect(goal).toContainText('まだ目標がありません。');
+  await goal.getByRole('button', { name: '目標を設定' }).click();
+  const fromProgress = page.getByRole('dialog', { name: '採用の目標を決める' });
+  await fromProgress.getByLabel('目標', { exact: true }).fill('面接');
+  await fromProgress.getByLabel('量').fill('5');
+  await fromProgress.getByLabel('単位').fill('回');
+  await fromProgress.getByLabel('期限').fill('2026-12-25');
+  await fromProgress.getByRole('button', { name: '保存' }).click();
+  await expect(fromProgress).toHaveCount(0);
+  // Its 「目標を設定」 is gone with the goal set, so focus goes to the page's heading.
+  await expect(goal).toContainText('12/25 までに 面接 5 回。11/4 に決めました。');
+  await expect(goal).toContainText('まだ記録がありません。');
+  await expect(page.getByRole('heading', { level: 1, name: '採用' })).toBeFocused();
+});
+
+test('beside a conversation, a row’s meta line wraps as one line of text with its due and delete in line', async ({
+  page,
+}, info) => {
+  await page.setViewportSize({ width: 1180, height: 820 });
+  await openHome(page);
+  await page.getByRole('button', { name: /^来週の面接の質問リストを作る/ }).click();
+  await expect(
+    page.getByRole('region', { name: '来週の面接の質問リストを作る' }).getByRole('button', {
+      name: '承認',
+    })
+  ).toBeVisible();
+
+  const layout = await page.locator('.todo-row').evaluateAll((rows) =>
+    rows.map((row) => {
+      const parts = [...row.querySelectorAll('.todo-row__meta > span')];
+      // Each part after the first starts on the line the one before it ends on.
+      const flows = parts.slice(1).every((part, i) => {
+        const before = [...parts[i].getClientRects()].at(-1)!;
+        const first = part.getClientRects()[0];
+        return Math.abs(first.top - before.top) < 1;
+      });
+      const due = row.querySelector('.todo-due')?.getBoundingClientRect();
+      const remove = row.querySelector('.todo-row__delete')!.getBoundingClientRect();
+      const inLine =
+        due === undefined ||
+        Math.abs(due.top + due.height / 2 - (remove.top + remove.height / 2)) < 1;
+      return { text: row.querySelector('.todo-row__text')?.textContent, flows, inLine };
+    })
+  );
+  expect(layout.length).toBeGreaterThan(0);
+  for (const row of layout) {
+    expect(row.flows, `${row.text}: meta parts flow`).toBe(true);
+    expect(row.inLine, `${row.text}: due and delete in line`).toBe(true);
+  }
+  expect(await hasNoSideScroll(page)).toBe(true);
+  await capture(page, info, 'beside-conversation');
 });

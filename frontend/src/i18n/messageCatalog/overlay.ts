@@ -94,6 +94,7 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.supplement.label': 'Additional instructions (optional)',
     'overlay.supplement.placeholder':
       "Conditions to approve with, or why you're passing (optional)",
+    'overlay.supplement.placeholderAcceptOnly': 'Conditions to approve with (optional)',
     'overlay.supplement.invalid': 'Additional instructions must be 8,000 characters or fewer.',
     'overlay.approvalRequired.title': 'Approval required',
     'overlay.approvalRequired.operation.bash': 'Run a local command.',
@@ -237,6 +238,7 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.openSuggestionFailed': 'メイン画面でこの提案を開けませんでした。',
     'overlay.supplement.label': '追加の指示（任意）',
     'overlay.supplement.placeholder': '承認の条件や、見送る理由を書く（任意）',
+    'overlay.supplement.placeholderAcceptOnly': '承認の条件を書く（任意）',
     'overlay.supplement.invalid': '追加の指示は8,000文字以内で入力してください。',
     'overlay.approvalRequired.title': '承認が必要です',
     'overlay.approvalRequired.operation.bash': 'ローカルコマンドを実行します。',

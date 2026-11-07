@@ -18,6 +18,7 @@ import {
   paceRate,
   recordCount,
   recordsFor,
+  setGoalButtonId,
   type ProgressI18n,
 } from './progressText';
 
@@ -90,12 +91,15 @@ export function GoalProgress({
   projectName,
   today,
   recordsById,
+  onSetGoal,
   ...recordActions
 }: {
   progress: GoalProgressData;
   projectName: string;
   today: string;
   recordsById: ReadonlyMap<string, ProgressRecordView>;
+  /** Opens the goal form for a project without one. */
+  onSetGoal: () => void;
 } & RecordActions) {
   const i18n = useI18n();
   const { t } = i18n;
@@ -108,6 +112,14 @@ export function GoalProgress({
       <section className="todo-progress-goal" aria-labelledby={headingId}>
         {heading}
         <p>{t('todoProgress.goal.none')}</p>
+        <button
+          type="button"
+          id={setGoalButtonId(progress.project_id)}
+          className="history-filter-button"
+          onClick={onSetGoal}
+        >
+          {t('todoProgress.goal.set')}
+        </button>
       </section>
     );
   }

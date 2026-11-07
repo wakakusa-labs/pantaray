@@ -1,4 +1,8 @@
-import type { TodoScopeQuery, TodoWeekQuery } from '../../electron/src/todos/todoContracts';
+import type {
+  TodoProgressQuery,
+  TodoScopeQuery,
+  TodoWeekQuery,
+} from '../../electron/src/todos/todoContracts';
 
 /** Which of the week's projects are in view. */
 export type TodoProjectFilter = Pick<TodoWeekQuery, 'project' | 'project_id'>;
@@ -12,6 +16,8 @@ export type TodoSelection = {
   /** Null is the current week; any day of a week names that week. */
   weekStart: string | null;
   view: TodoPageView;
+  /** What each of the progress view's rows covers. */
+  period: TodoProgressQuery['period'];
   /** The TODO whose conversation is open beside the list. */
   todoId: string | null;
 };
@@ -21,6 +27,7 @@ export const DEFAULT_TODO_SELECTION: TodoSelection = {
   project: { project: 'any' },
   weekStart: null,
   view: 'list',
+  period: 'week',
   todoId: null,
 };
 
@@ -28,6 +35,7 @@ const SCOPE_PARAM = 'scope';
 const PROJECT_PARAM = 'project';
 const WEEK_PARAM = 'week';
 const VIEW_PARAM = 'view';
+const PERIOD_PARAM = 'period';
 const TODO_PARAM = 'todo';
 /** The value for TODOs in no organization, and for TODOs in no project. */
 const NONE = 'none';
@@ -35,6 +43,7 @@ const ORGANIZATION_PREFIX = 'organization:';
 const PROJECT_PREFIX = 'project:';
 const LOCAL_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const VIEWS: readonly TodoPageView[] = ['list', 'progress', 'deleted'];
+const PERIODS: readonly TodoProgressQuery['period'][] = ['day', 'week', 'month'];
 
 /** Ids are canonical: never blank, never padded. */
 const canonicalId = (value: string | null): string | null =>
@@ -71,11 +80,13 @@ function parseProject(value: string | null): TodoProjectFilter {
 export function parseTodoSelection(search: string): TodoSelection {
   const params = new URLSearchParams(search);
   const view = params.get(VIEW_PARAM);
+  const period = params.get(PERIOD_PARAM);
   return {
     scope: parseScope(params.get(SCOPE_PARAM)),
     project: parseProject(params.get(PROJECT_PARAM)),
     weekStart: localDate(params.get(WEEK_PARAM)),
     view: VIEWS.find((candidate) => candidate === view) ?? DEFAULT_TODO_SELECTION.view,
+    period: PERIODS.find((candidate) => candidate === period) ?? DEFAULT_TODO_SELECTION.period,
     todoId: canonicalId(params.get(TODO_PARAM)),
   };
 }
@@ -98,6 +109,9 @@ export function todoSelectionSearch(selection: TodoSelection): string {
   if (selection.weekStart !== null) entries.push(`${WEEK_PARAM}=${selection.weekStart}`);
   if (selection.view !== DEFAULT_TODO_SELECTION.view) {
     entries.push(`${VIEW_PARAM}=${selection.view}`);
+  }
+  if (selection.period !== DEFAULT_TODO_SELECTION.period) {
+    entries.push(`${PERIOD_PARAM}=${selection.period}`);
   }
   if (selection.todoId !== null) {
     entries.push(`${TODO_PARAM}=${encodeURIComponent(selection.todoId)}`);

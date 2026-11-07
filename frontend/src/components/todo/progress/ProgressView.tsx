@@ -28,11 +28,14 @@ export function ProgressView({
   page,
   projectName,
   onPeriodChange,
+  onSetGoal,
   ...recordActions
 }: {
   page: TodoProgressPage;
   projectName: ProjectNameOf;
   onPeriodChange: (period: ProgressPeriod) => void;
+  /** Opens the goal form for the project in view, which has no goal yet. */
+  onSetGoal: (projectId: string) => void;
 } & RecordActions) {
   const i18n = useI18n();
   const { t } = i18n;
@@ -84,6 +87,7 @@ export function ProgressView({
               projectName={projectName(projectId)}
               today={page.today}
               recordsById={recordsById}
+              onSetGoal={() => onSetGoal(projectId)}
               {...recordActions}
             />
           );

@@ -202,6 +202,11 @@ describe('SuggestionTaskPane', () => {
     await renderPane('sug-1', null, false);
 
     expect(screen.queryByRole('button', { name: 'Dismiss suggestion' })).toBeNull();
+    // Nothing on screen dismisses it, so the field asks for no reason to.
+    expect(screen.getByLabelText('Additional instructions (optional)')).toHaveAttribute(
+      'placeholder',
+      'Conditions to approve with (optional)'
+    );
     fireEvent.click(acceptButton());
     expect(acceptAction).toHaveBeenCalledWith(expect.objectContaining({ suggestionId: 'sug-1' }));
     expect(acceptButton()).toBeDisabled();

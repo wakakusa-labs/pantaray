@@ -192,8 +192,9 @@ type OverlayComposerProps = {
    * 右端のボタンが担う操作。本文があれば送信、空でエージェントが動いていれば
    * 停止、空で直前に止めたままなら再開。`decision` はホストのボタン（承認の可否など）が
    * 送信の代わりに右端へ並び、本文はそのボタンが使う。Enter ではどれも押さない。
+   * `canDismiss` はそのボタンに「見送る」があるかで、本文の案内もそれに合わせる。
    */
-  action: 'send' | 'stop' | 'resume' | { decision: ReactNode };
+  action: 'send' | 'stop' | 'resume' | { decision: ReactNode; canDismiss: boolean };
   canSend: boolean;
   /** 「再開」の要求が通らなかった。次の入力で消える。 */
   resumeFailed: boolean;
@@ -360,7 +361,13 @@ export function OverlayComposer({
         value={draft}
         mentions={mentions}
         readOnly={isReadOnly}
-        placeholder={t(decides ? 'overlay.supplement.placeholder' : 'overlay.composer.placeholder')}
+        placeholder={t(
+          !decides
+            ? 'overlay.composer.placeholder'
+            : action.canDismiss
+              ? 'overlay.supplement.placeholder'
+              : 'overlay.supplement.placeholderAcceptOnly'
+        )}
         invalid={validationFailed}
         describedBy={validationFailed ? MESSAGE_ERROR_ID : undefined}
         onChange={onDraftChange}

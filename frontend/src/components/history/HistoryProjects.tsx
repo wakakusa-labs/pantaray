@@ -4,6 +4,7 @@ import { Plus } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 
+import { ProjectGoalDialog } from '@/components/todo/progress/ProjectGoalDialog';
 import type { useI18n } from '@/context/useI18n';
 import {
   workspacePendingKey,
@@ -36,14 +37,14 @@ export type WorkspaceProjects = Pick<
   | 'busy'
 >;
 
-type OpenDialog = { kind: 'delete' | 'organizations'; project: WorkspaceProject };
+type OpenDialog = { kind: 'delete' | 'organizations' | 'goal'; project: WorkspaceProject };
 
 const menuButtonId = (projectId: string) => `history-project-menu:${projectId}`;
 
 /**
  * The sidebar's projects, managed in place: ＋ names a new project, which then takes its folders,
- * each row's menu renames it, adds folders, sets its organization, opens it in Finder or deletes
- * it, and rows are dragged into order. A row's name shows that project's TODOs; the conversations
+ * each row's menu renames it, adds folders, sets its organization or its goal, or deletes it, and
+ * rows are dragged into order. A row's name shows that project's TODOs; the conversations
  * below are not filtered by it.
  */
 export function HistoryProjects({
@@ -117,6 +118,10 @@ export function HistoryProjects({
       {
         label: t('history.projects.setOrganization'),
         onSelect: () => setDialog({ kind: 'organizations', project }),
+      },
+      {
+        label: t('history.projects.setGoal'),
+        onSelect: () => setDialog({ kind: 'goal', project }),
       },
       { label: t('common.delete'), onSelect: () => setDialog({ kind: 'delete', project }) },
     ];
@@ -219,6 +224,13 @@ export function HistoryProjects({
               organizationId ? [organizationId] : []
             )
           }
+          onClose={() => closeDialog(dialog.project)}
+        />
+      ) : null}
+      {dialog?.kind === 'goal' ? (
+        <ProjectGoalDialog
+          projectId={dialog.project.project_id}
+          projectName={dialog.project.display_name}
           onClose={() => closeDialog(dialog.project)}
         />
       ) : null}

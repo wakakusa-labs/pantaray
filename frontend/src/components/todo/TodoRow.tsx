@@ -1,4 +1,4 @@
-import { Check, Repeat, Trash2 } from 'lucide-react';
+import { Repeat, Trash2 } from 'lucide-react';
 import { useId } from 'react';
 
 import type { UiLanguageContextValue } from '@/context/uiLanguageContextShared';
@@ -90,20 +90,15 @@ export function TodoRow({
   const done = todo.state.kind === 'done';
   return (
     <li className={done ? 'todo-row todo-row--done' : 'todo-row'}>
-      {/* A real toggle, named with the text so each row's check is told apart. */}
-      <button
-        type="button"
+      {/* Named with the text so each row's check is told apart; the backend's answer checks it. */}
+      <input
+        type="checkbox"
         className="todo-check"
-        aria-pressed={done}
-        aria-label={t(done ? 'todo.check.undoNamed' : 'todo.check.doneNamed', { text: todo.text })}
-        data-tooltip={t(done ? 'todo.check.undo' : 'todo.check.done')}
+        aria-label={t('todo.check', { text: todo.text })}
+        checked={done}
         disabled={pending}
-        onClick={onToggleCheck}
-      >
-        <span className="todo-check__box" aria-hidden="true">
-          {done ? <Check size={12} strokeWidth={2.5} /> : null}
-        </span>
-      </button>
+        onChange={onToggleCheck}
+      />
       <button
         type="button"
         className="todo-row__body"

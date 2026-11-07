@@ -50,8 +50,6 @@
   background: var(--fog-mist-strong);
 }
 
-/* A 28px target around the drawn 18px box. */
-.todo-check,
 .todo-row__delete {
   display: grid;
   place-items: center;
@@ -65,24 +63,28 @@
   cursor: pointer;
 }
 
-.todo-check__box {
-  display: grid;
-  place-items: center;
+.todo-check {
+  appearance: none;
+  justify-self: center;
   box-sizing: border-box;
   width: 18px;
   height: 18px;
+  margin: 5px 0 0;
   border: 1.5px solid var(--fog-text-3);
   border-radius: 5px;
-  color: var(--app-background);
+  background: transparent center / 12px no-repeat;
+  cursor: pointer;
 }
 
-.todo-check:hover:not(:disabled) .todo-check__box,
-.todo-check[aria-pressed='true'] .todo-check__box {
+.todo-check:hover:not(:disabled),
+.todo-check:checked {
   border-color: var(--fog-text);
 }
 
-.todo-check[aria-pressed='true'] .todo-check__box {
-  background: var(--fog-text);
+/* The check mark in --app-background on the --fog-text fill. */
+.todo-check:checked {
+  background-color: var(--fog-text);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%2313171e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 6.2l2.3 2.3L9.5 3.8'/%3E%3C/svg%3E");
 }
 
 .todo-row__body {

@@ -2,10 +2,7 @@ import { defineMessages } from './defineMessages';
 
 export const TODO_MESSAGES = defineMessages({
   en: {
-    'todo.check.done': 'Mark done',
-    'todo.check.doneNamed': 'Mark done: {text}',
-    'todo.check.undo': 'Mark not done',
-    'todo.check.undoNamed': 'Mark not done: {text}',
+    'todo.check': 'Done: {text}',
     'todo.delete': 'Delete',
     'todo.deleteNamed': 'Delete: {text}',
     'todo.origin.user': 'You added this',
@@ -47,10 +44,7 @@ export const TODO_MESSAGES = defineMessages({
     'todo.deleted.restoreNamed': 'Restore: {text}',
   },
   ja: {
-    'todo.check.done': '完了にする',
-    'todo.check.doneNamed': '完了にする: {text}',
-    'todo.check.undo': '未完了に戻す',
-    'todo.check.undoNamed': '未完了に戻す: {text}',
+    'todo.check': '完了: {text}',
     'todo.delete': '削除',
     'todo.deleteNamed': '削除: {text}',
     'todo.origin.user': 'あなたが追加',

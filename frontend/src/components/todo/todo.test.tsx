@@ -51,10 +51,10 @@ function renderRow(overrides: Partial<TodoView> = {}, selected = false, pending 
 
 const body = () => screen.getByRole('button', { name: /^見積書を送る/ });
 
-it('names the check by what pressing it does and keeps it apart from opening the TODO', async () => {
+it('checks the TODO with a checkbox of its own, apart from opening the TODO', async () => {
   const handlers = renderRow();
-  const check = screen.getByRole('button', { name: '完了にする: 見積書を送る' });
-  expect(check).toHaveAttribute('aria-pressed', 'false');
+  const check = screen.getByRole('checkbox', { name: '完了: 見積書を送る' });
+  expect(check).not.toBeChecked();
   await userEvent.click(check);
   await userEvent.click(body());
   expect(handlers.onToggleCheck).toHaveBeenCalledOnce();
@@ -62,10 +62,7 @@ it('names the check by what pressing it does and keeps it apart from opening the
   expectIconButtonTooltips(screen.getByRole('listitem'));
 
   renderRow({ state: { kind: 'done', by: 'ai', at: '2026-11-06T12:00:00Z' } });
-  expect(screen.getByRole('button', { name: '未完了に戻す: 見積書を送る' })).toHaveAttribute(
-    'aria-pressed',
-    'true'
-  );
+  expect(screen.getByRole('checkbox', { name: '完了: 見積書を送る' })).toBeChecked();
   expect(body()).toHaveTextContent('Pantaray が完了（11/6）');
 });
 
@@ -109,7 +106,8 @@ it('answers Pantaray’s deletion request with the button pressed, and waits whi
 
   renderRow({ deletion_request: { request_id: 'r1', reason: '重複です' } }, true, true);
   expect(body()).toHaveAttribute('aria-current', 'true');
-  for (const name of ['完了にする: 見積書を送る', '削除: 見積書を送る', '消す', '残す']) {
+  expect(screen.getByRole('checkbox', { name: '完了: 見積書を送る' })).toBeDisabled();
+  for (const name of ['削除: 見積書を送る', '消す', '残す']) {
     expect(screen.getByRole('button', { name })).toBeDisabled();
   }
 });

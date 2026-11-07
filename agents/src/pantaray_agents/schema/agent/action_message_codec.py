@@ -11,6 +11,7 @@ from .action_message import (
     ActionWorkRef,
     FileAttachmentInput,
     SuggestionApprovalInput,
+    TodoHandoffInput,
 )
 
 _ACTION_USER_MESSAGE_ADAPTER = TypeAdapter(ActionUserMessageInput)
@@ -111,6 +112,8 @@ def render_action_user_request_text(message: ActionUserMessageInput) -> str:
                 + [f"- {path}" for path in message.suggestion_files]
             )
         )
+    if message.todo_handoff is not None:
+        sections.append(_render_todo_handoff(message.todo_handoff))
     project_refs = (*message.project_refs, *message.supplement_project_refs)
     if project_refs:
         sections.append(render_project_refs(project_refs))
@@ -134,16 +137,31 @@ def _render_suggestion_metadata(approval: SuggestionApprovalInput) -> list[str]:
     return metadata_lines
 
 
+def _render_todo_handoff(handoff: TodoHandoffInput) -> str:
+    lines = [f"TODO this task works on: {handoff.todo_id}"]
+    if handoff.project is not None:
+        lines += [
+            "Its workspace project:",
+            _render_project_line(handoff.project.display_name, handoff.project.paths),
+        ]
+    return "\n".join(lines)
+
+
 def render_project_refs(refs: tuple[ActionProjectRef, ...]) -> str:
     first_by_project: dict[str, ActionProjectRef] = {}
     for ref in refs:
         first_by_project.setdefault(ref.project_id, ref)
     lines = [
-        f"- {ref.display_name}: "
-        + (", ".join(ref.paths) if ref.paths else "no folders registered")
+        _render_project_line(ref.display_name, ref.paths)
         for ref in first_by_project.values()
     ]
     return "Referenced workspace projects:\n" + "\n".join(lines)
+
+
+def _render_project_line(display_name: str, paths: tuple[str, ...]) -> str:
+    return f"- {display_name}: " + (
+        ", ".join(paths) if paths else "no folders registered"
+    )
 
 
 def render_work_refs(refs: tuple[ActionWorkRef, ...]) -> str:

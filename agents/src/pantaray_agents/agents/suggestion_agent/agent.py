@@ -36,6 +36,7 @@ from pantaray_agents.agents.suggestion_agent.context_formatters import (
     SUGGESTION_HISTORY_DAYS,
     format_activity_descriptions,
     format_activity_summary,
+    format_open_todos,
     format_recent_suggestions,
     normalize_recent_suggestion_entry,
 )
@@ -356,6 +357,7 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
             "stable_memory_context": context_data["stable_memory_context"],
             "pending_work_context": self.stable_memory.pending_work.strip()
             or "(No pending work recorded.)",
+            "open_todos_context": format_open_todos(self.stable_memory.open_todos),
             "action_agent_capabilities": context_data["action_agent_capabilities"],
             "recent_suggestions": context_data["recent_suggestions"],
             "recent_activity_descriptions": context_data[

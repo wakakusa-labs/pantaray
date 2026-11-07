@@ -9,6 +9,8 @@ import pytest
 from pantaray_agents.agents.suggestion_agent import SuggestionAgent
 from pantaray_agents.agents.suggestion_agent.context_types import (
     SuggestionFetchedContext,
+    SuggestionOpenTodo,
+    SuggestionOpenTodos,
     SuggestionStableMemoryContext,
 )
 from pantaray_agents.agents.suggestion_agent.output import parse_suggestion_output
@@ -45,6 +47,9 @@ def test_real_prompt_renders_context_and_answer_language(
                 has_facts=True,
                 has_insights=True,
                 pending_work="pending-work-evidence",
+                open_todos=SuggestionOpenTodos(
+                    (SuggestionOpenTodo("open-todo-evidence", None, None, "partial"),)
+                ),
             ),
         )
 
@@ -64,7 +69,12 @@ def test_real_prompt_renders_context_and_answer_language(
     rendered = agent._build_prompt(context)  # noqa: SLF001
     instruction = agent._system_instruction_for_request()  # noqa: SLF001
 
-    for value in (*context.values(), "pending-work-evidence"):
+    for value in (
+        *context.values(),
+        "pending-work-evidence",
+        "## Open TODOs\n",
+        "- open-todo-evidence (no project; partly done)\n",
+    ):
         assert value in rendered
     assert f"the suggestion itself in {label}," in instruction
     assert "{answer_language}" not in instruction

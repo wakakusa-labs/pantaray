@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from pantaray_agents.agents.suggestion_agent.context_types import (
+    SuggestionOpenTodo,
+    SuggestionOpenTodos,
     SuggestionStableMemoryContext,
 )
 from pantaray_agents.local_runtime.memory_catalog.document_rendering import (
@@ -18,6 +20,13 @@ from pantaray_agents.local_runtime.memory_catalog.memory_indexes import (
     render_memory_indexes,
 )
 from pantaray_agents.local_runtime.memory_catalog.models import MemorySource
+from pantaray_agents.local_runtime.todos.display import Done, display_state
+from pantaray_agents.local_runtime.todos.store import (
+    AllScope,
+    AnyProject,
+    read_todo_clock,
+    read_todo_week,
+)
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings_models import (
     WorkspaceSettings,
 )
@@ -28,6 +37,12 @@ from .commands import commands_run_without_asking
 # The prompt carries insights/todos.md up to this size (production peaked at 41k
 # characters); a larger file is cut with a marker pointing to memory_search.
 PENDING_WORK_MAX_CHARS = 60_000
+# Design limit: the newest open TODOs are kept, as a Suggestion most likely
+# repeats what was written last; revisit when the "not shown" note appears in
+# Suggestion prompts. With the text bound the list stays near 30,000 of the
+# prompt's 124,000 characters.
+OPEN_TODOS_MAX = 50
+OPEN_TODO_TEXT_MAX_CHARS = 500
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +106,7 @@ def build_suggestion_research_snapshot(
             ),
             limit=PENDING_WORK_MAX_CHARS,
         ),
+        open_todos=_open_todos(user_id=user_id, workspace_settings=workspace_settings),
     )
     # A source without a published head is pinned to None, which hides any
     # revision published during the run; a missing key would show it.
@@ -112,6 +128,47 @@ def build_suggestion_research_snapshot(
         ),
         read_access_scope=workspace_settings.read_access_scope,
     )
+
+
+def _open_todos(
+    *, user_id: str, workspace_settings: WorkspaceSettings
+) -> SuggestionOpenTodos:
+    """The current week's unchecked TODOs, including those carried into it."""
+
+    week = read_todo_week(
+        user_id=user_id,
+        scope=AllScope(),
+        project=AnyProject(),
+        week_of=None,
+        clock=read_todo_clock(),
+    )
+    project_names = {
+        project.project_id: project.display_name
+        for project in workspace_settings.projects
+    }
+    open_todos: list[SuggestionOpenTodo] = []
+    for item in week.items:
+        state = display_state(item.todo, item.conversation, week.current_week_start)
+        if isinstance(state, Done):
+            continue
+        text = item.todo.text
+        if len(text) > OPEN_TODO_TEXT_MAX_CHARS:
+            text = text[:OPEN_TODO_TEXT_MAX_CHARS].rstrip() + " [truncated]"
+        open_todos.append(
+            SuggestionOpenTodo(
+                text=text,
+                # A project created after the settings were read has no name yet.
+                project_name=(
+                    None
+                    if item.todo.project_id is None
+                    else project_names.get(item.todo.project_id)
+                ),
+                due=item.todo.due,
+                state=state.kind,
+            )
+        )
+    shown = open_todos[-OPEN_TODOS_MAX:]
+    return SuggestionOpenTodos(items=tuple(shown), omitted=len(open_todos) - len(shown))
 
 
 def _bounded(value: str, *, limit: int) -> str:

@@ -55,6 +55,7 @@ system_instruction: |
     doing and is not about to do.
   - When the user is visibly acting on the item themselves, such as writing a
     reply in that thread or editing that file, do not offer to do it.
+  - Do not propose work that an open TODO already covers.
 
   ## Evidence rules for facts
   These rules govern every factual claim, including the facts behind an idea.
@@ -190,6 +191,11 @@ prompt: |
   The Memory agent's candidate work (`insights/todos.md`), not verified obligations,
   even for items labeled "observed pending".
   {pending_work_context}
+
+  ## Open TODOs
+  The user's TODO list: what is still open this week, including TODOs carried
+  over from earlier weeks, with each one's project, due date and state.
+  {open_todos_context}
 
   ## Why reconsider now
   An earlier agent's hypothesis, not proof of an opportunity. Periodic review alone

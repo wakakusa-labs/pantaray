@@ -67,6 +67,7 @@ import type { ActionLiveRefreshOutcome } from '../actions/actionLiveCore';
 import type { ChatTurnState } from '../chat/chatContracts';
 import type { TaskDraftStore } from '../actions/taskDraftStore';
 import type { createChatFetcher } from '../chat/chatFetch';
+import type { createTodoFetcher } from '../todos/todoFetch';
 import type { IntegrationSettingsApi } from '../settings/integrationSettingsFetch';
 import type {
   CreateNotificationIpcHandlers,
@@ -202,6 +203,8 @@ export type MainContext = {
     /** The chat turn's state as the live session last sent it, for a window that loads mid-turn. */
     getTurnState: () => ChatTurnState | null;
   };
+
+  todos: ReturnType<typeof createTodoFetcher>;
 
   actions: ReturnType<typeof createActionFetcher> & {
     getCurrentSubjectId: () => string | null;

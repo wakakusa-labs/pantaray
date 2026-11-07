@@ -393,6 +393,9 @@ export type ChatTurnStateEvent = OrchestrationEventEnvelope<
   { running: unknown }
 >;
 
+/** The owner's TODOs changed: the main window reads them again. It carries no TODO. */
+export type TodoChangedEvent = OrchestrationEventEnvelope<'todo_changed', { revision: unknown }>;
+
 export type OrchestrationServerEvent =
   | SuggestionChunkEvent
   | SuggestionReactionCommittedEvent
@@ -406,6 +409,7 @@ export type OrchestrationServerEvent =
   | HtmlRenderRequestedEvent
   | ChatItemAppendedEvent
   | ChatTurnStateEvent
+  | TodoChangedEvent
   | ProcessCompletedSuggestionEvent
   | ProcessCompletedActionEvent
   | SessionResumedEvent
@@ -480,6 +484,10 @@ export function isChatItemAppendedEvent(
 
 export function isChatTurnStateEvent(event: OrchestrationServerEvent): event is ChatTurnStateEvent {
   return event.event === 'chat_turn_state';
+}
+
+export function isTodoChangedEvent(event: OrchestrationServerEvent): event is TodoChangedEvent {
+  return event.event === 'todo_changed';
 }
 
 export function isProcessCompletedSuggestionEvent(

@@ -16,6 +16,7 @@ import { parseChatItem, parseChatTurnState, type ChatTurnState } from '../chat/c
 import type { LocalRuntimeState } from '../auth/localRuntimeState';
 import type { ScreenCaptureRequest } from '../capture/screenCapture';
 import type { HtmlRenderRequest } from '../render/htmlRender';
+import { parseTodoChanged } from '../todos/todoContracts';
 import type {
   AcceptActionRequest,
   NotificationWindowApi,
@@ -30,6 +31,7 @@ import {
   isChatTurnStateEvent,
   isScreenCaptureRequestedEvent,
   isHtmlRenderRequestedEvent,
+  isTodoChangedEvent,
 } from './eventContracts';
 import {
   ActionFileAttachmentsSchema,
@@ -368,7 +370,7 @@ export function createOrchestrationManager(params: {
   let chatTurnState: ChatTurnState | null = null;
 
   function sendToMainWindow(
-    channel: 'chat:itemAppended' | 'chat:turnState',
+    channel: 'chat:itemAppended' | 'chat:turnState' | 'todos:changed',
     payload: unknown
   ): void {
     const mainWindow = params.getMainWindow();
@@ -413,6 +415,11 @@ export function createOrchestrationManager(params: {
     if (isChatTurnStateEvent(message)) {
       chatTurnState = parseChatTurnState(message.data);
       sendToMainWindow('chat:turnState', chatTurnState);
+      return;
+    }
+    // The TODO list is the main window's alone too.
+    if (isTodoChangedEvent(message)) {
+      sendToMainWindow('todos:changed', parseTodoChanged(message.data));
       return;
     }
     rendererBridge.forwardEventToRenderers(message);

@@ -5,7 +5,6 @@ const {
   createOrchestrationManager,
 } = require('../electron/dist/orchestration/orchestrationManager.js');
 
-
 // Starts each read as soon as it is asked for, as the shared reader does with no other caller.
 function immediateLatestPages(readPage) {
   let readsStarted = 0;
@@ -1339,6 +1338,24 @@ test('OrchestrationManager: a chat item reaches only the main window, parsed', (
   assert.throws(() =>
     hooks.forwardEventToRenderers({ event: 'chat_turn_state', data: { running: 'yes' } })
   );
+  assert.deepEqual(harness.overlayWindowMessages, []);
+});
+
+test('OrchestrationManager: a TODO change reaches only the main window, parsed', () => {
+  const harness = createManagerHarness({ resolveOverlayId: () => 'sug-1' });
+  harness.manager.ensureConnected();
+  const hooks = harness.getWsHooks();
+
+  hooks.forwardEventToRenderers({ event: 'todo_changed', data: { revision: 4 }, event_id: 'e' });
+
+  assert.deepEqual(harness.mainWindowMessages, [
+    { channel: 'todos:changed', payload: { revision: 4 } },
+  ]);
+  assert.throws(
+    () => hooks.forwardEventToRenderers({ event: 'todo_changed', data: { revision: '5' } }),
+    /TODO change response is invalid/
+  );
+  assert.equal(harness.mainWindowMessages.length, 1);
   assert.deepEqual(harness.overlayWindowMessages, []);
 });
 

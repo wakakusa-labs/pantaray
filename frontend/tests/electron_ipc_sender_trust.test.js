@@ -175,7 +175,7 @@ test('Only the Overlay asks main to open the workspace settings page', () => {
 });
 
 // Design 8: the chat belongs to the main window; the Overlay keeps its own Action path.
-test('Only the main window uses the chat, and only the Overlay asks to show it', () => {
+test('Only the main window uses the chat and the TODO list', () => {
   const { mainEvent, security } = createSecurityHarness();
   const overlayEvent = createSender('http://127.0.0.1:3001/notification.html', 2);
   security.registerWindow('overlay', overlayEvent.sender);
@@ -185,6 +185,15 @@ test('Only the main window uses the chat, and only the Overlay asks to show it',
     'chat:listItems',
     'chat:retryTurn',
     'chat:getTurnState',
+    // The TODO list is the main window's too.
+    'todos:listWeek',
+    'todos:create',
+    'todos:setCheck',
+    'todos:setDue',
+    'todos:delete',
+    'todos:answerDeletion',
+    'todos:restore',
+    'todos:listDeleted',
   ]) {
     assert.equal(security.authorize(channel, mainEvent), 'main');
     assert.throws(

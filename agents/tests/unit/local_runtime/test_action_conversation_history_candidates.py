@@ -19,9 +19,6 @@ from pantaray_agents.local_runtime.action_conversation.history_candidates import
     read_conversation_history_candidates_in_connection,
     register_conversation_history_casefold_sqlite,
 )
-from pantaray_agents.local_runtime.runtime.action_message_models import (
-    ACTION_RESUME_STEP_NAME,
-)
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
 from pantaray_agents.schema.agent.action_message import (
     ActionUserMessageInput,
@@ -212,7 +209,6 @@ def test_large_lanes_filter_and_seek_before_bounded_outer_sort(
                 "user_id": "user-1",
                 "search_text": "",
                 "search_pattern": "%%",
-                "hidden_step_name": ACTION_RESUME_STEP_NAME,
                 "before_updated_at": _RUNNING_AT,
                 "before_kind": "conversation",
                 "before_id": "act-1",

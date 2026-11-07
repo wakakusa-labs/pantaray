@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Literal, TypedDict, get_args
 
 from pantaray_agents.local_runtime.runtime.action_message_models import (
-    ACTION_RESUME_STEP_NAME,
+    ACTION_HOST_STEP_NAMES,
 )
 from pantaray_agents.schema.agent.action import StepType
 from pantaray_agents.schema.agent.action_message_codec import (
@@ -69,10 +69,10 @@ def project_memory_action_conversation(
         message_json=user_message_json,
         user_request_text=user_request_text,
     )
-    if step_name == ACTION_RESUME_STEP_NAME or message is None:
+    if step_name in ACTION_HOST_STEP_NAMES or message is None:
         kind = (
             "host_control"
-            if step_name == ACTION_RESUME_STEP_NAME
+            if step_name in ACTION_HOST_STEP_NAMES
             else "legacy_unattributed"
         )
         return {

@@ -18,6 +18,8 @@ from jsonschema import validate
 from pantaray_agents.local_runtime.runtime.action_message_models import (
     ACTION_RESUME_REQUEST_TEXT,
     ACTION_RESUME_STEP_NAME,
+    ACTION_TODO_PICKUP_REQUEST_TEXT,
+    ACTION_TODO_PICKUP_STEP_NAME,
 )
 from pantaray_agents.local_runtime.tooling.agent_experience.action_history import (
     ActionTurnWindow,
@@ -222,26 +224,32 @@ async def test_approved_proposal_is_not_attributed_to_the_user(
     validate(searched.output, tools.definitions()[1].response_schema)
 
 
+_LITERAL_USER_TEXT = "Suggestion metadata:\n- Suggestion: literal user text"
+
+
 @pytest.mark.parametrize(
-    "origin", ["host_control", "legacy_unattributed", "user_message"]
+    ("origin", "step_name", "content"),
+    [
+        ("host_control", ACTION_RESUME_STEP_NAME, ACTION_RESUME_REQUEST_TEXT),
+        (
+            "host_control",
+            ACTION_TODO_PICKUP_STEP_NAME,
+            ACTION_TODO_PICKUP_REQUEST_TEXT,
+        ),
+        ("legacy_unattributed", None, _LITERAL_USER_TEXT),
+        ("user_message", None, _LITERAL_USER_TEXT),
+    ],
 )
 async def test_user_attribution_uses_durable_metadata_not_text(
-    tmp_path: Path, origin: str
+    tmp_path: Path, origin: str, step_name: str | None, content: str
 ) -> None:
-    message = ActionUserMessageInput(
-        message_id="message-1",
-        content=(
-            ACTION_RESUME_REQUEST_TEXT
-            if origin == "host_control"
-            else "Suggestion metadata:\n- Suggestion: literal user text"
-        ),
-    )
+    message = ActionUserMessageInput(message_id="message-1", content=content)
     db_path = _seed_user_step_with_images(tmp_path, message)
     with sqlite3.connect(db_path) as connection:
-        if origin == "host_control":
+        if step_name is not None:
             connection.execute(
                 "UPDATE agent_action_steps SET step_name=? WHERE step_id='step-user-1'",
-                (ACTION_RESUME_STEP_NAME,),
+                (step_name,),
             )
         elif origin == "legacy_unattributed":
             connection.execute(

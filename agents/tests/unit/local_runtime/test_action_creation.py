@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 
@@ -23,6 +25,11 @@ from pantaray_agents.local_runtime.runtime import (
 )
 from pantaray_agents.local_runtime.runtime.action_job_runtime_repository import (
     ActionJobRuntimeRepository,
+)
+from pantaray_agents.local_runtime.runtime.action_message_models import (
+    ACTION_TODO_PICKUP_REQUEST_TEXT,
+    ActionMessageOrigin,
+    ActionMessageTarget,
 )
 from pantaray_agents.local_runtime.runtime.action_message_process_fence import (
     resolve_action_process_lineage_in_connection,
@@ -441,6 +448,152 @@ def test_reply_to_a_dismissed_offer_starts_an_action_and_keeps_the_dismissal(
 def test_reply_cannot_also_approve_a_suggestion() -> None:
     with pytest.raises(ValidationError, match="cannot be combined"):
         NewActionTarget(suggestion_id="offer-1", reply_to_suggestion_id="comment-1")
+
+
+_TODO_TEXT = "週次の売上レポートの下書きを仕上げる"
+
+
+def _todo_pickup_command(
+    *,
+    origin: ActionMessageOrigin = "todo_pickup",
+    target: ActionMessageTarget | None = None,
+    content: str = ACTION_TODO_PICKUP_REQUEST_TEXT,
+) -> SubmitActionMessageCommand:
+    return SubmitActionMessageCommand(
+        user_id="user-1",
+        origin=origin,
+        target=target
+        or NewActionTarget(approval_mode="prompt_each_time", todo_text=_TODO_TEXT),
+        message=ActionUserMessageInput(message_id="todo-pickup-1", content=content),
+    )
+
+
+def test_todo_pickup_opens_with_the_todo_text_and_replays_to_the_same_action(
+    creation_db: Path,
+) -> None:
+    command = _todo_pickup_command()
+    result = submit_action_message(command)
+    assert isinstance(result, StartedActionMessageResult)
+    with sqlite3.connect(creation_db) as connection:
+        assert connection.execute(
+            """SELECT step_type,step_number,short_step_id,step_name,llm_response_text,
+                      user_request_text,source_suggestion_id,adopted_process_id
+               FROM agent_action_steps ORDER BY step_number"""
+        ).fetchall() == [
+            (
+                "assistant_message",
+                1,
+                "S-1-ASSISTANT",
+                "assistant_message",
+                _TODO_TEXT,
+                None,
+                None,
+                result.process_id,
+            ),
+            (
+                "user_request",
+                2,
+                "S-2-USER",
+                "todo_pickup_request",
+                None,
+                ACTION_TODO_PICKUP_REQUEST_TEXT,
+                None,
+                result.process_id,
+            ),
+        ]
+    assert submit_action_message(command) == replace(result, inserted=False)
+    with sqlite3.connect(creation_db) as connection:
+        for table, count in (("agent_actions", 1), ("agent_action_steps", 2)):
+            assert connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone() == (
+                count,
+            )
+        assert connection.execute("SELECT COUNT(*) FROM jobs").fetchone() == (1,)
+
+
+def test_concurrent_todo_pickups_start_one_action(creation_db: Path) -> None:
+    command = _todo_pickup_command()
+    # Both submits open their own connection and wait behind this write lock, so
+    # they contend for the same first write when it is released. The runtime
+    # store is already in WAL mode, as here, so opening a connection never waits.
+    with sqlite3.connect(creation_db, isolation_level=None) as blocker:
+        blocker.execute("PRAGMA journal_mode=WAL")
+        blocker.execute("BEGIN IMMEDIATE")
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(submit_action_message, command) for _ in range(2)]
+            time.sleep(0.2)
+            blocker.execute("ROLLBACK")
+            results = [future.result() for future in futures]
+    first, second = sorted(results, key=lambda result: not result.inserted)
+    assert first.inserted and second == replace(first, inserted=False)
+    with sqlite3.connect(creation_db) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM agent_actions").fetchone() == (
+            1,
+        )
+        assert connection.execute("SELECT COUNT(*) FROM jobs").fetchone() == (1,)
+
+
+def test_todo_pickup_asks_each_time_while_a_user_message_keeps_the_user_setting(
+    creation_db: Path,
+) -> None:
+    pickup = submit_action_message(_todo_pickup_command())
+    typed = submit_action_message(_text_command())
+    modes = [
+        load_action_approval_mode(
+            db_path=creation_db,
+            busy_timeout_ms=1_000,
+            user_id="user-1",
+            action_id=result.action_id,
+        )
+        for result in (pickup, typed)
+    ]
+    # No Action-level mode means the user's own setting decides.
+    assert modes == ["prompt_each_time", None]
+
+
+@pytest.mark.parametrize(
+    ("origin", "target", "content", "error"),
+    [
+        ("todo_pickup", NewActionTarget(todo_text=_TODO_TEXT), None, "each time"),
+        (
+            "todo_pickup",
+            NewActionTarget(approval_mode="always_allow", todo_text=_TODO_TEXT),
+            None,
+            "each time",
+        ),
+        ("todo_pickup", None, "Do the work", "fixed request text"),
+        (
+            "todo_pickup",
+            NewActionTarget(approval_mode="prompt_each_time"),
+            None,
+            "opens a new Action",
+        ),
+        (
+            "todo_pickup",
+            ExistingActionTarget(action_id="action-1", expected_process_id=None),
+            None,
+            "opens a new Action",
+        ),
+        ("user", None, None, "Only a TODO pickup"),
+        ("resume", None, None, "Only a TODO pickup"),
+    ],
+)
+def test_todo_pickup_shape_is_enforced_by_the_command(
+    origin: ActionMessageOrigin,
+    target: ActionMessageTarget | None,
+    content: str | None,
+    error: str,
+) -> None:
+    with pytest.raises(ValidationError, match=error):
+        _todo_pickup_command(
+            origin=origin,
+            target=target,
+            content=content or ACTION_TODO_PICKUP_REQUEST_TEXT,
+        )
+
+
+def test_todo_text_cannot_be_combined_with_a_suggestion_origin() -> None:
+    with pytest.raises(ValidationError, match="cannot be combined"):
+        NewActionTarget(reply_to_suggestion_id="comment-1", todo_text=_TODO_TEXT)
 
 
 def test_create_action_persists_one_atomic_creation_envelope(

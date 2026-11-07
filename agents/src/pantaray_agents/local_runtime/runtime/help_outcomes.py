@@ -14,6 +14,9 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Literal
 
+from pantaray_agents.local_runtime.runtime.action_suggestion_reply import (
+    action_request_text_sql,
+)
 from pantaray_agents.local_runtime.runtime.job_types import MEMORY_PROCESS_KIND
 from pantaray_agents.local_runtime.runtime.memory_update_progress import (
     MEMORY_UPDATE_COMPLETED_EVENT,
@@ -47,7 +50,8 @@ class DueOutcome:
     checkpoint_days: int
     delivered_at: str
     # What it was meant to change: a suggestion's summary, with the signs it
-    # named in advance, or what the user asked the Action for.
+    # named in advance, or what the Action was asked: the user's request, or
+    # the AI-written TODO Pantaray picked up.
     expectation: str
     # The suggestion an Action came from, read beside it; None otherwise.
     source_suggestion_id: str | None
@@ -96,8 +100,9 @@ HAVING delivered_at >= ?
 # An Action is delivered when its first turn completes: the turn that answered
 # the user's original request. It came from a suggestion when it took that offer
 # up, or when its conversation opens with the suggestion the user replied to.
-_ACTIONS_SQL = """
-SELECT actions.action_id, request.user_request_text,
+_ACTIONS_SQL = f"""
+SELECT actions.action_id,
+       {action_request_text_sql(action="actions", request="request")} AS asked,
        COALESCE(actions.suggestion_id, reply.source_suggestion_id)
            AS source_suggestion_id,
        MIN(turns.completed_at) AS delivered_at
@@ -150,7 +155,7 @@ def load_due_outcomes(
             "action",
             str(row["action_id"]),
             str(row["delivered_at"]),
-            str(row["user_request_text"] or "").strip(),
+            str(row["asked"] or "").strip(),
             row["source_suggestion_id"],
         )
         for row in connection.execute(_ACTIONS_SQL, (user_id, earliest))

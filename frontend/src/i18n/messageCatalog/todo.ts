@@ -42,6 +42,11 @@ export const TODO_MESSAGES = defineMessages({
     'todo.deleted.lastDay': 'Gone for good tomorrow',
     'todo.deleted.restore': 'Restore',
     'todo.deleted.restoreNamed': 'Restore: {text}',
+    'todo.error.generic': "That didn't work. Please try again.",
+    'todo.error.busy':
+      "This TODO can't be deleted while its conversation is going. Delete it once that ends, or stop it first.",
+    'todo.error.restoreExpired': "More than 30 days have passed, so it can't be restored.",
+    'todo.error.projectNotFound': 'This project no longer exists.',
   },
   ja: {
     'todo.check': '完了: {text}',
@@ -84,5 +89,10 @@ export const TODO_MESSAGES = defineMessages({
     'todo.deleted.lastDay': 'あと 1 日で完全に消えます',
     'todo.deleted.restore': '戻す',
     'todo.deleted.restoreNamed': '戻す: {text}',
+    'todo.error.generic': 'うまくいきませんでした。もう一度お試しください。',
+    'todo.error.busy':
+      'この TODO の会話が進んでいるあいだは消せません。終わってから、または止めてから消してください。',
+    'todo.error.restoreExpired': '30 日を過ぎたので戻せません。',
+    'todo.error.projectNotFound': 'このプロジェクトはもうありません。',
   },
 });

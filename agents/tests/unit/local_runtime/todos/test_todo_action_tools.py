@@ -193,3 +193,48 @@ def test_a_purged_todo_is_reported_back_to_the_model(db: Path) -> None:
         "reason": "not_found",
         "message": "This TODO no longer exists.",
     }
+
+
+def test_a_progress_record_cites_a_tool_result_of_the_running_turn(db: Path) -> None:
+    todo = _write("Close the Acme deal")
+    seed_action(db, "a", message_id="m-1", run="running")
+    execute(
+        db,
+        f"""INSERT INTO agent_action_steps(step_id, action_id, user_id, step_number,
+          local_step_number, short_step_id, step_type, step_name, status,
+          goal_handle, tool_output, created_at) VALUES ('step-2', 'a', '{USER}', 2,
+          2, 'S-2-TOOL', 'tool_execution', 'tool::read', 'success', 'S', '{{}}',
+          '{NOW.now}')""",
+    )
+
+    def record(*refs: str) -> JSONValue:
+        with TraceContextManager(extra={"process_id": "run-a"}):
+            result = run_todo_tool(
+                step_id="step-3",
+                tool_def=TOOL_REGISTRY["record_progress"],
+                args={
+                    "quantity": 30_000_000,
+                    "unit": "円",
+                    "note": "Acme\nsigned",
+                    "evidence_step_ids": list(refs),
+                },
+                state=_state(todo.todo_id),
+            )
+        return result.output
+
+    assert record("S-1-THINK") == {
+        "status": "refused",
+        "reason": "evidence_not_in_run",
+        "message": (
+            "Each evidence id must be the History Ref of a successful tool call in "
+            "this run. Nothing was recorded."
+        ),
+    }
+    assert record("S-2-TOOL") == {"status": "recorded"}
+    with closing(sqlite3.connect(db)) as connection:
+        assert connection.execute(
+            "SELECT todo_id, quantity, note, author, evidence_action_id, "
+            "evidence_step_ids FROM todo_progress_records"
+        ).fetchall() == [
+            (todo.todo_id, 30_000_000.0, "Acme signed", "ai", "a", '["step-2"]')
+        ]

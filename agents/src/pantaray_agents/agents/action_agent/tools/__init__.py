@@ -65,6 +65,8 @@ from .submit_final_answer_tool import (
 )
 from .thinking_tool import THINKING_TOOL
 from .todo_tools import (
+    RECORD_PROGRESS_TOOL,
+    RECORD_PROGRESS_TOOL_ID,
     REQUEST_TODO_DELETION_TOOL,
     REQUEST_TODO_DELETION_TOOL_ID,
     TODO_TOOL_IDS,
@@ -131,6 +133,8 @@ __all__ = [
     "INTEGRATION_LIST_TOOLS_TOOL",
     "INTEGRATION_LIST_TOOLS_TOOL_ID",
     "INTEGRATION_TOOL_IDS",
+    "RECORD_PROGRESS_TOOL",
+    "RECORD_PROGRESS_TOOL_ID",
     "REQUEST_TODO_DELETION_TOOL",
     "REQUEST_TODO_DELETION_TOOL_ID",
     "TODO_TOOL_IDS",
@@ -188,6 +192,7 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
         INTEGRATION_RUN_TOOL_TOOL,
         UPDATE_TODO_TOOL,
         REQUEST_TODO_DELETION_TOOL,
+        RECORD_PROGRESS_TOOL,
     )
 }
 

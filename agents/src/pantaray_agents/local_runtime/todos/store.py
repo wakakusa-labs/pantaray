@@ -188,7 +188,7 @@ def create_todo_item(
     if isinstance(created, Rejected):
         return created
     verify_current_owner(user_id)
-    with _connection() as connection, immediate_transaction(connection):
+    with todo_db_connection() as connection, immediate_transaction(connection):
         row = connection.execute(
             f"SELECT {_SELECT} FROM todo_items AS todo "
             "WHERE todo.user_id = ? AND todo.client_todo_id = ?",
@@ -201,7 +201,7 @@ def create_todo_item(
             if _request(existing) != _request(created):
                 return Rejected("client_todo_conflict")
             return existing
-        if project_id is not None and not _owns_project(
+        if project_id is not None and not owns_project(
             connection, user_id=user_id, project_id=project_id
         ):
             return Rejected("project_not_found")
@@ -224,7 +224,7 @@ def set_todo_check(
     """Check or uncheck; a weekly TODO's next instance is stored at most once."""
 
     verify_current_owner(user_id)
-    with _connection() as connection, immediate_transaction(connection):
+    with todo_db_connection() as connection, immediate_transaction(connection):
         current = _read(connection, user_id=user_id, todo_id=todo_id)
         if current is None:
             return None
@@ -257,7 +257,7 @@ def update_todo[R: str](
     """
 
     verify_current_owner(user_id)
-    with _connection() as connection, immediate_transaction(connection):
+    with todo_db_connection() as connection, immediate_transaction(connection):
         current = _read(connection, user_id=user_id, todo_id=todo_id)
         if current is None:
             return None
@@ -268,7 +268,7 @@ def update_todo[R: str](
 
 
 def read_todo(*, user_id: str, todo_id: TodoId) -> TodoEntry | None:
-    with _connection() as connection:
+    with todo_db_connection() as connection:
         todo = _read(connection, user_id=user_id, todo_id=todo_id)
         if todo is None:
             return None
@@ -290,8 +290,8 @@ def read_todo_week(
 
     current = clock.current_week_start
     week = current if week_of is None else week_start_of(week_of)
-    scope_sql, scope_params = _scope_sql(scope)
-    project_sql, project_params = _project_sql(project)
+    scope_sql, scope_params = todo_scope_sql(scope)
+    project_sql, project_params = todo_project_sql(project)
     # Design limit: every open TODO from earlier weeks is read, as the current
     # week shows them all; bound the read when open TODOs exceed 1,000.
     sql = (
@@ -312,7 +312,7 @@ def read_todo_week(
         **scope_params,
         **project_params,
     }
-    with _connection() as connection:
+    with todo_db_connection() as connection:
         shown = [
             (todo, placement.carried)
             for todo in map(_todo, connection.execute(sql, params))
@@ -340,8 +340,8 @@ def read_deleted_todos(
 ) -> tuple[Todo, ...]:
     """Deleted TODOs that can still be restored, most recently deleted first."""
 
-    scope_sql, scope_params = _scope_sql(scope)
-    with _connection() as connection:
+    scope_sql, scope_params = todo_scope_sql(scope)
+    with todo_db_connection() as connection:
         rows = connection.execute(
             f"SELECT {_SELECT} FROM todo_items AS todo "
             "WHERE todo.user_id = :user_id AND todo.deleted_at IS NOT NULL "
@@ -356,7 +356,7 @@ def read_deleted_todos(
 def read_purge_due_todos(*, user_id: str, now: str) -> tuple[TodoEntry, ...]:
     """Deleted TODOs past retention, with the conversations that go with them."""
 
-    with _connection() as connection:
+    with todo_db_connection() as connection:
         rows = connection.execute(
             f"SELECT {_SELECT} FROM todo_items AS todo "
             "WHERE todo.user_id = ? AND todo.deleted_at IS NOT NULL",
@@ -375,7 +375,7 @@ def delete_purged_todo(*, user_id: str, todo: Todo) -> None:
     """Remove the row, unless its deletion changed since it was read."""
 
     assert todo.deletion is not None
-    with _connection() as connection, immediate_transaction(connection):
+    with todo_db_connection() as connection, immediate_transaction(connection):
         connection.execute(
             "DELETE FROM todo_items WHERE user_id = ? AND todo_id = ? AND deleted_at = ?",
             (user_id, todo.todo_id, todo.deletion.at),
@@ -393,7 +393,7 @@ def read_pickup_candidates(
     # Design limit: every open TODO is read on each pass, those whose Action
     # already runs too, and the scan walks the user's TODOs up to this week; add
     # a partial index on open TODOs when a pass exceeds 50 ms.
-    with _connection() as connection:
+    with todo_db_connection() as connection:
         rows = connection.execute(
             f"SELECT {_SELECT} FROM todo_items AS todo "
             "WHERE todo.user_id = ? AND todo.week_start <= ? "
@@ -451,7 +451,7 @@ SELECT EXISTS (SELECT 1 FROM todo_items
 def read_todo_for_action(*, user_id: str, action_id: str) -> TodoId | None:
     """The TODO whose conversation is this Action, or None for any other Action."""
 
-    with _connection() as connection:
+    with todo_db_connection() as connection:
         row = connection.execute(
             _SERVED_TODO_SQL, {"user_id": user_id, "action_id": action_id}
         ).fetchone()
@@ -486,14 +486,16 @@ def conversation_has_open_todo(
 def read_todo_revision(*, user_id: str) -> int:
     """The user's TODO change counter, or 0 before the first TODO."""
 
-    with _connection() as connection:
+    with todo_db_connection() as connection:
         row = connection.execute(
             "SELECT revision FROM todo_revisions WHERE user_id = ?", (user_id,)
         ).fetchone()
     return 0 if row is None else int(row[0])
 
 
-def _scope_sql(scope: TodoScope) -> tuple[str, dict[str, str]]:
+def todo_scope_sql(scope: TodoScope) -> tuple[str, dict[str, str]]:
+    """A condition on `todo.project_id`; the query binds `:user_id`."""
+
     match scope:
         case AllScope():
             return "1", {}
@@ -515,7 +517,7 @@ def _scope_sql(scope: TodoScope) -> tuple[str, dict[str, str]]:
             assert_never(scope)
 
 
-def _project_sql(project: TodoProjectFilter) -> tuple[str, dict[str, str]]:
+def todo_project_sql(project: TodoProjectFilter) -> tuple[str, dict[str, str]]:
     match project:
         case AnyProject():
             return "1", {}
@@ -527,7 +529,7 @@ def _project_sql(project: TodoProjectFilter) -> tuple[str, dict[str, str]]:
             assert_never(project)
 
 
-def _owns_project(
+def owns_project(
     connection: sqlite3.Connection, *, user_id: str, project_id: str
 ) -> bool:
     row = connection.execute(
@@ -647,7 +649,7 @@ def _origin(row: sqlite3.Row) -> TodoOrigin:
 
 
 @contextmanager
-def _connection() -> Iterator[sqlite3.Connection]:
+def todo_db_connection() -> Iterator[sqlite3.Connection]:
     db_path, busy_timeout_ms = read_local_runtime_db_config()
     with closing(sqlite3.connect(db_path)) as connection:
         connection.row_factory = sqlite3.Row

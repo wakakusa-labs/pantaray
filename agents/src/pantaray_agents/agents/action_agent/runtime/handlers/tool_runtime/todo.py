@@ -1,17 +1,21 @@
-"""update_todo and request_todo_deletion execution, on the Action's own TODO."""
+"""update_todo, request_todo_deletion and record_progress execution, on the
+Action's own TODO."""
 
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import cast
 
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_args import (
     ToolArgs,
     require_string_arg,
+    require_string_list_arg,
 )
 from pantaray_agents.agents.action_agent.runtime.state import ActionAgentState
 from pantaray_agents.agents.action_agent.runtime.state.context import ensure_context
 from pantaray_agents.agents.action_agent.tools import (
+    RECORD_PROGRESS_TOOL_ID,
     UPDATE_TODO_TOOL_ID,
     ToolDefinition,
 )
@@ -22,6 +26,7 @@ from pantaray_agents.agents.action_agent.tools.todo_tools import (
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.todos import core
 from pantaray_agents.local_runtime.todos.core import Rejected
+from pantaray_agents.local_runtime.todos.goal_store import add_ai_progress_record
 from pantaray_agents.local_runtime.todos.model import AiReport, TodoId
 from pantaray_agents.local_runtime.todos.store import (
     read_todo_clock,
@@ -32,6 +37,8 @@ from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.utils.trace_context import get_trace_context
 
 from .shared import UnprojectedToolExecutionResult
+
+logger = logging.getLogger(__name__)
 
 
 def run_todo_tool(
@@ -52,6 +59,14 @@ def run_todo_tool(
             todo_id=todo_id,
             status=cast("TodoStatus", require_string_arg(args, "status")),
             note=require_string_arg(args, "note"),
+        )
+    elif tool_def.tool_id == RECORD_PROGRESS_TOOL_ID:
+        output = _record_progress(
+            user_id=user_id,
+            todo_id=todo_id,
+            step_id=step_id,
+            action_id=state["action_id"],
+            args=args,
         )
     else:
         output = _request_deletion(
@@ -109,6 +124,36 @@ def _request_deletion(
     return {"status": "requested"}
 
 
+def _record_progress(
+    *, user_id: str, todo_id: TodoId, step_id: str, action_id: str, args: ToolArgs
+) -> dict[str, JSONValue]:
+    quantity = args.get("quantity")
+    if isinstance(quantity, bool) or not isinstance(quantity, int | float):
+        raise RuntimeError("quantity must be a number after validation")
+    recorded = add_ai_progress_record(
+        user_id=user_id,
+        todo_id=todo_id,
+        tool_step_id=step_id,
+        action_id=action_id,
+        process_id=_current_run_id(),
+        evidence_refs=tuple(require_string_list_arg(args, "evidence_step_ids")),
+        quantity=float(quantity),
+        unit=require_string_arg(args, "unit"),
+        note=require_string_arg(args, "note"),
+        clock=read_todo_clock(),
+    )
+    if recorded is None or isinstance(recorded, Rejected):
+        output = _refused(recorded)
+        logger.info(
+            "TODO progress refused: todo_id=%s reason=%s", todo_id, output["reason"]
+        )
+        return output
+    logger.info(
+        "TODO progress recorded: todo_id=%s record_id=%s", todo_id, recorded.record_id
+    )
+    return {"status": "recorded"}
+
+
 def _refused[R: str](rejection: Rejected[R] | None) -> dict[str, JSONValue]:
     reason = "not_found" if rejection is None else rejection.reason
     return {"status": "refused", "reason": reason, "message": TODO_REFUSALS[reason]}
@@ -124,7 +169,7 @@ def _current_run_id() -> str:
     trace = get_trace_context()
     process_id = trace.extra.get("process_id") if trace is not None else None
     if not isinstance(process_id, str) or not process_id:
-        raise RuntimeError("update_todo requires the active Action job trace")
+        raise RuntimeError("a TODO tool requires the active Action job trace")
     return process_id
 
 

@@ -1,8 +1,9 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { ChevronDown, ChevronRight, FolderOpen, GripVertical, X } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 
+import { LineTextField } from '@/components/ui/LineTextField';
 import type { useI18n } from '@/context/useI18n';
 import {
   splitPathForMiddleEllipsis,
@@ -200,9 +201,6 @@ export function HistoryProjectRow({
   );
 }
 
-/** The keyCode of a key the IME processed, sent for the Enter that ends a composition. */
-const IME_PROCESS_KEY_CODE = 229;
-
 /**
  * A project's name, being renamed or created. Enter saves and Escape cancels; leaving the field
  * saves a rename, as a file name field does, and cancels a new name left empty.
@@ -220,44 +218,20 @@ export function ProjectNameField({
   onSave: (name: string) => Promise<void>;
   onCancel: () => void;
 }) {
-  const [name, setName] = useState(initialName);
-  // Set once Enter or Escape has decided, so the blur that follows does not save again.
-  const settledRef = useRef(false);
-  const save = async () => {
-    if (settledRef.current) return;
-    settledRef.current = true;
-    await onSave(name);
-    settledRef.current = false;
-  };
   return (
-    <input
-      type="text"
-      className="history-filter-input history-project__rename"
-      aria-label={label}
-      placeholder={label}
-      value={name}
+    <LineTextField
+      className="history-project__rename"
+      label={label}
+      initialText={initialName}
       // Opened from ＋ or the menu on purpose, so taking focus here is what the user asked for.
       autoFocus
-      onFocus={(event) => event.currentTarget.select()}
-      onChange={(event) => setName(event.target.value)}
-      // Selecting text with the pointer must not pick up the row.
-      onPointerDown={(event) => event.stopPropagation()}
-      onBlur={() => {
-        if (saveOnBlur) void save();
-        else if (!name.trim() && !settledRef.current) onCancel();
+      submitOnBlur={saveOnBlur}
+      onSubmit={async (name) => {
+        await onSave(name);
+        // A saved name closes the field, and one that was not saved stays to be fixed.
+        return false;
       }}
-      onKeyDown={(event) => {
-        // Enter and Escape while an IME is composing belong to the IME.
-        if (event.nativeEvent.isComposing || event.keyCode === IME_PROCESS_KEY_CODE) return;
-        if (event.key === 'Enter') {
-          event.preventDefault();
-          void save();
-        } else if (event.key === 'Escape') {
-          event.preventDefault();
-          settledRef.current = true;
-          onCancel();
-        }
-      }}
+      onCancel={onCancel}
     />
   );
 }

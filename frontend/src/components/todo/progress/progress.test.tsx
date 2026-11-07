@@ -300,7 +300,7 @@ it('marks the period in view as pressed and asks for another', async () => {
 
 it('gives each period its records by project, its checked count and the checked TODOs as written', () => {
   renderView(page());
-  const rows = screen.getByRole('region', { name: '週ごと' }).querySelectorAll('li');
+  const rows = screen.getByRole('region', { name: '週ごと' }).querySelectorAll(':scope > ul > li');
   expect(rows[0]).toHaveTextContent('11/2 の週');
   expect(rows[0]).toHaveTextContent('販路開拓 +2');
   expect(rows[0]).toHaveTextContent('済み 2');
@@ -318,7 +318,9 @@ it('gives each period its records by project, its checked count and the checked 
       ],
     })
   );
-  const months = screen.getByRole('region', { name: '月ごと' }).querySelectorAll('li');
+  const months = screen
+    .getByRole('region', { name: '月ごと' })
+    .querySelectorAll(':scope > ul > li');
   expect(months[0]).toHaveTextContent('11 月（11/7 まで）');
   expect(lead()).toHaveTextContent(/^今月は、販路開拓が 1 件進みました。/);
   expect(months[1]).toHaveTextContent('10 月');
@@ -333,6 +335,63 @@ it('gives each period its records by project, its checked count and the checked 
   );
   expect(screen.getByRole('region', { name: '日ごと' })).toHaveTextContent('11/7（土）');
   expect(lead()).toHaveTextContent(/^今日（11\/7）は、まだ記録がありません。/);
+});
+
+it("opens a period's records and deletes one, with no goal to count them toward", async () => {
+  const handlers = renderView(page({ goals: [] }));
+  const [current] = screen
+    .getByRole('region', { name: '週ごと' })
+    .querySelectorAll<HTMLElement>(':scope > ul > li');
+  const records = within(current)
+    .getByText('この期間の記録（2 件）')
+    .closest('details') as HTMLElement;
+  expect(notesIn(records)).toEqual(['丸和商事から受注', '北星から受注']);
+  await userEvent.click(within(records).getByRole('button', { name: '会話を開く: 北星から受注' }));
+  expect(handlers.onOpenEvidence).toHaveBeenCalledWith('action-1');
+  await userEvent.click(within(records).getByRole('button', { name: '削除: 北星から受注' }));
+  expect(handlers.onDeleteRecord).toHaveBeenCalledWith('r2');
+});
+
+it('never writes a positive share or quantity as 0, and never rounds a share up to 100%', () => {
+  const small = { ...record('r1', '一部入金', 1_000, '円'), recorded_at: '2026-11-05T12:00:00Z' };
+  const tiny = record('r2', '打ち合わせ', 0.001, '時間');
+  renderView(
+    page({
+      records: [small, tiny],
+      rows: [{ start: '2026-11-02', end: '2026-11-08', record_ids: ['r1', 'r2'], checked: [] }],
+      goals: [
+        measured({
+          total: 1_000,
+          share: 1_000 / 300_000_000,
+          record_ids: ['r1'],
+          other_unit_record_ids: ['r2'],
+          expected_share: 0.996,
+          pace: { kind: 'too_few_records', window_start: '2026-10-11', record_ids: ['r1'] },
+        }),
+      ],
+    })
+  );
+  expect(goalBlock()).toHaveTextContent('いま 0.0003%（1,000 円）');
+  expect(goalBlock()).toHaveTextContent('期限から逆算した今の位置 99%');
+  expect(lead()).toHaveTextContent('いまは 0.0003% です。');
+  expect(notesIn(disclosure(/^合計に入れていない記録/))).toEqual(['打ち合わせ']);
+  expect(disclosure(/^合計に入れていない記録/)).toHaveTextContent('0.001 時間');
+
+  renderView(
+    page({
+      goals: [
+        measured({
+          pace: {
+            kind: 'beyond_horizon',
+            window_start: '2026-10-11',
+            record_ids: ['r1', 'r2', 'r3'],
+            per_day: 0.0004,
+          },
+        }),
+      ],
+    })
+  );
+  expect(goalBlock()).toHaveTextContent('1 日あたり 0.0004 円ずつ');
 });
 
 it('rounds a share down and keeps a small step visible', () => {

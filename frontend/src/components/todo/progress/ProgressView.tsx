@@ -101,6 +101,7 @@ export function ProgressView({
               recordsById={recordsById}
               projectName={projectName}
               maxRecordCount={maxRecordCount}
+              {...recordActions}
             />
           ))}
         </ul>

@@ -237,13 +237,18 @@
   background: rgb(var(--accent-rgb));
 }
 
+.todo-progress-row .todo-progress-records {
+  margin-top: 0;
+}
+
 .todo-progress-row__checked {
   color: var(--fog-text-3);
   text-align: right;
   white-space: nowrap;
 }
 
-.todo-progress-row__texts {
+.todo-progress-row__texts,
+.todo-progress-row__records-list {
   grid-column: 1 / -1;
   color: var(--fog-text-2);
   font-size: 12.5px;

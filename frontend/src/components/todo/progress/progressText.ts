@@ -23,17 +23,30 @@ const FLOAT_SLACK = 1e-9;
 const EARLY_MONTH_LAST_DAY = 10;
 const MID_MONTH_LAST_DAY = 20;
 
-/** Records are held to positive quantities; two decimals keep 0.5 or 1.25 as written. */
-export const formatNumber = (language: UiLanguage, value: number): string =>
-  new Intl.NumberFormat(getLocaleForUiLanguage(language), { maximumFractionDigits: 2 }).format(
-    value
-  );
+/** Below this, two decimals would round a positive quantity to 0. */
+const SMALLEST_TWO_DECIMALS = 0.01;
+/** A quantity under 0.01 keeps this many significant digits (0.001, 0.0025). */
+const SMALL_SIGNIFICANT_DIGITS = 2;
 
-/** A pace of large amounts a day is told in whole units; a small one keeps two decimals. */
+/**
+ * Records are held to positive quantities: two decimals keep 0.5 or 1.25 as written, and a
+ * smaller one keeps its significant digits, so a positive amount never reads as 0.
+ */
+export const formatNumber = (language: UiLanguage, value: number): string =>
+  new Intl.NumberFormat(
+    getLocaleForUiLanguage(language),
+    value > 0 && value < SMALLEST_TWO_DECIMALS
+      ? { maximumSignificantDigits: SMALL_SIGNIFICANT_DIGITS }
+      : { maximumFractionDigits: 2 }
+  ).format(value);
+
+/** A pace of large amounts a day is told in whole units; a small one as any quantity. */
 const formatRate = (language: UiLanguage, value: number): string =>
-  new Intl.NumberFormat(getLocaleForUiLanguage(language), {
-    maximumFractionDigits: value >= 10 ? 0 : 2,
-  }).format(value);
+  value >= 10
+    ? new Intl.NumberFormat(getLocaleForUiLanguage(language), { maximumFractionDigits: 0 }).format(
+        value
+      )
+    : formatNumber(language, value);
 
 export const formatQuantity = ({ t, language }: ProgressI18n, value: number, unit: string) =>
   t('todoProgress.quantity', { number: formatNumber(language, value), unit });
@@ -50,8 +63,13 @@ export function percentValue(share: number): number {
   return Math.floor(percent * scale + FLOAT_SLACK) / scale;
 }
 
+/** `percentValue` has already rounded, so the format adds no rounding of its own. */
 export const formatPercent = ({ t, language }: ProgressI18n, share: number) =>
-  t('todoProgress.percent', { number: formatNumber(language, percentValue(share)) });
+  t('todoProgress.percent', {
+    number: new Intl.NumberFormat(getLocaleForUiLanguage(language), {
+      maximumFractionDigits: 20,
+    }).format(percentValue(share)),
+  });
 
 export const recordCount = ({ t }: ProgressI18n, count: number) =>
   t(count === 1 ? 'todoProgress.count.records.one' : 'todoProgress.count.records.other', {

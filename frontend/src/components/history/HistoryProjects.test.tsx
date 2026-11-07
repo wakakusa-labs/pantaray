@@ -173,6 +173,19 @@ it('名前の変更は Enter で保存し、Esc で取り消し、ほかのプ�
   await waitFor(() => expect(screen.getByRole('button', { name: 'Aurora' })).toHaveFocus());
 });
 
+it('名前の変更は欄から離れても保存する', async () => {
+  await renderProjects();
+
+  await chooseFromMenu('a', 'history.projects.rename');
+  const field = screen.getByRole('textbox', { name: 'history.projects.nameLabel' });
+  await userEvent.clear(field);
+  await userEvent.type(field, 'Aurora');
+  await userEvent.tab();
+
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Aurora' })).toBeInTheDocument());
+  expect(api.renameProject).toHaveBeenCalledExactlyOnceWith('a', { displayName: 'Aurora' });
+});
+
 it('IME で変換中の Enter では保存せず、確定後の Enter で保存する', async () => {
   await renderProjects();
 

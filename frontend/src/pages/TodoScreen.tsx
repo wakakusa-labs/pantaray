@@ -45,6 +45,7 @@ function FailureLine({ failure }: { failure: TodoMutationFailure }) {
 export function TodoScreen({
   selection,
   week,
+  weekShowsSelection,
   settings,
   settingsFailed,
   onSelect,
@@ -54,6 +55,11 @@ export function TodoScreen({
   selection: TodoSelection;
   /** Read by the page, whose sidebar counts the week's open TODOs too. */
   week: TodoWeekRead;
+  /**
+   * The page was read for the selected scope and week. Until another selection's read lands,
+   * the last page stays on screen, dimmed and closed to writes: an add would go to its week.
+   */
+  weekShowsSelection: boolean;
   settings: WorkspaceSettings | null;
   /** The workspace could not be read, so the TODOs cannot be put in their projects. */
   settingsFailed: boolean;
@@ -88,14 +94,23 @@ export function TodoScreen({
 
   // Focus stays in the list: 「今週へ」 and the close button go away once they are used.
   const focusHeading = () => headingRef.current?.focus();
-  const showWeek = (start: string | null) => {
+  // Weeks step from the one selected, not the one on screen, which may still be the last read.
+  const showWeek = (weeks: number | null) => {
     if (!page) return;
+    const start =
+      weeks === null ? null : shiftWeek(selection.weekStart ?? page.current_week_start, weeks);
     onSelect({
       ...selection,
       weekStart: start === null || start === page.current_week_start ? null : start,
       todoId: null,
     });
   };
+  /** A read that failed after one landed: what is shown may be out of date. */
+  const staleAlert = (
+    <p className="history-error" role="alert">
+      {t('todo.page.loadFailedStale')}
+    </p>
+  );
 
   const renderWeek = (): ReactNode => {
     if (!page || !settings) {
@@ -118,81 +133,86 @@ export function TodoScreen({
         <WeekSwitcher
           week={page.week}
           isCurrent={page.week.start === page.current_week_start}
-          onPrevious={() => showWeek(shiftWeek(page.week.start, -1))}
-          onNext={() => showWeek(shiftWeek(page.week.start, 1))}
+          onPrevious={() => showWeek(-1)}
+          onNext={() => showWeek(1)}
           onCurrent={() => {
             showWeek(null);
             focusHeading();
           }}
         />
         {/* What was read before the failure stays; the next change reads again. */}
-        {week.error ? (
-          <p className="history-error" role="alert">
-            {t('todo.page.loadFailed')}
-          </p>
-        ) : null}
-        {groups.length === 0 ? (
-          <p className="todo-screen__empty">
-            {takesTodos ? t('todo.page.noProjects') : t('todo.page.emptyWeek')}
-          </p>
-        ) : null}
-        {groups.map((group) => (
-          <TodoProjectGroup
-            key={group.projectId ?? ''}
-            projectName={group.projectName}
-            organizationName={
-              group.organization === null
-                ? null
-                : group.organization.kind === 'organization'
-                  ? group.organization.name
-                  : t('todo.rail.none')
-            }
-            doneCount={group.doneCount}
-            totalCount={group.totalCount}
-            addField={
-              takesTodos ? (
-                <>
-                  <TodoAddField
-                    onSubmit={(text) => mutations.create(group.projectId, page.week.start, text)}
-                  />
-                  {failureFor(
-                    (target) => target.kind === 'add' && target.projectId === group.projectId
-                  )}
-                </>
-              ) : null
-            }
-          >
-            {group.items.flatMap((todo) => {
-              const request = todo.deletion_request;
-              const rowFailure = failureFor(
-                (target) => target.kind === 'todo' && target.todoId === todo.todo_id
-              );
-              return [
-                <TodoRow
-                  key={todo.todo_id}
-                  todo={todo}
-                  today={page.today}
-                  selected={todo.todo_id === selectedTodo?.todo_id}
-                  pending={mutations.pending.has(todo.todo_id)}
-                  onToggleCheck={() =>
-                    void mutations.setCheck(todo.todo_id, todo.state.kind !== 'done')
-                  }
-                  onSelect={() => onSelect({ ...selection, todoId: todo.todo_id })}
-                  onDelete={() => void mutations.deleteTodo(todo.todo_id)}
-                  onAnswerDeletion={(answer) => {
-                    if (request)
-                      void mutations.answerDeletion(todo.todo_id, request.request_id, answer);
-                  }}
-                />,
-                rowFailure ? (
-                  <li key={`${todo.todo_id}:failure`} className="todo-screen__failure-row">
-                    {rowFailure}
-                  </li>
-                ) : null,
-              ];
-            })}
-          </TodoProjectGroup>
-        ))}
+        {week.error ? staleAlert : null}
+        {/* A disabled fieldset closes every control in it to the keyboard and the pointer. */}
+        <fieldset
+          className={
+            weekShowsSelection ? 'todo-screen__week' : 'todo-screen__week todo-screen__week--stale'
+          }
+          disabled={!weekShowsSelection}
+          aria-busy={!weekShowsSelection && !week.error}
+        >
+          {groups.length === 0 ? (
+            <p className="todo-screen__empty">
+              {takesTodos ? t('todo.page.noProjects') : t('todo.page.emptyWeek')}
+            </p>
+          ) : null}
+          {groups.map((group) => (
+            <TodoProjectGroup
+              key={group.projectId ?? ''}
+              projectName={group.projectName}
+              organizationName={
+                group.organization === null
+                  ? null
+                  : group.organization.kind === 'organization'
+                    ? group.organization.name
+                    : t('todo.rail.none')
+              }
+              doneCount={group.doneCount}
+              totalCount={group.totalCount}
+              addField={
+                takesTodos ? (
+                  <>
+                    <TodoAddField
+                      onSubmit={(text) => mutations.create(group.projectId, page.week.start, text)}
+                    />
+                    {failureFor(
+                      (target) => target.kind === 'add' && target.projectId === group.projectId
+                    )}
+                  </>
+                ) : null
+              }
+            >
+              {group.items.flatMap((todo) => {
+                const request = todo.deletion_request;
+                const rowFailure = failureFor(
+                  (target) => target.kind === 'todo' && target.todoId === todo.todo_id
+                );
+                return [
+                  <TodoRow
+                    key={todo.todo_id}
+                    todo={todo}
+                    today={page.today}
+                    selected={todo.todo_id === selectedTodo?.todo_id}
+                    pending={mutations.pending.has(todo.todo_id)}
+                    onToggleCheck={() =>
+                      void mutations.setCheck(todo.todo_id, todo.state.kind !== 'done')
+                    }
+                    onSelect={() => onSelect({ ...selection, todoId: todo.todo_id })}
+                    onDelete={() => void mutations.deleteTodo(todo.todo_id)}
+                    onAnswerDeletion={(answer) => {
+                      if (request)
+                        void mutations.answerDeletion(todo.todo_id, request.request_id, answer);
+                    }}
+                  />,
+                  rowFailure ? (
+                    <li key={`${todo.todo_id}:failure`} className="todo-screen__failure-row">
+                      {rowFailure}
+                    </li>
+                  ) : null,
+                ];
+              })}
+            </TodoProjectGroup>
+          ))}
+        </fieldset>
       </>
     );
   };
@@ -212,30 +232,41 @@ export function TodoScreen({
         </p>
       );
     }
-    if (items.length === 0) return <p className="todo-screen__empty">{t('todo.deleted.empty')}</p>;
+    // What was read before the failure stays; the next change reads again.
+    const alert = deleted.error ? staleAlert : null;
+    if (items.length === 0)
+      return (
+        <>
+          {alert}
+          <p className="todo-screen__empty">{t('todo.deleted.empty')}</p>
+        </>
+      );
     return (
-      <ul className="todo-screen__deleted">
-        {items.flatMap((item) => {
-          const rowFailure = failureFor(
-            (target) => target.kind === 'todo' && target.todoId === item.todo_id
-          );
-          return [
-            <DeletedTodoRow
-              key={item.todo_id}
-              item={item}
-              projectName={projectName(item.project_id)}
-              today={page.today}
-              pending={mutations.pending.has(item.todo_id)}
-              onRestore={() => void mutations.restore(item.todo_id)}
-            />,
-            rowFailure ? (
-              <li key={`${item.todo_id}:failure`} className="todo-screen__failure-row">
-                {rowFailure}
-              </li>
-            ) : null,
-          ];
-        })}
-      </ul>
+      <>
+        {alert}
+        <ul className="todo-screen__deleted">
+          {items.flatMap((item) => {
+            const rowFailure = failureFor(
+              (target) => target.kind === 'todo' && target.todoId === item.todo_id
+            );
+            return [
+              <DeletedTodoRow
+                key={item.todo_id}
+                item={item}
+                projectName={projectName(item.project_id)}
+                today={page.today}
+                pending={mutations.pending.has(item.todo_id)}
+                onRestore={() => void mutations.restore(item.todo_id)}
+              />,
+              rowFailure ? (
+                <li key={`${item.todo_id}:failure`} className="todo-screen__failure-row">
+                  {rowFailure}
+                </li>
+              ) : null,
+            ];
+          })}
+        </ul>
+      </>
     );
   };
 

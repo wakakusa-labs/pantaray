@@ -129,6 +129,16 @@ const SuggestionHistoryPage = () => {
   const todoSelection = parseTodoSelection(location.search);
   const { scope } = todoSelection;
   const week = useTodoWeek(scope, ANY_PROJECT, todoSelection.weekStart);
+  // The read keeps its last page while another scope or week is read, and only the latest
+  // query's answer lands, so a page that arrived since the query last changed is that query's.
+  const weekQuery = todoSelectionSearch({
+    ...DEFAULT_TODO_SELECTION,
+    scope,
+    weekStart: todoSelection.weekStart,
+  });
+  const [weekReadFor, setWeekReadFor] = useState({ page: week.page, query: weekQuery });
+  if (weekReadFor.page !== week.page) setWeekReadFor({ page: week.page, query: weekQuery });
+  const weekShowsSelection = week.page !== null && weekReadFor.query === weekQuery;
   const { settings } = workspace;
 
   // The rail's organizations are the ones this visit read.
@@ -316,6 +326,7 @@ const SuggestionHistoryPage = () => {
         <TodoScreen
           selection={todoSelection}
           week={week}
+          weekShowsSelection={weekShowsSelection}
           settings={settings}
           settingsFailed={settings === null && workspace.errorMessage !== null}
           onSelect={selectTodos}

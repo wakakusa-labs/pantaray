@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { forwardRef, useImperativeHandle } from 'react';
 import { MemoryRouter, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
@@ -6,7 +6,11 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import type { ActionConversationUserItem } from '../../electron/src/actions/actionConversationModel';
 import type { ConversationHistoryListItem } from '../../electron/src/history/historyContracts';
-import type { TodoView, TodoWeekPage } from '../../electron/src/todos/todoContracts';
+import type {
+  DeletedTodoView,
+  TodoView,
+  TodoWeekPage,
+} from '../../electron/src/todos/todoContracts';
 import { UserItem } from '@/components/action-conversation/UserMessage';
 import type { ChatViewHandle } from '@/components/chat/ChatView';
 import type { TaskPreview } from '@/components/task/taskFiles';
@@ -161,7 +165,11 @@ const WEEK: TodoWeekPage = {
     todo('T4', null),
   ],
 };
-const listWeek = vi.fn(async () => WEEK);
+const listWeek = vi.fn(async (_query: { week_start?: string }) => WEEK);
+const listDeleted = vi.fn(async (): Promise<DeletedTodoView[]> => []);
+/** Every reader that listens for `todos:changed`; the test tells them all, as main does. */
+const changeListeners = new Set<() => void>();
+const todosChanged = () => changeListeners.forEach((listener) => listener());
 const removeTodo = vi.fn(async () => ({ kind: 'refused', code: 'TODO_BUSY' }) as const);
 const createTodo = vi.fn(async () => ({ kind: 'ok', result: {} }) as const);
 const deleteItem = vi.fn(async () => ({ ok: true }) as const);
@@ -172,6 +180,7 @@ const stored = new Map<string, string>();
 beforeEach(() => {
   stored.clear();
   listWeek.mockImplementation(async () => WEEK);
+  listDeleted.mockImplementation(async () => []);
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => stored.get(key) ?? null,
     setItem: (key: string, value: string) => stored.set(key, value),
@@ -192,8 +201,11 @@ beforeEach(() => {
     agentOverlay: { showHistory: vi.fn() },
     todos: {
       listWeek,
-      listDeleted: vi.fn(async () => []),
-      onChanged: () => () => undefined,
+      listDeleted,
+      onChanged: (callback: () => void) => {
+        changeListeners.add(callback);
+        return () => changeListeners.delete(callback);
+      },
       delete: removeTodo,
       create: createTodo,
     },
@@ -593,4 +605,75 @@ it('adds to the group it was written in, and tells a refused write under its row
   // Under the row it was made from, before the next one.
   const rows = within(estimate).getAllByRole('listitem');
   expect(rows.findIndex((row) => row.contains(alert))).toBe(1);
+});
+
+const NEXT_WEEK = '2026-11-09';
+const addFields = () => screen.getAllByRole('textbox', { name: /TODO を書く/ });
+
+it("closes the week's writes while another week is read, so nothing is added to the last one", async () => {
+  renderPage(['/history']);
+  await screen.findByRole('checkbox', { name: '完了: TODO T1' });
+  expect(addFields()[0]).toBeEnabled();
+  listWeek.mockImplementation(({ week_start }) =>
+    week_start === NEXT_WEEK ? new Promise(() => {}) : Promise.resolve(WEEK)
+  );
+
+  await userEvent.click(screen.getByRole('button', { name: '次の週' }));
+  expect(location()).toHaveTextContent(`/history?week=${NEXT_WEEK}`);
+  // The last week stays on screen, closed: its fields and checks take nothing.
+  for (const field of addFields()) expect(field).toBeDisabled();
+  expect(screen.getByRole('checkbox', { name: '完了: TODO T1' })).toBeDisabled();
+  await userEvent.type(addFields()[0], '請求書を送る{Enter}');
+  expect(createTodo).not.toHaveBeenCalled();
+  // The week steps from the one selected, not the one still on screen.
+  await userEvent.click(screen.getByRole('button', { name: '次の週' }));
+  expect(location()).toHaveTextContent('/history?week=2026-11-16');
+});
+
+it('keeps the last week closed and says so when the selected week fails to load', async () => {
+  renderPage(['/history']);
+  await screen.findByRole('checkbox', { name: '完了: TODO T1' });
+  listWeek.mockImplementation(async ({ week_start }) => {
+    if (week_start === NEXT_WEEK) throw new Error('offline');
+    return WEEK;
+  });
+
+  await userEvent.click(screen.getByRole('button', { name: '次の週' }));
+  expect(
+    await screen.findByText('TODO を読み込めませんでした。表示が古いかもしれません。')
+  ).toBeVisible();
+  for (const field of addFields()) expect(field).toBeDisabled();
+});
+
+it('says a list may be out of date when it fails to load again after a read', async () => {
+  const DELETED: DeletedTodoView = {
+    todo_id: 'D1',
+    project_id: 'P1',
+    text: '旧版の見積書',
+    deleted_by: 'user',
+    deleted_at: '2026-11-01T00:00:00.000Z',
+    purge_on: '2026-12-01',
+  };
+  const STALE = 'TODO を読み込めませんでした。表示が古いかもしれません。';
+  for (const first of [[], [DELETED]]) {
+    listDeleted.mockImplementation(async () => first);
+    renderPage(['/history?view=deleted']);
+    await screen.findByText(first.length === 0 ? '削除した TODO はありません。' : '旧版の見積書');
+    expect(screen.queryByText(STALE)).toBeNull();
+
+    listDeleted.mockRejectedValue(new Error('offline'));
+    act(() => todosChanged());
+    expect(await screen.findByRole('alert')).toHaveTextContent(STALE);
+    // What was read stays under the note.
+    if (first.length > 0) expect(screen.getByText('旧版の見積書')).toBeVisible();
+    cleanup();
+  }
+
+  // The week's list says the same over the TODOs it last read.
+  renderPage(['/history']);
+  await screen.findByRole('checkbox', { name: '完了: TODO T1' });
+  listWeek.mockRejectedValue(new Error('offline'));
+  act(() => todosChanged());
+  await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(STALE));
+  expect(screen.getByRole('checkbox', { name: '完了: TODO T1' })).toBeVisible();
 });

@@ -221,6 +221,28 @@ it('labels a suggestion’s card as a suggestion, as the task list does', async 
   expect(within(card).queryByText('確認待ち')).not.toBeInTheDocument();
 });
 
+it('labels a suggestion that became a task by the task’s status', async () => {
+  historyRows.set('suggestion:S2', work('A9', '請求書の下書きを作る', 'running'));
+  pages = [
+    {
+      items: [
+        item(1, {
+          kind: 'assistant_message',
+          text: '下書きを進めています。',
+          quote_item_id: null,
+          cards: [{ kind: 'suggestion', suggestion_id: 'S2', summary: '請求書の下書き' }],
+        }),
+      ],
+      next_cursor: null,
+    },
+  ];
+  renderPage();
+
+  const card = await screen.findByRole('button', { name: '請求書の下書きを作る を開く' });
+  await waitFor(() => expect(within(card).getByText('実行中')).toBeInTheDocument());
+  expect(within(card).queryByText('提案')).not.toBeInTheDocument();
+});
+
 it('shows the status of a work the dated list leaves out, such as a TODO’s conversation', async () => {
   historyFetch.mockResolvedValueOnce({
     data: [],

@@ -27,12 +27,7 @@ export function ChatCard({
   const summaryId = useId();
   const statusId = useId();
   const statusMeta =
-    isLatest && work
-      ? getHistoryItemStatusMeta({
-          kind: card.kind === 'action' ? 'conversation' : 'suggestion',
-          status: work.status,
-        })
-      : null;
+    isLatest && work ? getHistoryItemStatusMeta({ kind: work.kind, status: work.status }) : null;
   return (
     <button
       type="button"

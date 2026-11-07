@@ -4,7 +4,12 @@ import type { ConversationHistoryStatus } from '../../electron/src/history/histo
 import type { WorkKey } from '@/components/chat/chatTimeline';
 import { splitWorkKey } from '@/history/historySelection';
 
-export type ChatWorkState = { title: string; status: ConversationHistoryStatus };
+/** `kind` is the row's own: a suggestion that became a task reads as that task. */
+export type ChatWorkState = {
+  kind: 'conversation' | 'suggestion';
+  title: string;
+  status: ConversationHistoryStatus;
+};
 
 const HISTORY_CHANGED_REFRESH_DELAY_MS = 150;
 
@@ -38,7 +43,9 @@ export function useChatWorkStates(works: readonly WorkKey[]): ReadonlyMap<WorkKe
         if (generation !== generationRef.current) return;
         const next = new Map<WorkKey, ChatWorkState>();
         rows.forEach((row, index) => {
-          if (row !== null) next.set(keys[index], { title: row.title, status: row.status });
+          if (row !== null) {
+            next.set(keys[index], { kind: row.kind, title: row.title, status: row.status });
+          }
         });
         setStates(next);
       } catch {

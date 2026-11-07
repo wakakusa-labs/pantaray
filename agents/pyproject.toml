@@ -140,6 +140,9 @@ files = [
     "src/pantaray_agents/local_runtime/tooling/documents",
     "src/pantaray_agents/local_runtime/web_tools",
     "src/pantaray_agents/local_runtime/todos",
+    "src/pantaray_agents/schema/todos.py",
+    "src/pantaray_agents/routers/todos.py",
+    "src/pantaray_agents/orchestration/ws/todo_relay.py",
 ]
 warn_return_any = true
 warn_unused_configs = true

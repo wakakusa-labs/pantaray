@@ -41,6 +41,7 @@ from .chat_relay import ChatRelayMixin
 from .handler_process_control import WSHandlerProcessControlMixin
 from .handler_shared import ProcessMetadata, SuggestionStatusPersistenceError
 from .task_supervisor import WsTaskSupervisor
+from .todo_relay import TodoRelayMixin
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ class WSOrchestrationHandler(
     WSHandlerProcessControlMixin,
     ActionFlowMixin,
     ChatRelayMixin,
+    TodoRelayMixin,
     BaseWSHandler,
 ):
     def __init__(

@@ -246,6 +246,7 @@ async def orchestrations_ws(websocket: WebSocket, user_id: str):
         # 進行中の suggestion process を検出して中継するだけの責務を持つ。
         handler.start_suggestion_relay()
         handler.start_chat_relay()
+        handler.start_todo_relay()
         if not deps.is_mock_mode():
             # A turn the app quit in runs again once the user is back.
             request_chat_turn(user_id)

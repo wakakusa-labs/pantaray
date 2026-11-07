@@ -3,6 +3,7 @@
 import logging
 from collections.abc import Mapping
 from datetime import datetime, timedelta
+from typing import Final
 
 from pantaray_agents.schema.agent.suggestion import (
     SuggestionHistoryEntry,
@@ -12,12 +13,26 @@ from pantaray_agents.utils.local_time import describe_utc_timestamp, local_perio
 from pantaray_agents.utils.timestamps import parse_iso8601_utc
 
 from .context_density import is_activity_summary_row_present
-from .context_types import ActivityDescriptionRow, ActivitySummaryRow
+from .context_types import (
+    ActivityDescriptionRow,
+    ActivitySummaryRow,
+    SuggestionOpenTodo,
+    SuggestionOpenTodos,
+    SuggestionTodoState,
+)
 
 NO_ACTIVITY_DESCRIPTIONS_TEXT = "(no activity descriptions available)"
 NO_ACTIVITY_SUMMARY_1H_TEXT = "(no 1h summary available)"
 NO_ACTIVITY_SUMMARY_24H_TEXT = "(no 24h summary available)"
 NO_RECENT_ANSWERS_TEXT = "(no recent answers)"
+NO_OPEN_TODOS_TEXT = "(No open TODOs.)"
+_TODO_STATE_TEXT: Final[Mapping[SuggestionTodoState, str]] = {
+    "working": "Pantaray is working on it",
+    "waiting": "waiting for the user",
+    "partial": "partly done",
+    "stopped": "stopped",
+    "not_started": "not started",
+}
 RECENT_SUGGESTION_REPLY_MAX_CHARS = 2_000
 # Stored Action outputs were 947 chars or fewer in 34 of 36 runs, and the head
 # carries the conclusion; twenty entries then add at most 20,000 chars.
@@ -77,6 +92,36 @@ def format_activity_summary(row: ActivitySummaryRow | None, missing_text: str) -
     summary = str(row.get("summary") or "").strip()
     period = local_period(row["period_start"], row["period_end"])
     return f"[{period}] {summary}"
+
+
+def format_open_todos(todos: SuggestionOpenTodos, *, max_chars: int) -> str:
+    """The user's open TODOs, one line each, after a note on any left out.
+
+    The oldest are dropped first until the list fits in `max_chars`; when not
+    even the note fits, the note alone is returned for the caller's limit check.
+    """
+    if not todos.items:
+        return NO_OPEN_TODOS_TEXT
+
+    lines = [_format_open_todo(todo) for todo in todos.items]
+    for dropped in range(len(lines) + 1):
+        omitted = todos.omitted + dropped
+        note = [f"[{omitted} older open TODOs not shown]"] if omitted else []
+        text = "\n".join(note + lines[dropped:])
+        if len(text) <= max_chars:
+            break
+    return text
+
+
+def _format_open_todo(todo: SuggestionOpenTodo) -> str:
+    details = [
+        "no project" if todo.project_name is None else f"project: {todo.project_name}"
+    ]
+    if todo.due is not None:
+        weekly = ", weekly" if todo.due.repeat == "weekly" else ""
+        details.append(f"due {todo.due.date}{weekly}")
+    details.append(_TODO_STATE_TEXT[todo.state])
+    return f"- {todo.text} ({'; '.join(details)})"
 
 
 def _bounded(text: str, max_chars: int, marker: str) -> str:

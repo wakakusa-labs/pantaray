@@ -5,11 +5,34 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import TypedDict
+from typing import Literal, TypedDict
 
+from pantaray_agents.local_runtime.todos.model import TodoDue
 from pantaray_agents.schema.repositories.repository import DBRow, JSONValue
 
 logger = logging.getLogger(__name__)
+
+# The open TODO's display state; a checked TODO is not open.
+type SuggestionTodoState = Literal[
+    "working", "waiting", "partial", "stopped", "not_started"
+]
+
+
+@dataclass(frozen=True, slots=True)
+class SuggestionOpenTodo:
+    text: str
+    project_name: str | None
+    due: TodoDue | None
+    state: SuggestionTodoState
+
+
+@dataclass(frozen=True, slots=True)
+class SuggestionOpenTodos:
+    """The current week's open TODOs, oldest first, bounded by the snapshot."""
+
+    items: tuple[SuggestionOpenTodo, ...] = ()
+    # Older open TODOs left out by the bound.
+    omitted: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,6 +44,7 @@ class SuggestionStableMemoryContext:
     has_insights: bool
     # The whole `insights/todos.md`, carried in the prompt as is.
     pending_work: str = ""
+    open_todos: SuggestionOpenTodos = SuggestionOpenTodos()
 
 
 class ActivityDescriptionRow(TypedDict, total=False):

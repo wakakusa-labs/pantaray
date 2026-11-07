@@ -22,6 +22,7 @@ from .cursor import (
     encode_action_conversation_cursor,
 )
 from .entry_projection import project_action_user_entry
+from .errors import ActionConversationIntegrityError
 from .history_queries import (
     ActionHistoryUserRow,
     TimelineAnchor,
@@ -44,10 +45,6 @@ class ActionConversationNotFoundError(MigrationError):
 
 class ActionConversationCursorConflictError(MigrationError):
     """The cursor owner, scope, or exact durable anchor is stale."""
-
-
-class ActionConversationIntegrityError(MigrationError):
-    """Durable Action conversation state violates the read contract."""
 
 
 @dataclass(frozen=True, slots=True)

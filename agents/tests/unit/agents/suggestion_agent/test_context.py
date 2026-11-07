@@ -21,10 +21,13 @@ from pantaray_agents.agents.suggestion_agent.context_formatters import (
     NO_ACTIVITY_SUMMARY_24H_TEXT,
     format_activity_descriptions,
     format_activity_summary,
+    format_open_todos,
     format_recent_suggestions,
     normalize_recent_suggestion_entry,
 )
 from pantaray_agents.agents.suggestion_agent.context_types import (
+    SuggestionOpenTodo,
+    SuggestionOpenTodos,
     SuggestionStableMemoryContext,
     normalize_activity_description_rows,
     normalize_activity_summary_row,
@@ -634,6 +637,45 @@ async def test_prompt_receives_pending_work_direction_and_user_feedback(
         "  User instructions during the Action (oldest first):\n"
         "    - Only review, do not merge.\n"
     ) in prompt
+
+
+def test_open_todos_render_one_line_each_after_the_omitted_count() -> None:
+    from pantaray_agents.local_runtime.todos.model import TodoDue
+
+    todos = SuggestionOpenTodos(
+        items=(
+            SuggestionOpenTodo(
+                "Send the quote",
+                "Website",
+                TodoDue(date="2026-11-06", repeat="weekly"),
+                "not_started",
+            ),
+            SuggestionOpenTodo("Book the venue", None, None, "waiting"),
+            SuggestionOpenTodo(
+                "Draft the report",
+                None,
+                TodoDue(date="2026-11-10", repeat="none"),
+                "working",
+            ),
+        ),
+        omitted=2,
+    )
+
+    full = (
+        "[2 older open TODOs not shown]\n"
+        "- Send the quote (project: Website; due 2026-11-06, weekly; not started)\n"
+        "- Book the venue (no project; waiting for the user)\n"
+        "- Draft the report (no project; due 2026-11-10; Pantaray is working on it)"
+    )
+    assert format_open_todos(todos, max_chars=len(full)) == full
+    # One character short drops the oldest TODO and counts it.
+    assert format_open_todos(todos, max_chars=len(full) - 1) == (
+        "[3 older open TODOs not shown]\n"
+        "- Book the venue (no project; waiting for the user)\n"
+        "- Draft the report (no project; due 2026-11-10; Pantaray is working on it)"
+    )
+    assert format_open_todos(todos, max_chars=0) == "[5 older open TODOs not shown]"
+    assert format_open_todos(SuggestionOpenTodos(), max_chars=0) == "(No open TODOs.)"
 
 
 def test_reply_and_result_previews_are_bounded() -> None:

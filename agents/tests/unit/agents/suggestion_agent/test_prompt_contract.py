@@ -7,8 +7,13 @@ from unittest.mock import patch
 import pytest
 
 from pantaray_agents.agents.suggestion_agent import SuggestionAgent
+from pantaray_agents.agents.suggestion_agent.agent import (
+    SUGGESTION_INITIAL_PROMPT_MAX_CHARS,
+)
 from pantaray_agents.agents.suggestion_agent.context_types import (
     SuggestionFetchedContext,
+    SuggestionOpenTodo,
+    SuggestionOpenTodos,
     SuggestionStableMemoryContext,
 )
 from pantaray_agents.agents.suggestion_agent.output import parse_suggestion_output
@@ -45,6 +50,9 @@ def test_real_prompt_renders_context_and_answer_language(
                 has_facts=True,
                 has_insights=True,
                 pending_work="pending-work-evidence",
+                open_todos=SuggestionOpenTodos(
+                    (SuggestionOpenTodo("open-todo-evidence", None, None, "partial"),)
+                ),
             ),
         )
 
@@ -64,10 +72,65 @@ def test_real_prompt_renders_context_and_answer_language(
     rendered = agent._build_prompt(context)  # noqa: SLF001
     instruction = agent._system_instruction_for_request()  # noqa: SLF001
 
-    for value in (*context.values(), "pending-work-evidence"):
+    for value in (
+        *context.values(),
+        "pending-work-evidence",
+        "## Open TODOs\n",
+        "- open-todo-evidence (no project; partly done)\n",
+    ):
         assert value in rendered
     assert f"the suggestion itself in {label}," in instruction
     assert "{answer_language}" not in instruction
+
+
+def test_open_todos_take_only_the_room_the_other_sections_leave(
+    mock_repository: MockSuggestionAgentRepository,
+    mock_llm_client: MockLLMClient,
+) -> None:
+    todos = tuple(
+        SuggestionOpenTodo(f"todo-{index:02d} " + "t" * 490, None, None, "not_started")
+        for index in range(50)
+    )
+    config = PromptLoader().load_config("suggestion/suggestion")
+    with patch(
+        "pantaray_agents.agents.core.base.prompt_loader.load_config",
+        return_value=config,
+    ):
+        agent = SuggestionAgent(
+            config={"llm_client": mock_llm_client},
+            repository=mock_repository,
+            research_tools=build_mock_suggestion_research_tools(),
+            stable_memory=SuggestionStableMemoryContext(
+                prompt="m" * 5_000,
+                has_facts=True,
+                has_insights=True,
+                # The snapshot's bound for insights/todos.md.
+                pending_work="p" * 60_000,
+                open_todos=SuggestionOpenTodos(todos, omitted=3),
+            ),
+        )
+    context: SuggestionFetchedContext = {
+        "short_term_insight": "i" * 6_000,
+        "reconsideration_reason": "reason",
+        "stable_memory_context": "m" * 5_000,
+        "action_agent_capabilities": "capabilities",
+        # Near the recent suggestions' 30,000-character bound.
+        "recent_suggestions": "h" * 29_000,
+        "recent_activity_descriptions": "activities",
+        "recent_activity_summary_1h": "hourly",
+        "recent_activity_summary_24h": "daily",
+        "context_density_signal": "context_density: high",
+        "workspace_context_prompt": "workspace",
+    }
+    agent._current_language = "en"  # noqa: SLF001
+
+    rendered = agent._build_prompt(context)  # noqa: SLF001
+
+    assert len(rendered) <= SUGGESTION_INITIAL_PROMPT_MAX_CHARS
+    shown = re.findall(r"^- todo-(\d\d) ", rendered, re.M)
+    # The newest TODOs stay, the oldest go, and the note counts every one left out.
+    assert shown and shown[-1] == "49" and shown[0] != "00"
+    assert f"[{3 + int(shown[0])} older open TODOs not shown]" in rendered
 
 
 @pytest.mark.parametrize("label", ["Japanese", "English"])

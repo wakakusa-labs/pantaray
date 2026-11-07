@@ -2,14 +2,20 @@ from __future__ import annotations
 
 import dataclasses
 import sqlite3
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
+from zoneinfo import ZoneInfo
 
 import pytest
 
 import pantaray_agents.local_runtime.memory_catalog.memory_indexes as memory_indexes_module
 import pantaray_agents.local_runtime.tooling.suggestion_research.snapshot as snapshot_module
+from pantaray_agents.agents.suggestion_agent.context_types import (
+    SuggestionOpenTodo,
+    SuggestionOpenTodos,
+)
 from pantaray_agents.local_runtime.memory_catalog.agent_experience_content import (
     AgentExperienceContent,
     AgentExperienceScope,
@@ -70,9 +76,23 @@ from pantaray_agents.local_runtime.memory_catalog.search_service import (
 from pantaray_agents.local_runtime.memory_catalog.semantic_index import (
     store_embedding_success,
 )
+from pantaray_agents.local_runtime.runtime.identity import (
+    register_logged_out_owner,
+    reset_logged_out_owner,
+)
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
+from pantaray_agents.local_runtime.todos import core as todo_core
+from pantaray_agents.local_runtime.todos.conversation import todo_message_id
+from pantaray_agents.local_runtime.todos.model import Todo, TodoDue
+from pantaray_agents.local_runtime.todos.store import (
+    TodoClock,
+    create_todo_item,
+    set_todo_check,
+    update_todo,
+)
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings import (
     create_workspace_folder,
+    create_workspace_project,
     list_workspace_settings,
 )
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings_models import (
@@ -102,8 +122,11 @@ from .test_memory_artifact_publication import (
 from .test_read_document_broker import PIXEL_PNG
 from .test_workspace_settings_repository import TIMESTAMP
 from .test_workspace_settings_repository import _bootstrap_db as _bootstrap_app_db
+from .todos.store_support import seed_action
 
 BUSY_TIMEOUT_MS = 1_000
+# Wednesday 2026-11-04, noon in Tokyo; the week starts on Monday 2026-11-02.
+TODO_CLOCK = TodoClock(now="2026-11-04T03:00:00.000Z", zone=ZoneInfo("Asia/Tokyo"))
 QUERY_EMBEDDING = (1.0, *(0.0 for _ in range(511)))
 
 
@@ -180,13 +203,47 @@ def _workspace_settings(db_path: Path) -> WorkspaceSettings:
 
 
 def _snapshot(*, db_path: Path, artifact_root: Path | None = None):
-    return build_suggestion_research_snapshot(
-        db_path=db_path,
-        busy_timeout_ms=BUSY_TIMEOUT_MS,
-        artifact_root=artifact_root or db_path.parent / "artifacts",
+    # The TODO store reads the runtime database the environment names.
+    with pytest.MonkeyPatch.context() as env:
+        env.setenv("LOCAL_DB_PATH", str(db_path))
+        return build_suggestion_research_snapshot(
+            db_path=db_path,
+            busy_timeout_ms=BUSY_TIMEOUT_MS,
+            artifact_root=artifact_root or db_path.parent / "artifacts",
+            user_id="user-1",
+            workspace_settings=_workspace_settings(db_path),
+        )
+
+
+@pytest.fixture
+def todo_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    db_path = _bootstrap_db(tmp_path)
+    monkeypatch.setenv("LOCAL_DB_PATH", str(db_path))
+    monkeypatch.setattr(snapshot_module, "read_todo_clock", lambda: TODO_CLOCK)
+    register_logged_out_owner("user-1")
+    yield db_path
+    reset_logged_out_owner()
+
+
+def _create_todo(
+    text: str,
+    *,
+    at: str,
+    project_id: str | None = None,
+    week_of: str = "2026-11-04",
+    due: TodoDue | None = None,
+) -> Todo:
+    created = create_todo_item(
         user_id="user-1",
-        workspace_settings=_workspace_settings(db_path),
+        client_todo_id=text,
+        project_id=project_id,
+        text=text,
+        week_of=week_of,
+        due=due,
+        clock=dataclasses.replace(TODO_CLOCK, now=at),
     )
+    assert isinstance(created, Todo)
+    return created
 
 
 def test_fact_snapshot_seeds_index_and_reads_leaf_from_immutable_revision(
@@ -288,6 +345,79 @@ def test_pending_work_bound_includes_truncation_marker() -> None:
 
     assert len(bounded) <= 650
     assert bounded.endswith("[truncated; find the rest with memory_search]")
+
+
+def test_snapshot_lists_open_todos_of_the_week_with_project_due_and_state(
+    todo_db: Path,
+) -> None:
+    project = create_workspace_project(
+        db_path=todo_db,
+        busy_timeout_ms=BUSY_TIMEOUT_MS,
+        user_id="user-1",
+        display_name="Website",
+        organization_ids=(),
+        now=TIMESTAMP,
+    )
+    weekly = TodoDue(date="2026-11-06", repeat="weekly")
+    _create_todo("Book the venue", at="2026-10-28T03:00:00.000Z", week_of="2026-10-28")
+    _create_todo(
+        "Send the quote",
+        at="2026-11-02T01:00:00.000Z",
+        project_id=project.project_id,
+        due=weekly,
+    )
+    running = _create_todo("Draft the report", at="2026-11-02T02:00:00.000Z")
+    seed_action(
+        todo_db,
+        "todo-action",
+        message_id=todo_message_id(running.todo_id),
+        status="processing",
+        run="running",
+    )
+    checked = _create_todo("Pay the invoice", at="2026-11-02T03:00:00.000Z")
+    set_todo_check(
+        user_id="user-1",
+        todo_id=checked.todo_id,
+        by="user",
+        checked=True,
+        clock=TODO_CLOCK,
+    )
+    deleted = _create_todo("Call the bank", at="2026-11-02T04:00:00.000Z")
+    update_todo(
+        user_id="user-1",
+        todo_id=deleted.todo_id,
+        step=lambda todo: todo_core.delete_by_user(todo, now=TODO_CLOCK.now),
+    )
+
+    snapshot = _snapshot(db_path=todo_db)
+
+    assert snapshot.stable_memory.open_todos == SuggestionOpenTodos(
+        items=(
+            # Carried from last week, still open.
+            SuggestionOpenTodo("Book the venue", None, None, "not_started"),
+            SuggestionOpenTodo("Send the quote", "Website", weekly, "not_started"),
+            SuggestionOpenTodo("Draft the report", None, None, "working"),
+        ),
+        omitted=0,
+    )
+
+
+def test_snapshot_keeps_the_newest_open_todos_and_counts_the_rest(
+    todo_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(snapshot_module, "OPEN_TODOS_MAX", 2)
+    monkeypatch.setattr(snapshot_module, "OPEN_TODO_TEXT_MAX_CHARS", 10)
+    _create_todo("Oldest", at="2026-11-02T01:00:00.000Z")
+    _create_todo("Middle", at="2026-11-02T02:00:00.000Z")
+    _create_todo("Newest with a long text", at="2026-11-02T03:00:00.000Z")
+
+    open_todos = _snapshot(db_path=todo_db).stable_memory.open_todos
+
+    assert [todo.text for todo in open_todos.items] == [
+        "Middle",
+        "Newest wit [truncated]",
+    ]
+    assert open_todos.omitted == 1
 
 
 def test_snapshot_search_remains_pinned_after_fact_head_update(

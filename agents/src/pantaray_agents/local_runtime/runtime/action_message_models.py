@@ -38,6 +38,10 @@ ACTION_TODO_PICKUP_STEP_NAME = "todo_pickup_request"
 ACTION_HOST_STEP_NAMES: Final = frozenset(
     {ACTION_RESUME_STEP_NAME, ACTION_TODO_PICKUP_STEP_NAME}
 )
+# The same names as an SQL list for ``step_name IN ...``; they are constants.
+ACTION_HOST_STEP_NAMES_SQL: Final = (
+    f"({','.join(f"'{name}'" for name in sorted(ACTION_HOST_STEP_NAMES))})"
+)
 
 type ActionMessageOrigin = Literal["user", "resume", "todo_pickup"]
 ACTION_STEP_NAME_BY_ORIGIN: Final[Mapping[ActionMessageOrigin, str]] = {
@@ -223,6 +227,7 @@ class MessageWithdrawnError(ActionMessageConflictError):
 
 __all__ = [
     "ACTION_HOST_STEP_NAMES",
+    "ACTION_HOST_STEP_NAMES_SQL",
     "ACTION_RESUME_REQUEST_TEXT",
     "ACTION_RESUME_STEP_NAME",
     "ACTION_STEP_NAME_BY_ORIGIN",

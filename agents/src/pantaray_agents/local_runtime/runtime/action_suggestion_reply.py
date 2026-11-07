@@ -10,7 +10,39 @@ follows is Pantaray's, not the user's.
 import sqlite3
 import uuid
 
-from .action_message_models import ActionMessageConflictError, NewActionTarget
+from .action_message_models import (
+    ACTION_HOST_STEP_NAMES_SQL,
+    ActionMessageConflictError,
+    NewActionTarget,
+)
+
+
+def opening_assistant_text_sql(action: str) -> str:
+    """SQL for the assistant message the Action aliased ``action`` opens with, or NULL.
+
+    Only an opening written here is ever an Action's first numbered step.
+    """
+
+    return f"""(SELECT CASE WHEN opening.step_type='assistant_message'
+                 THEN opening.llm_response_text END
+      FROM agent_action_steps AS opening
+        INDEXED BY idx_agent_action_steps_action_timeline
+      WHERE opening.action_id={action}.action_id AND opening.user_id={action}.user_id
+        AND opening.step_number IS NOT NULL
+        AND opening.step_type IN ('user_request','assistant_message','tool_execution')
+      ORDER BY opening.step_number,opening.step_id LIMIT 1)"""
+
+
+def action_request_text_sql(*, action: str, request: str) -> str:
+    """SQL for what the Action aliased ``action`` was asked, in words.
+
+    That is the text of its initial USER row, aliased ``request``, unless
+    Pantaray wrote that row: then it is the TODO the Action opens with.
+    """
+
+    return f"""(CASE WHEN {request}.step_name IN {ACTION_HOST_STEP_NAMES_SQL}
+      THEN {opening_assistant_text_sql(action)}
+      ELSE {request}.user_request_text END)"""
 
 
 def insert_opening_assistant_message(

@@ -32,6 +32,7 @@ from pantaray_agents.local_runtime.runtime.action_job_runtime_repository import 
     ActionJobRuntimeRepository,
 )
 from pantaray_agents.local_runtime.runtime.action_message_models import (
+    ACTION_TODO_PICKUP_REQUEST_TEXT,
     DeferredActionMessageResult,
     MessageIdentityConflictError,
     NewActionTarget,
@@ -434,6 +435,35 @@ async def test_the_work_list_keeps_one_cap_with_tasks_in_hand_first(
     assert "waiting for approval" in shown and "4 older tasks not listed here" in shown
     # Suggestions are looked up when the user brings one up, not listed.
     assert "sug-open" not in shown
+
+
+def test_a_picked_up_todo_is_listed_and_found_by_the_todo_not_its_request(
+    db_path: Path,
+) -> None:
+    picked_up = submit_action_message(
+        SubmitActionMessageCommand(
+            user_id=USER,
+            origin="todo_pickup",
+            target=NewActionTarget(
+                approval_mode="prompt_each_time", todo_text="Draft the weekly report"
+            ),
+            message=ActionUserMessageInput(
+                message_id="todo-pickup", content=ACTION_TODO_PICKUP_REQUEST_TEXT
+            ),
+        )
+    )
+
+    work = read_chat_work_list(user_id=USER)
+    assert [(task.action_id, task.title) for task in work.tasks] == [
+        (picked_up.action_id, "Draft the weekly report")
+    ]
+
+    def found(query: str) -> list[str]:
+        tasks = search_tasks(user_id=USER, query=query, since=None, until=None, limit=5)
+        return [task.action_id for task in tasks]
+
+    assert found("weekly report") == [picked_up.action_id]
+    assert found("Pantaray started") == []
 
 
 @pytest.mark.usefixtures("tokyo_local_zone")

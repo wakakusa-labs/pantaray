@@ -8,7 +8,10 @@ from dataclasses import dataclass
 from typing import ClassVar, Final, Literal, cast
 
 from pantaray_agents.local_runtime.runtime.action_message_models import (
-    ACTION_HOST_STEP_NAMES,
+    ACTION_HOST_STEP_NAMES_SQL,
+)
+from pantaray_agents.local_runtime.runtime.action_suggestion_reply import (
+    opening_assistant_text_sql,
 )
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
 from pantaray_agents.schema.conversation_history import ConversationHistoryStatus
@@ -170,14 +173,7 @@ WITH action_source AS (
         AND {CONVERSATION_HISTORY_CASEFOLD_SQL_FUNCTION}(assistant.llm_response_text)
           LIKE :search_pattern ESCAPE '\'
       ORDER BY assistant.step_number DESC LIMIT 1) AS matched_assistant_text,
-    (SELECT CASE WHEN opening.step_type='assistant_message'
-                 THEN opening.llm_response_text END
-      FROM agent_action_steps AS opening
-        INDEXED BY idx_agent_action_steps_action_timeline
-      WHERE opening.action_id=action.action_id AND opening.user_id=action.user_id
-        AND opening.step_number IS NOT NULL
-        AND opening.step_type IN ('user_request','assistant_message','tool_execution')
-      ORDER BY opening.step_number,opening.step_id LIMIT 1) AS opening_assistant_text
+    {opening_assistant_text_sql("action")} AS opening_assistant_text
   FROM agent_actions AS action INDEXED BY idx_agent_actions_user_history_recency
   LEFT JOIN agent_suggestions AS suggestion
     ON suggestion.suggestion_id=action.suggestion_id
@@ -201,7 +197,7 @@ WITH action_source AS (
     WHERE :search_text<>'' AND searched_user.user_id=action.user_id
       AND searched_user.action_id=action.action_id
       AND searched_user.step_type='user_request' AND searched_user.status='success'
-      AND searched_user.step_name NOT IN (SELECT value FROM json_each(:hidden_step_names))
+      AND searched_user.step_name NOT IN {ACTION_HOST_STEP_NAMES_SQL}
       AND searched_user.accepted_sequence IS NOT NULL
       AND ((searched_user.user_message_id IS NULL AND searched_user.user_message_json IS NULL
             AND {CONVERSATION_HISTORY_CASEFOLD_SQL_FUNCTION}(
@@ -339,7 +335,6 @@ def read_conversation_history_candidates_in_connection(
             "user_id": user_id,
             "search_text": normalized_search,
             "search_pattern": f"%{escaped_search}%",
-            "hidden_step_names": json.dumps(sorted(ACTION_HOST_STEP_NAMES)),
             "before_updated_at": anchor.updated_at if anchor else None,
             "before_kind": anchor.kind if anchor else None,
             "before_id": anchor.stable_id if anchor else None,

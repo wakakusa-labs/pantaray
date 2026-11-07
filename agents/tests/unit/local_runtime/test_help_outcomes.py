@@ -11,6 +11,11 @@ import pytest
 from pantaray_agents.local_runtime.memory_catalog.connection import (
     open_memory_catalog_connection,
 )
+from pantaray_agents.local_runtime.runtime.action_message_models import (
+    ACTION_TODO_PICKUP_REQUEST_TEXT,
+    ACTION_TODO_PICKUP_STEP_NAME,
+    ACTION_USER_STEP_NAME,
+)
 from pantaray_agents.local_runtime.runtime.help_outcomes import (
     DueOutcome,
     latest_checkpoint_between,
@@ -112,12 +117,17 @@ def _act(
     db_path: Path,
     action_id: str,
     *,
-    request: str,
+    request: str = ACTION_TODO_PICKUP_REQUEST_TEXT,
     turns: tuple[tuple[str, timedelta], ...],
     suggestion_id: str | None = None,
     replied_to: str | None = None,
+    picked_up_todo: str | None = None,
 ) -> None:
-    """An Action with its turns as (status, age), the first one first."""
+    """An Action with its turns as (status, age), the first one first.
+
+    ``picked_up_todo`` makes it the shape a TODO pickup writes: the TODO as the
+    opening assistant message, then Pantaray's fixed request.
+    """
 
     created = format_utc_iso(NOW - turns[0][1])
     message = ActionUserMessageInput(message_id=f"{action_id}-m1", content=request)
@@ -145,7 +155,7 @@ def _act(
                 (f"{action_id}-p{number}", USER_ID, status, action_id, *[at] * 4),
             )
         first_step = 1
-        if replied_to is not None:
+        if replied_to is not None or picked_up_todo is not None:
             connection.execute(
                 """
                 INSERT INTO agent_action_steps(
@@ -155,13 +165,14 @@ def _act(
                     llm_response_text, adopted_process_id, source_suggestion_id,
                     started_at, completed_at, created_at
                 ) VALUES (?, ?, ?, 1, 1, 'S-1-ASSISTANT', 'assistant_message',
-                          'assistant_message', 'success', 'S', 0, 0, 0, 'offer',
+                          'assistant_message', 'success', 'S', 0, 0, 0, ?,
                           ?, ?, ?, ?, ?)
                 """,
                 (
                     f"{action_id}-s1",
                     action_id,
                     USER_ID,
+                    picked_up_todo or "offer",
                     f"{action_id}-p1",
                     replied_to,
                     *[created] * 3,
@@ -176,7 +187,7 @@ def _act(
                 retry_count, prompt_tokens, completion_tokens, user_message_id,
                 user_message_json, user_request_text, accepted_sequence,
                 adopted_process_id, started_at, completed_at, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, 'user_request', 'user_request', 'success',
+            ) VALUES (?, ?, ?, ?, ?, ?, 'user_request', ?, 'success',
                       'S', 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
@@ -186,6 +197,9 @@ def _act(
                 first_step,
                 first_step,
                 f"S-{first_step}-USER",
+                ACTION_USER_STEP_NAME
+                if picked_up_todo is None
+                else ACTION_TODO_PICKUP_STEP_NAME,
                 message.message_id,
                 serialize_action_user_message(message),
                 render_action_user_request_text(message),
@@ -342,3 +356,35 @@ def test_an_action_is_due_from_its_first_completed_turn_with_what_was_asked(
     )
     assert expectations["s-note"] == ""
     assert expectations["own"] == "Summarize the contract."
+
+
+def test_a_picked_up_todo_is_looked_back_on_by_the_todo_not_its_request(
+    tmp_path: Path,
+) -> None:
+    db_path = _database(tmp_path)
+    _deliver(db_path, "s-note", age=timedelta(days=9))
+    _act(
+        db_path,
+        "replied",
+        request="Who owns this?",
+        replied_to="s-note",
+        turns=(("completed", timedelta(days=8)),),
+    )
+    _act(
+        db_path,
+        "picked-up",
+        picked_up_todo="Draft the weekly report",
+        turns=(("completed", timedelta(days=8)),),
+    )
+
+    expectations = {
+        item.item_id: item.expectation
+        for item in _load(db_path)
+        if item.kind == "action"
+    }
+
+    # A reply keeps the user's own words; its Suggestion is read beside it.
+    assert expectations == {
+        "replied": "Who owns this?",
+        "picked-up": "Draft the weekly report",
+    }

@@ -15,6 +15,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Final, cast
 
+from pantaray_agents.local_runtime.runtime.action_message_models import (
+    ACTION_HOST_STEP_NAMES_SQL,
+)
+from pantaray_agents.local_runtime.runtime.action_suggestion_reply import (
+    action_request_text_sql,
+)
 from pantaray_agents.local_runtime.runtime.runtime_env import (
     read_local_runtime_db_config,
 )
@@ -52,7 +58,10 @@ class ChatWorkList:
 
 
 _IN_HAND = "actions.status IN ('queued', 'processing')"
-_TASKS_SQL: Final[str] = """
+# What the task was asked, which titles it: a task Pantaray started for an
+# AI-written TODO is titled by that TODO, never by the request Pantaray wrote.
+_ASKED_SQL = action_request_text_sql(action="actions", request="first")
+_TASKS_SQL: Final[str] = f"""
     SELECT actions.action_id, actions.status,
            EXISTS (
                SELECT 1 FROM processes
@@ -60,13 +69,13 @@ _TASKS_SQL: Final[str] = """
                  AND processes.action_id = actions.action_id
                  AND processes.status = 'paused'
            ),
-           actions.final_output, first.user_message_json, actions.updated_at
+           actions.final_output, {_ASKED_SQL}, actions.updated_at
     FROM agent_actions AS actions
     JOIN agent_action_steps AS first
       ON first.user_id = actions.user_id
      AND first.user_message_id = actions.initial_user_message_id
-    WHERE actions.user_id = :user_id AND {where}
-    ORDER BY {order} actions.updated_at DESC, actions.action_id
+    WHERE actions.user_id = :user_id AND {{where}}
+    ORDER BY {{order}} actions.updated_at DESC, actions.action_id
     LIMIT :limit
 """
 
@@ -112,10 +121,12 @@ def search_tasks(
                 _TASKS_SQL.format(
                     where=(
                         "(:pattern IS NULL OR actions.final_output LIKE :pattern "
-                        "ESCAPE '\\' OR EXISTS (SELECT 1 FROM agent_action_steps "
+                        f"ESCAPE '\\' OR {_ASKED_SQL} LIKE :pattern ESCAPE '\\' "
+                        "OR EXISTS (SELECT 1 FROM agent_action_steps "
                         "AS asked WHERE asked.user_id = actions.user_id "
                         "AND asked.action_id = actions.action_id "
                         "AND asked.step_type = 'user_request' "
+                        f"AND asked.step_name NOT IN {ACTION_HOST_STEP_NAMES_SQL} "
                         "AND asked.user_request_text LIKE :pattern ESCAPE '\\')) "
                         "AND (:since IS NULL OR actions.updated_at >= :since) "
                         "AND (:until IS NULL OR actions.updated_at < :until)"
@@ -139,16 +150,11 @@ def _tasks(rows: Iterable[Sequence[object]]) -> tuple[ChatTask, ...]:
             action_id=str(action_id),
             status=cast(ActionStatus, status),
             awaiting_approval=bool(awaiting_approval),
-            title=_line(
-                render_action_user_request_text(
-                    parse_action_user_message(str(message_json))
-                )
-            )
-            or "(untitled)",
+            title=_line(str(asked)) or "(untitled)",
             latest=_line(str(final_output)),
             updated_at=str(updated_at),
         )
-        for action_id, status, awaiting_approval, final_output, message_json, updated_at in rows
+        for action_id, status, awaiting_approval, final_output, asked, updated_at in rows
     )
 
 

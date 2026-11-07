@@ -178,6 +178,16 @@ def test_an_open_todo_from_an_earlier_week_is_carried_into_the_current_week(
     assert _week_ids(week_of="2026-11-09") == [("Next week", False)]
 
 
+def test_a_todo_checked_before_its_week_began_stays_in_its_week(db: Path) -> None:
+    early = _create("client-1", text="Book the room", week_of="2026-11-10")
+    set_todo_check(
+        user_id=USER, todo_id=early.todo_id, by="user", checked=True, clock=NOW
+    )
+
+    assert _week_ids() == []
+    assert _week_ids(week_of="2026-11-09") == [("Book the room", False)]
+
+
 def test_a_deleted_todo_is_listed_and_restorable_for_30_days_only(db: Path) -> None:
     kept = _create("client-1", text="Restored")
     expired = _create("client-2", text="Expired")

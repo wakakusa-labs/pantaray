@@ -298,8 +298,9 @@ def read_todo_week(
         "WHERE todo.user_id = :user_id AND todo.deleted_at IS NULL "
         "AND todo.week_start <= :week AND (todo.checked_at IS NULL "
         # A check on a local date in the week is no earlier in UTC than the day
-        # before it; the exact week comes from effective_week below.
-        "OR todo.checked_at >= :checked_from) "
+        # before it, and one checked before its own week began stays there; the
+        # exact week comes from effective_week below.
+        "OR todo.checked_at >= :checked_from OR todo.week_start = :week) "
         f"AND {scope_sql} AND {project_sql} "
         "ORDER BY todo.week_start, todo.created_at, todo.todo_id"
     )

@@ -181,7 +181,15 @@ def answer_deletion(
 def delete_by_user(todo: Todo, *, now: str) -> Todo | Rejected[UserDeletionRejection]:
     if todo.deletion is not None:
         return Rejected("already_deleted")
-    return replace(todo, deletion=TodoDeletion(by="user", at=now))
+    request = todo.deletion_request
+    # A pending request is moot once the user deleted the TODO; dropping it keeps
+    # an answer to it from deleting the TODO again after a restore. A declined
+    # one stays so the AI still cannot ask again.
+    if request is not None and request.state == "pending":
+        request = None
+    return replace(
+        todo, deletion=TodoDeletion(by="user", at=now), deletion_request=request
+    )
 
 
 def restore(todo: Todo, *, now: str) -> Todo | Rejected[RestoreRejection]:

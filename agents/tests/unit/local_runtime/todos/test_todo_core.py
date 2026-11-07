@@ -173,6 +173,19 @@ def test_only_an_approved_request_deletes_and_keep_declines_it() -> None:
     )
 
 
+def test_a_request_pending_when_the_user_deleted_cannot_delete_after_restore() -> None:
+    deleted = delete_by_user(make_todo(deletion_request=PENDING), now=NOW)
+    assert isinstance(deleted, Todo)
+    restored = restore(deleted, now=LATER)
+    assert isinstance(restored, Todo)
+
+    assert answer_deletion(
+        restored, request_id="req-1", answer="approve", now=LATER
+    ) == Rejected("stale_request")
+    declined = delete_by_user(make_todo(deletion_request=DECLINED), now=NOW)
+    assert isinstance(declined, Todo) and declined.deletion_request == DECLINED
+
+
 @pytest.mark.parametrize(
     ("todo", "expected"),
     [

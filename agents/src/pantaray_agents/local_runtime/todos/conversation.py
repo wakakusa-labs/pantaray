@@ -12,11 +12,11 @@ import uuid
 from collections.abc import Sequence
 from typing import Final, Literal, cast
 
+from pantaray_agents.local_runtime.action_conversation.errors import (
+    ActionConversationIntegrityError,
+)
 from pantaray_agents.local_runtime.action_conversation.history_row_summary import (
     answer_status_line,
-)
-from pantaray_agents.local_runtime.action_conversation.repository import (
-    ActionConversationIntegrityError,
 )
 from pantaray_agents.local_runtime.todos.model import (
     ActionConversation,

@@ -28,9 +28,11 @@ from pantaray_agents.local_runtime.runtime.identity import (
 )
 from pantaray_agents.local_runtime.storage.migrations import load_default_migrations
 from pantaray_agents.local_runtime.todos import core
-from pantaray_agents.local_runtime.todos.conversation import todo_message_id
-from pantaray_agents.local_runtime.todos.store import (
+from pantaray_agents.local_runtime.todos.clock import (
     TodoClock,
+)
+from pantaray_agents.local_runtime.todos.conversation import todo_message_id
+from pantaray_agents.local_runtime.todos.writes import (
     set_todo_check,
     update_todo,
 )

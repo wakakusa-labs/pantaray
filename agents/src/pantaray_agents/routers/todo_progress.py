@@ -12,6 +12,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from pantaray_agents.agents.core import PublicAgentHTTPError
 from pantaray_agents.auth_http import get_current_user_id_from_token
+from pantaray_agents.local_runtime.todos.clock import (
+    read_todo_clock,
+)
 from pantaray_agents.local_runtime.todos.core import Rejected
 from pantaray_agents.local_runtime.todos.goal_store import (
     add_user_progress_record,
@@ -20,7 +23,6 @@ from pantaray_agents.local_runtime.todos.goal_store import (
     read_progress,
     set_project_goal,
 )
-from pantaray_agents.local_runtime.todos.store import read_todo_clock
 from pantaray_agents.schema.agent.base import ErrorType
 from pantaray_agents.schema.todo_progress import (
     GoalView,

@@ -19,6 +19,9 @@ from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.todo impo
 from pantaray_agents.agents.action_agent.runtime.state import ActionAgentState
 from pantaray_agents.agents.action_agent.tools import TODO_TOOL_IDS, TOOL_REGISTRY
 from pantaray_agents.local_runtime.todos import core, pickup
+from pantaray_agents.local_runtime.todos.action_link import (
+    read_todo_for_action,
+)
 from pantaray_agents.local_runtime.todos.conversation import todo_message_id
 from pantaray_agents.local_runtime.todos.model import (
     AiReport,
@@ -26,10 +29,11 @@ from pantaray_agents.local_runtime.todos.model import (
     TodoCheck,
     TodoDue,
 )
-from pantaray_agents.local_runtime.todos.store import (
-    create_todo_item,
+from pantaray_agents.local_runtime.todos.reads import (
     read_todo,
-    read_todo_for_action,
+)
+from pantaray_agents.local_runtime.todos.writes import (
+    create_todo_item,
     update_todo,
 )
 from pantaray_agents.schema.agent.base import JSONValue
@@ -42,9 +46,6 @@ WEEKLY = TodoDue(date="2026-11-08", repeat="weekly")
 
 @pytest.fixture(autouse=True)
 def _fixed_clock(monkeypatch: pytest.MonkeyPatch) -> None:
-    from pantaray_agents.local_runtime.todos import store
-
-    monkeypatch.setattr(store, "read_todo_clock", lambda: NOW)
     monkeypatch.setattr(pickup, "read_todo_clock", lambda: NOW)
     monkeypatch.setattr(todo_runtime, "read_todo_clock", lambda: NOW)
 

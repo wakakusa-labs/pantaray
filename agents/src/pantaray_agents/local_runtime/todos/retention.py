@@ -22,10 +22,12 @@ from pantaray_agents.local_runtime.todos.model import (
     ActionConversation,
     SuggestionOrigin,
 )
-from pantaray_agents.local_runtime.todos.store import (
+from pantaray_agents.local_runtime.todos.reads import (
     TodoEntry,
-    delete_purged_todo,
     read_purge_due_todos,
+)
+from pantaray_agents.local_runtime.todos.writes import (
+    delete_purged_todo,
 )
 
 logger = logging.getLogger(__name__)

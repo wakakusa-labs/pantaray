@@ -26,14 +26,16 @@ from pantaray_agents.agents.action_agent.tools.todo_tools import (
 )
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.todos import core
+from pantaray_agents.local_runtime.todos.clock import (
+    read_todo_clock,
+)
 from pantaray_agents.local_runtime.todos.core import Rejected
 from pantaray_agents.local_runtime.todos.goal_store import (
     AlreadyRecorded,
     add_ai_progress_record,
 )
 from pantaray_agents.local_runtime.todos.model import AiReport, TodoId
-from pantaray_agents.local_runtime.todos.store import (
-    read_todo_clock,
+from pantaray_agents.local_runtime.todos.writes import (
     set_todo_check,
     update_todo,
 )

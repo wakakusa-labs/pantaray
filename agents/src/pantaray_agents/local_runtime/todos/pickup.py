@@ -26,6 +26,9 @@ from pantaray_agents.local_runtime.runtime.action_messages import (
 from pantaray_agents.local_runtime.runtime.runtime_env import (
     read_local_runtime_db_config,
 )
+from pantaray_agents.local_runtime.todos.clock import (
+    read_todo_clock,
+)
 from pantaray_agents.local_runtime.todos.conversation import todo_message_id
 from pantaray_agents.local_runtime.todos.display import (
     ContinueAiTodo,
@@ -34,9 +37,8 @@ from pantaray_agents.local_runtime.todos.display import (
     pickup_target,
 )
 from pantaray_agents.local_runtime.todos.model import Todo
-from pantaray_agents.local_runtime.todos.store import (
+from pantaray_agents.local_runtime.todos.reads import (
     read_pickup_candidates,
-    read_todo_clock,
 )
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings import (
     list_workspace_settings,

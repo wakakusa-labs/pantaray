@@ -5,6 +5,11 @@ from pathlib import Path
 
 from pantaray_agents.local_runtime.todos import core
 from pantaray_agents.local_runtime.todos.core import Rejected
+from pantaray_agents.local_runtime.todos.db import (
+    AllScope,
+    AnyProject,
+    OneProject,
+)
 from pantaray_agents.local_runtime.todos.goal_store import (
     AlreadyRecorded,
     add_ai_progress_record,
@@ -21,13 +26,12 @@ from pantaray_agents.local_runtime.todos.progress import (
     NoGoal,
     ProgressRecord,
 )
-from pantaray_agents.local_runtime.todos.store import (
-    AllScope,
-    AnyProject,
-    OneProject,
+from pantaray_agents.local_runtime.todos.reads import (
+    read_todo_revision,
+)
+from pantaray_agents.local_runtime.todos.writes import (
     create_todo_item,
     delete_purged_todo,
-    read_todo_revision,
     update_todo,
 )
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings_deletion import (

@@ -14,7 +14,20 @@ from typing import Final, Literal
 
 from pantaray_agents.local_runtime.runtime.identity import verify_current_owner
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
+from pantaray_agents.local_runtime.todos.clock import (
+    TodoClock,
+)
 from pantaray_agents.local_runtime.todos.core import Rejected
+from pantaray_agents.local_runtime.todos.db import (
+    NoProject,
+    OneProject,
+    TodoProjectFilter,
+    TodoScope,
+    owns_project,
+    todo_db_connection,
+    todo_project_sql,
+    todo_scope_sql,
+)
 from pantaray_agents.local_runtime.todos.model import LocalDate, TodoId
 from pantaray_agents.local_runtime.todos.progress import (
     ActionStepsEvidence,
@@ -27,17 +40,6 @@ from pantaray_agents.local_runtime.todos.progress import (
     UserEvidence,
     period_bounds,
     progress_view,
-)
-from pantaray_agents.local_runtime.todos.store import (
-    NoProject,
-    OneProject,
-    TodoClock,
-    TodoProjectFilter,
-    TodoScope,
-    owns_project,
-    todo_db_connection,
-    todo_project_sql,
-    todo_scope_sql,
 )
 from pantaray_agents.local_runtime.todos.week import local_date_at, shift_days
 

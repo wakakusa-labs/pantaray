@@ -11,14 +11,14 @@ from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from pantaray_agents.local_runtime.todos.model import LocalDate
-from pantaray_agents.local_runtime.todos.progress import PeriodKind
-from pantaray_agents.local_runtime.todos.store import (
+from pantaray_agents.local_runtime.todos.db import (
     AnyProject,
     NoProject,
     OneProject,
     TodoProjectFilter,
 )
+from pantaray_agents.local_runtime.todos.model import LocalDate
+from pantaray_agents.local_runtime.todos.progress import PeriodKind
 from pantaray_agents.schema.todos import TodoScopeQuery
 
 GOAL_UNIT_MAX_LENGTH = 20

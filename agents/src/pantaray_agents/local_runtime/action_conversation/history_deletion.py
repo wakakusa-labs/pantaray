@@ -30,7 +30,9 @@ from pantaray_agents.local_runtime.storage.transactions import (
     immediate_transaction,
     register_after_commit,
 )
-from pantaray_agents.local_runtime.todos.store import conversation_has_open_todo
+from pantaray_agents.local_runtime.todos.action_link import (
+    conversation_has_open_todo,
+)
 from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
     ActionStoragePaths,
     resolve_action_storage_paths,

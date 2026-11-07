@@ -82,10 +82,12 @@ from pantaray_agents.local_runtime.runtime.identity import (
 )
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
 from pantaray_agents.local_runtime.todos import core as todo_core
+from pantaray_agents.local_runtime.todos.clock import (
+    TodoClock,
+)
 from pantaray_agents.local_runtime.todos.conversation import todo_message_id
 from pantaray_agents.local_runtime.todos.model import Todo, TodoDue
-from pantaray_agents.local_runtime.todos.store import (
-    TodoClock,
+from pantaray_agents.local_runtime.todos.writes import (
     create_todo_item,
     set_todo_check,
     update_todo,

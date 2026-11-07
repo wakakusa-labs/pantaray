@@ -43,7 +43,9 @@ from pantaray_agents.local_runtime.runtime.bootstrap import (
     read_local_runtime_artifact_root,
     read_local_runtime_db_config,
 )
-from pantaray_agents.local_runtime.todos.store import read_todo_for_action
+from pantaray_agents.local_runtime.todos.action_link import (
+    read_todo_for_action,
+)
 from pantaray_agents.local_runtime.tooling.repository.manifests import (
     pin_action_memory_roots,
 )

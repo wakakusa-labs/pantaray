@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Annotated, Literal, Self
+from typing import Annotated, Final, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from pantaray_agents.local_runtime.tooling.models import ApprovalMode
 from pantaray_agents.schema.action_conversation import ActionStatus
@@ -13,15 +21,30 @@ from pantaray_agents.schema.agent.action_message import (
     ActionMessageFailureType,
     ActionMessageId,
     ActionUserMessageInput,
+    bounded_content,
     validate_action_user_message_for_submit,
 )
 
 # Every USER row carries ``step_type = 'user_request'``, so the run it opens is
-# found the same way whoever sent it. ``step_name`` is what separates the two
-# origins: a resume is a button press with no message to show, so the
-# conversation projection drops its row while the run itself stays ordinary.
+# found the same way whoever sent it. ``step_name`` is what separates the
+# origins: a resume is a button press with no message to show, and a TODO pickup
+# is Pantaray starting work the AI wrote down, so the conversation projection
+# drops both rows while the run itself stays ordinary.
 ACTION_USER_STEP_NAME = "user_request"
 ACTION_RESUME_STEP_NAME = "resume_request"
+ACTION_TODO_PICKUP_STEP_NAME = "todo_pickup_request"
+# The USER rows Pantaray writes, never the user: nothing shows or reads them as
+# the user's words.
+ACTION_HOST_STEP_NAMES: Final = frozenset(
+    {ACTION_RESUME_STEP_NAME, ACTION_TODO_PICKUP_STEP_NAME}
+)
+
+type ActionMessageOrigin = Literal["user", "resume", "todo_pickup"]
+ACTION_STEP_NAME_BY_ORIGIN: Final[Mapping[ActionMessageOrigin, str]] = {
+    "user": ACTION_USER_STEP_NAME,
+    "resume": ACTION_RESUME_STEP_NAME,
+    "todo_pickup": ACTION_TODO_PICKUP_STEP_NAME,
+}
 
 # What the model reads at the top of a resumed turn. It is the whole message the
 # user "sent", so it must say what happened and what not to redo. A resume also
@@ -36,6 +59,15 @@ ACTION_RESUME_REQUEST_TEXT = (
     "reported."
 )
 
+# What the model reads after the TODO text it wrote, which opens the
+# conversation as its own message. The user sent nothing, so this says so.
+ACTION_TODO_PICKUP_REQUEST_TEXT = (
+    "Pantaray started this turn, not the user: your message above is a TODO you "
+    "wrote earlier, and you are picking it up now. Do the next part of the work "
+    "it describes. The user has not asked for it in their own words, so keep to "
+    "what it says and ask the user before going beyond it."
+)
+
 
 class NewActionTarget(BaseModel):
     """Create a new Action, optionally from an approved Suggestion."""
@@ -46,11 +78,17 @@ class NewActionTarget(BaseModel):
     suggestion_id: ActionMessageId | None = None
     approval_mode: ApprovalMode | None = None
     reply_to_suggestion_id: ActionMessageId | None = None
+    # The text of the AI-written TODO a ``todo_pickup`` continues: the Action
+    # opens with it as the assistant's first message.
+    todo_text: Annotated[str, AfterValidator(bounded_content)] | None = None
 
     @model_validator(mode="after")
-    def _separate_approval_and_reply(self) -> Self:
-        if self.suggestion_id is not None and self.reply_to_suggestion_id is not None:
-            raise ValueError("Suggestion approval and reply origins cannot be combined")
+    def _separate_origins(self) -> Self:
+        origins = (self.suggestion_id, self.reply_to_suggestion_id, self.todo_text)
+        if sum(origin is not None for origin in origins) > 1:
+            raise ValueError(
+                "Suggestion approval, reply and TODO origins cannot be combined"
+            )
         return self
 
 
@@ -80,11 +118,31 @@ class SubmitActionMessageCommand(BaseModel):
     message: ActionUserMessageInput
     # ``resume`` is the user asking for the stopped run to be continued. It is an
     # ordinary follow-up turn; only the step name and this guard differ.
-    origin: Literal["user", "resume"] = "user"
+    # ``todo_pickup`` is Pantaray starting an AI-written TODO: a new Action that
+    # opens with ``todo_text`` and carries the fixed request as its USER row.
+    origin: ActionMessageOrigin = "user"
 
     _validate_message = field_validator("message")(
         validate_action_user_message_for_submit
     )
+
+    @model_validator(mode="after")
+    def _require_todo_pickup_shape(self) -> Self:
+        target = self.target
+        if self.origin != "todo_pickup":
+            if isinstance(target, NewActionTarget) and target.todo_text is not None:
+                raise ValueError("Only a TODO pickup opens with TODO text")
+            return self
+        if not isinstance(target, NewActionTarget) or target.todo_text is None:
+            raise ValueError("A TODO pickup opens a new Action with its TODO text")
+        # Nobody asked for this work, so it asks before every edit or command
+        # whatever the user's own setting is; the Action-level mode is what the
+        # tool broker reads first.
+        if target.approval_mode != "prompt_each_time":
+            raise ValueError("A TODO pickup asks for approval each time")
+        if self.message.content != ACTION_TODO_PICKUP_REQUEST_TEXT:
+            raise ValueError("A TODO pickup carries the fixed request text")
+        return self
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,9 +222,14 @@ class MessageWithdrawnError(ActionMessageConflictError):
 
 
 __all__ = [
+    "ACTION_HOST_STEP_NAMES",
     "ACTION_RESUME_REQUEST_TEXT",
     "ACTION_RESUME_STEP_NAME",
+    "ACTION_STEP_NAME_BY_ORIGIN",
+    "ACTION_TODO_PICKUP_REQUEST_TEXT",
+    "ACTION_TODO_PICKUP_STEP_NAME",
     "ACTION_USER_STEP_NAME",
+    "ActionMessageOrigin",
     "ActionMessageConflictError",
     "ActionNotFoundError",
     "ActionMessageSubmissionError",

@@ -12,7 +12,7 @@ from pantaray_agents.agents.action_agent.tools.zanei_tools import (
     RECORDING_UNAVAILABLE_STATUS,
 )
 from pantaray_agents.local_runtime.runtime.action_message_models import (
-    ACTION_RESUME_STEP_NAME,
+    ACTION_HOST_STEP_NAMES,
 )
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
 from pantaray_agents.local_runtime.tooling.brokering.broker_patch_read_gate import (
@@ -70,12 +70,13 @@ class ActionConversationEntryIntegrityError(MigrationError):
 def action_user_row_is_visible(row: ActionHistoryUserRow) -> bool:
     """Say whether a durable USER row is a message the conversation shows.
 
-    A resume is a button press. It has to be a USER row because that is what
-    opens a run, and its text is what the model reads to continue, but the user
-    never wrote it, so no entry stands for it.
+    A resume is a button press, and a TODO pickup is Pantaray starting work the
+    AI wrote down. Each has to be a USER row because that is what opens a run,
+    and its text is what the model reads to continue, but the user never wrote
+    it, so no entry stands for it.
     """
 
-    return row.step_name != ACTION_RESUME_STEP_NAME
+    return row.step_name not in ACTION_HOST_STEP_NAMES
 
 
 def project_action_user_entry(

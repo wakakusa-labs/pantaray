@@ -270,12 +270,14 @@ def _project_action(
     return ConversationHistoryItem(
         kind="conversation",
         action_id=candidate.action_id,
-        # A conversation that opens with a replied-to Suggestion keeps the
-        # title that Suggestion had in the list before the reply.
+        # A conversation that opens with an assistant message is titled by it:
+        # a replied-to Suggestion keeps the title it had in the list before the
+        # reply, and a picked-up TODO shows its own text, never the USER row
+        # Pantaray wrote after it.
         title=(
             _user_history_text(title_entry)
-            if candidate.opening_suggestion_text is None
-            else candidate.opening_suggestion_text
+            if candidate.opening_assistant_text is None
+            else candidate.opening_assistant_text
         ),
         updated_at=candidate.updated_at,
         status=history_status,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
@@ -20,7 +21,7 @@ from pantaray_agents.local_runtime.action_conversation.history_candidates import
     register_conversation_history_casefold_sqlite,
 )
 from pantaray_agents.local_runtime.runtime.action_message_models import (
-    ACTION_RESUME_STEP_NAME,
+    ACTION_HOST_STEP_NAMES,
 )
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
 from pantaray_agents.schema.agent.action_message import (
@@ -212,7 +213,7 @@ def test_large_lanes_filter_and_seek_before_bounded_outer_sort(
                 "user_id": "user-1",
                 "search_text": "",
                 "search_pattern": "%%",
-                "hidden_step_name": ACTION_RESUME_STEP_NAME,
+                "hidden_step_names": json.dumps(sorted(ACTION_HOST_STEP_NAMES)),
                 "before_updated_at": _RUNNING_AT,
                 "before_kind": "conversation",
                 "before_id": "act-1",

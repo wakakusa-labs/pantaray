@@ -47,9 +47,15 @@ from pantaray_agents.local_runtime.runtime.action_job_runtime_repository import 
 )
 from pantaray_agents.local_runtime.runtime.action_message_models import (
     ACTION_RESUME_REQUEST_TEXT,
+    ACTION_TODO_PICKUP_REQUEST_TEXT,
+    NewActionTarget,
+    SubmitActionMessageCommand,
 )
 from pantaray_agents.local_runtime.runtime.action_message_process_fence import (
     resolve_action_process_lineage_in_connection,
+)
+from pantaray_agents.local_runtime.runtime.action_messages import (
+    submit_action_message,
 )
 from pantaray_agents.local_runtime.runtime.action_stopped_run_note import (
     ACTION_STOPPED_RUN_NOTE,
@@ -97,6 +103,7 @@ from pantaray_agents.schema.action_conversation import (
 )
 from pantaray_agents.schema.agent.action import (
     ActionAgentRequest,
+    ActionUserMessageInput,
     RuntimeStateCheckpointPayload,
 )
 from pantaray_agents.schema.agent.base import AgentError
@@ -296,6 +303,66 @@ def test_assistant_message_is_public_history_before_the_first_user(
     duplicate = _message("another-reply", "別の返信")
     duplicate["target"] = request["target"]
     assert client.post(MESSAGES_PATH, json=duplicate).status_code == 409
+
+
+def test_a_todo_pickup_shows_the_ai_text_and_never_its_request_as_the_users(
+    runtime_client: tuple[TestClient, Path],
+) -> None:
+    """Pantaray starts the AI's own TODO: the user said nothing, so nothing shows
+    or finds the USER row that opens the run, while the model reads both."""
+
+    client, db_path = runtime_client
+    todo_text = "週次の売上レポートの下書きを仕上げる"
+    started = submit_action_message(
+        SubmitActionMessageCommand(
+            user_id=USER_ID,
+            origin="todo_pickup",
+            target=NewActionTarget(
+                approval_mode="prompt_each_time", todo_text=todo_text
+            ),
+            message=ActionUserMessageInput(
+                message_id="todo-pickup", content=ACTION_TODO_PICKUP_REQUEST_TEXT
+            ),
+        )
+    )
+    action_id = started.action_id
+    _, preparation = _claim_and_prepare(db_path, claimed_by="worker:todo")
+    assert [
+        message.content for message in preparation.context.preceding_assistant_messages
+    ] == [todo_text]
+    assert preparation.context.user_message.content == ACTION_TODO_PICKUP_REQUEST_TEXT
+
+    state = client.get(
+        f"/v1/agents/users/{USER_ID}/actions/{action_id}/state", params={"limit": 100}
+    )
+    assert state.status_code == 200, state.text
+    assert ACTION_TODO_PICKUP_REQUEST_TEXT not in state.text
+    page = ActionConversationPage.model_validate_json(state.text)
+    assert [
+        [(entry.step_kind, entry.content) for entry in run.entries] for run in page.runs
+    ] == [[("assistant", todo_text)]]
+    assert page.unadopted_messages == ()
+
+    history = client.get("/api/agent/history", params={"limit": 25, "status": "all"})
+    assert history.status_code == 200, history.text
+    assert [(item["action_id"], item["title"]) for item in history.json()["items"]] == [
+        (action_id, todo_text)
+    ]
+    for search_text, found in (("売上レポート", [action_id]), ("Pantaray started", [])):
+        search = client.get(
+            "/api/agent/history", params={"search_text": search_text, "status": "all"}
+        )
+        assert search.status_code == 200, search.text
+        assert [item["action_id"] for item in search.json()["items"]] == found
+
+    approval = client.get(
+        f"/v1/agents/users/{USER_ID}/actions/{action_id}/approval-mode"
+    )
+    assert approval.json() == {
+        "action_id": action_id,
+        "approval_mode": "prompt_each_time",
+        "source": "action",
+    }
 
 
 def test_a_reply_to_the_welcome_continues_it_as_an_ordinary_conversation(

@@ -32,8 +32,7 @@ from pantaray_agents.tasks.action_user_message import (
 from .action_file_attachments import ActionFileAttachmentLinks
 from .action_invalidation_events import append_action_invalidation_event
 from .action_message_models import (
-    ACTION_RESUME_STEP_NAME,
-    ACTION_USER_STEP_NAME,
+    ACTION_STEP_NAME_BY_ORIGIN,
     ActionMessageConflictError,
     ActionMessageSubmissionError,
     ActionNotFoundError,
@@ -66,7 +65,7 @@ from .action_suggestion_adapter import (
     validate_suggestion_action_start,
 )
 from .action_suggestion_files import ActionSuggestionFiles
-from .action_suggestion_reply import insert_suggestion_reply_message
+from .action_suggestion_reply import insert_opening_assistant_message
 from .identity import verify_current_owner
 from .job_enqueue import enqueue_local_job
 from .job_payload_builder import build_action_job_payload
@@ -153,16 +152,14 @@ def submit_action_message(
                     suggestion_id=suggestion_id,
                     created_at=created_at,
                 )
-                if (
-                    isinstance(command.target, NewActionTarget)
-                    and command.target.reply_to_suggestion_id is not None
-                ):
-                    insert_suggestion_reply_message(
+                if isinstance(command.target, NewActionTarget):
+                    insert_opening_assistant_message(
                         connection=connection,
                         user_id=command.user_id,
                         action_id=action_id,
                         process_id=process_id,
-                        suggestion_id=command.target.reply_to_suggestion_id,
+                        target=command.target,
+                        created_at=created_at,
                     )
 
             if waiting is not None:
@@ -523,9 +520,7 @@ def _insert_user_step(
             position.local_step_number if position is not None else None,
             position.short_step_id if position is not None else None,
             ACTION_USER_STEP_TYPE,
-            ACTION_RESUME_STEP_NAME
-            if command.origin == "resume"
-            else ACTION_USER_STEP_NAME,
+            ACTION_STEP_NAME_BY_ORIGIN[command.origin],
             ACTION_USER_STEP_STATUS,
             ACTION_SUPERVISOR_SCOPE,
             command.message.message_id,

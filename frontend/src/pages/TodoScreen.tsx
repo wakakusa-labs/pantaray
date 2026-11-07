@@ -4,6 +4,7 @@ import { useRef, type ReactNode } from 'react';
 import { AiConnectionNotice } from '@/components/AiConnectionNotice';
 import { OpenWorkContext } from '@/components/action-conversation/sentMessageRefs';
 import { DeletedTodoRow } from '@/components/todo/DeletedTodoRow';
+import { ProgressPane } from '@/components/todo/progress/ProgressPane';
 import { TodoConversationPane } from '@/components/todo/TodoConversationPane';
 import { TodoAddField, TodoProjectGroup } from '@/components/todo/TodoProjectGroup';
 import { TodoRow } from '@/components/todo/TodoRow';
@@ -38,8 +39,8 @@ function FailureLine({ failure }: { failure: TodoMutationFailure }) {
 }
 
 /**
- * The home page's TODO list: the week's TODOs by project (or the deleted TODOs), and beside it
- * the conversation of the TODO selected. What is shown is the page's URL; this reads and writes
+ * The home page's TODO list: the week's TODOs by project (or their progress, or the deleted
+ * TODOs), and beside the week the conversation of the TODO selected. What is shown is the page's URL; this reads and writes
  * the TODOs through the TODO hooks and draws them with the TODO parts.
  */
 export function TodoScreen({
@@ -81,7 +82,7 @@ export function TodoScreen({
 
   const showingDeleted = selection.view === 'deleted';
   const selectedTodo =
-    !showingDeleted && selection.todoId !== null
+    selection.view === 'list' && selection.todoId !== null
       ? (page?.items.find((todo) => todo.todo_id === selection.todoId) ?? null)
       : null;
   const title = showingDeleted
@@ -111,21 +112,19 @@ export function TodoScreen({
       {t('todo.page.loadFailedStale')}
     </p>
   );
+  const loadFailed = (
+    <p className="history-error" role="alert">
+      {t('todo.page.loadFailed')}
+    </p>
+  );
+  const loading = (
+    <p className="history-loading" role="status">
+      {t('todo.page.loading')}
+    </p>
+  );
 
   const renderWeek = (): ReactNode => {
-    if (!page || !settings) {
-      if ((week.error && !page) || settingsFailed)
-        return (
-          <p className="history-error" role="alert">
-            {t('todo.page.loadFailed')}
-          </p>
-        );
-      return (
-        <p className="history-loading" role="status">
-          {t('todo.page.loading')}
-        </p>
-      );
-    }
+    if (!page || !settings) return (week.error && !page) || settingsFailed ? loadFailed : loading;
     const takesTodos = weekTakesTodos(page);
     const groups = groupTodosByProject(page, settings, selection.scope, selection.project);
     return (
@@ -217,21 +216,26 @@ export function TodoScreen({
     );
   };
 
+  // The projects' names come with the workspace, so the progress waits for it as the week does.
+  const renderProgress = (): ReactNode => {
+    if (!settings) return settingsFailed ? loadFailed : loading;
+    return (
+      <ProgressPane
+        scope={selection.scope}
+        projectFilter={selection.project}
+        period={selection.period}
+        // A project created since the workspace was read is named once it is read again.
+        projectName={(projectId) => projectName(projectId) ?? t('todo.noProject')}
+        onPeriodChange={(period) => onSelect({ ...selection, period })}
+        onOpenEvidence={(actionId) => onOpenWork(`action:${actionId}`)}
+        onFocusLost={focusHeading}
+      />
+    );
+  };
+
   const renderDeleted = (): ReactNode => {
     const { items } = deleted;
-    if (!items || !page) {
-      if (deleted.error || (week.error && !page))
-        return (
-          <p className="history-error" role="alert">
-            {t('todo.page.loadFailed')}
-          </p>
-        );
-      return (
-        <p className="history-loading" role="status">
-          {t('todo.page.loading')}
-        </p>
-      );
-    }
+    if (!items || !page) return deleted.error || (week.error && !page) ? loadFailed : loading;
     // What was read before the failure stays; the next change reads again.
     const alert = deleted.error ? staleAlert : null;
     if (items.length === 0)
@@ -294,7 +298,11 @@ export function TodoScreen({
         </header>
         <div className="todo-screen__scroll">
           <AiConnectionNotice />
-          {showingDeleted ? renderDeleted() : renderWeek()}
+          {showingDeleted
+            ? renderDeleted()
+            : selection.view === 'progress'
+              ? renderProgress()
+              : renderWeek()}
         </div>
       </section>
       {selectedTodo ? (

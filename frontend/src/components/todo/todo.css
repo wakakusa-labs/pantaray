@@ -112,14 +112,19 @@
   text-decoration: line-through;
 }
 
+/* One line of text that wraps as text, so a narrow column does not stack each part on its own. */
 .todo-row__meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0 12px;
   min-width: 0;
   color: var(--fog-text-3);
   font-size: var(--text-meta-size);
   overflow-wrap: anywhere;
+}
+
+/* Drawn, not read: each part is its own phrase already. */
+.todo-row__meta > span + span::before {
+  content: '·' / '';
+  margin: 0 6px;
+  color: var(--fog-text-3);
 }
 
 .todo-row__state--working,
@@ -176,6 +181,11 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 12px;
+}
+
+/* The due chip and the delete button stay side by side, however narrow the row. */
+.todo-row__end {
+  flex-wrap: nowrap;
 }
 
 .todo-deletion {

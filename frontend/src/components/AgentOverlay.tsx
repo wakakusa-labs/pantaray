@@ -507,6 +507,7 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
                     onAccept={acceptSuggestion}
                   />
                 ),
+                canDismiss: true,
               }
             : composerAction
         }

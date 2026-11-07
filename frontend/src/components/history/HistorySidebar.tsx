@@ -1,4 +1,5 @@
 import {
+  ChartNoAxesColumn,
   FileText,
   ListTodo,
   MessageCircle,
@@ -125,10 +126,11 @@ async function deleteHistoryItem(item: ConversationHistoryListItem): Promise<Mes
   return result.ok ? null : deleteFailureMessageKey(result.errorCode);
 }
 
-/** Which TODO list the main area shows. */
+/** Which TODO list the main area shows. Progress is of the one project in view, or of none. */
 export type TodoListPlace =
   | { kind: 'all' }
   | { kind: 'project'; projectId: string }
+  | { kind: 'progress'; projectId: string | null }
   | { kind: 'deleted' };
 
 /** The sidebar's entries into the TODO list. */
@@ -138,6 +140,7 @@ export type TodoSidebarNav = {
   /** Open TODOs by project id, for the week in view. */
   openCounts: ReadonlyMap<string, number>;
   onShowAll: () => void;
+  onShowProgress: () => void;
   onShowDeleted: () => void;
   onSelectProject: (projectId: string) => void;
 };
@@ -473,6 +476,7 @@ export function HistorySidebar({
     );
   };
 
+  const place = todoNav.current;
   return (
     <aside
       id={HISTORY_SIDEBAR_ID}
@@ -492,7 +496,7 @@ export function HistorySidebar({
         <SidebarEntry
           icon={<ListTodo size={16} strokeWidth={1.8} aria-hidden="true" />}
           label={t('todo.nav.all')}
-          current={todoNav.current?.kind === 'all'}
+          current={place?.kind === 'all'}
           onShow={todoNav.onShowAll}
         />
       </div>
@@ -500,16 +504,24 @@ export function HistorySidebar({
         projects={projects}
         creating={creatingProject}
         onCreatingChange={onCreatingProjectChange}
-        selectedProjectId={todoNav.current?.kind === 'project' ? todoNav.current.projectId : null}
+        selectedProjectId={
+          place?.kind === 'project' || place?.kind === 'progress' ? place.projectId : null
+        }
         openCounts={todoNav.openCounts}
         onSelectProject={todoNav.onSelectProject}
         t={t}
       />
       <div className="history-sidebar__chat history-sidebar__deleted">
         <SidebarEntry
+          icon={<ChartNoAxesColumn size={16} strokeWidth={1.8} aria-hidden="true" />}
+          label={t('todo.nav.progress')}
+          current={place?.kind === 'progress'}
+          onShow={todoNav.onShowProgress}
+        />
+        <SidebarEntry
           icon={<Trash2 size={16} strokeWidth={1.8} aria-hidden="true" />}
           label={t('todo.nav.deleted')}
-          current={todoNav.current?.kind === 'deleted'}
+          current={place?.kind === 'deleted'}
           onShow={todoNav.onShowDeleted}
         />
       </div>

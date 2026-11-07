@@ -293,6 +293,7 @@ export function SuggestionTaskPane({
                         {t('overlay.accept')}
                       </ApprovalDecisionButton>
                     ),
+                    canDismiss,
                   }
                 : 'send'
             }

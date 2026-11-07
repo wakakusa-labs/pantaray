@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   todoPlace: null as TodoListPlace | null,
   openCounts: new Map<string, number>(),
   showAll: vi.fn(),
+  showProgress: vi.fn(),
   showDeleted: vi.fn(),
   selectProject: vi.fn(),
   error: 'history.error.fetchFailed' as string | null,
@@ -100,6 +101,7 @@ function Sidebar() {
         current: mocks.todoPlace,
         openCounts: mocks.openCounts,
         onShowAll: mocks.showAll,
+        onShowProgress: mocks.showProgress,
         onShowDeleted: mocks.showDeleted,
         onSelectProject: mocks.selectProject,
       }}
@@ -168,7 +170,7 @@ const WORKSPACE: NonNullable<WorkspaceProjects['settings']> = {
   ],
 };
 
-it('上から検索、すべての TODO、プロジェクト、削除した TODO、チャット、そのほかの会話の順に並べ、＋で追加の流れを呼ぶ', async () => {
+it('上から検索、すべての TODO、プロジェクト、進み具合、削除した TODO、チャット、そのほかの会話の順に並べ、＋で追加の流れを呼ぶ', async () => {
   mocks.workspace = WORKSPACE;
   window.electron = {} as unknown as Window['electron'];
   render(<Sidebar />, { wrapper: SidebarWrapper });
@@ -177,6 +179,7 @@ it('上から検索、すべての TODO、プロジェクト、削除した TODO
     screen.getByRole('search'),
     screen.getByRole('button', { name: 'todo.nav.all' }),
     screen.getByRole('region', { name: 'history.projects.title' }),
+    screen.getByRole('button', { name: 'todo.nav.progress' }),
     screen.getByRole('button', { name: 'todo.nav.deleted' }),
     screen.getByRole('button', { name: 'history.chat.title' }),
     screen.getByRole('region', { name: 'history.tasks.title' }),
@@ -216,14 +219,28 @@ it('TODO の入口は見ている一覧を current にし、押すとその一�
   expect(mocks.showAll).toHaveBeenCalledOnce();
   await userEvent.click(deleted);
   expect(mocks.showDeleted).toHaveBeenCalledOnce();
+  const progress = screen.getByRole('button', { name: 'todo.nav.progress' });
+  await userEvent.click(progress);
+  expect(mocks.showProgress).toHaveBeenCalledOnce();
   // From the keyboard: this sidebar's drag stand-in would take a pointer press as a drag.
   screen.getByRole('button', { name: 'billing' }).focus();
   await userEvent.keyboard('{Enter}');
   expect(mocks.selectProject).toHaveBeenCalledWith('p-2');
 
+  // A project's progress keeps the project marked, as what the progress is of.
+  mocks.todoPlace = { kind: 'progress', projectId: 'p-1' };
+  rerender(<Sidebar />);
+  expect(progress).toHaveAttribute('aria-current', 'true');
+  expect(project).toHaveAttribute('aria-current', 'true');
+  mocks.todoPlace = { kind: 'progress', projectId: null };
+  rerender(<Sidebar />);
+  expect(progress).toHaveAttribute('aria-current', 'true');
+  expect(project).not.toHaveAttribute('aria-current');
+
   mocks.todoPlace = { kind: 'deleted' };
   rerender(<Sidebar />);
   expect(deleted).toHaveAttribute('aria-current', 'true');
+  expect(progress).not.toHaveAttribute('aria-current');
   expect(project).not.toHaveAttribute('aria-current');
 
   mocks.selected = 'chat';

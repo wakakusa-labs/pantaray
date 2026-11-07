@@ -74,8 +74,10 @@ function inScope(project: WorkspaceProject, scope: TodoScopeQuery): boolean {
 function listPlace(selection: TodoSelection): TodoListPlace | null {
   if (selection.view === 'deleted') return { kind: 'deleted' };
   const { project } = selection;
-  if (project.project === 'project' && project.project_id !== undefined)
-    return { kind: 'project', projectId: project.project_id };
+  const projectId =
+    project.project === 'project' && project.project_id !== undefined ? project.project_id : null;
+  if (selection.view === 'progress') return { kind: 'progress', projectId };
+  if (projectId !== null) return { kind: 'project', projectId };
   return project.project === 'any' ? { kind: 'all' } : null;
 }
 
@@ -218,6 +220,16 @@ const SuggestionHistoryPage = () => {
     openCounts,
     onShowAll: () =>
       selectTodos({ ...DEFAULT_TODO_SELECTION, scope, weekStart: todoSelection.weekStart }),
+    // The progress of what is in view, by the period last chosen for it.
+    onShowProgress: () =>
+      selectTodos({
+        ...DEFAULT_TODO_SELECTION,
+        scope,
+        project: todoSelection.project,
+        weekStart: todoSelection.weekStart,
+        view: 'progress',
+        period: todoSelection.period,
+      }),
     onShowDeleted: () => selectTodos({ ...DEFAULT_TODO_SELECTION, scope, view: 'deleted' }),
     onSelectProject: (projectId) => {
       const project = settings?.projects.find((candidate) => candidate.project_id === projectId);

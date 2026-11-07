@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -13,6 +13,7 @@ import type {
   TodoProgressPage,
 } from '../../../../electron/src/todos/todoContracts';
 import { GoalForm } from './GoalForm';
+import { ProjectGoalDialog } from './ProjectGoalDialog';
 import { percentValue } from './progressText';
 import { ProgressView } from './ProgressView';
 
@@ -120,6 +121,7 @@ function renderView(data: TodoProgressPage, pendingRecordIds: ReadonlySet<string
     onPeriodChange: vi.fn(),
     onOpenEvidence: vi.fn(),
     onDeleteRecord: vi.fn(),
+    onSetGoal: vi.fn(),
   };
   cleanup();
   render(
@@ -258,15 +260,20 @@ it('shows no number for a goal without records, or a project without a goal', ()
   expect(goalBlock()).toHaveTextContent('単位が「枚」の記録 1 件は、合計に入れていません。');
   expect(goalBlock()).not.toHaveTextContent('あわせて');
 
-  renderView(page({ goals: [{ kind: 'no_goal', project_id: 'p-sales' }] }));
+  const handlers = renderView(page({ goals: [{ kind: 'no_goal', project_id: 'p-sales' }] }));
   expect(goalBlock()).toHaveTextContent('まだ目標がありません。');
   expect(goalBlock()).not.toHaveTextContent(/\d/);
   expect(lead()).not.toHaveTextContent('目標');
+  // The project in view without a goal offers to set one, for that project.
+  fireEvent.click(within(goalBlock()).getByRole('button', { name: '目標を設定' }));
+  expect(handlers.onSetGoal).toHaveBeenCalledWith('p-sales');
 
   renderView(page({ goals: [] }));
   expect(screen.getByRole('heading', { name: '目標' }).parentElement).toHaveTextContent(
     'まだ目標がありません。'
   );
+  // No project is in view to set one for.
+  expect(screen.queryByRole('button', { name: '目標を設定' })).toBeNull();
 });
 
 it('leaves the goals out of the lead when several speak, and says when the period has no records', () => {
@@ -478,4 +485,61 @@ it('edits the goal it was opened with, removes it, and stays open on a refused w
 
   renderForm(null);
   expect(screen.queryByRole('button', { name: '目標を外す' })).toBeNull();
+});
+
+function renderProjectGoal(read: () => Promise<TodoProgressPage>) {
+  const bridge = {
+    progress: vi.fn(read),
+    setGoal: vi.fn(async () => ({ kind: 'ok', result: GOAL })),
+    clearGoal: vi.fn(async () => ({ kind: 'ok', result: null })),
+    onChanged: () => () => undefined,
+  };
+  window.electron = { todos: bridge } as unknown as Window['electron'];
+  const onClose = vi.fn();
+  render(ja(<ProjectGoalDialog projectId="p-sales" projectName="販路開拓" onClose={onClose} />));
+  return { bridge, onClose };
+}
+
+it('opens a project’s goal form on the goal it has now, and writes that project’s goal', async () => {
+  const { bridge, onClose } = renderProjectGoal(async () =>
+    page({ goals: [{ kind: 'no_records', goal: GOAL, other_unit_record_ids: [] }] })
+  );
+  const dialog = await screen.findByRole('dialog', { name: '販路開拓の目標を直す' });
+  expect(bridge.progress).toHaveBeenCalledWith(
+    expect.objectContaining({ scope: 'all', project: 'project', project_id: 'p-sales' })
+  );
+  expect(within(dialog).getByLabelText('目標')).toHaveValue('売上');
+  expect(within(dialog).getByLabelText('量')).toHaveValue(300_000_000);
+  expect(within(dialog).getByLabelText('単位')).toHaveValue('円');
+  expect(within(dialog).getByLabelText('期限')).toHaveValue('2027-08-31');
+
+  await userEvent.clear(within(dialog).getByLabelText('量'));
+  await userEvent.type(within(dialog).getByLabelText('量'), '400000000');
+  await userEvent.click(within(dialog).getByRole('button', { name: '保存' }));
+  expect(bridge.setGoal).toHaveBeenCalledWith({
+    project_id: 'p-sales',
+    text: '売上',
+    target: 400_000_000,
+    unit: '円',
+    deadline: '2027-08-31',
+  });
+  // Closed once the goal saved was read again.
+  await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+  expect(bridge.progress).toHaveBeenCalledTimes(2);
+});
+
+it('sets a new goal for a project without one, and says so when its goal could not be read', async () => {
+  renderProjectGoal(async () => page({ goals: [{ kind: 'no_goal', project_id: 'p-sales' }] }));
+  const dialog = await screen.findByRole('dialog', { name: '販路開拓の目標を決める' });
+  expect(within(dialog).getByLabelText('目標')).toHaveValue('');
+  expect(within(dialog).queryByRole('alert')).toBeNull();
+
+  cleanup();
+  renderProjectGoal(async () => {
+    throw new Error('backend unavailable');
+  });
+  const failed = await screen.findByRole('dialog', { name: '販路開拓の目標を決める' });
+  expect(within(failed).getByRole('alert')).toHaveTextContent(
+    'このプロジェクトの今の目標を読み込めませんでした。'
+  );
 });

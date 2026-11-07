@@ -35,12 +35,19 @@ type Outcome = 'ok' | 'refused' | 'unknown';
 
 const addKey = (projectId: string | null, weekStart: string) => `${weekStart}\n${projectId ?? ''}`;
 
+/** The reads that show a write's result: `useTodoWeek`'s and `useDeletedTodos`'s `reload`. */
+export type TodoReloads = {
+  reloadWeek: () => Promise<void>;
+  reloadDeleted: () => Promise<void>;
+};
+
 /**
- * The TODO list's writes. Each TODO with a write in flight is pending until its answer comes;
- * nothing is changed ahead of it, and the week's next read shows the result. The latest failed
- * write is told next to where it was made.
+ * The TODO list's writes. Nothing is changed ahead of the backend: a TODO with a write in flight
+ * stays pending until the write has answered and the lists showing its result have been read
+ * again, so its controls never act on the state from before the write. The latest failed write
+ * is told next to where it was made.
  */
-export function useTodoMutations() {
+export function useTodoMutations({ reloadWeek, reloadDeleted }: TodoReloads) {
   const { t } = useI18n();
   const [pending, setPending] = useState<ReadonlySet<string>>(new Set());
   const [failure, setFailure] = useState<{ target: TodoMutationTarget; key: MessageKey } | null>(
@@ -68,13 +75,20 @@ export function useTodoMutations() {
     }
   };
 
+  const reloadBoth = () => Promise.all([reloadWeek(), reloadDeleted()]);
+
   const writeRow = async <T>(
     todoId: string,
-    request: (todos: TodosBridge) => Promise<TodoWriteResult<T>>
+    request: (todos: TodosBridge) => Promise<TodoWriteResult<T>>,
+    reload: () => Promise<unknown>
   ): Promise<boolean> => {
     setPending((current) => new Set(current).add(todoId));
     try {
-      return (await send({ kind: 'todo', todoId }, request)) === 'ok';
+      // A refused or unanswered write changed nothing the screen shows; a change still reads
+      // again on `todos:changed`.
+      if ((await send({ kind: 'todo', todoId }, request)) !== 'ok') return false;
+      await reload();
+      return true;
     } finally {
       setPending((current) => {
         const next = new Set(current);
@@ -84,7 +98,7 @@ export function useTodoMutations() {
     }
   };
 
-  /** Resolves true when the TODO was added, which empties the add field. */
+  /** Resolves true once the added TODO has been read into the week, which empties the add field. */
   const create = async (
     projectId: string | null,
     weekStart: string,
@@ -106,23 +120,30 @@ export function useTodoMutations() {
       })
     );
     if (outcome !== 'unknown') unansweredAddsRef.current.delete(key);
-    return outcome === 'ok';
+    if (outcome !== 'ok') return false;
+    await reloadWeek();
+    return true;
   };
 
   return {
-    /** The TODOs whose write has not answered yet. */
+    /** The TODOs whose write, or the read showing it, has not answered yet. */
     pending,
     failure: failure ? { target: failure.target, message: t(failure.key) } : null,
     create,
     setCheck: (todoId: string, checked: boolean) =>
-      writeRow(todoId, (todos) => todos.setCheck({ todo_id: todoId, checked })),
+      writeRow(todoId, (todos) => todos.setCheck({ todo_id: todoId, checked }), reloadWeek),
     setDue: (todoId: string, due: TodoDue | null) =>
-      writeRow(todoId, (todos) => todos.setDue({ todo_id: todoId, due })),
-    deleteTodo: (todoId: string) => writeRow(todoId, (todos) => todos.delete({ todo_id: todoId })),
+      writeRow(todoId, (todos) => todos.setDue({ todo_id: todoId, due }), reloadWeek),
+    // Deleting and restoring move the TODO between the week and the deleted list.
+    deleteTodo: (todoId: string) =>
+      writeRow(todoId, (todos) => todos.delete({ todo_id: todoId }), reloadBoth),
     answerDeletion: (todoId: string, requestId: string, answer: 'approve' | 'keep') =>
-      writeRow(todoId, (todos) =>
-        todos.answerDeletion({ todo_id: todoId, request_id: requestId, answer })
+      writeRow(
+        todoId,
+        (todos) => todos.answerDeletion({ todo_id: todoId, request_id: requestId, answer }),
+        reloadWeek
       ),
-    restore: (todoId: string) => writeRow(todoId, (todos) => todos.restore({ todo_id: todoId })),
+    restore: (todoId: string) =>
+      writeRow(todoId, (todos) => todos.restore({ todo_id: todoId }), reloadBoth),
   };
 }

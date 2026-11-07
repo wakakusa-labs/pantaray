@@ -163,6 +163,12 @@ def _absolute_project_path(value: str) -> str:
     return value
 
 
+_ProjectFolderPath = Annotated[str, AfterValidator(_absolute_project_path)]
+_bounded_project_paths = _bounded_items(
+    limit=ACTION_PROJECT_REF_MAX_PATHS, unit="project_paths"
+)
+
+
 class ActionProjectRef(BaseModel):
     """A workspace project the user named in their text, copied at send time.
 
@@ -175,15 +181,13 @@ class ActionProjectRef(BaseModel):
 
     project_id: str
     display_name: str
-    paths: tuple[Annotated[str, AfterValidator(_absolute_project_path)], ...]
+    paths: tuple[_ProjectFolderPath, ...]
     start: NonNegativeInt
     end: NonNegativeInt
 
     _validate_project_id = field_validator("project_id")(_bounded_id)
     _validate_display_name = field_validator("display_name")(_bounded_project_name)
-    _validate_paths = field_validator("paths", mode="before")(
-        _bounded_items(limit=ACTION_PROJECT_REF_MAX_PATHS, unit="project_paths")
-    )
+    _validate_paths = field_validator("paths", mode="before")(_bounded_project_paths)
 
     @property
     def span_text(self) -> str:
@@ -348,6 +352,33 @@ class ChatHandoffInput(BaseModel):
     )
 
 
+class TodoHandoffProject(BaseModel):
+    """The TODO's project, with the name and folders it had at hand-off time."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    display_name: str
+    paths: tuple[_ProjectFolderPath, ...]
+
+    _validate_display_name = field_validator("display_name")(_bounded_project_name)
+    _validate_paths = field_validator("paths", mode="before")(_bounded_project_paths)
+
+
+class TodoHandoffInput(BaseModel):
+    """The TODO this Action was started for, set only by the system that starts it.
+
+    Unlike a project reference it points into no text: the user did not type the
+    project. ``project`` is ``None`` for a TODO that belongs to no project.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    todo_id: str
+    project: TodoHandoffProject | None
+
+    _validate_todo_id = field_validator("todo_id")(_bounded_id)
+
+
 class ActionUserMessageInput(BaseModel):
     """Canonical durable USER envelope used by internal Action callers."""
 
@@ -371,6 +402,7 @@ class ActionUserMessageInput(BaseModel):
     # After the project lists: a task or suggestion never shares a project's span.
     work_refs: tuple[ActionWorkRef, ...] = ()
     supplement_work_refs: tuple[ActionWorkRef, ...] = ()
+    todo_handoff: TodoHandoffInput | None = None
 
     _validate_message_id = field_validator("message_id")(_non_blank_text)
     _validate_content = field_validator("content")(_non_blank_text)
@@ -490,6 +522,8 @@ __all__ = [
     "ChatHandoffInput",
     "FileAttachmentInput",
     "SuggestionApprovalInput",
+    "TodoHandoffInput",
+    "TodoHandoffProject",
     "bounded_content",
     "bounded_files",
     "bounded_images",

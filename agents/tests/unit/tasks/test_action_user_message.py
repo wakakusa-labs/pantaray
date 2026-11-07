@@ -14,6 +14,8 @@ from pantaray_agents.schema.agent.action_message import (
     ActionProjectRef,
     ActionWorkRef,
     FileAttachmentInput,
+    TodoHandoffInput,
+    TodoHandoffProject,
 )
 from pantaray_agents.schema.agent.action_message_codec import (
     parse_action_user_message as parse_action_user_message_codec,
@@ -121,6 +123,79 @@ def test_project_refs_render_one_line_per_project_and_round_trip() -> None:
     )
 
 
+def test_todo_handoff_names_the_todo_and_its_project_folders_and_round_trips() -> None:
+    message = ActionUserMessageInput(
+        message_id="message-1",
+        content="Send the Q3 report to Sato",
+        todo_handoff=TodoHandoffInput(
+            todo_id="todo-1",
+            project=TodoHandoffProject(
+                display_name="Demo App",
+                paths=("/workspace/demo-app", "/workspace/demo-api"),
+            ),
+        ),
+    )
+
+    request_text = render_action_user_request_text(message)
+
+    assert request_text == (
+        "Send the Q3 report to Sato\n\n"
+        "TODO this task works on: todo-1\n"
+        "Its workspace project:\n"
+        "- Demo App: /workspace/demo-app, /workspace/demo-api"
+    )
+    assert (
+        parse_stored_action_user_message(
+            message_id="message-1",
+            message_json=serialize_action_user_message(message),
+            user_request_text=request_text,
+        )
+        == message
+    )
+
+
+def test_todo_handoff_without_a_project_names_only_the_todo() -> None:
+    message = ActionUserMessageInput(
+        message_id="message-1",
+        content="Renew the passport",
+        todo_handoff=TodoHandoffInput(todo_id="todo-1", project=None),
+    )
+
+    request_text = render_action_user_request_text(message)
+
+    assert request_text == "Renew the passport\n\nTODO this task works on: todo-1"
+    assert (
+        parse_stored_action_user_message(
+            message_id="message-1",
+            message_json=serialize_action_user_message(message),
+            user_request_text=request_text,
+        )
+        == message
+    )
+
+
+@pytest.mark.parametrize(
+    "todo_handoff",
+    [
+        {"todo_id": " ", "project": None},
+        {"todo_id": "todo-1"},
+        {"todo_id": "todo-1", "project": {"display_name": "Demo", "paths": ["rel"]}},
+        {"todo_id": "todo-1", "project": {"display_name": " ", "paths": []}},
+        {"todo_id": "todo-1", "project": None, "project_id": "project-1"},
+    ],
+)
+def test_todo_handoff_rejects_an_invalid_shape(todo_handoff: dict[str, object]) -> None:
+    message = {
+        "version": 1,
+        "message_id": "message-1",
+        "content": "Do it",
+        "todo_handoff": todo_handoff,
+    }
+
+    with pytest.raises(ValueError):
+        parse_action_user_message_codec(json.dumps(message))
+
+
 def test_work_refs_list_each_task_and_suggestion_once_and_round_trip() -> None:
     report = ActionWorkRef(
         kind="action", id="action-1", title="Q3 report", start=0, end=9
@@ -171,12 +246,11 @@ def test_a_message_without_work_refs_keeps_its_stored_request_text() -> None:
     message = ActionUserMessageInput(message_id="message-1", content="Plain")
 
     assert render_action_user_request_text(message) == "Plain"
-    assert (
-        parse_action_user_message(
-            '{"version":1,"message_id":"message-1","content":"Plain","images":[]}'
-        ).work_refs
-        == ()
+    stored = parse_action_user_message(
+        '{"version":1,"message_id":"message-1","content":"Plain","images":[]}'
     )
+    assert stored.work_refs == ()
+    assert stored.todo_handoff is None
 
 
 @pytest.mark.parametrize(

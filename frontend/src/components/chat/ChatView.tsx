@@ -59,7 +59,6 @@ export const ChatView = forwardRef<
   }
 >(function ChatView({ notice: pageNotice, chat, composer, onOpenWork, onAddProject }, ref) {
   const { t, language } = useI18n();
-  const works = useChatWorkStates();
   const [notice, setNotice] = useState<string | null>(null);
   const [jump, setJump] = useState<ChatJump | null>(null);
   const ready = !chat.loading;
@@ -78,6 +77,7 @@ export const ChatView = forwardRef<
     [chat.items]
   );
   const latestCards = useMemo(() => latestCardPositions(chat.items), [chat.items]);
+  const works = useChatWorkStates([...latestCards.keys()]);
   // Bridge events and turn failures feed the chat's model; the user sees the messages.
   const shown = useMemo(() => chat.items.filter(isChatMessage), [chat.items]);
   const failure = useMemo(() => retryableFailure(chat.items), [chat.items]);

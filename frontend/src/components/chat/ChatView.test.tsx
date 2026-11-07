@@ -119,8 +119,14 @@ const historyFetch = vi.fn(async () => ({
   error: null,
   errorCode: null,
 }));
+// The rows History names by key: a card reads its work's title and status one at a time.
+let historyRows: Map<string, ConversationHistoryListItem>;
+const readItem = vi.fn(
+  async ({ kind, id }: { kind: string; id: string }) => historyRows.get(`${kind}:${id}`) ?? null
+);
 
 beforeEach(() => {
+  historyRows = new Map([['conversation:A1', work('A1', '見積書のたたき台を作る', 'running')]]);
   localStorage.clear();
   // Every subscriber hears an appended item, as main's relay reaches them all.
   const appended = new Set<(item: ChatItem) => void>();
@@ -146,7 +152,7 @@ beforeEach(() => {
         return () => {};
       },
     },
-    history: { fetch: historyFetch, openConversation, openNewConversation: vi.fn() },
+    history: { fetch: historyFetch, readItem, openConversation, openNewConversation: vi.fn() },
     actions: { attachFile, attachImage: vi.fn(), discardAttachment },
     workspaceSettings: {
       get: async () => ({
@@ -187,21 +193,13 @@ const renderPage = (
   );
 
 it('labels a suggestion’s card as a suggestion, as the task list does', async () => {
-  historyFetch.mockResolvedValueOnce({
-    data: [
-      {
-        kind: 'suggestion',
-        suggestion_id: 'S1',
-        title: '請求書の下書きを作る',
-        updated_at: at(0),
-        status: 'approval_pending',
-        artifact_names: [],
-      },
-    ],
-    nextCursor: null,
-    unreadActionIds: [],
-    error: null,
-    errorCode: null,
+  historyRows.set('suggestion:S1', {
+    kind: 'suggestion',
+    suggestion_id: 'S1',
+    title: '請求書の下書きを作る',
+    updated_at: at(0),
+    status: 'approval_pending',
+    artifact_names: [],
   });
   pages = [
     {
@@ -221,6 +219,27 @@ it('labels a suggestion’s card as a suggestion, as the task list does', async 
   const card = await screen.findByRole('button', { name: '請求書の下書きを作る を開く' });
   await waitFor(() => expect(within(card).getByText('提案')).toBeInTheDocument());
   expect(within(card).queryByText('確認待ち')).not.toBeInTheDocument();
+});
+
+it('shows the status of a work the dated list leaves out, such as a TODO’s conversation', async () => {
+  historyFetch.mockResolvedValueOnce({
+    data: [],
+    nextCursor: null,
+    unreadActionIds: [],
+    error: null,
+    errorCode: null,
+  });
+  historyRows.set('conversation:T1', work('T1', '販路の候補を洗い出す', 'running'));
+  pages = [
+    {
+      items: [reply(1, '進めています。', [{ action_id: 'T1', summary: '候補を集めています。' }])],
+      next_cursor: null,
+    },
+  ];
+  renderPage();
+
+  const card = await screen.findByRole('button', { name: '販路の候補を洗い出す を開く' });
+  expect(within(card).getByText('実行中')).toBeInTheDocument();
 });
 
 it('shows no quote on a reply that quoted a task event', async () => {
@@ -278,7 +297,10 @@ it('shows messages and cards, with a work’s status on its latest card only', a
   expect(within(mine).getByText('たたき台を作りますね。')).toBeInTheDocument();
   expect(screen.queryByText('できました')).not.toBeInTheDocument();
 
-  const cards = within(chat).getAllByRole('button', { name: '見積書のたたき台を作る を開く' });
+  // A card's title is read for the works the loaded cards name, after they are drawn.
+  const cards = await within(chat).findAllByRole('button', {
+    name: '見積書のたたき台を作る を開く',
+  });
   expect(cards).toHaveLength(2);
   await waitFor(() => expect(within(cards[1]).getByText('実行中')).toBeInTheDocument());
   expect(within(cards[0]).queryByText('実行中')).not.toBeInTheDocument();

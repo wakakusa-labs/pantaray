@@ -58,12 +58,20 @@ import type {
 } from '../../electron/src/chat/chatContracts';
 import type {
   DeletedTodoView,
+  GoalView,
+  ProgressRecordCreateRequest,
+  ProgressRecordRefRequest,
+  ProgressRecordView,
   TodoChanged,
   TodoCheckRequest,
   TodoCheckResult,
   TodoCreateRequest,
   TodoDeletionAnswerRequest,
   TodoDueRequest,
+  TodoGoalRequest,
+  TodoProgressPage,
+  TodoProgressQuery,
+  TodoProjectRefRequest,
   TodoRefRequest,
   TodoScopeQuery,
   TodoView,
@@ -265,7 +273,7 @@ declare global {
         /** Whether a turn is answering: the typing bubble. */
         onTurnState: (callback: (state: ChatTurnState) => void) => () => void;
       };
-      /** The TODO list; main accepts these from the main window only. */
+      /** The TODO list and its progress; main accepts these from the main window only. */
       todos?: {
         listWeek: (query: TodoWeekQuery) => Promise<TodoWeekPage>;
         /** Resending the same `client_todo_id` returns the same TODO. */
@@ -276,7 +284,18 @@ declare global {
         answerDeletion: (request: TodoDeletionAnswerRequest) => Promise<TodoWriteResult<TodoView>>;
         restore: (request: TodoRefRequest) => Promise<TodoWriteResult<TodoView>>;
         listDeleted: (query: TodoScopeQuery) => Promise<DeletedTodoView[]>;
-        /** The TODOs changed: read them again. */
+        progress: (query: TodoProgressQuery) => Promise<TodoProgressPage>;
+        /** Editing keeps when the goal was first set, so records keep counting toward it. */
+        setGoal: (request: TodoGoalRequest) => Promise<TodoWriteResult<GoalView>>;
+        /** Succeeds also when the project has no goal. */
+        clearGoal: (request: TodoProjectRefRequest) => Promise<TodoWriteResult<null>>;
+        /** Resending the same `client_record_id` with the same record returns it. */
+        addProgressRecord: (
+          request: ProgressRecordCreateRequest
+        ) => Promise<TodoWriteResult<ProgressRecordView>>;
+        /** Succeeds also when the record is gone. */
+        deleteProgressRecord: (request: ProgressRecordRefRequest) => Promise<void>;
+        /** The TODOs or their progress changed: read them again. */
         onChanged: (callback: (change: TodoChanged) => void) => () => void;
       };
       /** Suggestions read into main's record; main accepts these from the main window only. */

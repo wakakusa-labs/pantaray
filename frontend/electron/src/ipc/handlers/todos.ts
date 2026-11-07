@@ -1,5 +1,5 @@
 /**
- * todos:* IPC handlers: the main window's TODO list.
+ * todos:* IPC handlers: the main window's TODO list and its progress.
  *
  * Sender trust keeps every `todos:*` channel main-only, as for the chat: an Overlay never
  * reads or writes the TODOs.
@@ -8,10 +8,15 @@
 import type { MainContext } from '../context';
 import type { IpcRegistrar } from '../registrar';
 import {
+  ProgressRecordCreateRequestSchema,
+  ProgressRecordRefRequestSchema,
   TodoCheckRequestSchema,
   TodoCreateRequestSchema,
   TodoDeletionAnswerRequestSchema,
   TodoDueRequestSchema,
+  TodoGoalRequestSchema,
+  TodoProgressQuerySchema,
+  TodoProjectRefRequestSchema,
   TodoRefRequestSchema,
   TodoScopeQuerySchema,
   TodoWeekQuerySchema,
@@ -44,5 +49,25 @@ export function registerTodoHandlers(ctx: MainContext, registrar: IpcRegistrar):
   );
   registrar.handle('todos:listDeleted', async (_event, query) =>
     ctx.todos.listDeleted(parseInput(TodoScopeQuerySchema, 'todos:listDeleted', query))
+  );
+  registrar.handle('todos:progress', async (_event, query) =>
+    ctx.todos.progress(parseInput(TodoProgressQuerySchema, 'todos:progress', query))
+  );
+  registrar.handle('todos:setGoal', async (_event, request) =>
+    ctx.todos.setGoal(parseInput(TodoGoalRequestSchema, 'todos:setGoal', request))
+  );
+  registrar.handle('todos:clearGoal', async (_event, request) =>
+    ctx.todos.clearGoal(parseInput(TodoProjectRefRequestSchema, 'todos:clearGoal', request))
+  );
+  // A user record: the renderer names it with `client_record_id`, so a resend adds nothing.
+  registrar.handle('todos:addProgressRecord', async (_event, request) =>
+    ctx.todos.addProgressRecord(
+      parseInput(ProgressRecordCreateRequestSchema, 'todos:addProgressRecord', request)
+    )
+  );
+  registrar.handle('todos:deleteProgressRecord', async (_event, request) =>
+    ctx.todos.deleteProgressRecord(
+      parseInput(ProgressRecordRefRequestSchema, 'todos:deleteProgressRecord', request)
+    )
   );
 }

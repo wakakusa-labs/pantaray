@@ -194,6 +194,11 @@ test('Only the main window uses the chat and the TODO list', () => {
     'todos:answerDeletion',
     'todos:restore',
     'todos:listDeleted',
+    'todos:progress',
+    'todos:setGoal',
+    'todos:clearGoal',
+    'todos:addProgressRecord',
+    'todos:deleteProgressRecord',
   ]) {
     assert.equal(security.authorize(channel, mainEvent), 'main');
     assert.throws(

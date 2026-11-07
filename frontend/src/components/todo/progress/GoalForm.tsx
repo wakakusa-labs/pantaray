@@ -73,14 +73,22 @@ export function GoalForm({
   const [draft, setDraft] = useState<Draft>(() => draftOf(goal));
   const [errors, setErrors] = useState<FieldErrors>({});
   const [busy, setBusy] = useState(false);
+  // A form closed while its write was pending is gone: the write's answer must not close the
+  // form opened after it, which the same `onClose` would.
+  const openRef = useRef(false);
   useEffect(() => {
+    openRef.current = true;
     const dialog = dialogRef.current;
     if (dialog && !dialog.open) dialog.showModal();
+    return () => {
+      openRef.current = false;
+    };
   }, []);
 
   const run = async (write: () => Promise<boolean>) => {
     setBusy(true);
     const done = await write();
+    if (!openRef.current) return;
     setBusy(false);
     if (done) onClose();
   };

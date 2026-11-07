@@ -1,6 +1,6 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
@@ -528,18 +528,77 @@ it('opens a project’s goal form on the goal it has now, and writes that projec
   expect(bridge.progress).toHaveBeenCalledTimes(2);
 });
 
-it('sets a new goal for a project without one, and says so when its goal could not be read', async () => {
+it('sets a new goal for a project without one', async () => {
   renderProjectGoal(async () => page({ goals: [{ kind: 'no_goal', project_id: 'p-sales' }] }));
   const dialog = await screen.findByRole('dialog', { name: '販路開拓の目標を決める' });
   expect(within(dialog).getByLabelText('目標')).toHaveValue('');
   expect(within(dialog).queryByRole('alert')).toBeNull();
+});
 
-  cleanup();
-  renderProjectGoal(async () => {
-    throw new Error('backend unavailable');
+it('writes nothing until the goal it has now is read: a failed read offers to read again', async () => {
+  let fail = true;
+  const { bridge, onClose } = renderProjectGoal(async () => {
+    if (fail) throw new Error('backend unavailable');
+    return page({ goals: [{ kind: 'no_records', goal: GOAL, other_unit_record_ids: [] }] });
   });
-  const failed = await screen.findByRole('dialog', { name: '販路開拓の目標を決める' });
+  const failed = await screen.findByRole('dialog', { name: '販路開拓の目標' });
   expect(within(failed).getByRole('alert')).toHaveTextContent(
     'このプロジェクトの今の目標を読み込めませんでした。'
   );
+  // No field and no save: what is saved would replace a goal not yet seen.
+  expect(within(failed).queryByRole('textbox')).toBeNull();
+  expect(within(failed).queryByRole('button', { name: '保存' })).toBeNull();
+
+  fail = false;
+  await userEvent.click(within(failed).getByRole('button', { name: 'もう一度読む' }));
+  const form = await screen.findByRole('dialog', { name: '販路開拓の目標を直す' });
+  expect(within(form).getByLabelText('目標')).toHaveValue('売上');
+  expect(within(form).getByLabelText('量')).toHaveValue(300_000_000);
+  expect(bridge.setGoal).not.toHaveBeenCalled();
+
+  await userEvent.click(within(form).getByRole('button', { name: 'キャンセル' }));
+  expect(onClose).toHaveBeenCalledOnce();
+});
+
+it('never lets a write answered after its form closed close the form opened since', async () => {
+  let answerFirst: (saved: boolean) => void = () => undefined;
+  const onSave = vi
+    .fn<(goal: unknown) => Promise<boolean>>()
+    .mockImplementationOnce(() => new Promise((resolve) => (answerFirst = resolve)));
+  const onClose = vi.fn();
+  function Opener() {
+    const [open, setOpen] = useState(true);
+    return open ? (
+      <GoalForm
+        projectName="販路開拓"
+        goal={GOAL}
+        failure={null}
+        onSave={onSave}
+        onClear={async () => true}
+        onClose={() => {
+          onClose();
+          setOpen(false);
+        }}
+      />
+    ) : (
+      <button type="button" onClick={() => setOpen(true)}>
+        開く
+      </button>
+    );
+  }
+  render(ja(<Opener />));
+  await userEvent.click(screen.getByRole('button', { name: '保存' }));
+  expect(onSave).toHaveBeenCalledOnce();
+  await userEvent.click(screen.getByRole('button', { name: 'キャンセル' }));
+  expect(onClose).toHaveBeenCalledOnce();
+
+  await userEvent.click(screen.getByRole('button', { name: '開く' }));
+  const reopened = screen.getByRole('dialog', { name: '販路開拓の目標を直す' });
+  await userEvent.clear(within(reopened).getByLabelText('単位'));
+  await userEvent.type(within(reopened).getByLabelText('単位'), 'ドル');
+  await act(async () => answerFirst(true));
+
+  expect(onClose).toHaveBeenCalledOnce();
+  expect(screen.getByRole('dialog', { name: '販路開拓の目標を直す' })).toBeInTheDocument();
+  expect(within(reopened).getByLabelText('単位')).toHaveValue('ドル');
 });

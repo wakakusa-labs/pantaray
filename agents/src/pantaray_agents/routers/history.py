@@ -15,6 +15,7 @@ from pantaray_agents.local_runtime.action_conversation.history_candidates import
 )
 from pantaray_agents.local_runtime.action_conversation.history_deletion import (
     ConversationBusyError,
+    ConversationOfTodoError,
     HistoryItemKind,
     delete_history_item,
 )
@@ -117,7 +118,8 @@ def delete_conversation_history_item(
     item_id: str,
     user_id: str = Depends(get_current_user_id_from_token),
 ) -> Response:
-    """204 also when already gone; 409 ``CONVERSATION_BUSY`` while its run is active."""
+    """204 also when already gone; 409 ``CONVERSATION_BUSY`` while its run is active,
+    409 ``CONVERSATION_OF_TODO`` while a TODO that is not deleted has it as its own."""
 
     try:
         db_path, busy_timeout_ms = runtime_env.read_local_runtime_db_config()
@@ -136,6 +138,14 @@ def delete_conversation_history_item(
             status_code=status.HTTP_409_CONFLICT,
             error_type=ErrorType.CONFLICT_ERROR,
             public_message="This conversation is in use. Try again later.",
+        ) from exc
+    except ConversationOfTodoError as exc:
+        raise PublicAgentHTTPError(
+            "Conversation belongs to a TODO",
+            error_code="CONVERSATION_OF_TODO",
+            status_code=status.HTTP_409_CONFLICT,
+            error_type=ErrorType.CONFLICT_ERROR,
+            public_message="Delete its TODO to delete this conversation.",
         ) from exc
     except (MigrationError, sqlite3.Error, vector.SQLiteVectorExtensionError) as exc:
         raise PublicAgentHTTPError(

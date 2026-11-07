@@ -30,6 +30,7 @@ from pantaray_agents.local_runtime.storage.transactions import (
     immediate_transaction,
     register_after_commit,
 )
+from pantaray_agents.local_runtime.todos.store import conversation_has_open_todo
 from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
     ActionStoragePaths,
     resolve_action_storage_paths,
@@ -44,6 +45,10 @@ type HistoryItemKind = Literal["conversation", "suggestion"]
 
 class ConversationBusyError(RuntimeError):
     """The conversation's own Action is still queued, running or paused."""
+
+
+class ConversationOfTodoError(RuntimeError):
+    """The conversation is a TODO's that is not deleted; it goes with its TODO."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,6 +173,7 @@ def delete_history_item(
 
     Raises:
         ConversationBusyError: the conversation's own run is still active.
+        ConversationOfTodoError: a TODO that is not deleted has it as its own.
     """
 
     with open_memory_catalog_connection(
@@ -186,6 +192,13 @@ def delete_history_item(
             }
             if connection.execute(_BUSY_SQL, params).fetchone()[0]:
                 raise ConversationBusyError("conversation is running")
+            if conversation_has_open_todo(
+                connection,
+                user_id=user_id,
+                action_id=conversation.action_id,
+                suggestion_ids=conversation.suggestion_ids,
+            ):
+                raise ConversationOfTodoError("conversation belongs to a TODO")
             storage = (
                 resolve_action_storage_paths(
                     db_path=db_path, user_id=user_id, action_id=conversation.action_id
@@ -275,6 +288,7 @@ def _remove_conversation_files(
 
 __all__ = [
     "ConversationBusyError",
+    "ConversationOfTodoError",
     "HistoryItemKind",
     "delete_history_item",
 ]

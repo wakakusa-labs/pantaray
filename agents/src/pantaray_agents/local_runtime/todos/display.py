@@ -151,11 +151,11 @@ def pickup_target(
         or conversation.kind == "action"
     ):
         return None
+    # A Suggestion's TODO is worked on in the Suggestion's own conversation,
+    # which only the user's approval or reply opens; an Action started here
+    # would be a second one beside it.
     if todo.origin.kind == "suggestion":
-        report = todo.ai_report
-        if report is None or report.kind != "continue":
-            return None
-        return ContinueAiTodo(todo_id=todo.todo_id)
+        return None
     if todo.author == "user":
         return StartWritten(todo_id=todo.todo_id)
     return ContinueAiTodo(todo_id=todo.todo_id)

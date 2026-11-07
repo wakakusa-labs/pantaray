@@ -7,9 +7,10 @@ user's zone are read here, by `read_todo_clock`, and handed to the core.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from typing import Final, Literal, assert_never, cast
@@ -414,16 +415,17 @@ def read_pickup_candidates(
 # TODO id in its hand-off, which only the pickup writes. A Suggestion's TODO is
 # also served by the Action that accepted or replied to that Suggestion. Each
 # branch is a lookup by key.
-_SERVED_TODO_SQL: Final = """
+_HANDOFF_TODO_ID_SQL: Final = """(
+  SELECT json_extract(step.user_message_json, '$.todo_handoff.todo_id')
+  FROM agent_actions AS action
+  JOIN agent_action_steps AS step
+    ON step.user_id = action.user_id AND step.action_id = action.action_id
+   AND step.user_message_id = action.initial_user_message_id
+  WHERE action.user_id = :user_id AND action.action_id = :action_id)"""
+_SERVED_TODO_SQL: Final = f"""
 SELECT COALESCE(
-  (SELECT todo.todo_id FROM agent_actions AS action
-   JOIN agent_action_steps AS step
-     ON step.user_id = action.user_id AND step.action_id = action.action_id
-    AND step.user_message_id = action.initial_user_message_id
-   JOIN todo_items AS todo
-     ON todo.user_id = action.user_id
-    AND todo.todo_id = json_extract(step.user_message_json, '$.todo_handoff.todo_id')
-   WHERE action.user_id = :user_id AND action.action_id = :action_id),
+  (SELECT todo_id FROM todo_items
+   WHERE user_id = :user_id AND todo_id = {_HANDOFF_TODO_ID_SQL}),
   (SELECT todo.todo_id FROM agent_actions AS action
    JOIN todo_items AS todo
      ON todo.user_id = action.user_id AND todo.suggestion_id = action.suggestion_id
@@ -433,6 +435,16 @@ SELECT COALESCE(
      ON todo.user_id = step.user_id AND todo.suggestion_id = step.source_suggestion_id
    WHERE step.user_id = :user_id AND step.action_id = :action_id)
 )
+"""
+# The same links seen from a conversation being deleted, which already knows
+# every Suggestion it holds.
+_OPEN_TODO_OF_CONVERSATION_SQL: Final = f"""
+SELECT EXISTS (SELECT 1 FROM todo_items
+               WHERE user_id = :user_id AND deleted_at IS NULL
+                 AND todo_id = {_HANDOFF_TODO_ID_SQL})
+    OR EXISTS (SELECT 1 FROM todo_items
+               WHERE user_id = :user_id AND deleted_at IS NULL
+                 AND suggestion_id IN (SELECT value FROM json_each(:suggestion_ids)))
 """
 
 
@@ -444,6 +456,31 @@ def read_todo_for_action(*, user_id: str, action_id: str) -> TodoId | None:
             _SERVED_TODO_SQL, {"user_id": user_id, "action_id": action_id}
         ).fetchone()
     return None if row[0] is None else str(row[0])
+
+
+def conversation_has_open_todo(
+    connection: sqlite3.Connection,
+    *,
+    user_id: str,
+    action_id: str | None,
+    suggestion_ids: Sequence[str],
+) -> bool:
+    """Whether a TODO that is not deleted has this conversation as its own.
+
+    Read in the caller's transaction. Such a conversation goes only with its
+    TODO: deleted alone, the pickup would find the TODO unstarted and run it
+    again.
+    """
+
+    row = connection.execute(
+        _OPEN_TODO_OF_CONVERSATION_SQL,
+        {
+            "user_id": user_id,
+            "action_id": action_id,
+            "suggestion_ids": json.dumps(list(suggestion_ids)),
+        },
+    ).fetchone()
+    return bool(row[0])
 
 
 def read_todo_revision(*, user_id: str) -> int:

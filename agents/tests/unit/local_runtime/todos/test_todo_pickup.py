@@ -135,32 +135,32 @@ def test_an_ai_todo_continues_as_pantaray_and_asks_before_every_step(
     db: Path,
 ) -> None:
     _insert_ai_todo(db, "todo-recur", origin="recurrence")
+    # A Suggestion's TODO waits for the user to approve or reply to it, even
+    # when the AI marked it to continue.
     _insert_ai_todo(db, "todo-go", origin="suggestion", report_kind="continue")
-    # A Suggestion TODO the AI did not mark to continue waits for the user.
-    _insert_ai_todo(db, "todo-wait", origin="suggestion", report_kind="needs_user")
     _insert_ai_todo(db, "todo-new", origin="suggestion")
 
     pickup.pick_up_todos(user_id=USER)
 
-    rows = _actions(db)
-    assert sorted(row["initial_user_message_id"] for row in rows) == sorted(
-        todo_message_id(todo_id) for todo_id in ("todo-recur", "todo-go")
+    [row] = _actions(db)
+    message = json.loads(row["user_message_json"])
+    assert (row["initial_user_message_id"], message["todo_handoff"]["todo_id"]) == (
+        todo_message_id("todo-recur"),
+        "todo-recur",
     )
-    for row in rows:
-        message = json.loads(row["user_message_json"])
-        assert (
-            row["step_name"],
-            row["initial_approval_mode"],
-            row["opening"],
-            message["content"],
-            message["todo_handoff"]["project"],
-        ) == (
-            "todo_pickup_request",
-            "prompt_each_time",
-            "Renew the domain",
-            ACTION_TODO_PICKUP_REQUEST_TEXT,
-            None,
-        )
+    assert (
+        row["step_name"],
+        row["initial_approval_mode"],
+        row["opening"],
+        message["content"],
+        message["todo_handoff"]["project"],
+    ) == (
+        "todo_pickup_request",
+        "prompt_each_time",
+        "Renew the domain",
+        ACTION_TODO_PICKUP_REQUEST_TEXT,
+        None,
+    )
 
 
 def test_only_open_todos_whose_week_began_are_picked(db: Path) -> None:

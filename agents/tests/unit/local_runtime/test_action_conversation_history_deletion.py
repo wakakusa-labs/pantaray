@@ -11,6 +11,7 @@ import pytest
 from pantaray_agents.local_runtime.action_conversation import history_deletion
 from pantaray_agents.local_runtime.action_conversation.history_deletion import (
     ConversationBusyError,
+    ConversationOfTodoError,
     HistoryItemKind,
     delete_history_item,
 )
@@ -261,6 +262,67 @@ def test_active_conversation_is_refused_and_kept(tmp_path: Path, busy: str) -> N
         _delete(db_path, "conversation", "act-1")
 
     assert _counts(db_path, "act-1", "") == before
+
+
+def _todo(todo_id: str, *, suggestion_id: str | None = None) -> str:
+    origin = "'suggestion'" if suggestion_id else "'written'"
+    suggestion = f"'{suggestion_id}'" if suggestion_id else "NULL"
+    return f"""
+      INSERT INTO todo_items(todo_id,user_id,text,author,origin_kind,suggestion_id,
+        week_start,created_at) VALUES ('{todo_id}','{USER}','Send the quote','user',
+        {origin},{suggestion},'2026-08-31','{T}');"""
+
+
+@pytest.mark.parametrize(
+    ("link", "kind", "item"),
+    [
+        # The pickup opened the Action with the TODO in its first message.
+        ("handoff", "conversation", "act-1"),
+        ("offer", "conversation", "act-1"),
+        ("offer", "suggestion", "sug-1"),
+        ("reply", "suggestion", "sug-1"),
+        ("standalone", "suggestion", "sug-1"),
+    ],
+)
+def test_a_todos_conversation_goes_only_once_its_todo_is_deleted(
+    tmp_path: Path, link: str, kind: HistoryItemKind, item: str
+) -> None:
+    db_path = _db(tmp_path)
+    # Another TODO's Suggestion does not hold this conversation back.
+    script = _suggestion("sug-other") + _todo("todo-other", suggestion_id="sug-other")
+    if link != "handoff":
+        script += _suggestion("sug-1") + _todo("todo-1", suggestion_id="sug-1")
+    else:
+        script += _todo("todo-1")
+    if link != "standalone":
+        script += _action("act-1", suggestion_id="sug-1" if link == "offer" else None)
+    if link == "handoff":
+        script += """UPDATE agent_action_steps SET user_message_json = json_set(
+          user_message_json, '$.todo_handoff',
+          json('{"todo_id":"todo-1","project":null}')) WHERE step_id = 'user-act-1';"""
+    if link == "reply":
+        script += f"""
+          INSERT INTO agent_action_steps(step_id,action_id,user_id,step_number,
+            local_step_number,short_step_id,step_type,step_name,status,goal_handle,
+            llm_response_text,adopted_process_id,source_suggestion_id,started_at,
+            completed_at,created_at) VALUES ('reply','act-1','{USER}',3,2,
+            'S-2-ASSISTANT','assistant_message','assistant','success','S','reply',
+            'run-act-1','sug-1','{T}','{T}','{T}');"""
+    _seed(db_path, script)
+    before = _counts(db_path, "act-1", "sug-1")
+
+    # Deleted alone, the pickup would find the TODO unstarted and run it again.
+    with pytest.raises(ConversationOfTodoError):
+        _delete(db_path, kind, item)
+    assert _counts(db_path, "act-1", "sug-1") == before
+
+    _seed(
+        db_path,
+        f"UPDATE todo_items SET deleted_by='user', deleted_at='{T}' "
+        "WHERE todo_id='todo-1';",
+    )
+    _delete(db_path, kind, item)
+    assert set(_counts(db_path, "act-1", "sug-1")) == {0}
 
 
 def _files(db_path: Path, images: tuple[str, ...]) -> tuple[Path, ...]:

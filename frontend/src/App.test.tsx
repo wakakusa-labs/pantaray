@@ -11,7 +11,22 @@ vi.mock('../electron/src/auth/accountLoginFeature', () => ({
   PANTARAY_ACCOUNT_LOGIN_ENABLED: true,
 }));
 
-vi.mock('./pages/SuggestionHistoryPage', () => ({ default: () => <h1>Local history</h1> }));
+const pageMocks = vi.hoisted(() => ({
+  organizations: [] as { organization_id: string; display_name: string }[],
+}));
+// The home page hands the rail the organizations it read, as the real one does.
+vi.mock('./pages/SuggestionHistoryPage', async () => {
+  const { useEffect } = await import('react');
+  const { useOutletContext } = await import('react-router-dom');
+  return {
+    default: function HomePage() {
+      const { publishOrganizations } =
+        useOutletContext<import('./components/Layout').LayoutOutletContext>();
+      useEffect(() => publishOrganizations(pageMocks.organizations), [publishOrganizations]);
+      return <h1>Local history</h1>;
+    },
+  };
+});
 vi.mock('./pages/SettingsPage', () => ({ default: () => <h1>Local settings</h1> }));
 vi.mock('./components/RecordingIntroDialog', () => ({ RecordingIntroDialog: () => null }));
 vi.mock('./lib/supabase', () => ({
@@ -63,6 +78,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  pageMocks.organizations = [];
   cleanup();
   delete window.electron;
   vi.clearAllMocks();
@@ -77,12 +93,13 @@ it.each([
   window.history.replaceState(null, '', `/#${path}`);
   render(subject());
   expect(await screen.findByRole('heading', { name: heading })).toBeVisible();
-  // Projects live in History's sidebar; the rail has no page for them.
+  // The rail holds the organizations to see TODOs for, then Settings; projects live in the
+  // home page's sidebar.
   expect(
-    within(screen.getByRole('navigation')).getAllByRole('button', {
-      name: /^(ホーム|設定|ワークスペース)$/,
-    })
-  ).toHaveLength(2);
+    within(screen.getByRole('navigation'))
+      .getAllByRole('button', { name: /^(すべての組織|組織なし|設定|ホーム|ワークスペース)$/ })
+      .map((button) => button.getAttribute('aria-label'))
+  ).toEqual(['すべての組織', '組織なし', '設定']);
   expect(startBrowserLogin).not.toHaveBeenCalled();
 });
 
@@ -92,22 +109,40 @@ it('opens first-run setup instead of the app, without the rail, until it is comp
   render(subject());
   expect(await screen.findByRole('heading', { name: /AI をつなぐ/ })).toBeVisible();
   expect(screen.queryByRole('heading', { name: 'Local history' })).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'ホーム' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'すべての組織' })).not.toBeInTheDocument();
 });
 
-it('reopens what History last showed from Home, and leaves it as it is on History', async () => {
+it('opens a scope’s TODOs from the rail, and from another page returns to where home was left', async () => {
   const user = userEvent.setup();
   window.history.replaceState(null, '', '/#/history?item=action:task-1');
   render(subject());
   const rail = within(await screen.findByRole('navigation'));
-  await user.click(rail.getByRole('button', { name: 'ホーム' }));
-  expect(window.location.hash).toBe('#/history?item=action:task-1');
+  const all = rail.getByRole('button', { name: 'すべての組織' });
+  expect(all).toHaveAttribute('aria-pressed', 'true');
 
   await user.click(rail.getByRole('button', { name: '設定' }));
   expect(await screen.findByRole('heading', { name: 'Local settings' })).toBeVisible();
-  await user.click(rail.getByRole('button', { name: 'ホーム' }));
+  await user.click(all);
   expect(await screen.findByRole('heading', { name: 'Local history' })).toBeVisible();
   expect(window.location.hash).toBe('#/history?item=action:task-1');
+
+  await user.click(rail.getByRole('button', { name: '組織なし' }));
+  expect(window.location.hash).toBe('#/history?scope=none');
+  expect(rail.getByRole('button', { name: '組織なし' })).toHaveAttribute('aria-pressed', 'true');
+  await user.click(all);
+  expect(window.location.hash).toBe('#/history');
+});
+
+it('shows the organizations the home page read in the rail, each opening its TODOs', async () => {
+  const user = userEvent.setup();
+  pageMocks.organizations = [{ organization_id: 'O1', display_name: 'xer' }];
+  window.history.replaceState(null, '', '/#/history');
+  render(subject());
+  const entry = await screen.findByRole('button', { name: 'xer' });
+  expect(entry).toHaveTextContent('X');
+  await user.click(entry);
+  expect(window.location.hash).toBe('#/history?scope=organization:O1');
+  expect(entry).toHaveAttribute('aria-pressed', 'true');
 });
 
 it('offers optional Pantaray login and lets a guest return without starting authentication', async () => {

@@ -1,5 +1,12 @@
-import { FileText, MessageCircle, PictureInPicture2, SquarePen, Trash2 } from 'lucide-react';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import {
+  FileText,
+  ListTodo,
+  MessageCircle,
+  PictureInPicture2,
+  SquarePen,
+  Trash2,
+} from 'lucide-react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 
 import type { ConversationHistoryListItem } from '../../../electron/src/history/historyContracts';
 import { useChatUnreadCount } from '@/components/chat/chatUnread';
@@ -118,6 +125,48 @@ async function deleteHistoryItem(item: ConversationHistoryListItem): Promise<Mes
   return result.ok ? null : deleteFailureMessageKey(result.errorCode);
 }
 
+/** Which TODO list the main area shows. */
+export type TodoListPlace =
+  | { kind: 'all' }
+  | { kind: 'project'; projectId: string }
+  | { kind: 'deleted' };
+
+/** The sidebar's entries into the TODO list. */
+export type TodoSidebarNav = {
+  /** Null while the main area shows the chat or a conversation instead. */
+  current: TodoListPlace | null;
+  /** Open TODOs by project id, for the week in view. */
+  openCounts: ReadonlyMap<string, number>;
+  onShowAll: () => void;
+  onShowDeleted: () => void;
+  onSelectProject: (projectId: string) => void;
+};
+
+/** One of the sidebar's plain entries: an icon and a label, current while it is shown. */
+function SidebarEntry({
+  icon,
+  label,
+  current,
+  onShow,
+}: {
+  icon: ReactNode;
+  label: string;
+  current: boolean;
+  onShow: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="history-chat-row"
+      aria-current={current ? 'true' : undefined}
+      onClick={onShow}
+    >
+      {icon}
+      <span className="history-chat-row__label">{label}</span>
+    </button>
+  );
+}
+
 /** The chat's row, with Pantaray's unread messages counted. */
 function ChatRow({
   t,
@@ -156,16 +205,18 @@ function ChatRow({
 }
 
 /**
- * The History page's sidebar: search, the projects, the chat, and the user's tasks by day under
- * their heading. The heading starts a new task in two places: ✎ in the detail pane, and the small
- * window's icon in the small window, as the global shortcut does. A task row selects what the
- * detail pane shows; the selected one is marked current.
+ * The home page's sidebar: search, all TODOs, the projects (each selects its TODOs), the deleted
+ * TODOs, the chat, and the other conversations by day under their heading. The heading starts a
+ * new task in two places: ✎ in the detail pane, and the small window's icon in the small window,
+ * as the global shortcut does. A conversation row selects what the main area shows; the selected
+ * entry is marked current.
  */
 export function HistorySidebar({
   history,
   projects,
   creatingProject,
   onCreatingProjectChange,
+  todoNav,
   selected,
   onSelect,
   hidden,
@@ -176,7 +227,9 @@ export function HistorySidebar({
   projects: WorkspaceProjects;
   creatingProject: boolean;
   onCreatingProjectChange: (creating: boolean) => void;
-  selected: HistorySelection;
+  todoNav: TodoSidebarNav;
+  /** Null while the main area shows a TODO list. */
+  selected: HistorySelection | null;
   onSelect: (selection: HistorySelection, options?: { replace: true }) => void;
   /** Hidden by the page's toggle; it stays mounted, so its search and scroll are kept. */
   hidden: boolean;
@@ -435,12 +488,31 @@ export function HistorySidebar({
           </div>
         ) : null}
       </div>
+      <div className="history-sidebar__chat">
+        <SidebarEntry
+          icon={<ListTodo size={16} strokeWidth={1.8} aria-hidden="true" />}
+          label={t('todo.nav.all')}
+          current={todoNav.current?.kind === 'all'}
+          onShow={todoNav.onShowAll}
+        />
+      </div>
       <HistoryProjects
         projects={projects}
         creating={creatingProject}
         onCreatingChange={onCreatingProjectChange}
+        selectedProjectId={todoNav.current?.kind === 'project' ? todoNav.current.projectId : null}
+        openCounts={todoNav.openCounts}
+        onSelectProject={todoNav.onSelectProject}
         t={t}
       />
+      <div className="history-sidebar__chat history-sidebar__deleted">
+        <SidebarEntry
+          icon={<Trash2 size={16} strokeWidth={1.8} aria-hidden="true" />}
+          label={t('todo.nav.deleted')}
+          current={todoNav.current?.kind === 'deleted'}
+          onShow={todoNav.onShowDeleted}
+        />
+      </div>
       <ChatRow t={t} current={selected === 'chat'} onShow={() => onSelect('chat')} />
       <section className="history-tasks" aria-labelledby="history-tasks-title">
         <div className="history-projects__head">

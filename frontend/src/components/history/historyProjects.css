@@ -40,6 +40,7 @@
 .history-projects__add:focus-visible,
 .history-project__handle:focus-visible,
 .history-project__toggle:focus-visible,
+.history-project__select:focus-visible,
 .history-project__folder-action:focus-visible,
 .history-project__path:focus-visible,
 .history-project-menu__item:focus-visible {
@@ -86,19 +87,56 @@
 }
 
 .history-project__toggle {
-  display: flex;
-  flex: 1;
+  display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
-  gap: 4px;
-  min-width: 0;
-  padding: 6px 4px 6px 0;
+  justify-content: center;
+  width: 20px;
+  height: 28px;
+  padding: 0;
   border: none;
-  border-radius: 8px;
+  border-radius: 6px;
   background: transparent;
   color: var(--fog-text-3);
   cursor: pointer;
+}
+
+.history-project__toggle:hover {
+  color: var(--fog-text);
+}
+
+/* The name selects the project's TODOs; the selected one is the row's current. */
+.history-project__select {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 4px 6px 2px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
   font: inherit;
   text-align: left;
+}
+
+.history-project:has(> .history-project__select[aria-current='true']) {
+  background: var(--fog-mist-strong);
+}
+
+.history-project__select[aria-current='true'] .history-project__name {
+  color: var(--fog-text);
+  font-weight: var(--weight-semibold);
+}
+
+/* How many TODOs are open: a count in the meta tone, not a chip. */
+.history-project__count {
+  flex: none;
+  color: var(--fog-text-3);
+  font-size: var(--text-meta-size);
+  font-variant-numeric: tabular-nums;
 }
 
 .history-project__name {

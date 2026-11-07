@@ -14,15 +14,20 @@ import {
 
 import { HistoryProjectMenu, type HistoryProjectMenuItem } from './HistoryProjectMenu';
 
-const projectToggleId = (projectId: string) => `history-project:${projectId}`;
+const projectNameId = (projectId: string) => `history-project:${projectId}`;
+const projectToggleId = (projectId: string) => `history-project-toggle:${projectId}`;
+const openCountId = (projectId: string) => `history-project-open:${projectId}`;
+/** Past this the badge shows "99+"; the description still says the number. */
+const MAX_SHOWN_OPEN = 99;
 const folderRemoveId = (projectId: string, folderId: string) =>
   `history-project-folder-remove:${projectId}:${folderId}`;
 
 const focusById = (id: string) => document.getElementById(id)?.focus();
 
 /**
- * One project in the sidebar: its name toggles its folders and organization, its 「…」 menu
- * holds the actions, and it is dragged by the row (or moved from the keyboard by its handle).
+ * One project in the sidebar: its name selects its TODOs, with how many are open beside it, the
+ * chevron before it toggles its folders and organization, its 「…」 menu holds the actions, and
+ * it is dragged by the row (or moved from the keyboard by its handle).
  */
 export function HistoryProjectRow({
   project,
@@ -32,7 +37,10 @@ export function HistoryProjectRow({
   menuButtonId,
   renaming,
   dragDisabled,
+  selected,
+  openCount,
   t,
+  onSelect,
   onRename,
   onRenameEnd,
   onRemoveFolder,
@@ -48,7 +56,12 @@ export function HistoryProjectRow({
   menuButtonId: string;
   renaming: boolean;
   dragDisabled: boolean;
+  /** Its TODOs are the ones in view. */
+  selected: boolean;
+  /** The open TODOs of the week in view; none shows no badge. */
+  openCount: number;
   t: ReturnType<typeof useI18n>['t'];
+  onSelect: () => void;
   onRename: (displayName: string) => Promise<boolean>;
   /** False when another row's rename has begun since, which keeps its field and its focus. */
   onRenameEnd: () => boolean;
@@ -69,7 +82,7 @@ export function HistoryProjectRow({
   const projectFolderIds = folders.map((folder) => folder.folder_id);
 
   const endRename = () => {
-    if (onRenameEnd()) focusById(projectToggleId(project.project_id));
+    if (onRenameEnd()) focusById(projectNameId(project.project_id));
   };
   const removeFolder = async (folderId: string) => {
     if (!(await onRemoveFolder(folderId))) return;
@@ -87,7 +100,7 @@ export function HistoryProjectRow({
       data-project-id={project.project_id}
       style={{ transform: CSS.Translate.toString(transform), transition }}
       // A pointer drags the whole row; the keyboard picks it up from the handle, so Enter and
-      // Space on the name still open and close it.
+      // Space on the name still select it.
       onPointerDown={(event) => listeners?.onPointerDown?.(event)}
     >
       <button
@@ -102,6 +115,21 @@ export function HistoryProjectRow({
       >
         <GripVertical size={13} aria-hidden="true" />
       </button>
+      <button
+        type="button"
+        id={projectToggleId(project.project_id)}
+        className="history-project__toggle"
+        aria-label={t('history.projects.toggleFolders', { name: project.display_name })}
+        aria-expanded={expanded}
+        aria-controls={detailsId}
+        onClick={() => setExpanded((open) => !open)}
+      >
+        {expanded ? (
+          <ChevronDown size={13} aria-hidden="true" />
+        ) : (
+          <ChevronRight size={13} aria-hidden="true" />
+        )}
+      </button>
       {renaming ? (
         <ProjectNameField
           initialName={project.display_name}
@@ -115,20 +143,25 @@ export function HistoryProjectRow({
       ) : (
         <button
           type="button"
-          id={projectToggleId(project.project_id)}
-          className="history-project__toggle"
-          aria-expanded={expanded}
-          aria-controls={detailsId}
-          onClick={() => setExpanded((open) => !open)}
+          id={projectNameId(project.project_id)}
+          className="history-project__select"
+          aria-current={selected ? 'true' : undefined}
+          aria-describedby={openCount > 0 ? openCountId(project.project_id) : undefined}
+          onClick={onSelect}
         >
-          {expanded ? (
-            <ChevronDown size={13} aria-hidden="true" />
-          ) : (
-            <ChevronRight size={13} aria-hidden="true" />
-          )}
           <span className="history-project__name">{project.display_name}</span>
+          {openCount > 0 ? (
+            <span className="history-project__count" aria-hidden="true">
+              {openCount > MAX_SHOWN_OPEN ? `${MAX_SHOWN_OPEN}+` : openCount}
+            </span>
+          ) : null}
         </button>
       )}
+      {openCount > 0 ? (
+        <span id={openCountId(project.project_id)} hidden>
+          {t('history.projects.openCount', { count: openCount })}
+        </span>
+      ) : null}
       <HistoryProjectMenu
         label={t('history.projects.menu', { name: project.display_name })}
         buttonId={menuButtonId}

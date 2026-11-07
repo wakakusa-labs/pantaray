@@ -43,18 +43,27 @@ const menuButtonId = (projectId: string) => `history-project-menu:${projectId}`;
 /**
  * The sidebar's projects, managed in place: ＋ names a new project, which then takes its folders,
  * each row's menu renames it, adds folders, sets its organization, opens it in Finder or deletes
- * it, and rows are dragged into order. They do not filter or group the tasks below.
+ * it, and rows are dragged into order. A row's name shows that project's TODOs; the conversations
+ * below are not filtered by it.
  */
 export function HistoryProjects({
   projects,
   creating,
   onCreatingChange,
+  selectedProjectId,
+  openCounts,
+  onSelectProject,
   t,
 }: {
   projects: WorkspaceProjects;
   /** Whether the new project's name field shows; the composers' add opens it as well. */
   creating: boolean;
   onCreatingChange: (creating: boolean) => void;
+  /** The project whose TODOs are in view, or null. */
+  selectedProjectId: string | null;
+  /** Open TODOs by project id, for the week in view. */
+  openCounts: ReadonlyMap<string, number>;
+  onSelectProject: (projectId: string) => void;
   t: ReturnType<typeof useI18n>['t'];
 }) {
   const { settings, errorMessage, pending, dragController } = projects;
@@ -170,7 +179,10 @@ export function HistoryProjects({
                   menuButtonId={menuButtonId(project.project_id)}
                   renaming={renamingId === project.project_id}
                   dragDisabled={projects.busy}
+                  selected={selectedProjectId === project.project_id}
+                  openCount={openCounts.get(project.project_id) ?? 0}
                   t={t}
+                  onSelect={() => onSelectProject(project.project_id)}
                   onRename={(name) => projects.renameProject(project.project_id, name)}
                   onRenameEnd={() => endRename(project.project_id)}
                   onRemoveFolder={(folderId) =>

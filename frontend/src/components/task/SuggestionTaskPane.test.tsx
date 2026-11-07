@@ -87,13 +87,18 @@ const publish = (snapshot: OverlaySnapshot) =>
   act(async () => snapshotListener?.({ snapshot, initialUiState: null }));
 const emit = (event: OrchestrationServerEvent) => act(async () => eventListener?.(event));
 
-async function renderPane(suggestionId = 'sug-1', requestedFile: string | null = null) {
+async function renderPane(
+  suggestionId = 'sug-1',
+  requestedFile: string | null = null,
+  canDismiss = true
+) {
   const rendered = render(
     <UiLanguageProvider initialLanguage="en">
       <SuggestionTaskPane
         suggestionId={suggestionId}
         title="Invoice draft"
         requestedFile={requestedFile}
+        canDismiss={canDismiss}
         onStarted={onStarted}
         onAddProject={() => undefined}
       />
@@ -191,6 +196,15 @@ describe('SuggestionTaskPane', () => {
     expect(order[0]).toBe('field');
     expect(order[1]).toBe('Add files');
     expect(order.slice(-2)).toEqual(['Dismiss suggestion', 'Accept']);
+  });
+
+  it("offers accept alone for a TODO's suggestion, which is let go by deleting the TODO", async () => {
+    await renderPane('sug-1', null, false);
+
+    expect(screen.queryByRole('button', { name: 'Dismiss suggestion' })).toBeNull();
+    fireEvent.click(acceptButton());
+    expect(acceptAction).toHaveBeenCalledWith(expect.objectContaining({ suggestionId: 'sug-1' }));
+    expect(acceptButton()).toBeDisabled();
   });
 
   it('leaves both decisions to their buttons: Enter neither approves nor dismisses', async () => {

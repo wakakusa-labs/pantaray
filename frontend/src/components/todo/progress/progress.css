@@ -1,0 +1,311 @@
+/* The progress view takes its structure from type, hairlines and two thin tracks; no boxes. */
+
+.todo-progress__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--fog-line);
+}
+
+.todo-progress__head h2 {
+  margin: 0;
+  color: var(--fog-text);
+  font-size: var(--text-heading-size-lg);
+  font-weight: var(--text-heading-weight);
+}
+
+.todo-progress__periods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* The chosen period keeps its face and gains a ring, so it does not hang on colour alone. */
+.todo-progress__period[aria-pressed='true'] {
+  border-color: var(--focus-ring-color);
+  box-shadow: inset 0 0 0 1px var(--focus-ring-color);
+  color: var(--fog-light);
+}
+
+.todo-progress__lead {
+  margin: 20px 0 0;
+  color: var(--fog-text);
+  font-size: 18px;
+  font-weight: var(--weight-semibold);
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+
+.todo-progress-goal,
+.todo-progress-rows {
+  margin-top: 28px;
+  padding-top: 14px;
+  border-top: 1px solid var(--fog-line);
+}
+
+.todo-progress-goal h3,
+.todo-progress-rows h3 {
+  margin: 0;
+  color: var(--fog-text);
+  font-size: var(--text-heading-size);
+  font-weight: var(--text-heading-weight);
+  overflow-wrap: anywhere;
+}
+
+.todo-progress-goal p {
+  margin: 8px 0 0;
+  color: var(--fog-text-2);
+  font-size: 13.5px;
+  overflow-wrap: anywhere;
+}
+
+.todo-progress-goal p b {
+  color: var(--fog-text);
+  font-weight: var(--weight-semibold);
+}
+
+.todo-progress-goal .todo-progress-goal__statement {
+  margin-top: 2px;
+  color: var(--fog-text-3);
+  font-size: 12.5px;
+}
+
+.todo-progress-track {
+  margin: 14px 0 12px;
+  font-size: var(--text-meta-size);
+  font-variant-numeric: tabular-nums;
+}
+
+.todo-progress-track__over {
+  margin-bottom: 6px;
+}
+
+.todo-progress-track__expected {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  color: var(--warning-color);
+}
+
+.todo-progress-track__bar {
+  position: relative;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--fog-mist-strong);
+}
+
+.todo-progress-track__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 2px;
+  background: var(--fog-text);
+}
+
+.todo-progress-track__tick {
+  position: absolute;
+  top: -6px;
+  width: 1px;
+  height: 16px;
+  background: var(--warning-color);
+}
+
+.todo-progress-track__under {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px 12px;
+  margin-top: 8px;
+  color: var(--fog-text);
+}
+
+.todo-progress-track__under span:last-child {
+  color: var(--fog-text-3);
+}
+
+.todo-progress-records {
+  margin-top: 10px;
+  font-size: 13px;
+}
+
+.todo-progress-records summary {
+  width: fit-content;
+  border-radius: 6px;
+  color: var(--fog-text-2);
+  cursor: pointer;
+}
+
+.todo-progress-records summary:focus-visible,
+.todo-progress-link:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.todo-progress-records ul,
+.todo-progress-rows ul {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.todo-progress-record {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--fog-line);
+}
+
+.todo-progress-record__body {
+  display: grid;
+  flex: 1 1 240px;
+  gap: 2px;
+  min-width: 0;
+}
+
+.todo-progress-record__note {
+  color: var(--fog-text);
+  overflow-wrap: anywhere;
+}
+
+.todo-progress-record__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 12px;
+  color: var(--fog-text-3);
+  font-size: var(--text-meta-size);
+  font-variant-numeric: tabular-nums;
+}
+
+.todo-progress-record__error,
+.todo-goal-form__error,
+.todo-goal-form__failure {
+  color: var(--danger-color);
+  font-size: var(--text-meta-size);
+}
+
+/* Reads as a link inside the line of text; it opens a conversation in the app, not a page. */
+.todo-progress-link {
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fog-text-2);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.todo-progress-link:hover {
+  color: var(--fog-text);
+}
+
+.todo-progress-row {
+  display: grid;
+  grid-template-columns: minmax(5.5em, auto) minmax(40px, 1fr) minmax(0, auto) auto;
+  gap: 4px 14px;
+  align-items: center;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--fog-line);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.todo-progress-row__label,
+.todo-progress-row__records {
+  color: var(--fog-text);
+  overflow-wrap: anywhere;
+}
+
+.todo-progress-row__bar {
+  position: relative;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--fog-mist-strong);
+}
+
+.todo-progress-row__bar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 2px;
+  background: rgb(var(--accent-rgb));
+}
+
+.todo-progress-row .todo-progress-records {
+  margin-top: 0;
+}
+
+.todo-progress-row__checked {
+  color: var(--fog-text-3);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.todo-progress-row__texts,
+.todo-progress-row__records-list {
+  grid-column: 1 / -1;
+  color: var(--fog-text-2);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.todo-goal-form {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: min(460px, calc(100vw - 32px));
+  padding: 24px;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--fog-popover);
+  color: var(--fog-text);
+}
+
+.todo-goal-form::backdrop {
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.todo-goal-form h2 {
+  margin: 0 0 14px;
+  font-size: var(--text-heading-size-lg);
+  font-weight: var(--text-heading-weight);
+  overflow-wrap: anywhere;
+}
+
+.todo-goal-form__field {
+  display: grid;
+  flex: 1 1 140px;
+  gap: 4px;
+  min-width: 0;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.todo-goal-form__field label {
+  color: var(--fog-text-2);
+}
+
+.todo-goal-form__pair {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 12px;
+}
+
+.todo-goal-form__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  margin-top: 18px;
+}
+
+/* Removing the goal stands apart from saving it. */
+.todo-goal-form__clear {
+  margin-right: auto;
+  color: var(--danger-color);
+}

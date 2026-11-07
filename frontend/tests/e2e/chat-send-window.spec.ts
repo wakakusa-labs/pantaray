@@ -22,6 +22,8 @@ test('the History chat sends to the local backend and reads its messages back', 
       )
       .toBe('ready');
     await page.reload();
+    // History opens on the TODO list; the chat is its own row in the sidebar.
+    await page.getByRole('button', { name: 'チャット', exact: true }).click();
 
     const chat = page.getByRole('list', { name: 'Pantaray とのチャット' });
     const input = page.getByRole('textbox', { name: 'メッセージ' });
@@ -104,6 +106,8 @@ test('a project named with @ in the chat reaches the local backend with its fold
       return created.real_path;
     }, fs.realpathSync(folder));
     await page.reload();
+    // History opens on the TODO list; the chat is its own row in the sidebar.
+    await page.getByRole('button', { name: 'チャット', exact: true }).click();
 
     const input = page.getByRole('textbox', { name: 'メッセージ' });
     await input.pressSequentially('@Au');

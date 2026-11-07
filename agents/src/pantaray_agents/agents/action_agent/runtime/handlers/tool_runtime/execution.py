@@ -22,6 +22,7 @@ from pantaray_agents.agents.action_agent.tools import (
     SEND_MESSAGE_TO_SUBAGENT_TOOL_ID,
     SPAWN_SUBAGENT_TOOL_ID,
     SUBMIT_FINAL_ANSWER_TOOL_ID,
+    TODO_TOOL_IDS,
     WAIT_SUBAGENTS_TOOL_ID,
     WRITE_SESSION_MEMORY_TOOL_ID,
     ZANEI_QUERY_TOOL_ID,
@@ -106,6 +107,7 @@ from .subagent_spawn import run_spawn_subagent_tool
 from .subagent_wait import run_wait_subagents_tool
 from .submit_final_answer import run_submit_final_answer_tool
 from .thinking import run_thinking_tool
+from .todo import run_todo_tool
 from .validation import validate_tool_args
 from .zanei import run_zanei_query_tool, run_zanei_timeline_tool
 
@@ -315,6 +317,10 @@ async def run_validated_tool_impl(
     elif tool_def.tool_id == "history_fetch":
         result = await run_history_fetch_wrapper(
             agent, resolved_step_id, tool_def, args, state
+        )
+    elif tool_def.tool_id in TODO_TOOL_IDS:
+        result = run_todo_tool(
+            step_id=resolved_step_id, tool_def=tool_def, args=args, state=state
         )
     elif tool_def.tool_id == INTEGRATION_LIST_TOOLS_TOOL_ID:
         result = await run_integration_list_tool(

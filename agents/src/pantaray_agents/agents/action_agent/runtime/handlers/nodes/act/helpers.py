@@ -53,10 +53,12 @@ def _resolve_act_tool_contract(
 
     phase = state.get("phase")
     if phase == "executing":
-        integrations = _ensure_context(state).get("integration_tools_exposed", False)
+        context = _ensure_context(state)
+        integrations = context.get("integration_tools_exposed", False)
+        todo = context.get("served_todo_id") is not None
         return (
-            select_supervisor_act_tool_registry(integrations=integrations),
-            select_supervisor_act_tool_ids(integrations=integrations),
+            select_supervisor_act_tool_registry(integrations=integrations, todo=todo),
+            select_supervisor_act_tool_ids(integrations=integrations, todo=todo),
             "supervisor",
         )
     raise ValueError(

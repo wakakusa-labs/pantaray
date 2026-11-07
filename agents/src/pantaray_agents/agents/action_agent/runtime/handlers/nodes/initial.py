@@ -129,6 +129,10 @@ async def initialize_context(
     context["agents_md_instructions"] = load_pantaray_agents_md()
     if "integration_tools_exposed" not in context:
         context["integration_tools_exposed"] = await integration_tools_available()
+    if "served_todo_id" not in context:
+        context["served_todo_id"] = _read_served_todo_id(
+            user_id=str(request.user_id), action_id=request.action_id
+        )
 
     # 親ランタイムは単一 ReAct のみ。mandatory planning phase を経由せず executing に
     # 直行する。
@@ -179,6 +183,14 @@ async def initialize_context(
             images=current_user_message.images,
         ),
     )
+
+
+def _read_served_todo_id(*, user_id: str, action_id: str) -> str | None:
+    # The TODO store reads Action conversations through modules that import the
+    # Action agent, so importing it when this module loads closes a cycle.
+    from pantaray_agents.local_runtime.todos.store import read_todo_for_action
+
+    return read_todo_for_action(user_id=user_id, action_id=action_id)
 
 
 def ensure_memory_indexes(state: ActionAgentState, *, user_id: str) -> None:

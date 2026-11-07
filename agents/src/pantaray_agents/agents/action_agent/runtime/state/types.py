@@ -182,6 +182,9 @@ class ActionAgentContext(TypedDict, total=False):
     # turn; the integration tools are offered for the whole Action or not at all,
     # so the tool schemas never change mid-Action.
     integration_tools_exposed: bool
+    # The TODO whose conversation this Action is, read on its first turn; the
+    # TODO tools are offered exactly when it is not None.
+    served_todo_id: str | None
     # The Executing head's field values from the Action's first conversation
     # turn. Every later turn renders the head from them, byte for byte.
     executing_head_fields: dict[str, str]

@@ -7,6 +7,7 @@ import {
   OVERLAY_MESSAGES,
   SETTINGS_MESSAGES,
   TODO_MESSAGES,
+  TODO_PROGRESS_MESSAGES,
 } from './messageCatalog';
 
 export const MESSAGES = {
@@ -19,6 +20,7 @@ export const MESSAGES = {
     ...OVERLAY_MESSAGES.en,
     ...ONBOARDING_MESSAGES.en,
     ...TODO_MESSAGES.en,
+    ...TODO_PROGRESS_MESSAGES.en,
   },
   ja: {
     ...COMMON_MESSAGES.ja,
@@ -29,5 +31,6 @@ export const MESSAGES = {
     ...OVERLAY_MESSAGES.ja,
     ...ONBOARDING_MESSAGES.ja,
     ...TODO_MESSAGES.ja,
+    ...TODO_PROGRESS_MESSAGES.ja,
   },
 } as const;

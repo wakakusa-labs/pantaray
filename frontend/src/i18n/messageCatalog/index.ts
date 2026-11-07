@@ -6,3 +6,4 @@ export { ONBOARDING_MESSAGES } from './onboarding';
 export { OVERLAY_MESSAGES } from './overlay';
 export { SETTINGS_MESSAGES } from './settings';
 export { TODO_MESSAGES } from './todo';
+export { TODO_PROGRESS_MESSAGES } from './todoProgress';

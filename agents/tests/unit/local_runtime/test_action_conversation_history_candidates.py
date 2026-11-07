@@ -23,6 +23,7 @@ from pantaray_agents.local_runtime.storage.migrations import MigrationError
 from pantaray_agents.schema.agent.action_message import (
     ActionUserMessageInput,
     SuggestionApprovalInput,
+    TodoHandoffInput,
 )
 
 from .local_action_repository_support import bootstrap_action_repository_db
@@ -337,3 +338,170 @@ def test_requires_caller_owned_transaction() -> None:
         connection.commit()
         with pytest.raises(MigrationError, match="caller-owned transaction"):
             _read(connection)
+
+
+_TODO_AT = "2026-08-30T00:05:00.123Z"
+
+
+def _insert_todo(
+    connection: sqlite3.Connection,
+    todo_id: str,
+    *,
+    suggestion_id: str | None = None,
+    deleted: bool = False,
+) -> None:
+    connection.execute(
+        """INSERT INTO todo_items(
+               todo_id,user_id,text,author,origin_kind,suggestion_id,week_start,
+               deleted_by,deleted_at,created_at)
+           VALUES (?,'user-1','A TODO','ai',?,?,'2026-08-24',?,?,?)""",
+        (
+            todo_id,
+            "written" if suggestion_id is None else "suggestion",
+            suggestion_id,
+            "user" if deleted else None,
+            _TODO_AT if deleted else None,
+            _TODO_AT,
+        ),
+    )
+
+
+def _insert_action(
+    connection: sqlite3.Connection,
+    action_id: str,
+    *,
+    message: ActionUserMessageInput,
+    step_name: str = "user_request",
+    opening_text: str | None = None,
+    reply_to: str | None = None,
+) -> None:
+    run_id = f"run-{action_id}"
+    connection.execute(
+        """INSERT INTO agent_actions(
+           action_id,user_id,initial_user_message_id,execution_target_json,status,
+           final_output,prompt_name,prompt_version,created_at,updated_at)
+           VALUES (?,'user-1',?,'{"kind":"scratch"}','success','','test','1',?,?)""",
+        (action_id, message.message_id, _TODO_AT, _TODO_AT),
+    )
+    connection.execute(
+        """INSERT INTO processes(process_id,user_id,kind,status,action_id,started_at,
+           updated_at,completed_at,heartbeat_at,terminal_event_id,next_event_seq)
+           VALUES (?,'user-1','action','completed',?,?,?,?,?,NULL,1)""",
+        (run_id, action_id, _TODO_AT, _TODO_AT, _TODO_AT, _TODO_AT),
+    )
+    user_number = 1
+    if opening_text is not None:
+        user_number = 2
+        connection.execute(
+            """INSERT INTO agent_action_steps(
+               step_id,action_id,user_id,step_number,local_step_number,short_step_id,
+               step_type,step_name,status,goal_handle,llm_response_text,
+               adopted_process_id,source_suggestion_id,started_at,completed_at,created_at)
+               VALUES (?,?,'user-1',1,1,'S-1-ASSISTANT','assistant_message',
+                       'assistant_message','success','S',?,?,?,?,?,?)""",
+            (f"opening-{action_id}", action_id, opening_text, run_id, reply_to)
+            + (_TODO_AT,) * 3,
+        )
+    connection.execute(
+        """INSERT INTO agent_action_steps(
+           step_id,action_id,user_id,step_number,local_step_number,short_step_id,
+           step_type,step_name,status,goal_handle,user_message_id,user_message_json,
+           user_request_text,accepted_sequence,adopted_process_id,created_at)
+           VALUES (?,?,'user-1',?,?,?,'user_request',?,'success','S',?,?,?,1,?,?)""",
+        (
+            f"user-{action_id}",
+            action_id,
+            user_number,
+            user_number,
+            f"S-{user_number}-USER",
+            step_name,
+            message.message_id,
+            message.model_dump_json(),
+            message.content,
+            run_id,
+            _TODO_AT,
+        ),
+    )
+
+
+def _listed(connection: sqlite3.Connection, search_text: str = "") -> set[str]:
+    return {
+        item.stable_id for item in _read(connection, search_text=search_text).candidates
+    }
+
+
+def test_a_todos_conversation_leaves_the_dated_list_and_its_search(
+    history_connection: sqlite3.Connection,
+) -> None:
+    # Pantaray picks up a TODO: its first USER message names the TODO it serves.
+    _insert_action(
+        history_connection,
+        "action-pickup",
+        message=ActionUserMessageInput(
+            message_id="message-pickup",
+            content="Pantaray started this turn",
+            todo_handoff=TodoHandoffInput(todo_id="todo-picked", project=None),
+        ),
+        step_name="todo_pickup_request",
+        opening_text="Pickup needle",
+    )
+    # Replying to a Suggestion makes the reply's Action its conversation.
+    _insert_action(
+        history_connection,
+        "action-reply",
+        message=ActionUserMessageInput(message_id="message-reply", content="Go"),
+        opening_text="Reply needle",
+        reply_to="suggestion-message",
+    )
+    # An Action the user started that serves another TODO's id stays listed:
+    # only a TODO row in the list owns a conversation.
+    _insert_action(
+        history_connection,
+        "action-orphan-handoff",
+        message=ActionUserMessageInput(
+            message_id="message-orphan",
+            content="Orphan needle",
+            todo_handoff=TodoHandoffInput(todo_id="todo-purged", project=None),
+        ),
+    )
+    everything = {
+        "act-1",
+        "action-terminal",
+        "action-pickup",
+        "action-reply",
+        "action-orphan-handoff",
+        "suggestion-invalid",
+    }
+    assert _listed(history_connection) == everything
+    assert _listed(history_connection, "pickup needle") == {"action-pickup"}
+
+    _insert_todo(history_connection, "todo-picked", deleted=True)
+    # act-1 accepted sug-1; action-reply replied to suggestion-message.
+    _insert_todo(history_connection, "todo-accepted", suggestion_id="sug-1")
+    _insert_todo(history_connection, "todo-replied", suggestion_id="suggestion-message")
+    _insert_todo(
+        history_connection, "todo-unanswered", suggestion_id="suggestion-invalid"
+    )
+
+    assert _listed(history_connection) == {"action-terminal", "action-orphan-handoff"}
+    for search_text in ("pickup needle", "reply needle", "café", "standalone"):
+        assert _listed(history_connection, search_text) == set()
+    assert _listed(history_connection, "orphan needle") == {"action-orphan-handoff"}
+    assert _listed(history_connection, "terminal needle") == {"action-terminal"}
+
+    # A link to the conversation still names it.
+    for item in (
+        ("conversation", "action-pickup"),
+        ("conversation", "act-1"),
+        ("conversation", "action-reply"),
+        ("suggestion", "suggestion-invalid"),
+    ):
+        page = read_conversation_history_candidates_in_connection(
+            connection=history_connection,
+            user_id="user-1",
+            search_text="",
+            cursor=None,
+            limit=1,
+            item=item,
+        )
+        assert [candidate.stable_id for candidate in page.candidates] == [item[1]]

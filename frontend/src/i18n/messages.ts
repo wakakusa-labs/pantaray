@@ -6,6 +6,7 @@ import {
   ONBOARDING_MESSAGES,
   OVERLAY_MESSAGES,
   SETTINGS_MESSAGES,
+  TODO_MESSAGES,
 } from './messageCatalog';
 
 export const MESSAGES = {
@@ -17,6 +18,7 @@ export const MESSAGES = {
     ...AUTH_MESSAGES.en,
     ...OVERLAY_MESSAGES.en,
     ...ONBOARDING_MESSAGES.en,
+    ...TODO_MESSAGES.en,
   },
   ja: {
     ...COMMON_MESSAGES.ja,
@@ -26,5 +28,6 @@ export const MESSAGES = {
     ...AUTH_MESSAGES.ja,
     ...OVERLAY_MESSAGES.ja,
     ...ONBOARDING_MESSAGES.ja,
+    ...TODO_MESSAGES.ja,
   },
 } as const;

@@ -13,6 +13,16 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 
 from pantaray_agents.local_runtime.todos.core import DELETED_TODO_RETENTION
+from pantaray_agents.local_runtime.todos.db import (
+    AllScope,
+    AnyProject,
+    NoOrganizationScope,
+    NoProject,
+    OneProject,
+    OrganizationScope,
+    TodoProjectFilter,
+    TodoScope,
+)
 from pantaray_agents.local_runtime.todos.display import (
     TodoDisplayState,
     display_state,
@@ -27,15 +37,7 @@ from pantaray_agents.local_runtime.todos.model import (
     TodoConversation,
     TodoDue,
 )
-from pantaray_agents.local_runtime.todos.store import (
-    AllScope,
-    AnyProject,
-    NoOrganizationScope,
-    NoProject,
-    OneProject,
-    OrganizationScope,
-    TodoProjectFilter,
-    TodoScope,
+from pantaray_agents.local_runtime.todos.reads import (
     TodoWeek,
 )
 from pantaray_agents.local_runtime.todos.week import shift_days

@@ -7,7 +7,9 @@ from contextlib import closing
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from pantaray_agents.local_runtime.todos.store import TodoClock
+from pantaray_agents.local_runtime.todos.clock import (
+    TodoClock,
+)
 
 USER = "user-1"
 T = "2026-11-01T00:00:00.000Z"

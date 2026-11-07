@@ -15,6 +15,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pantaray_agents.agents.core import PublicAgentHTTPError
 from pantaray_agents.auth_http import get_current_user_id_from_token
 from pantaray_agents.local_runtime.todos import core
+from pantaray_agents.local_runtime.todos.clock import (
+    TodoClock,
+    read_todo_clock,
+)
 from pantaray_agents.local_runtime.todos.core import Rejected
 from pantaray_agents.local_runtime.todos.model import (
     ActionConversation,
@@ -23,18 +27,18 @@ from pantaray_agents.local_runtime.todos.model import (
     Todo,
     TodoId,
 )
-from pantaray_agents.local_runtime.todos.store import (
-    TodoClock,
+from pantaray_agents.local_runtime.todos.reads import (
     TodoEntry,
-    create_todo_item,
     read_deleted_todos,
     read_todo,
-    read_todo_clock,
     read_todo_week,
+)
+from pantaray_agents.local_runtime.todos.week import effective_week
+from pantaray_agents.local_runtime.todos.writes import (
+    create_todo_item,
     set_todo_check,
     update_todo,
 )
-from pantaray_agents.local_runtime.todos.week import effective_week
 from pantaray_agents.schema.agent.base import ErrorType
 from pantaray_agents.schema.todos import (
     DeletedTodoView,

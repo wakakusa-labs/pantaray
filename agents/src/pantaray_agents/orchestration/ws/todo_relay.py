@@ -14,7 +14,9 @@ import sqlite3
 from typing import Final
 
 import pantaray_agents.dependencies as deps
-from pantaray_agents.local_runtime.todos.store import read_todo_revision
+from pantaray_agents.local_runtime.todos.reads import (
+    read_todo_revision,
+)
 from pantaray_agents.orchestration.ws.background_task import spawn_ws_background_task
 from pantaray_agents.orchestration.ws.base import BaseWSHandler
 from pantaray_agents.orchestration.ws.task_supervisor import WsTaskSupervisor

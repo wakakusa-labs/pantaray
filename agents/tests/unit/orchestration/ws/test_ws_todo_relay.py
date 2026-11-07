@@ -20,7 +20,10 @@ from pantaray_agents.local_runtime.runtime.identity import (
 from pantaray_agents.local_runtime.storage.migrations import load_default_migrations
 from pantaray_agents.local_runtime.todos import core
 from pantaray_agents.local_runtime.todos.model import Todo
-from pantaray_agents.local_runtime.todos.store import create_todo_item, update_todo
+from pantaray_agents.local_runtime.todos.writes import (
+    create_todo_item,
+    update_todo,
+)
 from pantaray_agents.orchestration.session.store import InMemorySessionStore
 from pantaray_agents.orchestration.ws import todo_relay
 from pantaray_agents.orchestration.ws.handler import WSOrchestrationHandler

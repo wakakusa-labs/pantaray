@@ -4,21 +4,27 @@ from dataclasses import replace
 from pathlib import Path
 
 from pantaray_agents.local_runtime.todos import core
+from pantaray_agents.local_runtime.todos.clock import (
+    TodoClock,
+)
 from pantaray_agents.local_runtime.todos.core import CheckSet, Rejected
-from pantaray_agents.local_runtime.todos.model import Todo, TodoDue
-from pantaray_agents.local_runtime.todos.store import (
+from pantaray_agents.local_runtime.todos.db import (
     AllScope,
     AnyProject,
     NoOrganizationScope,
     NoProject,
     OrganizationScope,
-    TodoClock,
     TodoProjectFilter,
     TodoScope,
-    create_todo_item,
+)
+from pantaray_agents.local_runtime.todos.model import Todo, TodoDue
+from pantaray_agents.local_runtime.todos.reads import (
     read_deleted_todos,
     read_todo_revision,
     read_todo_week,
+)
+from pantaray_agents.local_runtime.todos.writes import (
+    create_todo_item,
     set_todo_check,
     update_todo,
 )

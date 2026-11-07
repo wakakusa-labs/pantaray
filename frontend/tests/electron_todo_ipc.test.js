@@ -228,6 +228,215 @@ test('a refusal keeps its error code; other failures and off-contract responses 
   );
 });
 
+const GOAL = {
+  project_id: 'project 1',
+  text: 'Ship 40 estimates',
+  target: 40,
+  unit: '件',
+  deadline: '2026-12-31',
+  set_at: '2026-11-01T00:00:00.000000Z',
+};
+
+const GOAL_REQUEST = {
+  project_id: 'project 1',
+  text: 'Ship 40 estimates',
+  target: 40,
+  unit: '件',
+  deadline: '2026-12-31',
+};
+
+const RECORD_REQUEST = {
+  todo_id: 'todo 1',
+  client_record_id: 'c-rec-1',
+  quantity: 2.5,
+  unit: '件',
+  note: 'Sent two and a half',
+};
+
+const USER_RECORD = {
+  record_id: 'rec-1',
+  todo_id: 'todo 1',
+  project_id: 'project 1',
+  quantity: 2.5,
+  unit: '件',
+  note: 'Sent two and a half',
+  evidence: { kind: 'user' },
+  recorded_at: '2026-11-03T01:02:03.000000Z',
+};
+
+const AI_RECORD = {
+  ...USER_RECORD,
+  record_id: 'rec-2',
+  project_id: null,
+  evidence: { kind: 'action_steps', action_id: 'a-1', step_ids: ['s-1', 's-2'] },
+};
+
+const WINDOW = { window_start: '2026-10-08', record_ids: ['rec-1'] };
+
+// One goal per progress kind and one measured goal per pace kind the backend sends.
+const GOAL_VARIANTS = [
+  { kind: 'no_goal', project_id: 'project 2' },
+  { kind: 'no_records', goal: GOAL, other_unit_record_ids: ['rec-2'] },
+  ...[
+    { kind: 'too_few_records', ...WINDOW },
+    { kind: 'reached' },
+    { kind: 'projected', ...WINDOW, per_day: 0.5, projected_on: '2027-01-20' },
+    // Too far ahead to name a day: no `projected_on`.
+    { kind: 'beyond_horizon', ...WINDOW, per_day: 0.001 },
+  ].map((pace) => ({
+    kind: 'measured',
+    goal: GOAL,
+    total: 2.5,
+    share: 0.0625,
+    record_ids: ['rec-1'],
+    other_unit_record_ids: [],
+    expected_share: 0.5,
+    deadline_passed: false,
+    pace,
+  })),
+];
+
+const PROGRESS_PAGE = {
+  today: '2026-11-04',
+  period: 'week',
+  rows: [
+    {
+      start: '2026-11-02',
+      end: '2026-11-08',
+      record_ids: ['rec-1', 'rec-2'],
+      checked: [
+        {
+          todo_id: 'todo 1',
+          project_id: null,
+          text: 'Send the estimate',
+          checked_at: '2026-11-03T00:00:00.000000Z',
+        },
+      ],
+    },
+    { start: '2026-10-26', end: '2026-11-01', record_ids: [], checked: [] },
+  ],
+  goals: GOAL_VARIANTS,
+  records: [USER_RECORD, AI_RECORD],
+};
+
+test('every progress route reaches its backend path, and each goal, pace and evidence parses', async () => {
+  const responses = [
+    jsonResponse(200, PROGRESS_PAGE),
+    jsonResponse(200, GOAL),
+    new Response(null, { status: 204 }),
+    jsonResponse(200, USER_RECORD),
+    new Response(null, { status: 204 }),
+  ];
+  await withTodoBackend(
+    (count) => responses[count - 1],
+    async (todos, requests) => {
+      assert.deepEqual(
+        await todos.progress({
+          scope: 'no_organization',
+          project: 'project',
+          project_id: 'project 1',
+          period: 'week',
+        }),
+        PROGRESS_PAGE
+      );
+      assert.deepEqual(await todos.setGoal(GOAL_REQUEST), { kind: 'ok', result: GOAL });
+      assert.deepEqual(await todos.clearGoal({ project_id: 'project 1' }), {
+        kind: 'ok',
+        result: null,
+      });
+      assert.deepEqual(await todos.addProgressRecord(RECORD_REQUEST), {
+        kind: 'ok',
+        result: USER_RECORD,
+      });
+      assert.equal(await todos.deleteProgressRecord({ record_id: 'rec/1' }), undefined);
+
+      // The id that names the path stays out of the body.
+      const { project_id: _project, ...goalBody } = GOAL_REQUEST;
+      const { todo_id: _todo, ...recordBody } = RECORD_REQUEST;
+      assert.deepEqual(
+        requests.map(({ url, options }) => [
+          options.method,
+          url.replace(BASE, ''),
+          options.body === undefined ? undefined : JSON.parse(options.body),
+        ]),
+        [
+          [
+            'GET',
+            '/progress?scope=no_organization&project=project&project_id=project+1&period=week',
+            undefined,
+          ],
+          ['PUT', '/projects/project%201/goal', goalBody],
+          ['DELETE', '/projects/project%201/goal', undefined],
+          ['POST', '/todo%201/progress-records', recordBody],
+          ['DELETE', '/progress-records/rec%2F1', undefined],
+        ]
+      );
+      for (const { options } of requests) {
+        assert.equal(options.headers.Authorization, 'Bearer local-api-token');
+      }
+    }
+  );
+});
+
+test('a refused goal or record write keeps its code; off-contract progress throws', async () => {
+  const responses = [
+    refusal(422, 'TODO_GOAL_DEADLINE_BEFORE_SET'),
+    refusal(422, 'TODO_PROGRESS_INVALID_TEXT'),
+    refusal(404, 'PROJECT_NOT_FOUND'),
+    refusal(404, 'PROJECT_NOT_FOUND'),
+    refusal(404, 'TODO_NOT_FOUND'),
+    refusal(409, 'TODO_DELETED'),
+    refusal(409, 'TODO_PROGRESS_CLIENT_ID_CONFLICT'),
+    refusal(422, 'TODO_PROGRESS_INVALID_TEXT'),
+    refusal(500, 'UNEXPECTED_SERVER_ERROR'),
+    // A projection names its day.
+    jsonResponse(200, {
+      ...PROGRESS_PAGE,
+      goals: [{ ...GOAL_VARIANTS[4], pace: { kind: 'projected', ...WINDOW, per_day: 1 } }],
+    }),
+    jsonResponse(200, {
+      ...PROGRESS_PAGE,
+      records: [{ ...AI_RECORD, evidence: { kind: 'action_steps', action_id: 'a-1' } }],
+    }),
+    jsonResponse(200, { ...PROGRESS_PAGE, period: 'year' }),
+    jsonResponse(200, { ...GOAL, extra: 1 }),
+    jsonResponse(200, { ...USER_RECORD, evidence: { kind: 'ai' } }),
+  ];
+  const progressQuery = { scope: 'all', project: 'any', period: 'day' };
+  await withTodoBackend(
+    (count) => responses[count - 1],
+    async (todos) => {
+      const refused = (code) => ({ kind: 'refused', code });
+      assert.deepEqual(await todos.setGoal(GOAL_REQUEST), refused('TODO_GOAL_DEADLINE_BEFORE_SET'));
+      assert.deepEqual(await todos.setGoal(GOAL_REQUEST), refused('TODO_PROGRESS_INVALID_TEXT'));
+      assert.deepEqual(await todos.setGoal(GOAL_REQUEST), refused('PROJECT_NOT_FOUND'));
+      assert.deepEqual(await todos.clearGoal({ project_id: 'p' }), refused('PROJECT_NOT_FOUND'));
+      assert.deepEqual(await todos.addProgressRecord(RECORD_REQUEST), refused('TODO_NOT_FOUND'));
+      assert.deepEqual(await todos.addProgressRecord(RECORD_REQUEST), refused('TODO_DELETED'));
+      assert.deepEqual(
+        await todos.addProgressRecord(RECORD_REQUEST),
+        refused('TODO_PROGRESS_CLIENT_ID_CONFLICT')
+      );
+      assert.deepEqual(
+        await todos.addProgressRecord(RECORD_REQUEST),
+        refused('TODO_PROGRESS_INVALID_TEXT')
+      );
+      await assert.rejects(
+        todos.deleteProgressRecord({ record_id: 'r' }),
+        (error) => error.status === 500
+      );
+      for (let index = 0; index < 3; index += 1) {
+        await assert.rejects(todos.progress(progressQuery), /TODO progress response is invalid/);
+      }
+      await assert.rejects(todos.setGoal(GOAL_REQUEST), /TODO goal response is invalid/);
+      await assert.rejects(
+        todos.addProgressRecord(RECORD_REQUEST),
+        /progress record response is invalid/
+      );
+    }
+  );
+});
+
 function todoHandlers() {
   const handlers = new Map();
   const calls = [];
@@ -246,6 +455,11 @@ function todoHandlers() {
         answerDeletion: record('answerDeletion'),
         restore: record('restore'),
         listDeleted: record('listDeleted'),
+        progress: record('progress'),
+        setGoal: record('setGoal'),
+        clearGoal: record('clearGoal'),
+        addProgressRecord: record('addProgressRecord'),
+        deleteProgressRecord: record('deleteProgressRecord'),
       },
     },
     { handle: (channel, handler) => handlers.set(channel, handler) }
@@ -273,8 +487,21 @@ test('TODO IPC validates the renderer payload before anything reaches the backen
     'todos:answerDeletion': { todo_id: 't-1', request_id: 'r-1', answer: 'approve' },
     'todos:restore': { todo_id: 't-1' },
     'todos:listDeleted': { scope: 'no_organization' },
+    'todos:progress': {
+      scope: 'organization',
+      organization_id: 'org-1',
+      project: 'any',
+      period: 'month',
+    },
+    'todos:setGoal': GOAL_REQUEST,
+    'todos:clearGoal': { project_id: 'p-1' },
+    'todos:addProgressRecord': RECORD_REQUEST,
+    'todos:deleteProgressRecord': { record_id: 'rec-1' },
   };
   for (const [channel, payload] of Object.entries(valid)) await ipc.invoke(channel, payload);
+  // 200 code points pass though they are 400 UTF-16 units.
+  await ipc.invoke('todos:setGoal', { ...GOAL_REQUEST, text: '😀'.repeat(200) });
+  ipc.calls.pop();
   // The text goes as written: whether it is one line is the backend's to decide.
   assert.deepEqual(
     ipc.calls.map(([, request]) => request),
@@ -303,6 +530,41 @@ test('TODO IPC validates the renderer payload before anything reaches the backen
     'todos:answerDeletion': [{ todo_id: 't-1', request_id: 'r-1', answer: 'delete' }],
     'todos:restore': [{ todo_id: 't-1', extra: 1 }],
     'todos:listDeleted': [{ scope: 'organization' }, { scope: 'all', project: 'any' }],
+    'todos:progress': [
+      { scope: 'all', project: 'any' },
+      { scope: 'all', project: 'any', period: 'year' },
+      { scope: 'organization', project: 'any', period: 'day' },
+      { scope: 'all', organization_id: 'org-1', project: 'any', period: 'day' },
+      { scope: 'all', project: 'project', period: 'day' },
+      { scope: 'all', project: 'any', project_id: 'p-1', period: 'day' },
+      { scope: 'all', project: 'any', period: 'day', week_start: '2026-11-02' },
+    ],
+    'todos:setGoal': [
+      { ...GOAL_REQUEST, project_id: undefined },
+      { ...GOAL_REQUEST, text: '' },
+      // 200 code points, each two UTF-16 units: the limit counts code points.
+      { ...GOAL_REQUEST, text: '😀'.repeat(201) },
+      { ...GOAL_REQUEST, target: 0 },
+      { ...GOAL_REQUEST, target: -1 },
+      { ...GOAL_REQUEST, target: Infinity },
+      { ...GOAL_REQUEST, target: '10' },
+      { ...GOAL_REQUEST, unit: 'x'.repeat(21) },
+      { ...GOAL_REQUEST, deadline: '2026/12/31' },
+      { ...GOAL_REQUEST, set_at: '2026-11-01T00:00:00Z' },
+    ],
+    'todos:clearGoal': [{}, { project_id: 'p-1', text: 'x' }],
+    'todos:addProgressRecord': [
+      { ...RECORD_REQUEST, client_record_id: undefined },
+      { ...RECORD_REQUEST, todo_id: '' },
+      { ...RECORD_REQUEST, quantity: 0 },
+      { ...RECORD_REQUEST, quantity: NaN },
+      { ...RECORD_REQUEST, unit: '' },
+      { ...RECORD_REQUEST, note: '' },
+      { ...RECORD_REQUEST, note: 'x'.repeat(201) },
+      // The renderer only adds the user's record: the AI's evidence never comes from it.
+      { ...RECORD_REQUEST, evidence: { kind: 'action_steps', action_id: 'a', step_ids: [] } },
+    ],
+    'todos:deleteProgressRecord': [{ record_id: '' }, { todo_id: 't-1' }],
   };
   for (const [channel, payloads] of Object.entries(invalid)) {
     for (const payload of payloads) {

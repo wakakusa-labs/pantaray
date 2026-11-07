@@ -7,11 +7,19 @@ import {
 import {
   TODO_REFUSAL_CODES,
   type DeletedTodoView,
+  type GoalView,
+  type ProgressRecordCreateRequest,
+  type ProgressRecordRefRequest,
+  type ProgressRecordView,
   type TodoCheckRequest,
   type TodoCheckResult,
   type TodoCreateRequest,
   type TodoDeletionAnswerRequest,
   type TodoDueRequest,
+  type TodoGoalRequest,
+  type TodoProgressPage,
+  type TodoProgressQuery,
+  type TodoProjectRefRequest,
   type TodoRefRequest,
   type TodoRefusalCode,
   type TodoScopeQuery,
@@ -20,7 +28,10 @@ import {
   type TodoWeekQuery,
   type TodoWriteResult,
   parseDeletedTodos,
+  parseGoalView,
+  parseProgressRecordView,
   parseTodoCheckResult,
+  parseTodoProgressPage,
   parseTodoView,
   parseTodoWeekPage,
 } from './todoContracts';
@@ -47,6 +58,13 @@ export function createTodoFetcher(params: {
   answerDeletion: (request: TodoDeletionAnswerRequest) => Promise<TodoWriteResult<TodoView>>;
   restore: (request: TodoRefRequest) => Promise<TodoWriteResult<TodoView>>;
   listDeleted: (query: TodoScopeQuery) => Promise<DeletedTodoView[]>;
+  progress: (query: TodoProgressQuery) => Promise<TodoProgressPage>;
+  setGoal: (request: TodoGoalRequest) => Promise<TodoWriteResult<GoalView>>;
+  clearGoal: (request: TodoProjectRefRequest) => Promise<TodoWriteResult<null>>;
+  addProgressRecord: (
+    request: ProgressRecordCreateRequest
+  ) => Promise<TodoWriteResult<ProgressRecordView>>;
+  deleteProgressRecord: (request: ProgressRecordRefRequest) => Promise<void>;
 } {
   const todosPath = (): string => {
     const userId = params.getUserId();
@@ -54,6 +72,8 @@ export function createTodoFetcher(params: {
     return `/v1/agents/users/${encodeURIComponent(userId)}/todos`;
   };
   const todoPath = (todoId: string): string => `${todosPath()}/${encodeURIComponent(todoId)}`;
+  const goalPath = (projectId: string): string =>
+    `${todosPath()}/projects/${encodeURIComponent(projectId)}/goal`;
 
   const read = (request: Omit<LocalBackendRequest, 'timeoutMs'>): Promise<unknown> =>
     params.requestJson<unknown>({ ...request, timeoutMs: TODO_REQUEST_TIMEOUT_MS });
@@ -98,5 +118,24 @@ export function createTodoFetcher(params: {
       write({ path: `${todoPath(todo_id)}/restore`, method: 'POST' }, parseTodoView),
     listDeleted: async (query) =>
       parseDeletedTodos(await read({ path: `${todosPath()}/deleted`, method: 'GET', query })),
+    progress: async (query) =>
+      parseTodoProgressPage(await read({ path: `${todosPath()}/progress`, method: 'GET', query })),
+    setGoal: ({ project_id, ...goal }) =>
+      write({ path: goalPath(project_id), method: 'PUT', body: goal }, parseGoalView),
+    // 204 also when the project has no goal.
+    clearGoal: ({ project_id }) =>
+      write({ path: goalPath(project_id), method: 'DELETE' }, () => null),
+    addProgressRecord: ({ todo_id, ...record }) =>
+      write(
+        { path: `${todoPath(todo_id)}/progress-records`, method: 'POST', body: record },
+        parseProgressRecordView
+      ),
+    // The backend never refuses it: 204 also when the record is gone.
+    deleteProgressRecord: async ({ record_id }) => {
+      await read({
+        path: `${todosPath()}/progress-records/${encodeURIComponent(record_id)}`,
+        method: 'DELETE',
+      });
+    },
   };
 }

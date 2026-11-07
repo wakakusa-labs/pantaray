@@ -1,4 +1,4 @@
-// The TODO list, for the main window: main refuses these channels from an Overlay.
+// The TODO list and its progress, for the main window: main refuses these channels from an Overlay.
 function createTodosApi({ ipcRenderer }) {
   return {
     todos: {
@@ -10,6 +10,11 @@ function createTodosApi({ ipcRenderer }) {
       answerDeletion: (request) => ipcRenderer.invoke('todos:answerDeletion', request),
       restore: (request) => ipcRenderer.invoke('todos:restore', request),
       listDeleted: (query) => ipcRenderer.invoke('todos:listDeleted', query),
+      progress: (query) => ipcRenderer.invoke('todos:progress', query),
+      setGoal: (request) => ipcRenderer.invoke('todos:setGoal', request),
+      clearGoal: (request) => ipcRenderer.invoke('todos:clearGoal', request),
+      addProgressRecord: (request) => ipcRenderer.invoke('todos:addProgressRecord', request),
+      deleteProgressRecord: (request) => ipcRenderer.invoke('todos:deleteProgressRecord', request),
       onChanged: (callback) => {
         const listener = (_event, change) => callback(change);
         ipcRenderer.on('todos:changed', listener);

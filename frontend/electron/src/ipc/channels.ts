@@ -134,7 +134,7 @@ export const validInvokeChannels = [
   'chat:listItems',
   'chat:retryTurn',
   'chat:getTurnState',
-  // The TODO list (main window only)
+  // The TODO list and its progress (main window only)
   'todos:listWeek',
   'todos:create',
   'todos:setCheck',
@@ -143,6 +143,11 @@ export const validInvokeChannels = [
   'todos:answerDeletion',
   'todos:restore',
   'todos:listDeleted',
+  'todos:progress',
+  'todos:setGoal',
+  'todos:clearGoal',
+  'todos:addProgressRecord',
+  'todos:deleteProgressRecord',
   // Main window: read a suggestion into main's record without opening a panel
   'suggestion:read',
   // Suggestion history (main SSOT)

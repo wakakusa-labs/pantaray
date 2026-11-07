@@ -94,15 +94,23 @@ def format_activity_summary(row: ActivitySummaryRow | None, missing_text: str) -
     return f"[{period}] {summary}"
 
 
-def format_open_todos(todos: SuggestionOpenTodos) -> str:
-    """The user's open TODOs, one line each, after a note on any left out."""
+def format_open_todos(todos: SuggestionOpenTodos, *, max_chars: int) -> str:
+    """The user's open TODOs, one line each, after a note on any left out.
+
+    The oldest are dropped first until the list fits in `max_chars`; when not
+    even the note fits, the note alone is returned for the caller's limit check.
+    """
     if not todos.items:
         return NO_OPEN_TODOS_TEXT
 
     lines = [_format_open_todo(todo) for todo in todos.items]
-    if todos.omitted:
-        lines.insert(0, f"[{todos.omitted} older open TODOs not shown]")
-    return "\n".join(lines)
+    for dropped in range(len(lines) + 1):
+        omitted = todos.omitted + dropped
+        note = [f"[{omitted} older open TODOs not shown]"] if omitted else []
+        text = "\n".join(note + lines[dropped:])
+        if len(text) <= max_chars:
+            break
+    return text
 
 
 def _format_open_todo(todo: SuggestionOpenTodo) -> str:

@@ -661,13 +661,21 @@ def test_open_todos_render_one_line_each_after_the_omitted_count() -> None:
         omitted=2,
     )
 
-    assert format_open_todos(todos) == (
+    full = (
         "[2 older open TODOs not shown]\n"
         "- Send the quote (project: Website; due 2026-11-06, weekly; not started)\n"
         "- Book the venue (no project; waiting for the user)\n"
         "- Draft the report (no project; due 2026-11-10; Pantaray is working on it)"
     )
-    assert format_open_todos(SuggestionOpenTodos()) == "(No open TODOs.)"
+    assert format_open_todos(todos, max_chars=len(full)) == full
+    # One character short drops the oldest TODO and counts it.
+    assert format_open_todos(todos, max_chars=len(full) - 1) == (
+        "[3 older open TODOs not shown]\n"
+        "- Book the venue (no project; waiting for the user)\n"
+        "- Draft the report (no project; due 2026-11-10; Pantaray is working on it)"
+    )
+    assert format_open_todos(todos, max_chars=0) == "[5 older open TODOs not shown]"
+    assert format_open_todos(SuggestionOpenTodos(), max_chars=0) == "(No open TODOs.)"
 
 
 def test_reply_and_result_previews_are_bounded() -> None:

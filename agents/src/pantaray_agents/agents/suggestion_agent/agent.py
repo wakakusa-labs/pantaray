@@ -357,7 +357,7 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
             "stable_memory_context": context_data["stable_memory_context"],
             "pending_work_context": self.stable_memory.pending_work.strip()
             or "(No pending work recorded.)",
-            "open_todos_context": format_open_todos(self.stable_memory.open_todos),
+            "open_todos_context": "",
             "action_agent_capabilities": context_data["action_agent_capabilities"],
             "recent_suggestions": context_data["recent_suggestions"],
             "recent_activity_descriptions": context_data[
@@ -370,6 +370,13 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
             "answer_language": self._answer_language_label(),
         }
         self._recent_suggestions_text = context_data["recent_suggestions"]
+        # The other sections have no fixed worst case, so the TODO list takes
+        # what they leave under the limit, dropping its oldest TODOs first.
+        others = len(self.task_suggestion_prompt.format(**values))
+        values["open_todos_context"] = format_open_todos(
+            self.stable_memory.open_todos,
+            max_chars=SUGGESTION_INITIAL_PROMPT_MAX_CHARS - others,
+        )
         rendered = self.task_suggestion_prompt.format(**values)
         if len(rendered) > SUGGESTION_INITIAL_PROMPT_MAX_CHARS:
             raise ValueError(

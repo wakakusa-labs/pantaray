@@ -39,8 +39,8 @@ from .commands import commands_run_without_asking
 PENDING_WORK_MAX_CHARS = 60_000
 # Design limit: the newest open TODOs are kept, as a Suggestion most likely
 # repeats what was written last; revisit when the "not shown" note appears in
-# Suggestion prompts. With the text bound the list stays near 30,000 of the
-# prompt's 124,000 characters.
+# Suggestion prompts. With the text bound the list stays near 30,000 characters;
+# the prompt drops more of the oldest when its other sections leave less room.
 OPEN_TODOS_MAX = 50
 OPEN_TODO_TEXT_MAX_CHARS = 500
 

@@ -222,6 +222,13 @@ async function installBridge(
               error: null,
               errorCode: null,
             }),
+            // A chat card reads its work by key, as History names one row.
+            readItem: async ({ kind, id }: { kind: string; id: string }) =>
+              history.find((row) =>
+                row.kind === 'conversation'
+                  ? kind === 'conversation' && row.action_id === id
+                  : kind === 'suggestion' && row.suggestion_id === id
+              ) ?? null,
             onChanged: () => noop,
             openNewConversation: async () => undefined,
             deleteItem: async () => ({ ok: true }),

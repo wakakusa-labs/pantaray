@@ -87,8 +87,9 @@ def read_conversation_history_item(
     item_id: str,
     user_id: str = Depends(get_current_user_id_from_token),
 ) -> ConversationHistoryListItem:
-    """The list's row for one item, as the list shows it; 404 when the list does
-    not hold it for this user (gone, another user's, or a suggestion now a task)."""
+    """One item's row, titled as the list titles it, a TODO's conversation too
+    though the list leaves it out; a suggestion now a task answers with that
+    task's row. 404 when this user has no such item (gone or another user's)."""
 
     try:
         db_path, busy_timeout_ms = runtime_env.read_local_runtime_db_config()

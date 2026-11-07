@@ -101,14 +101,35 @@ class ConversationHistoryCandidatePage:
     next_cursor: str | None
 
 
+# A TODO's conversation is listed under that TODO, a deleted one's too, so the
+# dated list and its search leave it out; one row read by its key, as a link to
+# the conversation names it, still finds it. The pickup's first USER message
+# names the TODO it serves; a Suggestion's TODO owns the Action that accepted or
+# replied to it.
+_NOT_TODO_ACTION = """
+    AND NOT EXISTS (SELECT 1 FROM todo_items AS todo
+      WHERE todo.todo_id=json_extract(initial.user_message_json,'$.todo_handoff.todo_id')
+        AND todo.user_id=action.user_id)
+    AND NOT EXISTS (SELECT 1 FROM todo_items AS todo
+      WHERE todo.user_id=action.user_id AND todo.suggestion_id=action.suggestion_id)
+    AND action.action_id NOT IN (SELECT reply.action_id FROM todo_items AS todo
+      JOIN agent_action_steps AS reply
+        ON reply.user_id=todo.user_id AND reply.source_suggestion_id=todo.suggestion_id
+      WHERE todo.user_id=:user_id)"""
+_NOT_TODO_SUGGESTION = """
+    AND NOT EXISTS (SELECT 1 FROM todo_items AS todo
+      WHERE todo.user_id=suggestion.user_id
+        AND todo.suggestion_id=suggestion.suggestion_id)"""
+
+
 def _candidate_query(*, cursor_bound: bool, item_bound: bool) -> str:
-    action_item, suggestion_item = (
+    action_scope, suggestion_scope = (
         (
             "AND :item_kind='conversation' AND action.action_id=:item_id",
             "AND :item_kind='suggestion' AND suggestion.suggestion_id=:item_id",
         )
         if item_bound
-        else ("", "")
+        else (_NOT_TODO_ACTION, _NOT_TODO_SUGGESTION)
     )
     cursor_predicate = (
         """AND (raw_updated_at<:before_updated_at
@@ -214,7 +235,7 @@ WITH action_source AS (
                        THEN json_extract(searched_user.user_message_json,'$.chat_handoff.note') ELSE '' END)
                    LIKE :search_pattern ESCAPE '\')))
     ORDER BY searched_user.accepted_sequence DESC,searched_user.step_id DESC LIMIT 1)
-  WHERE action.user_id=:user_id {action_item}
+  WHERE action.user_id=:user_id {action_scope}
 ), action_evidence AS (
   SELECT 'conversation' AS kind,action_id AS stable_id,
     action_updated_at AS raw_updated_at,
@@ -268,7 +289,7 @@ WITH action_source AS (
   LEFT JOIN agent_actions AS linked
     ON linked.suggestion_id=suggestion.suggestion_id
   WHERE suggestion.user_id=:user_id AND suggestion.has_suggestion=1
-    {suggestion_item}
+    {suggestion_scope}
     AND linked.action_id IS NULL
     AND NOT EXISTS (SELECT 1 FROM agent_action_steps AS reply
       WHERE reply.user_id=suggestion.user_id

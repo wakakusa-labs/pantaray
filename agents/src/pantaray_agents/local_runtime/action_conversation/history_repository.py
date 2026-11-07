@@ -63,9 +63,10 @@ def read_conversation_history_page_in_connection(
 def read_conversation_history_item_in_connection(
     *, connection: sqlite3.Connection, user_id: str, item: ConversationHistoryItemKey
 ) -> ConversationHistoryListItem | None:
-    """The list's row for ``item``, titled as the list titles it, if the list
-    holds it for ``user_id``. A suggestion that became a task -- accepted, or
-    replied to -- is that task's row, as the list shows it now."""
+    """The row for ``item``, titled as the list titles it, if ``user_id`` has
+    it. A suggestion that became a task -- accepted, or replied to -- is that
+    task's row. A TODO's conversation is found too, though the dated list leaves
+    it out."""
 
     kind, item_id = item
     if kind == "suggestion":

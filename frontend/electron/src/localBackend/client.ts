@@ -83,6 +83,15 @@ const ALLOWED_LOCAL_BACKEND_ROUTES: ReadonlyArray<{
   { path: /^\/v1\/agents\/users\/[^/]+\/chat\/messages$/, methods: new Set(['POST']) },
   { path: /^\/v1\/agents\/users\/[^/]+\/chat\/items$/, methods: new Set(['GET']) },
   { path: /^\/v1\/agents\/users\/[^/]+\/chat\/turns\/retry$/, methods: new Set(['POST']) },
+  { path: /^\/v1\/agents\/users\/[^/]+\/todos$/, methods: new Set(['POST']) },
+  { path: /^\/v1\/agents\/users\/[^/]+\/todos\/(weeks|deleted)$/, methods: new Set(['GET']) },
+  { path: /^\/v1\/agents\/users\/[^/]+\/todos\/[^/]+$/, methods: new Set(['DELETE']) },
+  { path: /^\/v1\/agents\/users\/[^/]+\/todos\/[^/]+\/(check|due)$/, methods: new Set(['PUT']) },
+  { path: /^\/v1\/agents\/users\/[^/]+\/todos\/[^/]+\/restore$/, methods: new Set(['POST']) },
+  {
+    path: /^\/v1\/agents\/users\/[^/]+\/todos\/[^/]+\/deletion-requests\/[^/]+\/answer$/,
+    methods: new Set(['POST']),
+  },
   {
     path: /^\/v1\/agents\/users\/[^/]+\/actions\/[^/]+\/state$/,
     methods: new Set(['GET']),

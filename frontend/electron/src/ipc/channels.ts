@@ -37,6 +37,8 @@ export const validReceiveChannels = [
   // Main window only: an item appended to the user's chat, and whether a turn is answering
   'chat:itemAppended',
   'chat:turnState',
+  // Main window only: the user's TODOs changed; the screen reads them again
+  'todos:changed',
   // Main window only: select this work in History (a task a panel started)
   'history:showItem',
   // A task's shared draft as another window changed it
@@ -132,6 +134,15 @@ export const validInvokeChannels = [
   'chat:listItems',
   'chat:retryTurn',
   'chat:getTurnState',
+  // The TODO list (main window only)
+  'todos:listWeek',
+  'todos:create',
+  'todos:setCheck',
+  'todos:setDue',
+  'todos:delete',
+  'todos:answerDeletion',
+  'todos:restore',
+  'todos:listDeleted',
   // Main window: read a suggestion into main's record without opening a panel
   'suggestion:read',
   // Suggestion history (main SSOT)

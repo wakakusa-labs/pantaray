@@ -56,6 +56,21 @@ import type {
   ChatTurnRetryResult,
   ChatTurnState,
 } from '../../electron/src/chat/chatContracts';
+import type {
+  DeletedTodoView,
+  TodoChanged,
+  TodoCheckRequest,
+  TodoCheckResult,
+  TodoCreateRequest,
+  TodoDeletionAnswerRequest,
+  TodoDueRequest,
+  TodoRefRequest,
+  TodoScopeQuery,
+  TodoView,
+  TodoWeekPage,
+  TodoWeekQuery,
+  TodoWriteResult,
+} from '../../electron/src/todos/todoContracts';
 import type { ActionImageAttachResult } from '../../electron/src/ipc/schemas/actionImages';
 import type { ActionAttachFileResult } from '../../electron/src/ipc/schemas/actionAttachments';
 import type { OverlayOpenTaskRequest } from '../../electron/src/ipc/schemas/overlay';
@@ -249,6 +264,20 @@ declare global {
         getTurnState: () => Promise<ChatTurnState | null>;
         /** Whether a turn is answering: the typing bubble. */
         onTurnState: (callback: (state: ChatTurnState) => void) => () => void;
+      };
+      /** The TODO list; main accepts these from the main window only. */
+      todos?: {
+        listWeek: (query: TodoWeekQuery) => Promise<TodoWeekPage>;
+        /** Resending the same `client_todo_id` returns the same TODO. */
+        create: (request: TodoCreateRequest) => Promise<TodoWriteResult<TodoView>>;
+        setCheck: (request: TodoCheckRequest) => Promise<TodoWriteResult<TodoCheckResult>>;
+        setDue: (request: TodoDueRequest) => Promise<TodoWriteResult<TodoView>>;
+        delete: (request: TodoRefRequest) => Promise<TodoWriteResult<TodoView>>;
+        answerDeletion: (request: TodoDeletionAnswerRequest) => Promise<TodoWriteResult<TodoView>>;
+        restore: (request: TodoRefRequest) => Promise<TodoWriteResult<TodoView>>;
+        listDeleted: (query: TodoScopeQuery) => Promise<DeletedTodoView[]>;
+        /** The TODOs changed: read them again. */
+        onChanged: (callback: (change: TodoChanged) => void) => () => void;
       };
       /** Suggestions read into main's record; main accepts these from the main window only. */
       suggestions?: {

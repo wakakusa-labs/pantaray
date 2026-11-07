@@ -47,6 +47,19 @@ it('empties an add field only once the submit took the text', async () => {
   expect(field).toHaveValue('');
 });
 
+it('keeps what was typed while the submit was deciding', async () => {
+  const { onSubmit, answer } = deferredSubmit();
+  render(<LineTextField label="Add a TODO" onSubmit={onSubmit} />);
+  const field = screen.getByRole('textbox', { name: 'Add a TODO' });
+
+  await userEvent.type(field, 'Call Aoba{Enter}');
+  await userEvent.clear(field);
+  await userEvent.type(field, 'Book the room');
+  await answer(true);
+  expect(onSubmit).toHaveBeenCalledExactlyOnceWith('Call Aoba');
+  expect(field).toHaveValue('Book the room');
+});
+
 it('runs one submit at a time, from Enter or from leaving the field', async () => {
   const { onSubmit, answer } = deferredSubmit();
   render(<LineTextField label="Name" initialText="Aoba" submitOnBlur onSubmit={onSubmit} />);

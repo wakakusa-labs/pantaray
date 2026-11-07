@@ -6,7 +6,7 @@ const IME_PROCESS_KEY_CODE = 229;
 /**
  * A one-line text field. Enter submits the text and Escape cancels when the field can be canceled;
  * Enter and Escape while an IME is composing belong to the IME. One submit runs at a time, and a
- * submit that took the text empties the field for the next one.
+ * submit that took the text empties the field for the next one unless the text changed meanwhile.
  */
 export function LineTextField({
   label,
@@ -35,7 +35,9 @@ export function LineTextField({
   const submit = async () => {
     if (settledRef.current) return;
     settledRef.current = true;
-    if (await onSubmit(text)) setText('');
+    const sent = text;
+    // Text typed while the submit was deciding is the next line, so only the sent text is cleared.
+    if (await onSubmit(sent)) setText((current) => (current === sent ? '' : current));
     settledRef.current = false;
   };
   return (

@@ -1,11 +1,12 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { forwardRef, useImperativeHandle } from 'react';
-import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { MemoryRouter, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import type { ActionConversationUserItem } from '../../electron/src/actions/actionConversationModel';
 import type { ConversationHistoryListItem } from '../../electron/src/history/historyContracts';
+import type { TodoView, TodoWeekPage } from '../../electron/src/todos/todoContracts';
 import { UserItem } from '@/components/action-conversation/UserMessage';
 import type { ChatViewHandle } from '@/components/chat/ChatView';
 import type { TaskPreview } from '@/components/task/taskFiles';
@@ -13,9 +14,10 @@ import { ChatSessionContext, type ChatSession } from '@/components/chat/chatSess
 import { LocalOwnerContext } from '@/context/localOwnerContext';
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
 import { historySelectionSearch, parseHistorySelection } from '@/history/historySelection';
+import type { LayoutOutletContext } from '@/components/Layout';
 import SuggestionHistoryPage from './SuggestionHistoryPage';
 
-const mocks = vi.hoisted(() => ({ showNewest: vi.fn() }));
+const mocks = vi.hoisted(() => ({ showNewest: vi.fn(), publishOrganizations: vi.fn() }));
 
 // The panes and the chat have their own tests; here they only show what the page gave them.
 vi.mock('@/components/AiConnectionNotice', () => ({ AiConnectionNotice: () => null }));
@@ -51,14 +53,17 @@ vi.mock('@/components/task/SuggestionTaskPane', () => ({
   SuggestionTaskPane: ({
     suggestionId,
     title,
+    canDismiss,
     onStarted,
   }: {
     suggestionId: string;
     title: string;
+    canDismiss: boolean;
     onStarted: (actionId: string, preview: TaskPreview | null) => void;
   }) => (
     <section aria-label={`suggestion ${suggestionId}`}>
       <h1>{title}</h1>
+      {canDismiss ? <button type="button">dismiss</button> : null}
       <button type="button" onClick={() => onStarted('A9', null)}>
         accept
       </button>
@@ -128,6 +133,37 @@ const ITEMS: ConversationHistoryListItem[] = [
     artifact_names: [],
   },
 ];
+function todo(todoId: string, projectId: string | null, extra: Partial<TodoView> = {}): TodoView {
+  return {
+    todo_id: todoId,
+    project_id: projectId,
+    text: `TODO ${todoId}`,
+    author: 'user',
+    origin: 'written',
+    week_start: '2026-11-02',
+    carried: false,
+    due: null,
+    state: { kind: 'working', note: null },
+    deletion_request: null,
+    conversation: { kind: 'none' },
+    ...extra,
+  };
+}
+
+const WEEK: TodoWeekPage = {
+  today: '2026-11-04',
+  current_week_start: '2026-11-02',
+  week: { start: '2026-11-02', end: '2026-11-08' },
+  items: [
+    todo('T1', 'P1', { conversation: { kind: 'action', action_id: 'A5' } }),
+    todo('T2', 'P1', { state: { kind: 'done', by: 'user', at: '2026-11-03T01:00:00.000Z' } }),
+    todo('T3', 'P2', { conversation: { kind: 'suggestion', suggestion_id: 'S5' } }),
+    todo('T4', null),
+  ],
+};
+const listWeek = vi.fn(async () => WEEK);
+const removeTodo = vi.fn(async () => ({ kind: 'refused', code: 'TODO_BUSY' }) as const);
+const createTodo = vi.fn(async () => ({ kind: 'ok', result: {} }) as const);
 const deleteItem = vi.fn(async () => ({ ok: true }) as const);
 const selectFolder = vi.fn(async () => ({ canceled: true, path: null }));
 
@@ -135,6 +171,7 @@ const stored = new Map<string, string>();
 
 beforeEach(() => {
   stored.clear();
+  listWeek.mockImplementation(async () => WEEK);
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => stored.get(key) ?? null,
     setItem: (key: string, value: string) => stored.set(key, value),
@@ -153,11 +190,21 @@ beforeEach(() => {
       openConversation: vi.fn(),
     },
     agentOverlay: { showHistory: vi.fn() },
+    todos: {
+      listWeek,
+      listDeleted: vi.fn(async () => []),
+      onChanged: () => () => undefined,
+      delete: removeTodo,
+      create: createTodo,
+    },
     workspaceSettings: {
       get: vi.fn(async () => ({
         read_access_scope: 'workspace',
-        organizations: [],
-        projects: [],
+        organizations: [{ organization_id: 'O1', display_name: 'Xer' }],
+        projects: [
+          { project_id: 'P1', display_name: '見積もり', sort_order: 0, organization_ids: ['O1'] },
+          { project_id: 'P2', display_name: '採用', sort_order: 1, organization_ids: [] },
+        ],
         folders: [],
       })),
       selectFolder,
@@ -194,6 +241,10 @@ function LocationProbe() {
   );
 }
 
+const OUTLET_CONTEXT: LayoutOutletContext = {
+  publishOrganizations: mocks.publishOrganizations,
+};
+
 const renderPage = (entries: string[]) =>
   render(
     <MemoryRouter initialEntries={entries} initialIndex={entries.length - 1}>
@@ -201,7 +252,9 @@ const renderPage = (entries: string[]) =>
         <LocalOwnerContext.Provider value={{ id: 'user-1', kind: 'account' }}>
           <ChatSessionContext.Provider value={{} as ChatSession}>
             <Routes>
-              <Route path="/history" element={<SuggestionHistoryPage />} />
+              <Route element={<Outlet context={OUTLET_CONTEXT} />}>
+                <Route path="/history" element={<SuggestionHistoryPage />} />
+              </Route>
             </Routes>
             <LocationProbe />
           </ChatSessionContext.Provider>
@@ -212,7 +265,7 @@ const renderPage = (entries: string[]) =>
 
 const location = () => screen.getByRole('status', { name: 'location' });
 
-it('shows what `?item=` names, and the chat for a missing or malformed item', async () => {
+it('shows what `?item=` names, the TODOs without one, and the chat for a malformed one', async () => {
   renderPage(['/history?item=action:A1']);
   expect(screen.getByRole('region', { name: 'action A1' })).toBeInTheDocument();
   // The title is the history row's once the list is read.
@@ -235,8 +288,12 @@ it('shows what `?item=` names, and the chat for a missing or malformed item', as
   ).toBeInTheDocument();
   cleanup();
 
+  renderPage(['/history']);
+  expect(screen.getByRole('heading', { level: 1, name: 'すべての TODO' })).toBeInTheDocument();
+  expect(screen.queryByRole('region', { name: 'chat' })).toBeNull();
+  cleanup();
+
   for (const entry of [
-    '/history',
     '/history?item=chat',
     '/history?item=action:',
     '/history?item=action:%20A1',
@@ -249,14 +306,14 @@ it('shows what `?item=` names, and the chat for a missing or malformed item', as
 });
 
 it('selects a row into the URL and marks it current; the Chat row of the chat shows the newest', async () => {
-  renderPage(['/history']);
+  renderPage(['/history?item=chat']);
   const row = await screen.findByRole('button', { name: /^見積書を直す/ });
   const chatRow = screen.getByRole('button', { name: 'チャット' });
   expect(chatRow).toHaveAttribute('aria-current', 'true');
 
   await userEvent.click(chatRow);
   expect(mocks.showNewest).toHaveBeenCalledOnce();
-  expect(location()).toHaveTextContent(/^\/history$/);
+  expect(location()).toHaveTextContent(/^\/history\?item=chat$/);
 
   await userEvent.click(row);
   expect(location()).toHaveTextContent('/history?item=action:A1');
@@ -379,7 +436,7 @@ it('writes the selection as `?item=kind:id`, encoding only the id', () => {
   expect(parseHistorySelection(historySelectionSearch('action:a b&c:d'))).toBe('action:a b&c:d');
 });
 
-const SIDEBAR = { name: 'チャットと作業' } as const;
+const SIDEBAR = { name: 'TODO と会話' } as const;
 
 it('hides the sidebar and shows it again, keeping the detail pane and the choice', async () => {
   renderPage(['/history?item=action:A1']);
@@ -423,4 +480,117 @@ it('starts with the sidebar shown when storage is unavailable', () => {
   });
   renderPage(['/history']);
   expect(screen.getByRole('complementary', SIDEBAR)).toBeVisible();
+});
+
+const projectGroups = () =>
+  screen.getAllByRole('region').filter((region) => region.classList.contains('todo-group'));
+
+it('lists the week by project, counts open TODOs in the sidebar, and hands the rail its organizations', async () => {
+  renderPage(['/history']);
+  expect(await screen.findByRole('checkbox', { name: '完了: TODO T1' })).toBeInTheDocument();
+  expect(listWeek).toHaveBeenCalledWith({ scope: 'all', project: 'any' });
+  // Xer › 見積もり, then 組織なし › 採用 and 組織なし › プロジェクトなし.
+  expect(projectGroups()).toHaveLength(3);
+  const sidebar = screen.getByRole('complementary', SIDEBAR);
+  // T2 is done: one open TODO in 見積もり, one in 採用.
+  expect(within(sidebar).getByRole('button', { name: '見積もり' })).toHaveAccessibleDescription(
+    '未完了 1 件'
+  );
+  expect(within(sidebar).getByRole('button', { name: 'すべての TODO' })).toHaveAttribute(
+    'aria-current',
+    'true'
+  );
+  expect(mocks.publishOrganizations).toHaveBeenLastCalledWith([
+    { organization_id: 'O1', display_name: 'Xer' },
+  ]);
+});
+
+it("opens a TODO's conversation beside the list: its Action, its suggestion without 見送る, or a note", async () => {
+  renderPage(['/history']);
+  await userEvent.click(await screen.findByRole('button', { name: /^TODO T1/ }));
+  expect(location()).toHaveTextContent('/history?todo=T1');
+  expect(screen.getByRole('region', { name: 'action A5' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /^TODO T1/ })).toHaveAttribute('aria-current', 'true');
+
+  await userEvent.click(screen.getByRole('button', { name: /^TODO T3/ }));
+  const suggestion = screen.getByRole('region', { name: 'suggestion S5' });
+  expect(within(suggestion).queryByRole('button', { name: 'dismiss' })).toBeNull();
+  // Accepting shows its Action at once, before the week names it.
+  await userEvent.click(within(suggestion).getByRole('button', { name: 'accept' }));
+  expect(screen.getByRole('region', { name: 'action A9' })).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole('button', { name: /^TODO T4/ }));
+  expect(
+    screen.getByText('まだ会話はありません。Pantaray が始めると、ここに出ます。')
+  ).toBeVisible();
+
+  await userEvent.click(screen.getByRole('button', { name: '会話を閉じる' }));
+  expect(location()).toHaveTextContent(/^\/history$/);
+  expect(screen.getByRole('heading', { level: 1, name: 'すべての TODO' })).toHaveFocus();
+});
+
+it('a project selects its TODOs, keeping the scope that holds it and otherwise showing all', async () => {
+  renderPage(['/history?scope=none']);
+  const sidebar = screen.getByRole('complementary', SIDEBAR);
+  await userEvent.click(await within(sidebar).findByRole('button', { name: '採用' }));
+  expect(location()).toHaveTextContent('/history?scope=none&project=project:P2');
+  expect(screen.getByRole('heading', { level: 1, name: '採用' })).toBeInTheDocument();
+  expect(projectGroups()).toHaveLength(1);
+  expect(within(sidebar).getByRole('button', { name: '採用' })).toHaveAttribute(
+    'aria-current',
+    'true'
+  );
+
+  // 見積もり is Xer's, outside 組織なし.
+  await userEvent.click(within(sidebar).getByRole('button', { name: '見積もり' }));
+  expect(location()).toHaveTextContent(/^\/history\?project=project:P1$/);
+
+  await userEvent.click(within(sidebar).getByRole('button', { name: '削除した TODO' }));
+  expect(location()).toHaveTextContent(/^\/history\?view=deleted$/);
+  expect(await screen.findByText('削除した TODO はありません。')).toBeVisible();
+});
+
+it('keeps the scope while the chat is shown, and drops an organization that is gone', async () => {
+  renderPage(['/history?scope=organization:O1']);
+  await userEvent.click(screen.getByRole('button', { name: 'チャット' }));
+  expect(location()).toHaveTextContent('/history?item=chat&scope=organization:O1');
+  cleanup();
+
+  renderPage(['/history?scope=organization:GONE']);
+  await screen.findByRole('button', { name: '見積もり' });
+  expect(location()).toHaveTextContent(/^\/history$/);
+});
+
+it('「今週へ」 returns to this week and leaves focus on the list heading', async () => {
+  listWeek.mockImplementation(async () => ({
+    ...WEEK,
+    week: { start: '2026-10-26', end: '2026-11-01' },
+    items: [],
+  }));
+  renderPage(['/history?week=2026-10-26']);
+  await userEvent.click(await screen.findByRole('button', { name: '今週へ' }));
+  expect(location()).toHaveTextContent(/^\/history$/);
+  expect(screen.getByRole('heading', { level: 1, name: 'すべての TODO' })).toHaveFocus();
+  // An ended week takes no TODOs, so it has no add field.
+  expect(screen.queryByRole('textbox', { name: /TODO を書く/ })).toBeNull();
+});
+
+it('adds to the group it was written in, and tells a refused write under its row', async () => {
+  renderPage(['/history']);
+  const groups = await screen.findAllByRole('region', { name: /見積もり/ });
+  const estimate = groups.find((group) => group.classList.contains('todo-group'))!;
+  await userEvent.type(
+    within(estimate).getByRole('textbox', { name: /TODO を書く/ }),
+    '請求書を送る{Enter}'
+  );
+  expect(createTodo).toHaveBeenCalledWith(
+    expect.objectContaining({ project_id: 'P1', week_start: '2026-11-02', text: '請求書を送る' })
+  );
+
+  await userEvent.click(within(estimate).getByRole('button', { name: '削除: TODO T1' }));
+  const alert = await within(estimate).findByRole('alert');
+  expect(alert).toHaveTextContent('この TODO の会話が進んでいるあいだは消せません。');
+  // Under the row it was made from, before the next one.
+  const rows = within(estimate).getAllByRole('listitem');
+  expect(rows.findIndex((row) => row.contains(alert))).toBe(1);
 });

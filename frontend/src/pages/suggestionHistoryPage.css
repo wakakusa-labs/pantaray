@@ -85,10 +85,12 @@
    bottom line stays the card's top edge.
    The header must start clear of the toggle rather than pad its title past it: Electron makes a
    point draggable when the last app-region box over it in document order is a drag one, whatever
-   the z-index, so a drag header reaching under the toggle turns a click on it into a window drag. */
+   the z-index, so a drag header reaching under the toggle turns a click on it into a window drag.
+   On the TODO list only the list's header is next to the toggle; the conversation's stays put. */
 .history-page--sidebar-hidden
-  .history-detail
-  :is(.history-pane-header, .action-task__header, .suggestion-task__header) {
+  > .history-detail
+  :is(.history-pane-header, .action-task__header, .suggestion-task__header),
+.history-page--sidebar-hidden > .todo-screen > .todo-screen__list > .todo-screen__header {
   margin-left: 54px;
   padding-bottom: calc(var(--app-pane-header-height) - 2 * var(--history-title-row-center));
   padding-left: 0;

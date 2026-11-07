@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState, type ReactNode } from 'react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Outlet, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import type {
@@ -175,8 +175,14 @@ afterEach(() => {
 
 const OWNER = { id: 'user-1', kind: 'account' } as const;
 
+// The shell's outlet context; the rail it feeds is not under test here.
+const SHELL = { publishOrganizations: () => undefined };
+
 const renderPage = (
-  entry: { pathname: string; search?: string; state?: unknown } = { pathname: '/history' }
+  entry: { pathname: string; search?: string; state?: unknown } = {
+    pathname: '/history',
+    search: '?item=chat',
+  }
 ) =>
   render(
     <MemoryRouter initialEntries={[entry]}>
@@ -184,7 +190,9 @@ const renderPage = (
         <LocalOwnerContext.Provider value={OWNER}>
           <ChatSessionProvider>
             <Routes>
-              <Route path="/history" element={<SuggestionHistoryPage />} />
+              <Route element={<Outlet context={SHELL} />}>
+                <Route path="/history" element={<SuggestionHistoryPage />} />
+              </Route>
             </Routes>
           </ChatSessionProvider>
         </LocalOwnerContext.Provider>
@@ -453,7 +461,7 @@ it('a task pane’s Add project names a new project in the sidebar', async () =>
 it('shows the chat in the pane beside the sidebar of the chat row and the tasks', async () => {
   pages = [{ items: [reply(1, '始めます。')], next_cursor: null }];
   renderPage();
-  const sidebar = screen.getByRole('complementary', { name: 'チャットと作業' });
+  const sidebar = screen.getByRole('complementary', { name: 'TODO と会話' });
   const chatRow = within(sidebar).getByRole('button', { name: 'チャット' });
   expect(chatRow).toHaveAttribute('aria-current', 'true');
   expect(
@@ -491,12 +499,16 @@ it('the Chat row takes a reader who scrolled up back to the newest message, whic
   // One read for the chat, one for the unread count.
   pages = [page, page];
   render(
-    <MemoryRouter initialEntries={['/history']}>
+    <MemoryRouter initialEntries={['/history?item=chat']}>
       <UiLanguageProvider initialLanguage="ja">
         <LocalOwnerContext.Provider value={OWNER}>
           <ChatSessionProvider>
             <WithUnreadCount>
-              <SuggestionHistoryPage />
+              <Routes>
+                <Route element={<Outlet context={SHELL} />}>
+                  <Route path="/history" element={<SuggestionHistoryPage />} />
+                </Route>
+              </Routes>
             </WithUnreadCount>
           </ChatSessionProvider>
         </LocalOwnerContext.Provider>

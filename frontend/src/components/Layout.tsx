@@ -1,5 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { House, Settings, UserRound } from 'lucide-react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { Settings, UserRound } from 'lucide-react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useI18n } from '@/context/useI18n';
@@ -12,7 +12,25 @@ import { ChatUnreadContext } from './chat/chatUnread';
 import { UpdateReadyNotice } from './UpdateReadyNotice';
 import { PANTARAY_ACCOUNT_LOGIN_ENABLED } from '../../electron/src/auth/accountLoginFeature';
 import { useShowHistoryItem } from '@/history/useShowHistoryItem';
+import { OrganizationRail } from '@/components/todo/OrganizationRail';
+import type { WorkspaceOrganization } from '@/pages/settings/components/workspaceSettingsModel';
+import {
+  DEFAULT_TODO_SELECTION,
+  parseTodoSelection,
+  todoSelectionSearch,
+} from '@/todos/todoSelection';
+import type { TodoScopeQuery } from '../../electron/src/todos/todoContracts';
 import './Layout.css';
+
+const HOME_PATH = '/history';
+
+/** What the home page hands the shell: the organizations its settings read, for the rail. */
+export type LayoutOutletContext = {
+  publishOrganizations: (organizations: readonly WorkspaceOrganization[]) => void;
+};
+
+const sameScope = (a: TodoScopeQuery, b: TodoScopeQuery) =>
+  a.scope === b.scope && a.organization_id === b.organization_id;
 
 /**
  * The main window's shell: an icon rail on the left on every page, and the page beside it.
@@ -28,11 +46,18 @@ const Layout: React.FC = () => {
   const { t } = useI18n();
   const navigate = useNavigate();
   const location = useLocation();
-  // Home reopens what History last showed (its `?item=`), for as long as the window is open.
-  const lastHistorySearch = useRef('');
-  useEffect(() => {
-    if (location.pathname === '/history') lastHistorySearch.current = location.search;
-  }, [location.pathname, location.search]);
+  // The home page reads the workspace on every visit and hands its organizations up; until then
+  // the rail holds the entries every workspace has.
+  const [organizations, setOrganizations] = useState<readonly WorkspaceOrganization[]>([]);
+  const outletContext = useMemo<LayoutOutletContext>(
+    () => ({ publishOrganizations: setOrganizations }),
+    []
+  );
+  // The rail's scope reopens what the home page last showed, for as long as the window is open.
+  const onHome = location.pathname === HOME_PATH;
+  const [lastHomeSearch, setLastHomeSearch] = useState('');
+  if (onHome && lastHomeSearch !== location.search) setLastHomeSearch(location.search);
+  const scope = parseTodoSelection(onHome ? location.search : lastHomeSearch).scope;
 
   useShowHistoryItem();
 
@@ -79,19 +104,20 @@ const Layout: React.FC = () => {
   };
 
   // A page with its own columns shows the AI-connection notice in its right column.
-  const isSplitPage = location.pathname === '/history' || location.pathname === '/settings';
+  const isSplitPage = onHome || location.pathname === '/settings';
 
-  const openPage = (path: string) => {
-    if (path !== '/history') navigate(path);
-    // On History, Home leaves the selection as it is.
-    else if (location.pathname !== '/history')
-      navigate({ pathname: path, search: lastHistorySearch.current });
+  // From another page, the scope in view returns to where the home page was left; any other
+  // choice opens that scope's TODOs.
+  const openScope = (next: TodoScopeQuery) => {
+    if (!onHome && sameScope(next, scope))
+      navigate({ pathname: HOME_PATH, search: lastHomeSearch });
+    else
+      navigate({
+        pathname: HOME_PATH,
+        search: todoSelectionSearch({ ...DEFAULT_TODO_SELECTION, scope: next }),
+      });
   };
-
-  const navItems = [
-    { path: '/history', label: t('nav.home'), Icon: House },
-    { path: '/settings', label: t('nav.settings'), Icon: Settings },
-  ];
+  const settingsActive = location.pathname === '/settings';
 
   return (
     <ChatUnreadContext.Provider value={chatUnread}>
@@ -99,27 +125,30 @@ const Layout: React.FC = () => {
         {/* The window has no title bar; this strip above the content is what drags it. */}
         <div className="app-titlebar" aria-hidden="true" />
         <nav className="app-rail">
-          {navItems.map(({ path, label, Icon }) => {
-            const isActive = location.pathname === path;
-            const unread = path === '/history' && chatUnread > 0;
-            return (
-              <button
-                key={path}
-                type="button"
-                onClick={() => openPage(path)}
-                className={['app-rail-item', isActive ? 'app-rail-item--active' : null]
-                  .filter(Boolean)
-                  .join(' ')}
-                aria-label={label}
-                data-tooltip={label}
-                aria-current={isActive ? 'page' : undefined}
-                aria-describedby={unread ? 'app-rail-chat-unread' : undefined}
-              >
-                <Icon size={19} strokeWidth={1.8} aria-hidden="true" />
-                {unread ? <span className="app-rail-unread-dot" aria-hidden="true" /> : null}
-              </button>
-            );
-          })}
+          {/* The home: the TODOs of all organizations, of one, or of none. */}
+          <div className="app-rail-scopes">
+            <OrganizationRail organizations={organizations} selected={scope} onSelect={openScope} />
+            {/* The chat lives on the home page; its unread replies mark the home from any page. */}
+            {chatUnread > 0 ? (
+              <span
+                className="app-rail-unread-dot"
+                role="img"
+                aria-label={t('history.chat.unreadInRail', { count: chatUnread })}
+              />
+            ) : null}
+          </div>
+          <button
+            type="button"
+            onClick={() => navigate('/settings')}
+            className={['app-rail-item', settingsActive ? 'app-rail-item--active' : null]
+              .filter(Boolean)
+              .join(' ')}
+            aria-label={t('nav.settings')}
+            data-tooltip={t('nav.settings')}
+            aria-current={settingsActive ? 'page' : undefined}
+          >
+            <Settings size={19} strokeWidth={1.8} aria-hidden="true" />
+          </button>
           <div className="app-rail-bottom">
             {/* Recording belongs to the local owner; without one there is nothing to show. */}
             <LocalOwnerBoundary fallback={null}>
@@ -166,12 +195,6 @@ const Layout: React.FC = () => {
             )}
           </div>
         </nav>
-        {chatUnread > 0 ? (
-          <span id="app-rail-chat-unread" hidden>
-            {t('history.chat.unread', { count: chatUnread })}
-          </span>
-        ) : null}
-
         {/* The chat's unread count, for the rail and History's chat row on every page. */}
         <LocalOwnerBoundary fallback={null}>
           <ChatUnreadTracker onCount={setChatUnread} />
@@ -185,7 +208,7 @@ const Layout: React.FC = () => {
         <main className="app-main">
           <div className={isSplitPage ? 'app-surface app-surface--split' : 'app-surface'}>
             {isSplitPage ? null : <AiConnectionNotice />}
-            <Outlet />
+            <Outlet context={outletContext} />
           </div>
           <UpdateReadyNotice />
         </main>

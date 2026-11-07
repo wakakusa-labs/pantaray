@@ -1,6 +1,7 @@
 import { Check, CircleAlert, Clipboard, PictureInPicture2 } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 
+import { ApprovalDecisionButton } from '@/components/agent-overlay/ApprovalDecisionButton';
 import { DismissalReason } from '@/components/agent-overlay/DismissalReason';
 import { MarkdownBlock } from '@/components/agent-overlay/MarkdownRenderer';
 import { SuggestionDecisionButtons } from '@/components/agent-overlay/SuggestionDecisionButtons';
@@ -55,7 +56,11 @@ type SuggestionTaskPaneProps = {
    * the preview goes with it, so the Action's pane taking over keeps it open.
    */
   onStarted: (actionId: string, preview: TaskPreview | null) => void;
-  /** Opens the chat, as the task pane's header button does. */
+  /**
+   * Whether 見送る is offered. A TODO's suggestion is let go by deleting the TODO, so its pane
+   * offers 承認 alone.
+   */
+  canDismiss: boolean;
   /** The composer's @-mention "Add project" option. */
   onAddProject: () => void;
 };
@@ -71,6 +76,7 @@ export function SuggestionTaskPane({
   title,
   requestedFile,
   onStarted,
+  canDismiss,
   onAddProject,
 }: SuggestionTaskPaneProps) {
   const { language, t } = useI18n();
@@ -270,13 +276,22 @@ export function SuggestionTaskPane({
             action={
               decides
                 ? {
-                    decision: (
+                    decision: canDismiss ? (
                       <SuggestionDecisionButtons
                         canDismiss={task.canDismiss}
                         canAccept={task.canAccept}
                         onDismiss={task.dismiss}
                         onAccept={() => void task.accept()}
                       />
+                    ) : (
+                      <ApprovalDecisionButton
+                        type="button"
+                        $variant="primary"
+                        disabled={!task.canAccept}
+                        onClick={() => void task.accept()}
+                      >
+                        {t('overlay.accept')}
+                      </ApprovalDecisionButton>
                     ),
                   }
                 : 'send'

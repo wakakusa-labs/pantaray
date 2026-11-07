@@ -14,12 +14,17 @@ import type { HistorySelection } from '@/history/historySelection';
 import { useSuggestionHistory } from '@/hooks/useSuggestionHistory';
 import { HISTORY_MESSAGES } from '@/i18n/messageCatalog/history';
 import type { WorkspaceProjects } from './HistoryProjects';
-import { HistorySidebar } from './HistorySidebar';
+import { HistorySidebar, type TodoListPlace } from './HistorySidebar';
 
 const mocks = vi.hoisted(() => ({
   chatUnread: 0,
   select: vi.fn(),
-  selected: 'chat' as HistorySelection,
+  selected: 'chat' as HistorySelection | null,
+  todoPlace: null as TodoListPlace | null,
+  openCounts: new Map<string, number>(),
+  showAll: vi.fn(),
+  showDeleted: vi.fn(),
+  selectProject: vi.fn(),
   error: 'history.error.fetchFailed' as string | null,
   itemsOverride: null as ConversationHistoryListItem[] | null,
   loading: false,
@@ -91,6 +96,13 @@ function Sidebar() {
       }
       creatingProject={false}
       onCreatingProjectChange={mocks.startCreatingProject}
+      todoNav={{
+        current: mocks.todoPlace,
+        openCounts: mocks.openCounts,
+        onShowAll: mocks.showAll,
+        onShowDeleted: mocks.showDeleted,
+        onSelectProject: mocks.selectProject,
+      }}
       selected={mocks.selected}
       onSelect={mocks.select}
       hidden={false}
@@ -131,6 +143,8 @@ afterEach(() => {
   mocks.unreadActionId = 'A1';
   mocks.chatUnread = 0;
   mocks.selected = 'chat';
+  mocks.todoPlace = null;
+  mocks.openCounts = new Map();
   mocks.workspace = null;
   vi.clearAllMocks();
 });
@@ -154,14 +168,16 @@ const WORKSPACE: NonNullable<WorkspaceProjects['settings']> = {
   ],
 };
 
-it('上から検索、プロジェクト、チャット、作業の順に並べ、＋で追加の流れを呼ぶ', async () => {
+it('上から検索、すべての TODO、プロジェクト、削除した TODO、チャット、そのほかの会話の順に並べ、＋で追加の流れを呼ぶ', async () => {
   mocks.workspace = WORKSPACE;
   window.electron = {} as unknown as Window['electron'];
   render(<Sidebar />, { wrapper: SidebarWrapper });
 
   const order = [
     screen.getByRole('search'),
+    screen.getByRole('button', { name: 'todo.nav.all' }),
     screen.getByRole('region', { name: 'history.projects.title' }),
+    screen.getByRole('button', { name: 'todo.nav.deleted' }),
     screen.getByRole('button', { name: 'history.chat.title' }),
     screen.getByRole('region', { name: 'history.tasks.title' }),
     screen.getByRole('button', { name: /^Conversation/ }),
@@ -178,6 +194,48 @@ it('上から検索、プロジェクト、チャット、作業の順に並べ�
   expect(mocks.startCreatingProject).toHaveBeenCalledWith(true);
 });
 
+it('TODO の入口は見ている一覧を current にし、押すとその一覧を選ぶ。会話を見ている間はどれも current でない', async () => {
+  mocks.workspace = WORKSPACE;
+  mocks.selected = null;
+  mocks.todoPlace = { kind: 'project', projectId: 'p-1' };
+  mocks.openCounts = new Map([['p-1', 2]]);
+  window.electron = {} as unknown as Window['electron'];
+  const { rerender } = render(<Sidebar />, { wrapper: SidebarWrapper });
+
+  const all = screen.getByRole('button', { name: 'todo.nav.all' });
+  const deleted = screen.getByRole('button', { name: 'todo.nav.deleted' });
+  const project = screen.getByRole('button', { name: 'aurora' });
+  expect(project).toHaveAttribute('aria-current', 'true');
+  expect(project).toHaveAccessibleDescription('history.projects.openCount {"count":2}');
+  expect(all).not.toHaveAttribute('aria-current');
+  expect(screen.getByRole('button', { name: 'history.chat.title' })).not.toHaveAttribute(
+    'aria-current'
+  );
+
+  await userEvent.click(all);
+  expect(mocks.showAll).toHaveBeenCalledOnce();
+  await userEvent.click(deleted);
+  expect(mocks.showDeleted).toHaveBeenCalledOnce();
+  // From the keyboard: this sidebar's drag stand-in would take a pointer press as a drag.
+  screen.getByRole('button', { name: 'billing' }).focus();
+  await userEvent.keyboard('{Enter}');
+  expect(mocks.selectProject).toHaveBeenCalledWith('p-2');
+
+  mocks.todoPlace = { kind: 'deleted' };
+  rerender(<Sidebar />);
+  expect(deleted).toHaveAttribute('aria-current', 'true');
+  expect(project).not.toHaveAttribute('aria-current');
+
+  mocks.selected = 'chat';
+  mocks.todoPlace = null;
+  rerender(<Sidebar />);
+  expect(deleted).not.toHaveAttribute('aria-current');
+  expect(screen.getByRole('button', { name: 'history.chat.title' })).toHaveAttribute(
+    'aria-current',
+    'true'
+  );
+});
+
 it('作業の見出しは作業が無くても出し、✎ はメイン画面に、隣の小さく開くはショートカットと同じ小さい作業を開く', async () => {
   mocks.error = null;
   mocks.itemsOverride = [];
@@ -190,8 +248,8 @@ it('作業の見出しは作業が無くても出し、✎ はメイン画面に
   render(<Sidebar />, { wrapper: SidebarWrapper });
 
   const tasks = screen.getByRole('region', { name: 'history.tasks.title' });
-  expect(HISTORY_MESSAGES.ja['history.tasks.title']).toBe('作業');
-  expect(HISTORY_MESSAGES.en['history.tasks.title']).toBe('Tasks');
+  expect(HISTORY_MESSAGES.ja['history.tasks.title']).toBe('そのほかの会話');
+  expect(HISTORY_MESSAGES.en['history.tasks.title']).toBe('Other conversations');
   expect(HISTORY_MESSAGES.ja['history.newTaskMain']).toBe('メイン画面で新しい作業');
   expect(HISTORY_MESSAGES.ja['history.newTaskSmall']).toBe('小さく新しい作業');
   // Pen first, then the small window, as one row beside the heading.

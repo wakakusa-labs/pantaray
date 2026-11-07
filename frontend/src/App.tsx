@@ -8,6 +8,7 @@ import {
   Navigate,
   useLocation,
   useNavigate,
+  useOutletContext,
 } from 'react-router-dom';
 import { useAuth } from './hooks/useAuth';
 import LoginPage from './pages/LoginPage';
@@ -41,6 +42,9 @@ const AccountLoginDisabledPage: React.FC = () => {
     </div>
   );
 };
+
+/** Hands the shell's outlet context on through a route that only wraps its pages. */
+const OutletContextRelay: React.FC = () => <Outlet context={useOutletContext()} />;
 
 // ページに応じてbodyのクラスとウィンドウサイズを設定するコンポーネント
 const PageClassManager: React.FC = () => {
@@ -243,7 +247,7 @@ const MainAppRoutes: React.FC = () => {
               element={
                 <LocalOwnerBoundary>
                   <ChatSessionProvider>
-                    <Outlet />
+                    <OutletContextRelay />
                   </ChatSessionProvider>
                 </LocalOwnerBoundary>
               }

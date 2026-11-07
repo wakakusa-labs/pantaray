@@ -5,9 +5,15 @@ from __future__ import annotations
 import sqlite3
 from contextlib import closing
 from pathlib import Path
+from zoneinfo import ZoneInfo
+
+from pantaray_agents.local_runtime.todos.store import TodoClock
 
 USER = "user-1"
 T = "2026-11-01T00:00:00.000Z"
+TOKYO = ZoneInfo("Asia/Tokyo")
+# Wednesday 2026-11-04, noon in Tokyo; the week starts on Monday 2026-11-02.
+NOW = TodoClock(now="2026-11-04T03:00:00.000Z", zone=TOKYO)
 
 
 def execute(db_path: Path, script: str) -> None:

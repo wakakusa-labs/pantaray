@@ -54,6 +54,7 @@ class CheckSet:
 type CreateRejection = Literal["invalid_text"]
 type CheckRejection = Literal["deleted", "ai_cannot_uncheck"]
 type ReportRejection = Literal["deleted"]
+type DueRejection = Literal["deleted"]
 type DeletionRequestRejection = Literal["already_pending", "declined_before", "deleted"]
 type DeletionAnswerRejection = Literal["stale_request"]
 type UserDeletionRejection = Literal["already_deleted"]
@@ -130,6 +131,12 @@ def _next_recurrence(
         deletion=None,
         created_at=now,
     )
+
+
+def set_due(todo: Todo, due: TodoDue | None) -> Todo | Rejected[DueRejection]:
+    if todo.deletion is not None:
+        return Rejected("deleted")
+    return replace(todo, due=due)
 
 
 def report_progress(todo: Todo, report: AiReport) -> Todo | Rejected[ReportRejection]:

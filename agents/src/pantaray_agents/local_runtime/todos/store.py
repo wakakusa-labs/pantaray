@@ -11,7 +11,7 @@ import sqlite3
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import closing, contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Final, Literal, assert_never, cast
 from zoneinfo import ZoneInfo
 
@@ -160,7 +160,6 @@ class TodoWeek:
 
 
 type CreateItemRejection = Literal["project_not_found", "client_todo_conflict"]
-type DueRejection = Literal["deleted"]
 
 
 def create_todo_item(
@@ -265,14 +264,6 @@ def update_todo[R: str](
         if isinstance(result, Todo) and result != current:
             _update(connection, user_id=user_id, todo=result)
     return result
-
-
-def set_due(todo: Todo, due: TodoDue | None) -> Todo | Rejected[DueRejection]:
-    """The due-date transition the core does not have yet."""
-
-    if todo.deletion is not None:
-        return Rejected("deleted")
-    return replace(todo, due=due)
 
 
 def read_todo(*, user_id: str, todo_id: TodoId) -> TodoEntry | None:

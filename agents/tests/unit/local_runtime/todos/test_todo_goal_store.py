@@ -6,6 +6,7 @@ from pathlib import Path
 from pantaray_agents.local_runtime.todos import core
 from pantaray_agents.local_runtime.todos.core import Rejected
 from pantaray_agents.local_runtime.todos.goal_store import (
+    AlreadyRecorded,
     add_ai_progress_record,
     add_user_progress_record,
     clear_project_goal,
@@ -107,15 +108,20 @@ def _seed_second_run(db: Path) -> None:
     )
 
 
-def _ai_record(todo_id: str, *refs: str) -> ProgressRecord | Rejected[str] | None:
+def _ai_record(
+    todo_id: str,
+    *refs: str,
+    tool_step_id: str = "step-6",
+    quantity: float = 30_000_000.0,
+) -> ProgressRecord | AlreadyRecorded | Rejected[str] | None:
     return add_ai_progress_record(
         user_id=USER,
         todo_id=todo_id,
-        tool_step_id="step-6",
+        tool_step_id=tool_step_id,
         action_id="a",
         process_id="run-2",
         evidence_refs=refs,
-        quantity=30_000_000.0,
+        quantity=quantity,
         unit="円",
         note="Acme signed",
         clock=NOW,
@@ -283,3 +289,28 @@ def test_the_view_reports_a_named_project_without_a_goal_and_others_with_one(
         ).goals
         == ()
     )
+
+
+def test_the_same_figure_from_the_same_steps_is_recorded_once(db: Path) -> None:
+    _set_goal()
+    todo = _todo()
+    _seed_second_run(db)
+    first = _ai_record(todo.todo_id, "S-4-TOOL")
+    assert isinstance(first, ProgressRecord)
+
+    again = _ai_record(todo.todo_id, "S-4-TOOL", tool_step_id="step-7")
+    other_amount = _ai_record(
+        todo.todo_id, "S-4-TOOL", tool_step_id="step-8", quantity=1.0
+    )
+
+    assert again == AlreadyRecorded(record=first)
+    assert isinstance(other_amount, ProgressRecord)
+    view = read_progress(
+        user_id=USER,
+        scope=AllScope(),
+        project=OneProject("project-1"),
+        period="week",
+        clock=NOW,
+    )
+    (goal,) = view.goals
+    assert isinstance(goal, Measured) and goal.total == 30_000_001.0

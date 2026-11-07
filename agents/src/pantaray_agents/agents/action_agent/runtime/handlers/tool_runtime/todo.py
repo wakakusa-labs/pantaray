@@ -20,13 +20,17 @@ from pantaray_agents.agents.action_agent.tools import (
     ToolDefinition,
 )
 from pantaray_agents.agents.action_agent.tools.todo_tools import (
+    ALREADY_RECORDED_MESSAGE,
     TODO_REFUSALS,
     TodoStatus,
 )
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.todos import core
 from pantaray_agents.local_runtime.todos.core import Rejected
-from pantaray_agents.local_runtime.todos.goal_store import add_ai_progress_record
+from pantaray_agents.local_runtime.todos.goal_store import (
+    AlreadyRecorded,
+    add_ai_progress_record,
+)
 from pantaray_agents.local_runtime.todos.model import AiReport, TodoId
 from pantaray_agents.local_runtime.todos.store import (
     read_todo_clock,
@@ -142,6 +146,13 @@ def _record_progress(
         note=require_string_arg(args, "note"),
         clock=read_todo_clock(),
     )
+    if isinstance(recorded, AlreadyRecorded):
+        logger.info(
+            "TODO progress already recorded: todo_id=%s record_id=%s",
+            todo_id,
+            recorded.record.record_id,
+        )
+        return {"status": "already_recorded", "message": ALREADY_RECORDED_MESSAGE}
     if recorded is None or isinstance(recorded, Rejected):
         output = _refused(recorded)
         logger.info(

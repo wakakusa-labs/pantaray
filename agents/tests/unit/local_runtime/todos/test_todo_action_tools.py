@@ -207,10 +207,10 @@ def test_a_progress_record_cites_a_tool_result_of_the_running_turn(db: Path) -> 
           '{NOW.now}')""",
     )
 
-    def record(*refs: str) -> JSONValue:
+    def record(*refs: str, step_id: str = "step-3") -> JSONValue:
         with TraceContextManager(extra={"process_id": "run-a"}):
             result = run_todo_tool(
-                step_id="step-3",
+                step_id=step_id,
                 tool_def=TOOL_REGISTRY["record_progress"],
                 args={
                     "quantity": 30_000_000,
@@ -231,6 +231,13 @@ def test_a_progress_record_cites_a_tool_result_of_the_running_turn(db: Path) -> 
         ),
     }
     assert record("S-2-TOOL") == {"status": "recorded"}
+    assert record("S-2-TOOL", step_id="step-4") == {
+        "status": "already_recorded",
+        "message": (
+            "This figure is already recorded from the same tool results, so it was "
+            "not added again."
+        ),
+    }
     with closing(sqlite3.connect(db)) as connection:
         assert connection.execute(
             "SELECT todo_id, quantity, note, author, evidence_action_id, "

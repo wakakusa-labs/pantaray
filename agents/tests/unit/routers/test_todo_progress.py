@@ -78,11 +78,16 @@ def _todo_id(client: TestClient) -> str:
     return str(response.json()["todo_id"])
 
 
-def _record(client: TestClient, todo_id: str, quantity: float = 30_000_000) -> Response:
+def _record(
+    client: TestClient,
+    todo_id: str,
+    quantity: float = 30_000_000,
+    client_record_id: str = "r-1",
+) -> Response:
     return client.post(
         f"{TODOS}/{todo_id}/progress-records",
         json={
-            "client_record_id": "r-1",
+            "client_record_id": client_record_id,
             "quantity": quantity,
             "unit": "円",
             "note": "Acme signed",
@@ -133,6 +138,20 @@ def test_a_goal_and_a_users_record_show_as_measured_progress(
     assert _progress(client).json()["goals"][0]["kind"] == "no_records"
     assert client.delete(GOAL).status_code == 204
     assert client.delete(GOAL).status_code == 204
+
+
+def test_a_pace_too_slow_to_date_is_still_a_view(client: TestClient) -> None:
+    client.put(GOAL, json=GOAL_BODY)
+    todo_id = _todo_id(client)
+    for client_record_id in ("r-1", "r-2", "r-3"):
+        assert _record(client, todo_id, 1, client_record_id).status_code == 200
+
+    response = _progress(client)
+
+    assert response.status_code == 200, response.text
+    (goal,) = response.json()["goals"]
+    assert (goal["total"], goal["pace"]["kind"]) == (3.0, "beyond_horizon")
+    assert "projected_on" not in goal["pace"]
 
 
 def test_refusals_carry_error_codes(client: TestClient) -> None:

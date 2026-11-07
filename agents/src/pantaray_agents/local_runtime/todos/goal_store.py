@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
+from dataclasses import dataclass
 from typing import Final, Literal
 
 from pantaray_agents.local_runtime.runtime.identity import verify_current_owner
@@ -54,6 +55,14 @@ type GoalRejection = Literal["project_not_found", "invalid_text", "deadline_befo
 type RecordRejection = Literal[
     "invalid_text", "deleted", "record_conflict", "evidence_not_in_run"
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class AlreadyRecorded:
+    """Another call recorded the same figure from the same steps; nothing added."""
+
+    record: ProgressRecord
+
 
 # The run's successful tool steps by the History Ref the model was shown; a
 # retried step answers with its latest successful attempt. The run starts at
@@ -177,11 +186,12 @@ def add_ai_progress_record(
     unit: str,
     note: str,
     clock: TodoClock,
-) -> ProgressRecord | Rejected[RecordRejection] | None:
+) -> ProgressRecord | AlreadyRecorded | Rejected[RecordRejection] | None:
     """An Action run's record, kept only when every ref is one of its tool steps.
 
     The record's id derives from the calling tool step, so a replayed call
-    stores nothing new.
+    stores nothing new. A record of the same TODO, quantity and unit from the
+    same steps is the same outcome told twice, and would double the total.
     """
 
     verify_current_owner(user_id)
@@ -198,11 +208,26 @@ def add_ai_progress_record(
         step_by_ref = {str(row[0]): str(row[1]) for row in rows}
         if set(step_by_ref) != set(evidence_refs):
             return Rejected("evidence_not_in_run")
+        record_id = _record_id(f"step:{tool_step_id}")
+        same_figure = connection.execute(
+            f"SELECT {_RECORD_SELECT} FROM todo_progress_records AS record "
+            "JOIN todo_items AS todo ON todo.user_id = record.user_id "
+            "AND todo.todo_id = record.todo_id "
+            "WHERE record.user_id = ? AND record.todo_id = ? AND record.author = 'ai' "
+            "AND record.quantity = ? AND record.unit = ? AND record.record_id <> ? "
+            "ORDER BY record.recorded_at, record.record_id",
+            (user_id, todo_id, quantity, _line(unit), record_id),
+        ).fetchall()
+        for row in same_figure:
+            stored = _record(row)
+            assert isinstance(stored.evidence, ActionStepsEvidence)
+            if set(stored.evidence.step_ids) == set(step_by_ref.values()):
+                return AlreadyRecorded(record=stored)
         return _add_record(
             connection,
             user_id=user_id,
             todo_id=todo_id,
-            record_id=_record_id(f"step:{tool_step_id}"),
+            record_id=record_id,
             quantity=quantity,
             unit=unit,
             note=note,

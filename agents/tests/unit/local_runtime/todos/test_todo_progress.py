@@ -8,6 +8,7 @@ from dataclasses import replace
 
 from pantaray_agents.local_runtime.todos.progress import (
     PACE_MIN_RECORDS,
+    BeyondHorizon,
     CheckedTodo,
     Goal,
     Measured,
@@ -162,6 +163,23 @@ def test_the_pace_window_drops_records_older_than_four_weeks() -> None:
 
     assert _measured(view).pace == TooFewRecords(
         window_start="2026-10-08", record_ids=("new",)
+    )
+
+
+def test_a_pace_too_slow_for_a_century_has_no_date() -> None:
+    # 3 yen over four days toward 300M yen: 400M days, past any date.
+    view = _view(
+        [
+            _record("r-1", "2026-11-01T01:00:00.000Z", 1.0),
+            _record("r-2", "2026-11-02T01:00:00.000Z", 1.0),
+            _record("r-3", "2026-11-04T01:00:00.000Z", 1.0),
+        ]
+    )
+
+    measured = _measured(view)
+    assert (measured.total, measured.record_ids) == (3.0, ("r-3", "r-2", "r-1"))
+    assert measured.pace == BeyondHorizon(
+        window_start="2026-11-01", record_ids=("r-3", "r-2", "r-1"), per_day=0.75
     )
 
 

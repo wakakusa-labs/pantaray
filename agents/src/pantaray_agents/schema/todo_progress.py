@@ -140,6 +140,13 @@ class ProjectedView(_View):
     kind: Literal["projected"]
 
 
+class BeyondHorizonView(_View):
+    window_start: LocalDate
+    record_ids: tuple[str, ...]
+    per_day: float
+    kind: Literal["beyond_horizon"]
+
+
 class NoGoalView(_View):
     project_id: str
     kind: Literal["no_goal"]
@@ -160,7 +167,8 @@ class MeasuredView(_View):
     expected_share: float
     deadline_passed: bool
     pace: Annotated[
-        TooFewRecordsView | ReachedView | ProjectedView, Field(discriminator="kind")
+        TooFewRecordsView | ReachedView | ProjectedView | BeyondHorizonView,
+        Field(discriminator="kind"),
     ]
     kind: Literal["measured"]
 

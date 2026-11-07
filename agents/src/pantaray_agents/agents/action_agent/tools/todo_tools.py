@@ -58,6 +58,11 @@ TODO_REFUSALS: Final[dict[str, str]] = {
     "record_conflict": "This call already recorded different progress.",
 }
 
+ALREADY_RECORDED_MESSAGE: Final = (
+    "This figure is already recorded from the same tool results, so it was not "
+    "added again."
+)
+
 
 def _status_output(*statuses: str) -> dict[str, JSONValue]:
     return {
@@ -247,12 +252,13 @@ RECORD_PROGRESS_TOOL = ToolDefinition.from_spec(
                 ),
             )
         ),
-        output_schema=_status_output("recorded"),
+        output_schema=_status_output("recorded", "already_recorded"),
     )
 )
 
 
 __all__ = [
+    "ALREADY_RECORDED_MESSAGE",
     "RECORD_PROGRESS_TOOL",
     "RECORD_PROGRESS_TOOL_ID",
     "REQUEST_TODO_DELETION_TOOL",

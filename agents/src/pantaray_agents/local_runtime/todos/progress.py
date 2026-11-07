@@ -32,6 +32,9 @@ PERIOD_ROWS: Final[Mapping[PeriodKind, int]] = {"day": 7, "week": 4, "month": 6}
 PACE_WINDOW_DAYS: Final = 28
 # Fewer records than this in the window is one or two events, not a pace.
 PACE_MIN_RECORDS: Final = 3
+# A projected date a century out tells the user only that the pace is far too
+# slow, and far later dates are not representable at all.
+PROJECTION_HORIZON_DAYS: Final = 100 * 365
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,7 +121,17 @@ class Projected:
     kind: Literal["projected"] = "projected"
 
 
-type Pace = TooFewRecords | Reached | Projected
+@dataclass(frozen=True, slots=True)
+class BeyondHorizon:
+    """The window's pace reaches the target only after PROJECTION_HORIZON_DAYS."""
+
+    window_start: LocalDate  # through today
+    record_ids: tuple[str, ...]
+    per_day: float
+    kind: Literal["beyond_horizon"] = "beyond_horizon"
+
+
+type Pace = TooFewRecords | Reached | Projected | BeyondHorizon
 
 
 @dataclass(frozen=True, slots=True)
@@ -328,13 +341,17 @@ def _pace(
         return TooFewRecords(window_start=window_start, record_ids=record_ids)
     window_days = (date.fromisoformat(today) - date.fromisoformat(window_start)).days
     per_day = math.fsum(record.quantity for record in in_window) / (window_days + 1)
-    days_left = math.ceil((goal.target - total) / per_day)
+    days_left = (goal.target - total) / per_day
+    if days_left > PROJECTION_HORIZON_DAYS:
+        return BeyondHorizon(
+            window_start=window_start, record_ids=record_ids, per_day=per_day
+        )
     return Projected(
         window_start=window_start,
         record_ids=record_ids,
         per_day=per_day,
         projected_on=(
-            date.fromisoformat(today) + timedelta(days=days_left)
+            date.fromisoformat(today) + timedelta(days=math.ceil(days_left))
         ).isoformat(),
     )
 

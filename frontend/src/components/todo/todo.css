@@ -1,0 +1,251 @@
+/* The TODO list takes its structure from type weight, hairlines and spacing; the due is the only chip. */
+
+.todo-group {
+  margin-top: var(--space-xl);
+}
+
+.todo-group__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  padding-bottom: 6px;
+  color: var(--fog-text-3);
+  font-size: var(--text-meta-size);
+  font-variant-numeric: tabular-nums;
+}
+
+.todo-group__head h3 {
+  min-width: 0;
+  margin: 0;
+  color: var(--fog-text);
+  font-size: var(--text-heading-size);
+  font-weight: var(--text-heading-weight);
+  overflow-wrap: anywhere;
+}
+
+.todo-group__rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.todo-group__head,
+.todo-row,
+.todo-add,
+.todo-deleted {
+  border-bottom: 1px solid var(--fog-line);
+}
+
+.todo-row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 4px 10px;
+  align-items: start;
+  padding: 8px;
+}
+
+.todo-row:has(> .todo-row__body[aria-current='true']) {
+  border-radius: 8px;
+  background: var(--fog-mist-strong);
+}
+
+.todo-row__delete {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fog-text-3);
+  cursor: pointer;
+}
+
+.todo-check {
+  appearance: none;
+  justify-self: center;
+  box-sizing: border-box;
+  width: 18px;
+  height: 18px;
+  margin: 5px 0 0;
+  border: 1.5px solid var(--fog-text-3);
+  border-radius: 5px;
+  background: transparent center / 12px no-repeat;
+  cursor: pointer;
+}
+
+.todo-check:hover:not(:disabled),
+.todo-check:checked {
+  border-color: var(--fog-text);
+}
+
+/* The check mark in --app-background on the --fog-text fill. */
+.todo-check:checked {
+  background-color: var(--fog-text);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%2313171e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 6.2l2.3 2.3L9.5 3.8'/%3E%3C/svg%3E");
+}
+
+.todo-row__body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 3px 4px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.todo-row__text {
+  color: var(--fog-text);
+  font-size: var(--text-body-size);
+  overflow-wrap: anywhere;
+}
+
+.todo-row--done .todo-row__text {
+  color: var(--fog-text-3);
+  text-decoration: line-through;
+}
+
+.todo-row__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 12px;
+  min-width: 0;
+  color: var(--fog-text-3);
+  font-size: var(--text-meta-size);
+  overflow-wrap: anywhere;
+}
+
+.todo-row__state--working,
+.todo-row__state--partial {
+  color: var(--fog-text-2);
+}
+
+/* The blue of the app's info badge, as text: the user's turn. */
+.todo-row__state--waiting {
+  color: #9cc3ec;
+}
+
+.todo-due {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--control-border);
+  border-radius: 6px;
+  color: var(--fog-text-2);
+  font-size: var(--text-meta-size);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.todo-due--soon {
+  border-color: var(--warning-border);
+  color: var(--warning-color);
+}
+
+.todo-row__delete:hover:not(:disabled) {
+  background: var(--fog-mist-strong);
+  color: var(--fog-text);
+}
+
+.todo-row__delete:disabled,
+.todo-check:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.todo-check:focus-visible,
+.todo-row__body:focus-visible,
+.todo-row__delete:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.todo-row__end,
+.todo-deletion,
+.todo-deleted {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.todo-deletion {
+  grid-column: 2 / -1;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--control-border);
+}
+
+.todo-deletion__text {
+  flex: 1 1 240px;
+  min-width: 0;
+  margin: 0;
+  color: var(--fog-text);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.todo-deletion__title {
+  display: block;
+  color: var(--fog-text-3);
+  font-size: var(--text-meta-size);
+}
+
+.todo-deletion__approve {
+  color: var(--danger-color);
+}
+
+/* Lined up with the rows' text, past the check's column. */
+.todo-add {
+  padding: 8px 8px 8px 46px;
+}
+
+.todo-week {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  color: var(--fog-text-2);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.todo-week__step {
+  width: 34px;
+  padding: 0;
+}
+
+.todo-rail {
+  display: grid;
+  gap: 6px;
+}
+
+.todo-rail__entry {
+  font-size: 15px;
+  font-weight: var(--weight-semibold);
+}
+
+.todo-rail__none {
+  font-size: var(--text-meta-size);
+  font-weight: var(--weight-medium);
+}
+
+.todo-deleted {
+  padding: 10px 8px;
+}
+
+.todo-deleted__body {
+  display: grid;
+  flex: 1 1 240px;
+  gap: 2px;
+  min-width: 0;
+}

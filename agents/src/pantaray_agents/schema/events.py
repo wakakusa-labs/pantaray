@@ -29,4 +29,5 @@ class OutboundEvent(StrEnum):
     SESSION_STARTED = "session_started"
     CHAT_ITEM_APPENDED = "chat_item_appended"
     CHAT_TURN_STATE = "chat_turn_state"
+    TODO_CHANGED = "todo_changed"
     ERROR = "error"

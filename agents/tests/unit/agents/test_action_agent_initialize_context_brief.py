@@ -39,7 +39,10 @@ from pantaray_agents.agents.action_agent.runtime.state import (
     ActionAgentState,
     create_initial_state,
 )
-from pantaray_agents.agents.action_agent.tools import SUPERVISOR_SINGLE_REACT_TOOL_IDS
+from pantaray_agents.agents.action_agent.tools import (
+    SUPERVISOR_SINGLE_REACT_TOOL_IDS,
+    TODO_TOOL_IDS,
+)
 from pantaray_agents.local_runtime.integrations.registry import set_integration_gateway
 from pantaray_agents.local_runtime.storage.migrations import (
     apply_migrations,
@@ -193,6 +196,36 @@ async def test_a_broken_gateway_still_starts_the_action_with_todays_tools(
         assert continued["context"]["integration_tools_exposed"] is False
     finally:
         set_integration_gateway(None)
+
+
+@pytest.mark.asyncio
+async def test_the_action_serving_a_todo_is_offered_the_todo_tools(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = MockActionAgentRepository()
+    agent = _build_agent(repo)
+    await _save_suggestion(repo)
+    execution_context, db_path = _bootstrap_execution_context_with_db(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    # The seeded Action accepted suggestion-1, which wrote this TODO.
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """INSERT INTO todo_items(todo_id, user_id, text, author, origin_kind,
+              suggestion_id, week_start, created_at) VALUES ('todo-1', 'user-1',
+              'Offer', 'ai', 'suggestion', 'suggestion-1', '2026-03-16',
+              '2026-03-22T00:00:00Z')"""
+        )
+
+    updated = await initialize_context(  # type: ignore[arg-type]
+        agent, _state_with_execution_context(execution_context), _runtime(agent)
+    )
+
+    _, tool_ids, _ = _resolve_act_tool_contract(updated)
+    assert updated["context"]["served_todo_id"] == "todo-1"
+    assert set(tool_ids) - set(SUPERVISOR_SINGLE_REACT_TOOL_IDS) == set(TODO_TOOL_IDS)
 
 
 @pytest.mark.asyncio

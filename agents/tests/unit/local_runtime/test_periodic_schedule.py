@@ -29,6 +29,8 @@ OWNER_SCOPED_TASK_NAMES = (
     "short_insight",
     "memory_agent_dispatch",
     "memory_embedding_projection",
+    "todo_pickup",
+    "todo_purge",
 )
 
 
@@ -188,6 +190,78 @@ def test_memory_agent_dispatch_task_runs_for_the_current_owner(
 
     assert calls == [(context.db_path, context.busy_timeout_ms, context.owner_user_id)]
     assert next_runs == {"memory_agent_dispatch": 41.0}
+
+
+def test_todo_pickup_waits_for_a_connection_background_jobs_could_use(
+    monkeypatch: pytest.MonkeyPatch,
+    context: PeriodicTaskContext,
+    configured: None,
+    schedule_and_slot: tuple[tuple[PeriodicTask, ...], MemoryEmbeddingProjectionSlot],
+) -> None:
+    from pantaray_agents.local_runtime.runtime import periodic_schedule
+
+    owners: list[str] = []
+    can_send = False
+    monkeypatch.setattr(
+        periodic_schedule,
+        "pick_up_todos",
+        lambda *, user_id: owners.append(user_id),
+    )
+    monkeypatch.setattr(
+        periodic_schedule, "background_requests_can_send", lambda: can_send
+    )
+    schedule, _slot = schedule_and_slot
+    tasks = tuple(task for task in schedule if task.name == "todo_pickup")
+
+    waiting = run_due_periodic_tasks(
+        tasks=tasks,
+        context=context,
+        next_run_monotonic_by_task={"todo_pickup": 0.0},
+        now_monotonic=10.0,
+    )
+    # Without a connection its Actions would fail for good, so it waits and
+    # keeps its deadline for the next tick.
+    assert (waiting, owners) == ({"todo_pickup": 0.0}, [])
+
+    can_send = True
+    picked = run_due_periodic_tasks(
+        tasks=tasks,
+        context=context,
+        next_run_monotonic_by_task=waiting,
+        now_monotonic=10.1,
+    )
+    assert (picked, owners) == ({"todo_pickup": 13.1}, [context.owner_user_id])
+
+
+def test_todo_purge_runs_for_the_current_owner_at_the_current_time(
+    monkeypatch: pytest.MonkeyPatch,
+    context: PeriodicTaskContext,
+    configured: None,
+    schedule_and_slot: tuple[tuple[PeriodicTask, ...], MemoryEmbeddingProjectionSlot],
+) -> None:
+    from pantaray_agents.local_runtime.runtime import periodic_schedule
+
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        periodic_schedule, "now_utc_iso", lambda: "2026-12-04T00:00:00Z"
+    )
+    monkeypatch.setattr(
+        periodic_schedule,
+        "purge_expired_todos",
+        lambda *, user_id, now: calls.append((user_id, now)),
+    )
+    schedule, _slot = schedule_and_slot
+    tasks = tuple(task for task in schedule if task.name == "todo_purge")
+
+    next_runs = run_due_periodic_tasks(
+        tasks=tasks,
+        context=context,
+        next_run_monotonic_by_task={"todo_purge": 0.0},
+        now_monotonic=10.0,
+    )
+
+    assert calls == [(context.owner_user_id, "2026-12-04T00:00:00Z")]
+    assert next_runs == {"todo_purge": 3_610.0}
 
 
 def test_embedding_task_submits_while_the_worker_is_idle(
@@ -380,6 +454,10 @@ def _record_every_periodic_runner(
     monkeypatch.setattr(
         periodic_schedule, "run_memory_embedding_projection", run_projection
     )
+    monkeypatch.setattr(periodic_schedule, "pick_up_todos", record("todo_pickup"))
+    monkeypatch.setattr(periodic_schedule, "purge_expired_todos", record("todo_purge"))
+    # A live connection, so only the owner gate decides here.
+    monkeypatch.setattr(periodic_schedule, "background_requests_can_send", lambda: True)
 
 
 def test_owner_scoped_tasks_wait_for_configure_and_run_on_the_next_tick(
@@ -408,11 +486,8 @@ def test_owner_scoped_tasks_wait_for_configure_and_run_on_the_next_tick(
     # the user is would only hold back recovery.
     assert calls == ["reaper", "memory_repair"]
     assert [unconfigured_next_runs[name] for name in OWNER_SCOPED_TASK_NAMES] == [
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-    ]
+        0.0
+    ] * len(OWNER_SCOPED_TASK_NAMES)
 
     mark_configured()
     run_due_periodic_tasks(
@@ -424,12 +499,7 @@ def test_owner_scoped_tasks_wait_for_configure_and_run_on_the_next_tick(
 
     # A withheld task keeps its deadline, so the tick right after `configure`
     # takes every window the first one would have.
-    assert calls[2:] == [
-        "activity_summary",
-        "short_insight",
-        "memory_agent_dispatch",
-        "memory_embedding_projection",
-    ]
+    assert calls[2:] == list(OWNER_SCOPED_TASK_NAMES)
 
 
 def test_owner_scoped_tasks_wait_while_an_identity_change_is_at_the_barrier(
@@ -588,6 +658,8 @@ def test_due_tasks_run_in_declaration_order(
         "short_insight",
         "memory_agent_dispatch",
         "memory_embedding_projection",
+        "todo_pickup",
+        "todo_purge",
     ]
 
 

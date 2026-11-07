@@ -43,6 +43,7 @@ from pantaray_agents.local_runtime.runtime.bootstrap import (
     read_local_runtime_artifact_root,
     read_local_runtime_db_config,
 )
+from pantaray_agents.local_runtime.todos.store import read_todo_for_action
 from pantaray_agents.local_runtime.tooling.repository.manifests import (
     pin_action_memory_roots,
 )
@@ -129,6 +130,10 @@ async def initialize_context(
     context["agents_md_instructions"] = load_pantaray_agents_md()
     if "integration_tools_exposed" not in context:
         context["integration_tools_exposed"] = await integration_tools_available()
+    if "served_todo_id" not in context:
+        context["served_todo_id"] = read_todo_for_action(
+            user_id=str(request.user_id), action_id=request.action_id
+        )
 
     # 親ランタイムは単一 ReAct のみ。mandatory planning phase を経由せず executing に
     # 直行する。

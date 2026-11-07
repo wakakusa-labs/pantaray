@@ -64,6 +64,13 @@ from .submit_final_answer_tool import (
     SUBMIT_FINAL_ANSWER_TOOL_ID,
 )
 from .thinking_tool import THINKING_TOOL
+from .todo_tools import (
+    REQUEST_TODO_DELETION_TOOL,
+    REQUEST_TODO_DELETION_TOOL_ID,
+    TODO_TOOL_IDS,
+    UPDATE_TODO_TOOL,
+    UPDATE_TODO_TOOL_ID,
+)
 from .web_crawl_tool import WEB_CRAWL_TOOL
 from .web_extract_tool import WEB_EXTRACT_TOOL
 from .web_search_tool import WEB_SEARCH_TOOL
@@ -124,6 +131,11 @@ __all__ = [
     "INTEGRATION_LIST_TOOLS_TOOL",
     "INTEGRATION_LIST_TOOLS_TOOL_ID",
     "INTEGRATION_TOOL_IDS",
+    "REQUEST_TODO_DELETION_TOOL",
+    "REQUEST_TODO_DELETION_TOOL_ID",
+    "TODO_TOOL_IDS",
+    "UPDATE_TODO_TOOL",
+    "UPDATE_TODO_TOOL_ID",
     "SUPERVISOR_SINGLE_REACT_TOOL_IDS",
     "SUPERVISOR_SINGLE_REACT_ACT_TOOL_IDS",
     "TOOL_REGISTRY",
@@ -174,6 +186,8 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
         CANCEL_SUBAGENT_TOOL,
         INTEGRATION_LIST_TOOLS_TOOL,
         INTEGRATION_RUN_TOOL_TOOL,
+        UPDATE_TODO_TOOL,
+        REQUEST_TODO_DELETION_TOOL,
     )
 }
 
@@ -229,15 +243,21 @@ def select_tool_registry(tool_ids: tuple[str, ...]) -> dict[str, ToolDefinition]
     return {tool_id: TOOL_REGISTRY[tool_id] for tool_id in tool_ids}
 
 
-def select_supervisor_act_tool_ids(*, integrations: bool) -> tuple[str, ...]:
-    if integrations:
-        return (*SUPERVISOR_SINGLE_REACT_ACT_TOOL_IDS, *INTEGRATION_TOOL_IDS)
-    return SUPERVISOR_SINGLE_REACT_ACT_TOOL_IDS
+def select_supervisor_act_tool_ids(
+    *, integrations: bool, todo: bool
+) -> tuple[str, ...]:
+    """``todo``: the Action is a TODO's conversation, so its TODO tools are offered."""
+
+    return (
+        *SUPERVISOR_SINGLE_REACT_ACT_TOOL_IDS,
+        *(INTEGRATION_TOOL_IDS if integrations else ()),
+        *(TODO_TOOL_IDS if todo else ()),
+    )
 
 
 def select_supervisor_act_tool_registry(
-    *, integrations: bool
+    *, integrations: bool, todo: bool
 ) -> dict[str, ToolDefinition]:
     return select_tool_registry(
-        select_supervisor_act_tool_ids(integrations=integrations)
+        select_supervisor_act_tool_ids(integrations=integrations, todo=todo)
     )

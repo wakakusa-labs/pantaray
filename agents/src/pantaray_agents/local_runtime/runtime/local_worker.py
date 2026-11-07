@@ -120,24 +120,30 @@ def claimable_specs(
         return {}
     if not read_configured():
         return {}
-    # ``read_llm_route`` answers ``direct`` only for a stored connection with no
-    # cloud session; it folds an expired session into ``cloud``, which is why
-    # a live session is checked by state rather than by route. Whether the
-    # connection itself can send is the same predicate `llm_proxy/client.py`
-    # refuses on, so a claimed background job is never one the route turns away.
-    connection = peek_llm_connection()
-    claimable = (
-        llm_connection_can_send(connection)
-        if read_llm_route() == "direct" and connection is not None
-        else read_auth_context_state() == AUTH_CONTEXT_PRESENT_STATE
-    )
-    if claimable:
+    if background_requests_can_send():
         return specs
     return {
         job_type: spec
         for job_type, spec in specs.items()
         if job_type in USER_STARTED_JOB_TYPES
     }
+
+
+def background_requests_can_send() -> bool:
+    """Whether work nobody is waiting on could really send a request right now.
+
+    That is a live cloud session, or a stored connection that can send now.
+    ``read_llm_route`` answers ``direct`` only for a stored connection with no
+    cloud session; it folds an expired session into ``cloud``, which is why a
+    live session is checked by state rather than by route. Whether the
+    connection itself can send is the same predicate `llm_proxy/client.py`
+    refuses on, so background work started here is never one the route turns
+    away.
+    """
+    connection = peek_llm_connection()
+    if read_llm_route() == "direct" and connection is not None:
+        return llm_connection_can_send(connection)
+    return read_auth_context_state() == AUTH_CONTEXT_PRESENT_STATE
 
 
 ACTION_PROCESS_STATUS_ENQUEUED: PROCESS_RUNTIME_STATUS = "enqueued"

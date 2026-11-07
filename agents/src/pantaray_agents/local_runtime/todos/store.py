@@ -7,9 +7,10 @@ user's zone are read here, by `read_todo_clock`, and handed to the core.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from typing import Final, Literal, assert_never, cast
@@ -379,6 +380,107 @@ def delete_purged_todo(*, user_id: str, todo: Todo) -> None:
             "DELETE FROM todo_items WHERE user_id = ? AND todo_id = ? AND deleted_at = ?",
             (user_id, todo.todo_id, todo.deletion.at),
         )
+
+
+def read_pickup_candidates(
+    *, user_id: str, current_week_start: LocalDate
+) -> tuple[TodoEntry, ...]:
+    """Open TODOs whose week has begun, with their conversations.
+
+    A superset of what the pickup starts: `pickup_target` decides.
+    """
+
+    # Design limit: every open TODO is read on each pass, those whose Action
+    # already runs too, and the scan walks the user's TODOs up to this week; add
+    # a partial index on open TODOs when a pass exceeds 50 ms.
+    with _connection() as connection:
+        rows = connection.execute(
+            f"SELECT {_SELECT} FROM todo_items AS todo "
+            "WHERE todo.user_id = ? AND todo.week_start <= ? "
+            "AND todo.checked_at IS NULL AND todo.deleted_at IS NULL "
+            "ORDER BY todo.created_at, todo.todo_id",
+            (user_id, current_week_start),
+        ).fetchall()
+        todos = [_todo(row) for row in rows]
+        conversations = resolve_todo_conversations(
+            connection, user_id=user_id, todos=todos
+        )
+    return tuple(
+        TodoEntry(todo=todo, conversation=conversations[todo.todo_id]) for todo in todos
+    )
+
+
+# The pickup opens a TODO's Action with a message whose id derives from the TODO
+# id. SQLite cannot derive that id, but the same first message carries the
+# TODO id in its hand-off, which only the pickup writes. A Suggestion's TODO is
+# also served by the Action that accepted or replied to that Suggestion. Each
+# branch is a lookup by key.
+_HANDOFF_TODO_ID_SQL: Final = """(
+  SELECT json_extract(step.user_message_json, '$.todo_handoff.todo_id')
+  FROM agent_actions AS action
+  JOIN agent_action_steps AS step
+    ON step.user_id = action.user_id AND step.action_id = action.action_id
+   AND step.user_message_id = action.initial_user_message_id
+  WHERE action.user_id = :user_id AND action.action_id = :action_id)"""
+_SERVED_TODO_SQL: Final = f"""
+SELECT COALESCE(
+  (SELECT todo_id FROM todo_items
+   WHERE user_id = :user_id AND todo_id = {_HANDOFF_TODO_ID_SQL}),
+  (SELECT todo.todo_id FROM agent_actions AS action
+   JOIN todo_items AS todo
+     ON todo.user_id = action.user_id AND todo.suggestion_id = action.suggestion_id
+   WHERE action.user_id = :user_id AND action.action_id = :action_id),
+  (SELECT todo.todo_id FROM agent_action_steps AS step
+   JOIN todo_items AS todo
+     ON todo.user_id = step.user_id AND todo.suggestion_id = step.source_suggestion_id
+   WHERE step.user_id = :user_id AND step.action_id = :action_id)
+)
+"""
+# The same links seen from a conversation being deleted, which already knows
+# every Suggestion it holds.
+_OPEN_TODO_OF_CONVERSATION_SQL: Final = f"""
+SELECT EXISTS (SELECT 1 FROM todo_items
+               WHERE user_id = :user_id AND deleted_at IS NULL
+                 AND todo_id = {_HANDOFF_TODO_ID_SQL})
+    OR EXISTS (SELECT 1 FROM todo_items
+               WHERE user_id = :user_id AND deleted_at IS NULL
+                 AND suggestion_id IN (SELECT value FROM json_each(:suggestion_ids)))
+"""
+
+
+def read_todo_for_action(*, user_id: str, action_id: str) -> TodoId | None:
+    """The TODO whose conversation is this Action, or None for any other Action."""
+
+    with _connection() as connection:
+        row = connection.execute(
+            _SERVED_TODO_SQL, {"user_id": user_id, "action_id": action_id}
+        ).fetchone()
+    return None if row[0] is None else str(row[0])
+
+
+def conversation_has_open_todo(
+    connection: sqlite3.Connection,
+    *,
+    user_id: str,
+    action_id: str | None,
+    suggestion_ids: Sequence[str],
+) -> bool:
+    """Whether a TODO that is not deleted has this conversation as its own.
+
+    Read in the caller's transaction. Such a conversation goes only with its
+    TODO: deleted alone, the pickup would find the TODO unstarted and run it
+    again.
+    """
+
+    row = connection.execute(
+        _OPEN_TODO_OF_CONVERSATION_SQL,
+        {
+            "user_id": user_id,
+            "action_id": action_id,
+            "suggestion_ids": json.dumps(list(suggestion_ids)),
+        },
+    ).fetchone()
+    return bool(row[0])
 
 
 def read_todo_revision(*, user_id: str) -> int:

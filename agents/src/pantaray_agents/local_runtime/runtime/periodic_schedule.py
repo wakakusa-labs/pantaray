@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from ..todos.pickup import pick_up_todos
+from ..todos.retention import purge_expired_todos
 from .activity_summary_scheduler import (
     _SCHEDULER_INTERVAL_SECONDS,
     run_activity_summary_scheduler_once,
@@ -21,6 +23,7 @@ from .insight_queue import (
     SHORT_INSIGHT_WINDOW_SECONDS,
     enqueue_due_short_insight_job,
 )
+from .local_worker import background_requests_can_send
 from .memory_agent_dispatcher import (
     MEMORY_AGENT_DISPATCH_INTERVAL_SECONDS,
     dispatch_memory_agent_triggers_once,
@@ -35,11 +38,18 @@ from .memory_repair_scheduler import (
 )
 from .reaper import run_local_periodic_reaper_once
 from .session_store import read_configured
+from .utc_timestamps import now_utc_iso
 
 logger = logging.getLogger(__name__)
 
 LOCAL_RUNTIME_PERIODIC_REAPER_INTERVAL_SECONDS: Final[float] = 30.0
 MEMORY_EMBEDDING_IDLE_INTERVAL_SECONDS: Final[float] = 1.0
+# Nothing tells the worker that a TODO was written, so this interval is how long
+# a new TODO waits for its Action. A pass reads the open TODOs and looks up each
+# one's conversation by key; `read_pickup_candidates` names its limit.
+TODO_PICKUP_INTERVAL_SECONDS: Final[float] = 3.0
+# Deleted TODOs are kept for 30 days, so an hour late is nothing.
+TODO_PURGE_INTERVAL_SECONDS: Final[float] = 3_600.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +136,12 @@ def _run_memory_agent_dispatch(context: PeriodicTaskContext) -> None:
     )
 
 
+def _todo_pickup_is_ready(context: PeriodicTaskContext) -> bool:
+    # Nobody waits on a pickup and its Action fails for good without a
+    # connection, so it starts only when a background job would be claimed.
+    return _owner_is_settled(context) and background_requests_can_send()
+
+
 def build_periodic_schedule(
     *, embedding_slot: MemoryEmbeddingProjectionSlot
 ) -> tuple[PeriodicTask, ...]:
@@ -186,6 +202,20 @@ def build_periodic_schedule(
             ),
             run=embedding_slot.submit,
         ),
+        PeriodicTask(
+            name="todo_pickup",
+            interval_seconds=TODO_PICKUP_INTERVAL_SECONDS,
+            is_ready=_todo_pickup_is_ready,
+            run=lambda context: pick_up_todos(user_id=context.owner_user_id),
+        ),
+        PeriodicTask(
+            name="todo_purge",
+            interval_seconds=TODO_PURGE_INTERVAL_SECONDS,
+            is_ready=_owner_is_settled,
+            run=lambda context: purge_expired_todos(
+                user_id=context.owner_user_id, now=now_utc_iso()
+            ),
+        ),
     )
 
 
@@ -218,6 +248,8 @@ def run_due_periodic_tasks(
 __all__ = [
     "LOCAL_RUNTIME_PERIODIC_REAPER_INTERVAL_SECONDS",
     "MEMORY_EMBEDDING_IDLE_INTERVAL_SECONDS",
+    "TODO_PICKUP_INTERVAL_SECONDS",
+    "TODO_PURGE_INTERVAL_SECONDS",
     "MemoryEmbeddingProjectionSlot",
     "PeriodicTask",
     "PeriodicTaskContext",

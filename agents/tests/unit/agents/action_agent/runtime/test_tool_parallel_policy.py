@@ -99,6 +99,8 @@ EXPECTED_CONCURRENCY: dict[str, ToolConcurrency] = {
             "zanei_timeline",
             "integration_list_tools",
             "integration_run_tool",
+            "update_todo",
+            "request_todo_deletion",
         )
     },
 }
@@ -207,7 +209,7 @@ def _state_write_keys(handler: Callable[..., object]) -> set[str]:
 
 def test_every_action_tool_declares_its_former_placement() -> None:
     assert set(TOOL_CONCURRENCY) == set(
-        select_supervisor_act_tool_ids(integrations=True)
+        select_supervisor_act_tool_ids(integrations=True, todo=True)
     )
     assert dict(TOOL_CONCURRENCY) == {
         tool_id: EXPECTED_CONCURRENCY[tool_id] for tool_id in TOOL_CONCURRENCY

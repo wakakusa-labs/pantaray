@@ -136,7 +136,7 @@ async def _build_supervisor_fixture(
 
 def test_every_supervisor_tool_requires_a_step_note() -> None:
     native_tools = build_native_action_tools(
-        select_supervisor_act_tool_registry(integrations=True)
+        select_supervisor_act_tool_registry(integrations=True, todo=True)
     )
 
     assert native_tools

@@ -188,10 +188,15 @@ def test_history_maps_fixed_public_failures(
         assert mapped.public_message is None
 
 
-def test_delete_history_item_returns_204_and_maps_busy_and_failure(
+def test_delete_history_item_returns_204_and_maps_refusals_and_failure(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    outcomes = [None, history_router.ConversationBusyError("private"), sqlite3.Error()]
+    outcomes = [
+        None,
+        history_router.ConversationBusyError("private"),
+        sqlite3.Error(),
+        history_router.ConversationOfTodoError("private"),
+    ]
     delete = Mock(side_effect=outcomes)
     monkeypatch.setenv("LOCAL_DB_PATH", str(tmp_path / "local.db"))
     monkeypatch.setenv("LOCAL_DB_BUSY_TIMEOUT_MS", "1500")
@@ -205,19 +210,34 @@ def test_delete_history_item_returns_204_and_maps_busy_and_failure(
     with client:
         responses = [
             client.delete(f"{_PATH}/items/{kind}/item-1")
-            for kind in ("conversation", "suggestion", "conversation", "process")
+            for kind in (
+                "conversation",
+                "suggestion",
+                "conversation",
+                "process",
+                "suggestion",
+            )
         ]
 
-    assert [response.status_code for response in responses] == [204, 409, 500, 422]
+    assert [response.status_code for response in responses] == [
+        204,
+        409,
+        500,
+        422,
+        409,
+    ]
     assert responses[0].content == b""
     assert responses[1].json()["detail"]["error_code"] == "CONVERSATION_BUSY"
     assert "private" not in responses[1].text
     assert responses[2].json()["detail"]["error_code"] == (
         "CONVERSATION_HISTORY_DELETE_FAILED"
     )
+    assert responses[4].json()["detail"]["error_code"] == "CONVERSATION_OF_TODO"
+    assert "private" not in responses[4].text
     assert [call.kwargs["kind"] for call in delete.call_args_list] == [
         "conversation",
         "suggestion",
         "conversation",
+        "suggestion",
     ]
     assert delete.call_args.kwargs["user_id"] == "user-123"

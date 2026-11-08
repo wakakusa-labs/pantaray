@@ -84,7 +84,10 @@ const measured = (overrides: Partial<Extract<GoalProgress, { kind: 'measured' }>
 const page = (overrides: Partial<TodoProgressPage> = {}): TodoProgressPage => ({
   today: '2026-11-07',
   period: 'week',
+  page_start: '2026-11-01',
+  // Oldest first, as the backend lays the page out.
   rows: [
+    { start: '2026-10-26', end: '2026-11-01', record_ids: ['r3', 'r4'], checked: [] },
     {
       start: '2026-11-02',
       end: '2026-11-08',
@@ -104,7 +107,7 @@ const page = (overrides: Partial<TodoProgressPage> = {}): TodoProgressPage => ({
         },
       ],
     },
-    { start: '2026-10-26', end: '2026-11-01', record_ids: ['r3', 'r4'], checked: [] },
+    { start: '2026-11-09', end: '2026-11-15', record_ids: [], checked: [] },
   ],
   goals: [measured()],
   records: RECORDS,
@@ -319,15 +322,19 @@ it('gives each period its records by project, its checked count and the checked 
   renderView(
     page({
       period: 'month',
+      page_start: '2026-01-01',
       rows: [
-        { start: '2026-11-01', end: '2026-11-30', record_ids: ['r1'], checked: [] },
         { start: '2026-10-01', end: '2026-10-31', record_ids: [], checked: [] },
+        { start: '2026-11-01', end: '2026-11-30', record_ids: ['r1'], checked: [] },
+        { start: '2026-12-01', end: '2026-12-31', record_ids: [], checked: [] },
       ],
     })
   );
   const months = screen
     .getByRole('region', { name: '月ごと' })
     .querySelectorAll(':scope > ul > li');
+  // The rows run up to today, newest first.
+  expect(months).toHaveLength(2);
   expect(months[0]).toHaveTextContent('11 月（11/7 まで）');
   expect(lead()).toHaveTextContent(/^今月は、販路開拓が 1 件進みました。/);
   expect(months[1]).toHaveTextContent('10 月');

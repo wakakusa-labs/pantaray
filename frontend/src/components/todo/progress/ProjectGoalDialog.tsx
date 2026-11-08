@@ -83,11 +83,12 @@ export function ProjectGoalDialog({
   projectName: string;
   onClose: () => void;
 }) {
-  // The period only shapes the rows, which the form does not show.
+  // The period and page only shape the rows, which the form does not show.
   const progress = useTodoProgress(
     ALL_SCOPE,
     { project: 'project', project_id: projectId },
-    'week'
+    'week',
+    null
   );
   const mutations = useTodoProgressMutations({ reloadProgress: progress.reload });
   const { page } = progress;

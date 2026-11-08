@@ -24,6 +24,10 @@ from pantaray_agents.schema.todos import TodoScopeQuery
 GOAL_UNIT_MAX_LENGTH = 20
 GOAL_TEXT_MAX_LENGTH = 200
 RECORD_NOTE_MAX_LENGTH = 200
+# The pages a progress read may name. The calendar starts at the Unix epoch, and
+# the last December's grid spills into the next year, which must still exist.
+PROGRESS_FIRST_DAY = dt.date(1970, 1, 1)
+PROGRESS_LAST_DAY = dt.date(9998, 12, 31)
 
 type _Id = Annotated[str, Field(min_length=1, max_length=128)]
 type _Quantity = Annotated[float, Field(gt=0, allow_inf_nan=False)]
@@ -57,11 +61,15 @@ class ProgressRecordCreateRequest(_Request):
 
 
 class TodoProgressQuery(TodoScopeQuery):
-    """`project_id` is given exactly when `project` is ``project``."""
+    """`project_id` is given exactly when `project` is ``project``; no `on`
+    is the page holding today, and any day of a page names that page."""
 
     project: Literal["any", "project", "no_project"]
     project_id: _Id | None = None
     period: PeriodKind
+    on: (
+        Annotated[dt.date, Field(ge=PROGRESS_FIRST_DAY, le=PROGRESS_LAST_DAY)] | None
+    ) = None
 
     @model_validator(mode="after")
     def _project_id_matches_filter(self) -> Self:
@@ -176,7 +184,11 @@ class MeasuredView(_View):
 class TodoProgressPage(_View):
     today: LocalDate  # the backend owns the clock
     period: PeriodKind
-    rows: tuple[ProgressPeriodView, ...]  # newest first
+    # The first day of the month (day, week) or year (month) the rows lay out.
+    page_start: LocalDate
+    # Oldest first. Day and week rows cover the Monday-start weeks holding any
+    # day of the month; month rows are the year's twelve months.
+    rows: tuple[ProgressPeriodView, ...]
     goals: tuple[
         Annotated[
             NoGoalView | NoRecordsView | MeasuredView, Field(discriminator="kind")

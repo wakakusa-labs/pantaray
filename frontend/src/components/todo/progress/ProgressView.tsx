@@ -45,7 +45,9 @@ export function ProgressView({
     () => new Map(page.records.map((record) => [record.record_id, record])),
     [page.records]
   );
-  const maxRecordCount = Math.max(1, ...page.rows.map((row) => row.record_ids.length));
+  // The page's rows up to today, newest first.
+  const rows = page.rows.filter((row) => row.start <= page.today).reverse();
+  const maxRecordCount = Math.max(1, ...rows.map((row) => row.record_ids.length));
   return (
     <section className="todo-progress" aria-labelledby={headingId}>
       <div className="todo-progress__head">
@@ -96,7 +98,7 @@ export function ProgressView({
       <section className="todo-progress-rows" aria-labelledby={rowsHeadingId}>
         <h3 id={rowsHeadingId}>{t(PERIOD_LABELS[page.period])}</h3>
         <ul>
-          {page.rows.map((row) => (
+          {rows.map((row) => (
             <ProgressPeriodRow
               key={row.start}
               row={row}

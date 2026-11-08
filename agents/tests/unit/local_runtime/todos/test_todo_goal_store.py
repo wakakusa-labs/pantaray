@@ -214,9 +214,11 @@ def test_a_deleted_todo_takes_no_record_and_its_records_stop_counting(
         scope=AllScope(),
         project=OneProject("project-1"),
         period="week",
+        on=None,
         clock=NOW,
     )
-    assert view.records == () and view.rows[0].record_ids == ()
+    assert view.records == ()
+    assert all(row.record_ids == () for row in view.rows)
 
 
 def test_purging_a_todo_purges_its_records(db: Path) -> None:
@@ -269,13 +271,19 @@ def test_the_view_reports_a_named_project_without_a_goal_and_others_with_one(
     )
 
     every = read_progress(
-        user_id=USER, scope=AllScope(), project=AnyProject(), period="day", clock=NOW
+        user_id=USER,
+        scope=AllScope(),
+        project=AnyProject(),
+        period="day",
+        on=None,
+        clock=NOW,
     )
     named = read_progress(
         user_id=USER,
         scope=AllScope(),
         project=OneProject("project-2"),
         period="day",
+        on=None,
         clock=NOW,
     )
 
@@ -289,6 +297,7 @@ def test_the_view_reports_a_named_project_without_a_goal_and_others_with_one(
             scope=AllScope(),
             project=AnyProject(),
             period="day",
+            on=None,
             clock=NOW,
         ).goals
         == ()
@@ -314,6 +323,7 @@ def test_the_same_figure_from_the_same_steps_is_recorded_once(db: Path) -> None:
         scope=AllScope(),
         project=OneProject("project-1"),
         period="week",
+        on=None,
         clock=NOW,
     )
     (goal,) = view.goals

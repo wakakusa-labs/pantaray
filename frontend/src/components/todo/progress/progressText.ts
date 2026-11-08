@@ -218,8 +218,9 @@ export function countByProject(records: readonly ProgressRecordView[]) {
 }
 
 /**
- * The sentence above the view: what the newest period recorded and checked, and, when the page
- * reports a single goal, where that goal stands. With several goals each speaks in its own block.
+ * The sentence above the view: what the period holding today recorded and checked, and, when the
+ * page reports a single goal, where that goal stands. With several goals each speaks in its own
+ * block.
  */
 export function leadSentence(
   i18n: ProgressI18n,
@@ -229,7 +230,7 @@ export function leadSentence(
 ): string {
   const { t } = i18n;
   const sentences: string[] = [];
-  const [current] = page.rows;
+  const current = page.rows.find((row) => row.start <= page.today && page.today <= row.end);
   if (current) {
     const period =
       page.period === 'day'

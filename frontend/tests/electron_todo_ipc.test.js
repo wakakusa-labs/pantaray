@@ -299,7 +299,9 @@ const GOAL_VARIANTS = [
 const PROGRESS_PAGE = {
   today: '2026-11-04',
   period: 'week',
+  page_start: '2026-11-01',
   rows: [
+    { start: '2026-10-26', end: '2026-11-01', record_ids: [], checked: [] },
     {
       start: '2026-11-02',
       end: '2026-11-08',
@@ -313,7 +315,6 @@ const PROGRESS_PAGE = {
         },
       ],
     },
-    { start: '2026-10-26', end: '2026-11-01', record_ids: [], checked: [] },
   ],
   goals: GOAL_VARIANTS,
   records: [USER_RECORD, AI_RECORD],
@@ -336,6 +337,7 @@ test('every progress route reaches its backend path, and each goal, pace and evi
           project: 'project',
           project_id: 'project 1',
           period: 'week',
+          on: '2026-10-15',
         }),
         PROGRESS_PAGE
       );
@@ -362,7 +364,7 @@ test('every progress route reaches its backend path, and each goal, pace and evi
         [
           [
             'GET',
-            '/progress?scope=no_organization&project=project&project_id=project+1&period=week',
+            '/progress?scope=no_organization&project=project&project_id=project+1&period=week&on=2026-10-15',
             undefined,
           ],
           ['PUT', '/projects/project%201/goal', goalBody],
@@ -399,6 +401,7 @@ test('a refused goal or record write keeps its code; off-contract progress throw
       records: [{ ...AI_RECORD, evidence: { kind: 'action_steps', action_id: 'a-1' } }],
     }),
     jsonResponse(200, { ...PROGRESS_PAGE, period: 'year' }),
+    jsonResponse(200, { ...PROGRESS_PAGE, page_start: undefined }),
     jsonResponse(200, { ...GOAL, extra: 1 }),
     jsonResponse(200, { ...USER_RECORD, evidence: { kind: 'ai' } }),
   ];
@@ -425,7 +428,7 @@ test('a refused goal or record write keeps its code; off-contract progress throw
         todos.deleteProgressRecord({ record_id: 'r' }),
         (error) => error.status === 500
       );
-      for (let index = 0; index < 3; index += 1) {
+      for (let index = 0; index < 4; index += 1) {
         await assert.rejects(todos.progress(progressQuery), /TODO progress response is invalid/);
       }
       await assert.rejects(todos.setGoal(GOAL_REQUEST), /TODO goal response is invalid/);
@@ -538,6 +541,7 @@ test('TODO IPC validates the renderer payload before anything reaches the backen
       { scope: 'all', project: 'project', period: 'day' },
       { scope: 'all', project: 'any', project_id: 'p-1', period: 'day' },
       { scope: 'all', project: 'any', period: 'day', week_start: '2026-11-02' },
+      { scope: 'all', project: 'any', period: 'month', on: '2026-11' },
     ],
     'todos:setGoal': [
       { ...GOAL_REQUEST, project_id: undefined },

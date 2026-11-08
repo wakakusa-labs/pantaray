@@ -26,27 +26,31 @@ export type TodoProjectGroupView = {
   items: TodoView[];
 };
 
-type GroupSlot = Pick<TodoProjectGroupView, 'projectId' | 'projectName' | 'organization'>;
+/** A project in view: a group of the week, and a place the add row can put a TODO. */
+export type TodoProjectSlot = Pick<
+  TodoProjectGroupView,
+  'projectId' | 'projectName' | 'organization'
+>;
 
 /** A week that has not ended takes new TODOs; an ended week only shows what it held. */
 export const weekTakesTodos = (page: TodoWeekPage): boolean =>
   page.week.start >= page.current_week_start;
 
 /**
- * The groups the scope shows, in order: projects by the workspace's order and, while all
- * organizations are in view, by organization first. Projects in no organization, then the TODOs
- * in no project, come last. A project in several organizations is shown once, under the first of
+ * The projects the scope shows, in order: projects by the workspace's order and, while all
+ * organizations are in view, by organization first. Projects in no organization, then no
+ * project, come last. A project in several organizations is shown once, under the first of
  * them, so each TODO is one row.
  */
-function groupSlots(
+function scopeSlots(
   settings: Pick<WorkspaceSettings, 'organizations' | 'projects'>,
   scope: TodoScopeQuery
-): GroupSlot[] {
+): TodoProjectSlot[] {
   const projects = [...settings.projects].sort(compareProjects);
   const slot = (
     project: WorkspaceProject,
     organization: TodoGroupOrganization | null
-  ): GroupSlot => ({
+  ): TodoProjectSlot => ({
     projectId: project.project_id,
     projectName: project.display_name,
     organization,
@@ -87,21 +91,24 @@ const inFilter = (projectId: string | null, filter: TodoProjectFilter): boolean 
   filter.project === 'any' ||
   (filter.project === 'no_project' ? projectId === null : projectId === filter.project_id);
 
-/**
- * The week's TODOs by project. A week that takes TODOs shows every project in view, empty ones
- * too, since each group holds the field that adds to it; an ended week shows only the projects
- * that held TODOs. A TODO whose project the settings do not hold is not shown: the settings are
- * read with the page, and a deleted project's TODOs move to no project.
- */
-export function groupTodosByProject(
-  page: TodoWeekPage,
+/** The projects in view under the sidebar's project filter. */
+export const todoProjectSlots = (
   settings: Pick<WorkspaceSettings, 'organizations' | 'projects'>,
   scope: TodoScopeQuery,
   filter: TodoProjectFilter
+): TodoProjectSlot[] =>
+  scopeSlots(settings, scope).filter((slot) => inFilter(slot.projectId, filter));
+
+/**
+ * The week's TODOs by project, for the projects that hold any. A TODO whose project is not in
+ * `slots` is not shown: the settings are read with the page, and a deleted project's TODOs move
+ * to no project.
+ */
+export function groupTodosByProject(
+  page: TodoWeekPage,
+  slots: readonly TodoProjectSlot[]
 ): TodoProjectGroupView[] {
-  const showEmpty = weekTakesTodos(page);
-  return groupSlots(settings, scope)
-    .filter((slot) => inFilter(slot.projectId, filter))
+  return slots
     .map((slot) => {
       const items = page.items.filter((item) => item.project_id === slot.projectId);
       return {
@@ -111,5 +118,5 @@ export function groupTodosByProject(
         items,
       };
     })
-    .filter((group) => showEmpty || group.totalCount > 0);
+    .filter((group) => group.totalCount > 0);
 }

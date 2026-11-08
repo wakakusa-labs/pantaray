@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 
 import type { TodoView, TodoWeekPage } from '../../electron/src/todos/todoContracts';
-import { groupTodosByProject } from './groupTodosByProject';
+import { groupTodosByProject, todoProjectSlots } from './groupTodosByProject';
 
 const settings = {
   organizations: [
@@ -46,17 +46,17 @@ function todo(todoId: string, projectId: string | null, done = false): TodoView 
   };
 }
 
-const page = (items: TodoView[], weekStart = '2026-11-02'): TodoWeekPage => ({
+const page = (items: TodoView[]): TodoWeekPage => ({
   today: '2026-11-07',
   current_week_start: '2026-11-02',
-  week: { start: weekStart, end: '2026-11-08' },
+  week: { start: '2026-11-02', end: '2026-11-08' },
   items,
 });
 
-const ids = (groups: ReturnType<typeof groupTodosByProject>) => groups.map((g) => g.projectId);
+const ids = (slots: readonly { projectId: string | null }[]) => slots.map((g) => g.projectId);
 
 it('orders all organizations by organization, then sort_order, with no organization and no project last', () => {
-  const groups = groupTodosByProject(page([]), settings, { scope: 'all' }, { project: 'any' });
+  const groups = todoProjectSlots(settings, { scope: 'all' }, { project: 'any' });
   // A project in two organizations is shown once, under the first organization in order.
   expect(ids(groups)).toEqual(['p-both', 'p-alpha', 'p-beta', 'p-loose1', 'p-loose2', null]);
   expect(groups.map((g) => g.organization)).toEqual([
@@ -70,8 +70,7 @@ it('orders all organizations by organization, then sort_order, with no organizat
 });
 
 it('shows one organization by sort_order without an organization heading or a no-project group', () => {
-  const groups = groupTodosByProject(
-    page([]),
+  const groups = todoProjectSlots(
     settings,
     { scope: 'organization', organization_id: 'org-b' },
     { project: 'any' }
@@ -81,18 +80,17 @@ it('shows one organization by sort_order without an organization heading or a no
 });
 
 it('shows the projects in no organization, then the TODOs in no project', () => {
-  const groups = groupTodosByProject(
-    page([]),
-    settings,
-    { scope: 'no_organization' },
-    { project: 'any' }
-  );
+  const groups = todoProjectSlots(settings, { scope: 'no_organization' }, { project: 'any' });
   expect(ids(groups)).toEqual(['p-loose1', 'p-loose2', null]);
 });
 
-it('counts done TODOs and keeps the given order, done ones in place', () => {
+it('groups the projects holding TODOs, counting done ones and keeping the order given', () => {
   const items = [todo('t1', 'p-alpha', true), todo('t2', null), todo('t3', 'p-alpha')];
-  const groups = groupTodosByProject(page(items), settings, { scope: 'all' }, { project: 'any' });
+  const groups = groupTodosByProject(
+    page(items),
+    todoProjectSlots(settings, { scope: 'all' }, { project: 'any' })
+  );
+  expect(ids(groups)).toEqual(['p-alpha', null]);
   const alpha = groups.find((g) => g.projectId === 'p-alpha');
   expect(alpha).toMatchObject({ projectName: 'Alpha only', doneCount: 1, totalCount: 2 });
   expect(alpha?.items.map((item) => item.todo_id)).toEqual(['t1', 't3']);
@@ -103,38 +101,13 @@ it('counts done TODOs and keeps the given order, done ones in place', () => {
   });
 });
 
-it('shows empty projects only for a week that still takes TODOs', () => {
-  const items = [todo('t1', 'p-beta', true)];
-  const next = groupTodosByProject(
-    page(items, '2026-11-09'),
-    settings,
-    { scope: 'all' },
-    { project: 'any' }
-  );
-  expect(next).toHaveLength(6);
-  const past = groupTodosByProject(
-    page(items, '2026-10-26'),
-    settings,
-    { scope: 'all' },
-    { project: 'any' }
-  );
-  expect(ids(past)).toEqual(['p-beta']);
-});
-
 it('keeps only the project the filter names', () => {
-  const items = [todo('t1', 'p-alpha'), todo('t2', null)];
-  const one = groupTodosByProject(
-    page(items),
+  const one = todoProjectSlots(
     settings,
     { scope: 'all' },
     { project: 'project', project_id: 'p-alpha' }
   );
   expect(ids(one)).toEqual(['p-alpha']);
-  const none = groupTodosByProject(
-    page(items),
-    settings,
-    { scope: 'all' },
-    { project: 'no_project' }
-  );
-  expect(none.map((g) => g.items.map((item) => item.todo_id))).toEqual([['t2']]);
+  const none = todoProjectSlots(settings, { scope: 'all' }, { project: 'no_project' });
+  expect(none).toEqual([{ projectId: null, projectName: null, organization: { kind: 'none' } }]);
 });

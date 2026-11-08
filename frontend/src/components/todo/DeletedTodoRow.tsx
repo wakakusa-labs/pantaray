@@ -27,8 +27,8 @@ export function DeletedTodoRow({
   return (
     <li className="todo-deleted">
       <div className="todo-deleted__body">
-        <span className="todo-row__text">{item.text}</span>
-        <span className="todo-row__meta">
+        <span className="todo-deleted__text">{item.text}</span>
+        <span className="todo-deleted__meta">
           <span>{projectName ?? t('todo.noProject')}</span>
           <span>
             {t(item.deleted_by === 'user' ? 'todo.deleted.byUser' : 'todo.deleted.byAi', {

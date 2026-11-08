@@ -431,6 +431,8 @@ async function openHome(page: Page, search = '') {
               return { kind: 'ok', result: null };
             },
             deleteProgressRecord: async () => undefined,
+            // The request's conversation is still going, so the backend keeps the TODO.
+            answerDeletion: async () => ({ kind: 'refused', code: 'TODO_BUSY' }),
             onChanged: () => noop,
           },
           suggestions: {
@@ -484,7 +486,9 @@ test('the home lists every organization’s week by project, with the rail and t
   page,
 }, info) => {
   await openHome(page);
-  await expect(page.getByRole('heading', { level: 1, name: 'すべての TODO' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: '今週' })).toBeVisible();
+  await expect(page.locator('.todo-screen__header')).toContainText('11月2日 – 8日');
+  await expect(page.locator('.todo-screen__summary')).toHaveText('2 / 7 済み');
 
   // The rail: the organizations in place of Home, then Settings.
   const rail = railOf(page);
@@ -499,30 +503,32 @@ test('the home lists every organization’s week by project, with the rail and t
 
   // Groups by organization, then the projects in none, then the TODOs in no project.
   await expect(groups(page).locator('.todo-group__head')).toHaveText([
-    /^Xer ›見積もり1 \/ 2 済み$/,
-    /^Xer ›採用0 \/ 1 済み$/,
-    /^Wakakusa ›プロダクト0 \/ 2 済み$/,
-    /^組織なし ›家のこと0 \/ 1 済み$/,
-    /^組織なし ›プロジェクトなしすべて済み$/,
+    /^見積もりXer1 \/ 2$/,
+    /^採用Xer0 \/ 1$/,
+    /^プロダクトWakakusa0 \/ 2$/,
+    /^家のこと組織なし0 \/ 1$/,
+    /^プロジェクトなし組織なし1 \/ 1$/,
   ]);
-  const estimate = page.getByRole('region', { name: 'Xer 見積もり' });
+  const estimate = page.getByRole('region', { name: '見積もり Xer' });
   await expect(
     estimate.getByRole('checkbox', { name: '完了: 名刺 40 枚を入れておく' })
   ).toBeChecked();
-  await expect(estimate.getByRole('button', { name: /^見積書を再提出する/ })).toContainText(
-    '先週から持ち越し'
+  // Each row says where it stands in a word, and its due day.
+  await expect(estimate.getByRole('button', { name: /^見積書を再提出する/ })).toHaveText(
+    '見積書を再提出する途中まで金 11/6'
   );
-  await expect(
-    estimate.getByRole('textbox', { name: 'TODO を書く（Enter で追加）' })
-  ).toBeVisible();
-
-  // Pantaray's request to delete waits for the user's 消す or 残す.
-  const request = page.getByRole('group', {
-    name: 'Pantaray がこの TODO を消したいと言っています',
-  });
-  await expect(request).toContainText('どれも main に取り込み済みで');
-  await expect(request.getByRole('button', { name: '消す' })).toBeVisible();
-  await expect(request.getByRole('button', { name: '残す' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^古いブランチを消す/ })).toHaveText(
+    '古いブランチを消す消してよい？'
+  );
+  // One add row above the groups, into the first project in view until another is chosen.
+  await expect(page.getByRole('textbox', { name: 'TODO を書く' })).toHaveCount(1);
+  await expect(page.getByRole('combobox', { name: 'プロジェクト' })).toHaveValue('estimate');
+  await expect(page.getByRole('combobox', { name: '期限' })).toHaveValue('');
+  // Every row is one line.
+  const heights = await page
+    .locator('.todo-row')
+    .evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().height));
+  expect(new Set(heights)).toEqual(new Set([40]));
 
   // The sidebar: all TODOs (current), the projects with their open counts, deleted, chat, others.
   const sidebar = sidebarOf(page);
@@ -577,9 +583,18 @@ test('a selected TODO opens its conversation beside the list, with 承認 and no
   await page.getByRole('button', { name: /^リリースノートの下書きを書く/ }).click();
   await expect(page.getByRole('region', { name: 'リリースノートの下書きを書く' })).toBeVisible();
 
+  // Pantaray's request to delete waits under the conversation for the user's 消す or 残す.
+  await page.getByRole('button', { name: /^古いブランチを消す/ }).click();
+  const request = page.getByRole('group', {
+    name: 'Pantaray がこの TODO を消したいと言っています',
+  });
+  await expect(request).toContainText('どれも main に取り込み済みで');
+  await expect(request.getByRole('button', { name: '消す' })).toBeVisible();
+  await expect(request.getByRole('button', { name: '残す' })).toBeVisible();
+
   await page.getByRole('button', { name: '会話を閉じる' }).click();
   await expect(page).toHaveURL(/#\/history$/);
-  await expect(page.getByRole('heading', { level: 1, name: 'すべての TODO' })).toBeFocused();
+  await expect(page.getByRole('heading', { level: 1, name: '今週' })).toBeFocused();
 });
 
 test('the rail scopes the week to one organization, a project filters it, and 今週へ keeps focus', async ({
@@ -597,20 +612,19 @@ test('the rail scopes the week to one organization, a project filters it, and �
 
   await sidebarOf(page).getByRole('button', { name: '見積もり', exact: true }).click();
   await expect(page).toHaveURL(/#\/history\?scope=organization:xer&project=project:estimate$/);
-  await expect(page.getByRole('heading', { level: 1, name: '見積もり' })).toBeVisible();
   await expect(groups(page).locator('h3')).toHaveText(['見積もり']);
 
   // An ended week shows what was done in it, takes no new TODOs, and offers 今週へ.
   await page.getByRole('button', { name: '前の週' }).click();
-  await expect(page.getByText('10月26日(月)〜11月1日(日)')).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: '10月26日 – 11月1日' })).toBeVisible();
   await expect(page.getByRole('textbox', { name: /TODO を書く/ })).toHaveCount(0);
   const thisWeek = page.getByRole('button', { name: '今週へ' });
   await capture(page, info, 'week-past');
   await thisWeek.focus();
   await page.keyboard.press('Enter');
   await expect(thisWeek).toHaveCount(0);
-  await expect(page.getByRole('heading', { level: 1, name: '見積もり' })).toBeFocused();
-  await expect(page.getByText('11月2日(月)〜11月8日(日)')).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: '今週' })).toBeFocused();
+  await expect(page.locator('.todo-screen__header')).toContainText('11月2日 – 8日');
 });
 
 test('the deleted TODOs list what can still be restored', async ({ page }, info) => {
@@ -632,7 +646,7 @@ test('a narrow window stacks the conversation under the list header, with nothin
 }, info) => {
   await page.setViewportSize({ width: 900, height: 820 });
   await openHome(page);
-  await expect(page.getByRole('heading', { level: 1, name: 'すべての TODO' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: '今週' })).toBeVisible();
   expect(await hasNoSideScroll(page)).toBe(true);
   await capture(page, info, 'narrow-week');
 
@@ -645,6 +659,26 @@ test('a narrow window stacks the conversation under the list header, with nothin
   await capture(page, info, 'narrow-conversation');
   await page.getByRole('button', { name: '会話を閉じる' }).click();
   await expect(page.getByRole('checkbox', { name: '完了: 名刺 40 枚を入れておく' })).toBeVisible();
+});
+
+test('a narrow window tells a failed answer to Pantaray’s deletion request in the conversation', async ({
+  page,
+}, info) => {
+  await page.setViewportSize({ width: 960, height: 820 });
+  await openHome(page);
+  await page.getByRole('button', { name: /^古いブランチを消す/ }).click();
+  const request = page.getByRole('group', {
+    name: 'Pantaray がこの TODO を消したいと言っています',
+  });
+  await request.getByRole('button', { name: '消す' }).click();
+  // The list is hidden at this width; the failure is told under the request, and only there.
+  const alerts = page.getByRole('alert');
+  await expect(alerts).toHaveCount(1);
+  await expect(alerts).toBeVisible();
+  await expect(alerts).toHaveText(
+    'この TODO の会話が進んでいるあいだは消せません。終わってから、または止めてから消してください。'
+  );
+  await capture(page, info, 'narrow-deletion-failure');
 });
 
 test('進み具合 shows the progress in view, keeps its period in the address, and opens where a number came from', async ({
@@ -774,10 +808,9 @@ test('a project’s goal is set from its menu or from its progress, opening on t
   await expect(page.getByRole('heading', { level: 1, name: '採用' })).toBeFocused();
 });
 
-test('beside a conversation, a row’s meta line wraps as one line of text with its due and delete in line', async ({
+test('beside a conversation the sidebar folds away and the rows keep their one line', async ({
   page,
 }, info) => {
-  await page.setViewportSize({ width: 1180, height: 820 });
   await openHome(page);
   await page.getByRole('button', { name: /^来週の面接の質問リストを作る/ }).click();
   await expect(
@@ -785,29 +818,14 @@ test('beside a conversation, a row’s meta line wraps as one line of text with 
       name: '承認',
     })
   ).toBeVisible();
-
-  const layout = await page.locator('.todo-row').evaluateAll((rows) =>
-    rows.map((row) => {
-      const parts = [...row.querySelectorAll('.todo-row__meta > span')];
-      // Each part after the first starts on the line the one before it ends on.
-      const flows = parts.slice(1).every((part, i) => {
-        const before = [...parts[i].getClientRects()].at(-1)!;
-        const first = part.getClientRects()[0];
-        return Math.abs(first.top - before.top) < 1;
-      });
-      const due = row.querySelector('.todo-due')?.getBoundingClientRect();
-      const remove = row.querySelector('.todo-row__delete')!.getBoundingClientRect();
-      const inLine =
-        due === undefined ||
-        Math.abs(due.top + due.height / 2 - (remove.top + remove.height / 2)) < 1;
-      return { text: row.querySelector('.todo-row__text')?.textContent, flows, inLine };
-    })
-  );
-  expect(layout.length).toBeGreaterThan(0);
-  for (const row of layout) {
-    expect(row.flows, `${row.text}: meta parts flow`).toBe(true);
-    expect(row.inLine, `${row.text}: due and delete in line`).toBe(true);
-  }
+  await expect(sidebarOf(page)).toHaveCount(0);
+  const heights = await page
+    .locator('.todo-row')
+    .evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().height));
+  expect(new Set(heights)).toEqual(new Set([40]));
   expect(await hasNoSideScroll(page)).toBe(true);
   await capture(page, info, 'beside-conversation');
+
+  await page.getByRole('button', { name: '会話を閉じる' }).click();
+  await expect(sidebarOf(page)).toBeVisible();
 });

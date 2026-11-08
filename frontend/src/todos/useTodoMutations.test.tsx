@@ -75,34 +75,44 @@ it('tells what the user can act on, and only a generic message for the rest', as
 
 it('resends an unanswered add with the same id, so the same line is added once', async () => {
   const { result } = renderHook(() => useTodoMutations({ reloadWeek, reloadDeleted }), { wrapper });
+  const due = { date: '2026-11-06', repeat: 'none' } as const;
   create.mockRejectedValueOnce(new Error('timeout'));
   await act(async () => {
-    expect(await result.current.create('p1', '2026-11-02', '見積書を送る')).toBe(false);
+    expect(await result.current.create('p1', '2026-11-02', '見積書を送る', due)).toBe(false);
   });
-  expect(result.current.failure?.target).toEqual({ kind: 'add', projectId: 'p1' });
+  expect(result.current.failure?.target).toEqual({ kind: 'add' });
 
+  create.mockRejectedValueOnce(new Error('timeout'));
+  await act(() => result.current.create('p1', '2026-11-02', '見積書を送る', due));
+  // The same line with another due is another TODO: the backend would answer with the first.
+  create.mockRejectedValueOnce(new Error('timeout'));
+  await act(() => result.current.create('p1', '2026-11-02', '見積書を送る', null));
   create.mockResolvedValue(ok);
   await act(async () => {
-    expect(await result.current.create('p1', '2026-11-02', '見積書を送る')).toBe(true);
+    expect(await result.current.create('p1', '2026-11-02', '見積書を送る', null)).toBe(true);
   });
-  await act(() => result.current.create('p1', '2026-11-02', '見積書を送る'));
-  const [first, second, third] = create.mock.calls.map(([request]) => request.client_todo_id);
+  await act(() => result.current.create('p1', '2026-11-02', '見積書を送る', null));
+  const [first, second, otherDue, otherDueAgain, afterAnswer] = create.mock.calls.map(
+    ([request]) => request.client_todo_id
+  );
   expect(second).toBe(first);
+  expect(otherDue).not.toBe(first);
+  expect(otherDueAgain).toBe(otherDue);
   // Once answered, the next add is a new TODO.
-  expect(third).not.toBe(first);
+  expect(afterAnswer).not.toBe(otherDue);
   expect(create.mock.calls[0][0]).toEqual({
     client_todo_id: first,
     project_id: 'p1',
     text: '見積書を送る',
     week_start: '2026-11-02',
-    due: null,
+    due,
   });
 });
 
 it('adds nothing for an empty line', async () => {
   const { result } = renderHook(() => useTodoMutations({ reloadWeek, reloadDeleted }), { wrapper });
   await act(async () => {
-    expect(await result.current.create(null, '2026-11-02', '   ')).toBe(false);
+    expect(await result.current.create(null, '2026-11-02', '   ', null)).toBe(false);
   });
   expect(create).not.toHaveBeenCalled();
   expect(result.current.failure).toBeNull();

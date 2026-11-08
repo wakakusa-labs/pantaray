@@ -1,68 +1,50 @@
 import { Repeat, Trash2 } from 'lucide-react';
-import { useId } from 'react';
 
-import type { UiLanguageContextValue } from '@/context/uiLanguageContextShared';
 import { useI18n } from '@/context/useI18n';
+import type { MessageKey } from '@/i18n/types';
 
-import type { TodoDue, TodoState, TodoView } from '../../../electron/src/todos/todoContracts';
-import { daysFrom, monthDay, momentMonthDay } from './todoDates';
+import type { TodoView } from '../../../electron/src/todos/todoContracts';
+import { dueDay } from './todoDates';
 
 import './todo.css';
 
-type Translate = UiLanguageContextValue['t'];
+/**
+ * How a state word is drawn: the user's turn in weight (a question without the dot), Pantaray's
+ * work in grey, done faint.
+ */
+type StateTone = 'turn' | 'ask' | 'working' | 'quiet' | 'done';
 
-/** A due date this close to today, or already past, is drawn in the warm tone. */
-const SOON_WITHIN_DAYS = 2;
-
-/** 「11/10 まで」. A done TODO's due date is only a date: it is no longer close to anything. */
-function DueChip({ due, today, done }: { due: TodoDue; today: string; done: boolean }) {
-  const { t } = useI18n();
-  const soon = !done && daysFrom(today, due.date) <= SOON_WITHIN_DAYS;
-  return (
-    <span className={soon ? 'todo-due todo-due--soon' : 'todo-due'}>
-      {due.repeat === 'weekly' ? (
-        <span role="img" aria-label={t('todo.due.weekly')}>
-          <Repeat size={12} aria-hidden="true" />
-        </span>
-      ) : null}
-      {t('todo.due', { date: monthDay(due.date) })}
-    </span>
-  );
-}
-
-const withNote = (t: Translate, state: string, note: string | null) =>
-  note ? t('todo.state.withNote', { state, note }) : state;
-
-/** Where the TODO stands, in one short sentence. */
-function stateSentence(t: Translate, state: TodoState): string {
+/** Where the TODO stands, in a word; the conversation beside the list tells the rest. */
+function stateWord(todo: TodoView): { key: MessageKey; tone: StateTone } {
+  // Pantaray's request to delete waits for the user, whatever the work's own state.
+  if (todo.deletion_request) return { key: 'todo.state.deletionRequested', tone: 'ask' };
+  const { state } = todo;
   switch (state.kind) {
     case 'done':
-      return t(state.by === 'user' ? 'todo.state.doneByUser' : 'todo.state.doneByAi', {
-        date: momentMonthDay(state.at),
-      });
-    case 'working':
-      return withNote(t, t('todo.state.working'), state.note);
+      return { key: 'todo.state.done', tone: 'done' };
     case 'waiting':
-      return withNote(t, t('todo.state.waiting'), state.note);
+      return { key: 'todo.state.waiting', tone: 'turn' };
+    case 'working':
+      return { key: 'todo.state.working', tone: 'working' };
     case 'partial':
-      return withNote(t, t('todo.state.partial'), state.note);
+      return { key: 'todo.state.partial', tone: 'quiet' };
     case 'stopped':
-      return t(state.outcome === 'failed' ? 'todo.state.failed' : 'todo.state.canceled');
+      return {
+        key: state.outcome === 'failed' ? 'todo.state.failed' : 'todo.state.canceled',
+        tone: 'quiet',
+      };
     case 'not_started':
-      return t(state.reason === 'starting' ? 'todo.state.starting' : 'todo.state.weekNotStarted');
+      return {
+        key: state.reason === 'starting' ? 'todo.state.starting' : 'todo.state.weekNotStarted',
+        tone: 'quiet',
+      };
   }
 }
 
-/** Who wrote it: a weekly TODO's next instance is the week's, not a person's. */
-function originText(t: Translate, todo: TodoView): string {
-  if (todo.origin === 'recurrence') return t('todo.origin.recurrence');
-  return t(todo.author === 'user' ? 'todo.origin.user' : 'todo.origin.ai');
-}
-
 /**
- * One TODO: its check, its text and meta line (a button that opens its conversation), its due
- * date, its delete button, and Pantaray's pending request to delete it. A checked TODO stays in
- * its place, struck through. The rows go in a list.
+ * One TODO on one line: its check, then a button that opens its conversation (its text, the
+ * repeat mark, its state in a word, its due day), then its delete button. A checked TODO stays
+ * in its place, struck through. The rows go in a list.
  */
 export function TodoRow({
   todo,
@@ -72,10 +54,9 @@ export function TodoRow({
   onToggleCheck,
   onSelect,
   onDelete,
-  onAnswerDeletion,
 }: {
   todo: TodoView;
-  /** The backend's today, which decides how close the due date is. */
+  /** The backend's today, which decides whether the due day has passed. */
   today: string;
   selected: boolean;
   /** A write on this row is waiting for its answer; its controls wait with it. */
@@ -83,11 +64,11 @@ export function TodoRow({
   onToggleCheck: () => void;
   onSelect: () => void;
   onDelete: () => void;
-  onAnswerDeletion: (answer: 'approve' | 'keep') => void;
 }) {
-  const { t } = useI18n();
-  const deletionTitleId = useId();
+  const { t, language } = useI18n();
   const done = todo.state.kind === 'done';
+  const state = stateWord(todo);
+  const late = !done && todo.due !== null && todo.due.date < today;
   return (
     <li className={done ? 'todo-row todo-row--done' : 'todo-row'}>
       {/* Named with the text so each row's check is told apart; the backend's answer checks it. */}
@@ -105,55 +86,32 @@ export function TodoRow({
         aria-current={selected ? 'true' : undefined}
         onClick={onSelect}
       >
-        <span className="todo-row__text">{todo.text}</span>
-        <span className="todo-row__meta">
-          {todo.carried ? <span>{t('todo.origin.carried')}</span> : null}
-          <span>{originText(t, todo)}</span>
-          <span className={`todo-row__state todo-row__state--${todo.state.kind}`}>
-            {stateSentence(t, todo.state)}
-          </span>
+        <span className="todo-row__title">
+          <span className="todo-row__text">{todo.text}</span>
+          {todo.due?.repeat === 'weekly' ? (
+            <Repeat
+              className="todo-row__repeat"
+              size={13}
+              role="img"
+              aria-label={t('todo.due.weekly')}
+            />
+          ) : null}
+        </span>
+        <span className={`todo-row__state todo-row__state--${state.tone}`}>{t(state.key)}</span>
+        <span className={late ? 'todo-row__due todo-row__due--late' : 'todo-row__due'}>
+          {todo.due ? dueDay(language, todo.due.date) : null}
         </span>
       </button>
-      <div className="todo-row__end">
-        {todo.due ? <DueChip due={todo.due} today={today} done={done} /> : null}
-        <button
-          type="button"
-          className="todo-row__delete"
-          aria-label={t('todo.deleteNamed', { text: todo.text })}
-          data-tooltip={t('todo.delete')}
-          disabled={pending}
-          onClick={onDelete}
-        >
-          <Trash2 size={15} aria-hidden="true" />
-        </button>
-      </div>
-      {/* Only the user's 「消す」 deletes the TODO Pantaray asked to delete. */}
-      {todo.deletion_request ? (
-        <div className="todo-deletion" role="group" aria-labelledby={deletionTitleId}>
-          <p className="todo-deletion__text">
-            <span id={deletionTitleId} className="todo-deletion__title">
-              {t('todo.deletionRequest.title')}
-            </span>
-            {todo.deletion_request.reason}
-          </p>
-          <button
-            type="button"
-            className="history-filter-button todo-deletion__approve"
-            disabled={pending}
-            onClick={() => onAnswerDeletion('approve')}
-          >
-            {t('todo.deletionRequest.approve')}
-          </button>
-          <button
-            type="button"
-            className="history-filter-button"
-            disabled={pending}
-            onClick={() => onAnswerDeletion('keep')}
-          >
-            {t('todo.deletionRequest.keep')}
-          </button>
-        </div>
-      ) : null}
+      <button
+        type="button"
+        className="todo-row__delete"
+        aria-label={t('todo.deleteNamed', { text: todo.text })}
+        data-tooltip={t('todo.delete')}
+        disabled={pending}
+        onClick={onDelete}
+      >
+        <Trash2 size={14} aria-hidden="true" />
+      </button>
     </li>
   );
 }

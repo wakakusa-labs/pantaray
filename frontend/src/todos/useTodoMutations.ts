@@ -10,10 +10,14 @@ import type {
 } from '../../electron/src/todos/todoContracts';
 import type { TodosBridge } from './useTodoRead';
 
-/** Where a failed write is told: next to its row, or next to the group's add field. */
+/**
+ * Where a failed write is told: next to its row, under the add row, or under the deletion
+ * request in the TODO's conversation, which stays in view when a narrow window hides the list.
+ */
 export type TodoMutationTarget =
   | { kind: 'todo'; todoId: string }
-  | { kind: 'add'; projectId: string | null };
+  | { kind: 'add' }
+  | { kind: 'deletion'; todoId: string };
 
 export type TodoMutationFailure = { target: TodoMutationTarget; message: string };
 
@@ -55,7 +59,9 @@ export function useTodoMutations({ reloadWeek, reloadDeleted }: TodoReloads) {
   );
   // An add whose answer never came may have landed, so sending the same line again reuses its
   // `client_todo_id` and the backend returns that TODO instead of adding a second one.
-  const unansweredAddsRef = useRef(new Map<string, { text: string; clientTodoId: string }>());
+  const unansweredAddsRef = useRef(
+    new Map<string, { text: string; due: string | null; clientTodoId: string }>()
+  );
 
   const send = async <T>(
     target: TodoMutationTarget,
@@ -80,13 +86,14 @@ export function useTodoMutations({ reloadWeek, reloadDeleted }: TodoReloads) {
   const writeRow = async <T>(
     todoId: string,
     request: (todos: TodosBridge) => Promise<TodoWriteResult<T>>,
-    reload: () => Promise<unknown>
+    reload: () => Promise<unknown>,
+    target: TodoMutationTarget = { kind: 'todo', todoId }
   ): Promise<boolean> => {
     setPending((current) => new Set(current).add(todoId));
     try {
       // A refused or unanswered write changed nothing the screen shows; a change still reads
       // again on `todos:changed`.
-      if ((await send({ kind: 'todo', todoId }, request)) !== 'ok') return false;
+      if ((await send(target, request)) !== 'ok') return false;
       await reload();
       return true;
     } finally {
@@ -102,21 +109,26 @@ export function useTodoMutations({ reloadWeek, reloadDeleted }: TodoReloads) {
   const create = async (
     projectId: string | null,
     weekStart: string,
-    text: string
+    text: string,
+    due: TodoDue | null
   ): Promise<boolean> => {
     // Enter on an empty field adds nothing and tells nothing.
     if (!text.trim()) return false;
     const key = addKey(projectId, weekStart);
     const unanswered = unansweredAddsRef.current.get(key);
-    const clientTodoId = unanswered?.text === text ? unanswered.clientTodoId : crypto.randomUUID();
-    unansweredAddsRef.current.set(key, { text, clientTodoId });
-    const outcome = await send({ kind: 'add', projectId }, (todos) =>
+    const dueKey = due ? `${due.date}:${due.repeat}` : null;
+    const clientTodoId =
+      unanswered?.text === text && unanswered.due === dueKey
+        ? unanswered.clientTodoId
+        : crypto.randomUUID();
+    unansweredAddsRef.current.set(key, { text, due: dueKey, clientTodoId });
+    const outcome = await send({ kind: 'add' }, (todos) =>
       todos.create({
         client_todo_id: clientTodoId,
         project_id: projectId,
         text,
         week_start: weekStart,
-        due: null,
+        due,
       })
     );
     if (outcome !== 'unknown') unansweredAddsRef.current.delete(key);
@@ -141,7 +153,8 @@ export function useTodoMutations({ reloadWeek, reloadDeleted }: TodoReloads) {
       writeRow(
         todoId,
         (todos) => todos.answerDeletion({ todo_id: todoId, request_id: requestId, answer }),
-        reloadWeek
+        reloadWeek,
+        { kind: 'deletion', todoId }
       ),
     restore: (todoId: string) =>
       writeRow(todoId, (todos) => todos.restore({ todo_id: todoId }), reloadBoth),

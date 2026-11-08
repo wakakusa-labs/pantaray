@@ -301,7 +301,7 @@ it('shows what `?item=` names, the TODOs without one, and the chat for a malform
   cleanup();
 
   renderPage(['/history']);
-  expect(screen.getByRole('heading', { level: 1, name: 'すべての TODO' })).toBeInTheDocument();
+  expect(screen.getByRole('heading', { level: 1, name: '今週' })).toBeInTheDocument();
   expect(screen.queryByRole('region', { name: 'chat' })).toBeNull();
   cleanup();
 
@@ -523,6 +523,11 @@ it("opens a TODO's conversation beside the list: its Action, its suggestion with
   expect(location()).toHaveTextContent('/history?todo=T1');
   expect(screen.getByRole('region', { name: 'action A5' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /^TODO T1/ })).toHaveAttribute('aria-current', 'true');
+  // The sidebar folds away beside the conversation; its toggle shows it there without saving.
+  expect(screen.queryByRole('complementary', SIDEBAR)).toBeNull();
+  await userEvent.click(screen.getByRole('button', { name: 'サイドバーを表示' }));
+  expect(screen.getByRole('complementary', SIDEBAR)).toBeVisible();
+  expect(stored.has('pantaray.history.sidebarHidden')).toBe(false);
 
   await userEvent.click(screen.getByRole('button', { name: /^TODO T3/ }));
   const suggestion = screen.getByRole('region', { name: 'suggestion S5' });
@@ -538,7 +543,8 @@ it("opens a TODO's conversation beside the list: its Action, its suggestion with
 
   await userEvent.click(screen.getByRole('button', { name: '会話を閉じる' }));
   expect(location()).toHaveTextContent(/^\/history$/);
-  expect(screen.getByRole('heading', { level: 1, name: 'すべての TODO' })).toHaveFocus();
+  expect(screen.getByRole('heading', { level: 1, name: '今週' })).toHaveFocus();
+  expect(screen.getByRole('complementary', SIDEBAR)).toBeVisible();
 });
 
 it('a project selects its TODOs, keeping the scope that holds it and otherwise showing all', async () => {
@@ -546,8 +552,8 @@ it('a project selects its TODOs, keeping the scope that holds it and otherwise s
   const sidebar = screen.getByRole('complementary', SIDEBAR);
   await userEvent.click(await within(sidebar).findByRole('button', { name: '採用' }));
   expect(location()).toHaveTextContent('/history?scope=none&project=project:P2');
-  expect(screen.getByRole('heading', { level: 1, name: '採用' })).toBeInTheDocument();
   expect(projectGroups()).toHaveLength(1);
+  expect(within(projectGroups()[0]).getByRole('heading', { level: 3 })).toHaveTextContent('採用');
   expect(within(sidebar).getByRole('button', { name: '採用' })).toHaveAttribute(
     'aria-current',
     'true'
@@ -574,31 +580,35 @@ it('keeps the scope while the chat is shown, and drops an organization that is g
 });
 
 it('「今週へ」 returns to this week and leaves focus on the list heading', async () => {
-  listWeek.mockImplementation(async () => ({
-    ...WEEK,
-    week: { start: '2026-10-26', end: '2026-11-01' },
-    items: [],
-  }));
+  listWeek.mockImplementation(async ({ week_start }) =>
+    week_start ? { ...WEEK, week: { start: '2026-10-26', end: '2026-11-01' }, items: [] } : WEEK
+  );
   renderPage(['/history?week=2026-10-26']);
-  await userEvent.click(await screen.findByRole('button', { name: '今週へ' }));
-  expect(location()).toHaveTextContent(/^\/history$/);
-  expect(screen.getByRole('heading', { level: 1, name: 'すべての TODO' })).toHaveFocus();
+  expect(
+    await screen.findByRole('heading', { level: 1, name: '10月26日 – 11月1日' })
+  ).toBeVisible();
   // An ended week takes no TODOs, so it has no add field.
   expect(screen.queryByRole('textbox', { name: /TODO を書く/ })).toBeNull();
+  await userEvent.click(screen.getByRole('button', { name: '今週へ' }));
+  expect(location()).toHaveTextContent(/^\/history$/);
+  expect(screen.getByRole('heading', { level: 1, name: '今週' })).toHaveFocus();
 });
 
-it('adds to the group it was written in, and tells a refused write under its row', async () => {
+it('adds to the project chosen in the add row, and tells a refused write under its row', async () => {
   renderPage(['/history']);
-  const groups = await screen.findAllByRole('region', { name: /見積もり/ });
-  const estimate = groups.find((group) => group.classList.contains('todo-group'))!;
-  await userEvent.type(
-    within(estimate).getByRole('textbox', { name: /TODO を書く/ }),
-    '請求書を送る{Enter}'
-  );
+  await screen.findByRole('checkbox', { name: '完了: TODO T1' });
+  await userEvent.selectOptions(screen.getByRole('combobox', { name: 'プロジェクト' }), '採用');
+  await userEvent.type(screen.getByRole('textbox', { name: 'TODO を書く' }), '請求書を送る{Enter}');
   expect(createTodo).toHaveBeenCalledWith(
-    expect.objectContaining({ project_id: 'P1', week_start: '2026-11-02', text: '請求書を送る' })
+    expect.objectContaining({
+      project_id: 'P2',
+      week_start: '2026-11-02',
+      text: '請求書を送る',
+      due: null,
+    })
   );
 
+  const estimate = projectGroups()[0];
   await userEvent.click(within(estimate).getByRole('button', { name: '削除: TODO T1' }));
   const alert = await within(estimate).findByRole('alert');
   expect(alert).toHaveTextContent('この TODO の会話が進んでいるあいだは消せません。');

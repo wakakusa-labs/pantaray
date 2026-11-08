@@ -17,27 +17,6 @@ from .action_message_models import (
 )
 
 
-def suggestion_has_conversation(
-    connection: sqlite3.Connection, *, user_id: str, suggestion_id: str
-) -> bool:
-    """Whether an Action already opened with the Suggestion's message.
-
-    Then the Action owns what happens next: approving or dismissing the
-    Suggestion as well would start a second Action, or leave rejected work running.
-    Besides replies, stored Actions the TODO pickup once opened for a Suggestion
-    that nobody had answered are such conversations.
-    """
-
-    return (
-        connection.execute(
-            "SELECT 1 FROM agent_action_steps "
-            "WHERE user_id = ? AND source_suggestion_id = ?",
-            (user_id, suggestion_id),
-        ).fetchone()
-        is not None
-    )
-
-
 def opening_assistant_text_sql(action: str) -> str:
     """SQL for the assistant message the Action aliased ``action`` opens with, or NULL.
 

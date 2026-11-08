@@ -19,7 +19,6 @@ from pantaray_agents.local_runtime.runtime.action_message_models import (
     ACTION_TODO_PICKUP_REQUEST_TEXT,
 )
 from pantaray_agents.local_runtime.runtime.suggestion_acceptance import (
-    SuggestionAcceptanceRejected,
     SuggestionAcceptanceResult,
     SuggestionAccepted,
     accept_suggestion,
@@ -51,7 +50,7 @@ from pantaray_agents.schema.agent.suggestion import (
     SuggestionTodo,
 )
 
-from .store_support import NOW, USER, T, execute, seed_action
+from .store_support import NOW, USER, T, execute
 
 
 @pytest.fixture(autouse=True)
@@ -150,7 +149,6 @@ def test_a_written_todo_starts_one_action_with_its_text_and_project(
     assert message["todo_handoff"] == {
         "todo_id": todo.todo_id,
         "project": {"display_name": "One", "paths": [str(folder.resolve())]},
-        "suggestion": None,
     }
     loose_message = json.loads(
         rows[todo_message_id(loose.todo_id)]["user_message_json"]
@@ -158,7 +156,6 @@ def test_a_written_todo_starts_one_action_with_its_text_and_project(
     assert loose_message["todo_handoff"] == {
         "todo_id": loose.todo_id,
         "project": None,
-        "suggestion": None,
     }
 
 
@@ -340,25 +337,6 @@ async def test_a_suggestion_left_to_continue_starts_only_when_the_user_approves_
     assert len(_actions(db)) == 1
 
 
-@pytest.mark.asyncio
-async def test_an_unanswered_offer_with_a_stored_conversation_cannot_be_approved(
-    db: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(suggestion_repository_module, "read_todo_clock", lambda: NOW)
-    await _save_suggestion(
-        db,
-        "s-go",
-        "action_offer",
-        SuggestionTodo(text="Send the reply", outcome="continue", note="Not sent."),
-    )
-    seed_action(db, "stored", message_id="m-stored", status="queued", reply_to="s-go")
-
-    accepted = await _approve("s-go")
-
-    assert accepted == SuggestionAcceptanceRejected("creation_conflict")
-    assert len(_actions(db)) == 1
-
-
 async def _approve(suggestion_id: str) -> SuggestionAcceptanceResult:
     return await accept_suggestion(
         user_id=USER,
@@ -409,33 +387,6 @@ async def test_a_dismissed_suggestion_is_not_picked_up_and_stays_where_it_stoppe
     assert display_state(entry.todo, entry.conversation, NOW.current_week_start) == (
         Partial(note="Not sent.")
     )
-
-
-@pytest.mark.asyncio
-async def test_an_unanswered_offer_with_a_stored_conversation_cannot_be_dismissed(
-    db: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(suggestion_repository_module, "read_todo_clock", lambda: NOW)
-    repository = await _save_suggestion(
-        db,
-        "s-go",
-        "action_offer",
-        SuggestionTodo(text="Send the reply", outcome="continue", note="Not sent."),
-    )
-    seed_action(db, "stored", message_id="m-stored", status="queued", reply_to="s-go")
-
-    dismissed = await _dismiss(repository, "s-go")
-
-    assert (
-        dismissed.error
-        == suggestion_repository_module.SUGGESTION_HAS_CONVERSATION_ERROR
-    )
-    with closing(sqlite3.connect(db)) as connection:
-        reaction = connection.execute(
-            "SELECT user_reaction, rejected_at FROM agent_suggestions"
-        ).fetchone()
-        status = connection.execute("SELECT status FROM agent_actions").fetchone()
-    assert (reaction, status) == ((None, None), ("queued",))
 
 
 def test_a_failed_change_count_leaves_no_action_and_the_next_pass_recovers(

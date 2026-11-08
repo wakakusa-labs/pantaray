@@ -70,11 +70,7 @@ from pantaray_agents.schema.agent.action import (
     ActionAgentRequest,
     SuggestionApprovalInput,
 )
-from pantaray_agents.schema.agent.action_message import (
-    ActionUserMessageInput,
-    TodoHandoffInput,
-    TodoHandoffSuggestion,
-)
+from pantaray_agents.schema.agent.action_message import ActionUserMessageInput
 from pantaray_agents.schema.agent.action_message_codec import (
     render_action_user_request_text,
 )
@@ -388,56 +384,6 @@ async def test_initialize_context_projects_followup_to_restored_history_once(
         "step-1",
         "step-2",
     ]
-
-
-@pytest.mark.asyncio
-async def test_a_stored_suggestion_handoff_reads_its_summary_and_target_unapproved(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    repo = MockActionAgentRepository()
-    agent = _build_agent(repo)
-    execution_context = _bootstrap_execution_context(
-        tmp_path=tmp_path,
-        monkeypatch=monkeypatch,
-    )
-    request = build_action_request(
-        action_id="action-1", suggestion_id=None, user_id="user-1", content="Go on."
-    )
-    handoff = TodoHandoffInput(
-        todo_id="todo-1",
-        project=None,
-        suggestion=TodoHandoffSuggestion(
-            suggestion_id="suggestion-1",
-            summary="Draft the reply only; do not send it.",
-            organization_name="Wakakusa",
-            project_name="Pantaray",
-        ),
-    )
-    request = request.model_copy(
-        update={
-            "user_message": request.user_message.model_copy(
-                update={"todo_handoff": handoff}
-            )
-        }
-    )
-
-    updated = await initialize_context(  # type: ignore[arg-type]
-        agent,
-        _state_with_execution_context(execution_context, suggestion_id=None),
-        _runtime(agent, request=request),
-    )
-
-    # The constraint lives only in the summary, so the Action reads it as an
-    # approval would pass it, while nothing says the user approved.
-    assert updated["context"]["request_summary"] == (
-        "Draft the reply only; do not send it."
-    )
-    assert updated["context"]["target_context"] == {
-        "organization_name": "Wakakusa",
-        "project_name": "Pantaray",
-    }
-    assert request.user_message.suggestion_approval is None
 
 
 @pytest.mark.asyncio

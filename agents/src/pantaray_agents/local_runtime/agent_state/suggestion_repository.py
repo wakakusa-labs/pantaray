@@ -10,9 +10,6 @@ from pantaray_agents import todo_ux_feature
 from pantaray_agents.local_runtime.memory_catalog.domain_registration import (
     register_inline_domain_memory,
 )
-from pantaray_agents.local_runtime.runtime.action_suggestion_reply import (
-    suggestion_has_conversation,
-)
 from pantaray_agents.local_runtime.runtime.utc_timestamps import (
     format_utc_iso,
     now_utc_iso,
@@ -52,7 +49,6 @@ from .shared import build_audit_timestamps, encode_json_column
 from .suggestion_termination import LocalSuggestionTerminationMixin
 
 MESSAGE_ONLY_INTERACTION_CONTRACT = "message_only"
-SUGGESTION_HAS_CONVERSATION_ERROR = "Suggestion already has a conversation"
 
 
 def _normalize_interaction_contract(value: object) -> str | None:
@@ -395,7 +391,7 @@ class LocalSuggestionRepository(
             update_columns.append("action_failure_code = ?")
             params.append(action_failure_code)
         with self._connect() as connection:
-            with immediate_transaction(connection):
+            with connection:
                 mutation_guard = _reject_message_only_action_lane_mutation(
                     connection=connection,
                     user_id=user_id,
@@ -404,12 +400,6 @@ class LocalSuggestionRepository(
                 )
                 if mutation_guard is not None:
                     return RepositoryResult(error=mutation_guard)
-                # Once an Action opened with the Suggestion's message, that Action
-                # is where the user stops the work; a dismissal would leave it running.
-                if stored_user_reaction == "rejected" and suggestion_has_conversation(
-                    connection, user_id=user_id, suggestion_id=suggestion_id
-                ):
-                    return RepositoryResult(error=SUGGESTION_HAS_CONVERSATION_ERROR)
                 connection.execute(
                     f"""
                     UPDATE agent_suggestions

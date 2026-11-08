@@ -20,7 +20,6 @@ from pantaray_agents.local_runtime.suggestion_state.public_projection import (
 from pantaray_agents.schema.agent.action import ActionUserMessageInput
 
 from .action_message_models import ActionMessageConflictError
-from .action_suggestion_reply import suggestion_has_conversation
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,12 +69,6 @@ def validate_suggestion_action_start(
         raise ActionMessageConflictError(
             "Suggestion is not available for Action creation"
         )
-    # An Action that already opened with its message owns the work; approving
-    # the Suggestion too would start a second one.
-    if suggestion_has_conversation(
-        connection, user_id=user_id, suggestion_id=suggestion_id
-    ):
-        raise ActionMessageConflictError("Suggestion already has a conversation")
     if approval.suggestion_id != suggestion_id:
         raise ActionMessageConflictError(
             "Suggestion approval relation does not match suggestion_id"

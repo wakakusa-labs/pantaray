@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { createServer, type ViteDevServer } from 'vite';
+import { createServer, type Plugin, type ViteDevServer } from 'vite';
 import type { ChatItem, ChatItemPage } from '../../electron/src/chat/chatContracts';
 import type { ConversationHistoryListItem } from '../../electron/src/history/historyContracts';
 import { waitForAnimationsToSettle } from './animations';
@@ -8,8 +8,19 @@ import { installTaskDrafts } from './taskDrafts';
 // The main window's History page from the production entry, with deterministic IPC inputs.
 let vite: ViteDevServer;
 let baseUrl: string;
+// The main window ships with the chat and the conversation lists off; this spec turns them on.
+const showConversationLists: Plugin = {
+  name: 'e2e-show-conversation-lists',
+  load: (id) =>
+    id.endsWith('/src/history/conversationListsFeature.ts')
+      ? 'export const SHOW_CONVERSATION_LISTS = true;'
+      : null,
+};
 test.beforeAll(async () => {
-  vite = await createServer({ server: { host: '127.0.0.1', port: 0 } });
+  vite = await createServer({
+    server: { host: '127.0.0.1', port: 0 },
+    plugins: [showConversationLists],
+  });
   await vite.listen();
   baseUrl = vite.resolvedUrls!.local[0];
 });

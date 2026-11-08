@@ -39,6 +39,8 @@ const mocks = vi.hoisted(() => ({
   startCreatingProject: vi.fn(),
   workspace: null as WorkspaceProjects['settings'],
 }));
+// The chat and the conversation lists this covers are off in the main window for now.
+vi.mock('@/history/conversationListsFeature', () => ({ SHOW_CONVERSATION_LISTS: true }));
 vi.mock('@/context/useI18n', () => ({
   useI18n: () => ({
     language: 'ja',

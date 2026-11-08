@@ -15,6 +15,7 @@ import { badgeClassName } from '@/components/history/statusTokens';
 import { acceleratorKeycaps, ariaKeyShortcuts } from '@/components/shortcut/acceleratorKeycaps';
 import { useGlobalShortcutHint } from '@/components/shortcut/useGlobalShortcutHint';
 import { useI18n } from '@/context/useI18n';
+import { SHOW_CONVERSATION_LISTS } from '@/history/conversationListsFeature';
 import { groupHistoryByDay } from '@/history/historyDayGroups';
 import type { HistoryLiveStage } from '@/history/historyLiveStage';
 import { historyItemSelection, type HistorySelection } from '@/history/historySelection';
@@ -208,11 +209,11 @@ function ChatRow({
 }
 
 /**
- * The home page's sidebar: search, all TODOs, the projects (each selects its TODOs), the deleted
- * TODOs, the chat, and the other conversations by day under their heading. The heading starts a
- * new task in two places: ✎ in the detail pane, and the small window's icon in the small window,
- * as the global shortcut does. A conversation row selects what the main area shows; the selected
- * entry is marked current.
+ * The home page's sidebar: all TODOs, the projects (each selects its TODOs), the deleted TODOs,
+ * and, while `SHOW_CONVERSATION_LISTS` is on, search, the chat and the other conversations by day
+ * under their heading. The heading starts a new task in two places: ✎ in the detail pane, and the
+ * small window's icon in the small window, as the global shortcut does. A conversation row
+ * selects what the main area shows; the selected entry is marked current.
  */
 export function HistorySidebar({
   history,
@@ -481,11 +482,16 @@ export function HistorySidebar({
     <aside
       id={HISTORY_SIDEBAR_ID}
       className="history-sidebar"
-      aria-label={t('history.sidebar.label')}
+      aria-label={t(
+        SHOW_CONVERSATION_LISTS ? 'history.sidebar.label' : 'history.sidebar.todosLabel'
+      )}
       hidden={hidden}
     >
       <div className="history-sidebar__head">
-        <HistorySearchField searchText={searchText} onSearch={setSearchText} />
+        {/* The search filters the conversations only. */}
+        {SHOW_CONVERSATION_LISTS ? (
+          <HistorySearchField searchText={searchText} onSearch={setSearchText} />
+        ) : null}
         {notice ? (
           <div className="history-error" role="alert">
             {notice}
@@ -525,45 +531,51 @@ export function HistorySidebar({
           onShow={todoNav.onShowDeleted}
         />
       </div>
-      <ChatRow t={t} current={selected === 'chat'} onShow={() => onSelect('chat')} />
-      <section className="history-tasks" aria-labelledby="history-tasks-title">
-        <div className="history-projects__head">
-          <h2 id="history-tasks-title">{t('history.tasks.title')}</h2>
-          <div className="history-tasks__new">
-            <button
-              type="button"
-              id={NEW_TASK_BUTTON_ID}
-              className="history-projects__add"
-              aria-label={t('history.newTaskMain')}
-              data-tooltip={t('history.newTaskMain')}
-              aria-current={selected === 'new' ? 'page' : undefined}
-              onClick={() => onSelect('new')}
-            >
-              <SquarePen size={15} aria-hidden="true" />
-            </button>
-            {/* The task headers' Open small icon; here it opens a new task, like the shortcut. */}
-            <button
-              type="button"
-              className="history-projects__add"
-              aria-label={t('history.newTaskSmall')}
-              aria-keyshortcuts={shortcutKeycaps ? ariaKeyShortcuts(shortcutKeycaps) : undefined}
-              data-tooltip={
-                shortcutKeycaps
-                  ? t('history.newTaskSmallWithShortcut', {
-                      shortcut: shortcutKeycaps.map((keycap) => keycap.symbol).join(' '),
-                    })
-                  : t('history.newTaskSmall')
-              }
-              onClick={openSmallNewTask}
-            >
-              <PictureInPicture2 size={15} aria-hidden="true" />
-            </button>
-          </div>
-        </div>
-        <div ref={tasksRef} className="history-sidebar__tasks">
-          {renderContent()}
-        </div>
-      </section>
+      {SHOW_CONVERSATION_LISTS ? (
+        <>
+          <ChatRow t={t} current={selected === 'chat'} onShow={() => onSelect('chat')} />
+          <section className="history-tasks" aria-labelledby="history-tasks-title">
+            <div className="history-projects__head">
+              <h2 id="history-tasks-title">{t('history.tasks.title')}</h2>
+              <div className="history-tasks__new">
+                <button
+                  type="button"
+                  id={NEW_TASK_BUTTON_ID}
+                  className="history-projects__add"
+                  aria-label={t('history.newTaskMain')}
+                  data-tooltip={t('history.newTaskMain')}
+                  aria-current={selected === 'new' ? 'page' : undefined}
+                  onClick={() => onSelect('new')}
+                >
+                  <SquarePen size={15} aria-hidden="true" />
+                </button>
+                {/* The task headers' Open small icon; here it opens a new task, like the shortcut. */}
+                <button
+                  type="button"
+                  className="history-projects__add"
+                  aria-label={t('history.newTaskSmall')}
+                  aria-keyshortcuts={
+                    shortcutKeycaps ? ariaKeyShortcuts(shortcutKeycaps) : undefined
+                  }
+                  data-tooltip={
+                    shortcutKeycaps
+                      ? t('history.newTaskSmallWithShortcut', {
+                          shortcut: shortcutKeycaps.map((keycap) => keycap.symbol).join(' '),
+                        })
+                      : t('history.newTaskSmall')
+                  }
+                  onClick={openSmallNewTask}
+                >
+                  <PictureInPicture2 size={15} aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+            <div ref={tasksRef} className="history-sidebar__tasks">
+              {renderContent()}
+            </div>
+          </section>
+        </>
+      ) : null}
       {confirmingDelete ? (
         <HistoryDeleteDialog
           t={t}

@@ -23,6 +23,8 @@ import SuggestionHistoryPage from './SuggestionHistoryPage';
 
 const mocks = vi.hoisted(() => ({ showNewest: vi.fn(), publishOrganizations: vi.fn() }));
 
+// The chat and the conversation lists this covers are off in the main window for now.
+vi.mock('@/history/conversationListsFeature', () => ({ SHOW_CONVERSATION_LISTS: true }));
 // The panes and the chat have their own tests; here they only show what the page gave them.
 vi.mock('@/components/AiConnectionNotice', () => ({ AiConnectionNotice: () => null }));
 vi.mock('@/components/chat/ChatView', () => ({

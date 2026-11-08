@@ -20,6 +20,8 @@ import { ChatSessionProvider } from './ChatSessionProvider';
 import { ChatUnreadTracker } from './ChatUnreadTracker';
 import { ChatUnreadContext } from './chatUnread';
 
+// The chat and the conversation lists this covers are off in the main window for now.
+vi.mock('@/history/conversationListsFeature', () => ({ SHOW_CONVERSATION_LISTS: true }));
 // The AI-connection notice reads the account; its own tests cover it.
 vi.mock('@/components/AiConnectionNotice', () => ({ AiConnectionNotice: () => null }));
 // The task panes have their own tests; here they only stand for the selected work.

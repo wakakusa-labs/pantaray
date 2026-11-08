@@ -153,7 +153,7 @@ it('leads with the week holding today on the current page, and the one goal with
   // 11/2–11/8: r4, then r1 and r2 added up, for 販路開拓, and r5 for 採用; 10/30's r3 is last
   // week's.
   expect(lead()).toHaveTextContent(
-    '今週は、販路開拓が 40 枚と 25,000,000 円、採用が 2 人進みました。済んだ TODO は 2 件です。' +
+    '今週は、販路開拓が 40 枚と 25,000,000 円、採用が 2 人進みました。完了した TODO は 2 件です。' +
       '売上 300,000,000 円の目標に対して、いまは 10% です。' +
       'このペースなら 2027 年 6 月のはじめに届きます。'
   );
@@ -182,8 +182,8 @@ it('leads with the very totals the week column and the month cell show', () => {
   const week = document.querySelector('.todo-progress-week--now');
   expect(amountsIn(week!)).toEqual(['40 枚', '25,000,000 円']);
   for (const amount of amountsIn(week!)) expect(lead()).toHaveTextContent(amount!);
-  expect(week).toHaveTextContent('✓ 2 済み');
-  expect(lead()).toHaveTextContent('済んだ TODO は 2 件です。');
+  expect(week).toHaveTextContent('✓ 2 完了');
+  expect(lead()).toHaveTextContent('完了した TODO は 2 件です。');
 
   renderView(
     page({
@@ -251,7 +251,7 @@ it('leads with the whole month or year on any other page, never with the weeks s
     })
   );
   expect(lead()).toHaveTextContent(
-    /^2026年は、販路開拓が 10,000,000 円、採用が 2 人進みました。済んだ TODO は 2 件です。$/
+    /^2026年は、販路開拓が 10,000,000 円、採用が 2 人進みました。完了した TODO は 2 件です。$/
   );
 });
 
@@ -308,7 +308,7 @@ it('tells each pace without a number it does not have', () => {
 it('gives each day up to today its records by project and unit, and its checked TODOs', async () => {
   const handlers = renderView(page(), '2026-11-05');
   const thursday = dayCell(/^11月5日（木）/);
-  expect(thursday).toHaveAccessibleName('11月5日（木）、記録 3 件、済んだ TODO 0 件');
+  expect(thursday).toHaveAccessibleName('11月5日（木）、記録 3 件、完了した TODO 0 件');
   expect(thursday).toHaveAttribute('aria-pressed', 'true');
   // r1 and r2 add up; 採用's 人 stays its own line.
   expect(thursday).toHaveTextContent('販路開拓 25,000,000 円');
@@ -339,7 +339,7 @@ it('tells how many lines a busy day leaves out, and totals each begun week from 
   const weeks = document.querySelectorAll('.todo-progress-week');
   expect(weeks).toHaveLength(6);
   // 11/2–11/8: six lines from its days' records, and both TODOs checked in it.
-  expect(weeks[1]).toHaveTextContent('販路開拓 40 枚販路開拓 1 件ほか 4✓ 2 済み');
+  expect(weeks[1]).toHaveTextContent('販路開拓 40 枚販路開拓 1 件ほか 4✓ 2 完了');
   expect(weeks[0]).toHaveTextContent(/^販路開拓 5,000,000 円$/);
   // Weeks not begun have no totals.
   expect(weeks[2]).toHaveTextContent(/^$/);
@@ -363,7 +363,7 @@ it('lays out the year as its months, each opening its calendar', async () => {
   );
   const months = within(screen.getByRole('group', { name: '2026年' })).getAllByRole('button');
   expect(months).toHaveLength(12);
-  expect(months[10]).toHaveAccessibleName('2026年11月、記録 3 件、済んだ TODO 2 件');
+  expect(months[10]).toHaveAccessibleName('2026年11月、記録 3 件、完了した TODO 2 件');
   expect(months[10]).toHaveTextContent('11月販路開拓 25,000,000 円採用 2 人✓ 2');
   await userEvent.click(months[11]);
   expect(handlers.onSelectMonth).toHaveBeenCalledWith('2026-12-01');
@@ -394,7 +394,7 @@ it('opens a day onto its records, the conversation behind an AI record, and the 
   const [thursday] = page().rows.filter((row) => row.start === '2026-11-05');
   const handlers = renderDay(thursday, new Set(['r1']));
   const pane = screen.getByRole('region', { name: '11月5日（木）' });
-  expect(pane).toHaveTextContent('記録 3 件済んだ TODO 0 件');
+  expect(pane).toHaveTextContent('記録 3 件完了した TODO 0 件');
   const [byUser, byAi, other] = within(pane).getAllByRole('listitem');
   expect(byUser).toHaveTextContent('丸和商事から受注10,000,000 円販路開拓');
   expect(within(byUser).queryByRole('button', { name: /会話を開く/ })).toBeNull();
@@ -410,7 +410,7 @@ it('opens a day onto its records, the conversation behind an AI record, and the 
 
   const [tuesday] = page().rows.filter((row) => row.start === '2026-11-03');
   renderDay(tuesday);
-  expect(screen.getByRole('heading', { name: '済んだ TODO' })).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: '完了した TODO' })).toBeInTheDocument();
   expect(screen.getByRole('region', { name: '11月3日（火）' })).toHaveTextContent('見積書を送る');
 });
 

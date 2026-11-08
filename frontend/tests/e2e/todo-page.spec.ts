@@ -498,7 +498,7 @@ test('the home lists every organization’s week by project, with the rail and t
   await openHome(page);
   await expect(page.getByRole('heading', { level: 1, name: '今週' })).toBeVisible();
   await expect(page.locator('.todo-screen__header')).toContainText('11月2日 – 8日');
-  await expect(page.locator('.todo-screen__summary')).toHaveText('2 / 7 済み');
+  await expect(page.locator('.todo-screen__summary')).toHaveText('2 / 7 完了');
 
   // The rail: the organizations in place of Home, then Settings.
   const rail = railOf(page);
@@ -725,7 +725,7 @@ test('進み具合 lays out the month, keeps its page in the address, and opens 
   await expect(goal).toContainText('40%');
   await expect(goal).toContainText('このペースなら 2026 年 12 月のなかばに届きます。');
   await expect(page.locator('.todo-progress__lead')).toHaveText(
-    '今週は、見積もりが 1 件進みました。済んだ TODO は 1 件です。受注 10 件の目標に対して、いまは 40% です。このペースなら 2026 年 12 月のなかばに届きます。'
+    '今週は、見積もりが 1 件進みました。完了した TODO は 1 件です。受注 10 件の目標に対して、いまは 40% です。このペースなら 2026 年 12 月のなかばに届きます。'
   );
   // A day ahead opens nothing.
   await expect(page.getByRole('button', { name: /^11月5日/ })).toHaveCount(0);
@@ -733,7 +733,7 @@ test('進み具合 lays out the month, keeps its page in the address, and opens 
   await capture(page, info, 'progress-month');
 
   // A day opens beside the calendar, in the conversation's place, and the sidebar folds away.
-  await page.getByRole('button', { name: '11月3日（火）、記録 1 件、済んだ TODO 1 件' }).click();
+  await page.getByRole('button', { name: '11月3日（火）、記録 1 件、完了した TODO 1 件' }).click();
   await expect(page).toHaveURL(/view=progress&day=2026-11-03$/);
   const day = page.getByRole('region', { name: '11月3日（火）' });
   await expect(day).toContainText('記録 1 件');
@@ -773,7 +773,7 @@ test('進み具合 lays out the month, keeps its page in the address, and opens 
   const months = page.getByRole('group', { name: '2026年' }).getByRole('button');
   await expect(months).toHaveCount(12);
   await capture(page, info, 'progress-year');
-  await page.getByRole('button', { name: '2026年10月、記録 2 件、済んだ TODO 0 件' }).click();
+  await page.getByRole('button', { name: '2026年10月、記録 2 件、完了した TODO 0 件' }).click();
   await expect(page).toHaveURL(/view=progress&on=2026-10-01$/);
   await expect(page.locator('.todo-screen__range')).toHaveText('2026年10月');
 
@@ -782,7 +782,7 @@ test('進み具合 lays out the month, keeps its page in the address, and opens 
   await sidebar.getByRole('button', { name: '進み具合' }).click();
   await expect(page).toHaveURL(/#\/history\?view=progress$/);
   await expect(page.locator('.todo-progress__lead')).toContainText(
-    '今週は、プロダクトが 1 本、見積もりが 1 件進みました。済んだ TODO は 2 件です。'
+    '今週は、プロダクトが 1 本、見積もりが 1 件進みました。完了した TODO は 2 件です。'
   );
   await capture(page, info, 'progress-all');
 });

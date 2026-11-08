@@ -7,9 +7,6 @@ import logging
 from pantaray_agents.action_status import (
     parse_stored_suggestion_user_reaction,
 )
-from pantaray_agents.local_runtime.agent_state.suggestion_repository import (
-    SUGGESTION_HAS_CONVERSATION_ERROR,
-)
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.agent.base import ErrorSeverity, ErrorType
 from pantaray_agents.schema.events import OutboundEvent
@@ -99,7 +96,20 @@ class WSHandlerProcessControlMixin:
             else None
         )
         if interaction_contract != "action_offer" or current_reaction:
-            await self._send_dismiss_not_allowed(suggestion_id)
+            await self.send_error(
+                public_ws_error(
+                    error_code="WS_ACTION_NOT_ALLOWED",
+                    request_id=self.session_id,
+                    error_type=ErrorType.VALIDATION_ERROR,
+                    severity=ErrorSeverity.ERROR,
+                    error_message="dismiss_suggestion is not allowed for current suggestion state",
+                ),
+                meta=build_suggestion_error_meta(
+                    suggestion_id=str(suggestion_id),
+                    stage="dismiss_not_allowed",
+                    error_code="WS_ACTION_NOT_ALLOWED",
+                ),
+            )
             return
         rejected_at = now_utc_iso()
         try:
@@ -112,10 +122,6 @@ class WSHandlerProcessControlMixin:
                 dismiss_reason=reason,
             )
         except SuggestionStatusPersistenceError as exc:
-            # Pantaray picked up its TODO meanwhile; the Action's own controls stop it.
-            if str(exc) == SUGGESTION_HAS_CONVERSATION_ERROR:
-                await self._send_dismiss_not_allowed(suggestion_id)
-                return
             await self._send_suggestion_persistence_error(
                 suggestion_id=suggestion_id,
                 failure_kind="persist_dismiss_reaction",
@@ -133,22 +139,6 @@ class WSHandlerProcessControlMixin:
             committed_at=committed_at,
             reason=reason,
             meta={"suggestion_id": suggestion_id, "kind": "suggestion"},
-        )
-
-    async def _send_dismiss_not_allowed(self, suggestion_id: str) -> None:
-        await self.send_error(
-            public_ws_error(
-                error_code="WS_ACTION_NOT_ALLOWED",
-                request_id=self.session_id,
-                error_type=ErrorType.VALIDATION_ERROR,
-                severity=ErrorSeverity.ERROR,
-                error_message="dismiss_suggestion is not allowed for current suggestion state",
-            ),
-            meta=build_suggestion_error_meta(
-                suggestion_id=str(suggestion_id),
-                stage="dismiss_not_allowed",
-                error_code="WS_ACTION_NOT_ALLOWED",
-            ),
         )
 
     async def handle_reject(self, suggestion_id: str) -> None:

@@ -19,18 +19,16 @@ from pantaray_agents.local_runtime.runtime.action_message_models import (
     ACTION_TODO_PICKUP_REQUEST_TEXT,
 )
 from pantaray_agents.local_runtime.runtime.suggestion_acceptance import (
-    SuggestionAcceptanceRejected,
+    SuggestionAcceptanceResult,
+    SuggestionAccepted,
     accept_suggestion,
-)
-from pantaray_agents.local_runtime.suggestion_state.repository import (
-    LocalSuggestionStateRepository,
 )
 from pantaray_agents.local_runtime.todos import core, pickup
 from pantaray_agents.local_runtime.todos.conversation import todo_message_id
 from pantaray_agents.local_runtime.todos.db import count_todo_change
 from pantaray_agents.local_runtime.todos.display import (
     Partial,
-    Working,
+    Waiting,
     display_state,
 )
 from pantaray_agents.local_runtime.todos.model import ActionConversation, Todo
@@ -151,7 +149,6 @@ def test_a_written_todo_starts_one_action_with_its_text_and_project(
     assert message["todo_handoff"] == {
         "todo_id": todo.todo_id,
         "project": {"display_name": "One", "paths": [str(folder.resolve())]},
-        "suggestion": None,
     }
     loose_message = json.loads(
         rows[todo_message_id(loose.todo_id)]["user_message_json"]
@@ -159,7 +156,6 @@ def test_a_written_todo_starts_one_action_with_its_text_and_project(
     assert loose_message["todo_handoff"] == {
         "todo_id": loose.todo_id,
         "project": None,
-        "suggestion": None,
     }
 
 
@@ -305,129 +301,8 @@ async def _save_suggestion(
     return repository
 
 
-def _pick_up_twice_at_once(db: Path) -> None:
-    # Both passes read before either writes, then contend for the first write.
-    with closing(sqlite3.connect(db, isolation_level=None)) as blocker:
-        blocker.execute("BEGIN IMMEDIATE")
-        threads = [
-            threading.Thread(target=pickup.pick_up_todos, kwargs={"user_id": USER})
-            for _ in range(2)
-        ]
-        for thread in threads:
-            thread.start()
-        time.sleep(0.2)
-        blocker.execute("ROLLBACK")
-        for thread in threads:
-            thread.join()
-
-
 @pytest.mark.asyncio
-async def test_a_suggestion_left_to_continue_opens_one_action_with_its_message(
-    db: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(suggestion_repository_module, "read_todo_clock", lambda: NOW)
-    line = "Send the reply"
-    await _save_suggestion(
-        db,
-        "s-go",
-        "action_offer",
-        SuggestionTodo(text=line, outcome="continue", note="Not sent."),
-    )
-    await _save_suggestion(
-        db,
-        "s-part",
-        "action_offer",
-        SuggestionTodo(text=line, outcome="partial", note="Drafted."),
-    )
-    await _save_suggestion(
-        db,
-        "s-done",
-        "action_offer",
-        SuggestionTodo(text=line, outcome="done", note=None),
-    )
-    await _save_suggestion(
-        db,
-        "s-notice",
-        "message_only",
-        SuggestionTodo(text=line, outcome="done", note=None),
-    )
-
-    revision = read_todo_revision(user_id=USER)
-    pickup.pick_up_todos(user_id=USER)
-    # The open windows read the TODO list again, and the Suggestion with it.
-    assert read_todo_revision(user_id=USER) == revision + 1
-    pickup.pick_up_todos(user_id=USER)
-    _pick_up_twice_at_once(db)
-    assert read_todo_revision(user_id=USER) == revision + 1
-
-    todo_id = suggestion_todo_id("s-go")
-    [row] = _actions(db)
-    message = json.loads(row["user_message_json"])
-    assert (
-        row["initial_user_message_id"],
-        row["step_name"],
-        row["initial_approval_mode"],
-        row["opening"],
-        message["content"],
-        message["todo_handoff"],
-    ) == (
-        todo_message_id(todo_id),
-        "todo_pickup_request",
-        "prompt_each_time",
-        "Message of s-go",
-        ACTION_TODO_PICKUP_REQUEST_TEXT,
-        {
-            "todo_id": todo_id,
-            "project": None,
-            # The Suggestion's context, as an approval carries it, but no approval.
-            "suggestion": {
-                "suggestion_id": "s-go",
-                "summary": "Draft the reply only; do not send it.",
-                "organization_name": "Wakakusa",
-                "project_name": "Pantaray",
-            },
-        },
-    )
-    assert (
-        "suggestion_approval" not in message or message["suggestion_approval"] is None
-    )
-    assert (
-        "- Suggestion summary: Draft the reply only; do not send it."
-        in (row["user_request_text"])
-    )
-    with closing(sqlite3.connect(db)) as connection:
-        linked = connection.execute(
-            "SELECT action.suggestion_id, opening.source_suggestion_id "
-            "FROM agent_action_steps AS opening JOIN agent_actions AS action "
-            "ON action.action_id = opening.action_id "
-            "WHERE opening.step_type = 'assistant_message'"
-        ).fetchall()
-        reactions = connection.execute(
-            "SELECT user_reaction, accepted_at FROM agent_suggestions"
-        ).fetchall()
-    # Linked as a reply is, so nothing records an approval the user never gave.
-    assert linked == [(None, "s-go")]
-    assert set(reactions) == {(None, None)}
-    entry = read_todo(user_id=USER, todo_id=todo_id)
-    assert entry is not None
-    assert isinstance(entry.conversation, ActionConversation)
-    assert display_state(entry.todo, entry.conversation, NOW.current_week_start) == (
-        Working(note=None)
-    )
-    # What a window showing the Suggestion reads, as after a reply: its Action,
-    # and no reaction.
-    state = await LocalSuggestionStateRepository(
-        db_path=db, busy_timeout_ms=1_000
-    ).get_suggestion_state(user_id=USER, suggestion_id="s-go")
-    assert state.data is not None
-    assert (state.data["action_id"], state.data["user_reaction"]) == (
-        entry.conversation.action_id,
-        None,
-    )
-
-
-@pytest.mark.asyncio
-async def test_a_suggestion_pantaray_picked_up_cannot_be_approved_into_a_second_action(
+async def test_a_suggestion_left_to_continue_starts_only_when_the_user_approves_it(
     db: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(suggestion_repository_module, "read_todo_clock", lambda: NOW)
@@ -437,11 +312,35 @@ async def test_a_suggestion_pantaray_picked_up_cannot_be_approved_into_a_second_
         "action_offer",
         SuggestionTodo(text="Send the reply", outcome="continue", note="Not sent."),
     )
+    todo_id = suggestion_todo_id("s-go")
+    revision = read_todo_revision(user_id=USER)
+
     pickup.pick_up_todos(user_id=USER)
 
-    accepted = await accept_suggestion(
+    assert _actions(db) == []
+    assert read_todo_revision(user_id=USER) == revision
+    waiting = read_todo(user_id=USER, todo_id=todo_id)
+    assert waiting is not None
+    # Not "about to start": only the user's answer starts it.
+    assert display_state(
+        waiting.todo, waiting.conversation, NOW.current_week_start
+    ) == (Waiting(reason="approval", note="Not sent."))
+
+    accepted = await _approve("s-go")
+
+    assert isinstance(accepted, SuggestionAccepted)
+    entry = read_todo(user_id=USER, todo_id=todo_id)
+    assert entry is not None
+    assert isinstance(entry.conversation, ActionConversation)
+    assert entry.conversation.action_id == accepted.action.action_id
+    pickup.pick_up_todos(user_id=USER)
+    assert len(_actions(db)) == 1
+
+
+async def _approve(suggestion_id: str) -> SuggestionAcceptanceResult:
+    return await accept_suggestion(
         user_id=USER,
-        suggestion_id="s-go",
+        suggestion_id=suggestion_id,
         command_id="11111111-1111-4111-8111-111111111111",
         approval_mode="prompt_each_time",
         language="ja",
@@ -451,9 +350,6 @@ async def test_a_suggestion_pantaray_picked_up_cannot_be_approved_into_a_second_
         images=(),
         files=(),
     )
-
-    assert accepted == SuggestionAcceptanceRejected("creation_conflict")
-    assert len(_actions(db)) == 1
 
 
 async def _dismiss(repository: LocalSuggestionRepository, suggestion_id: str):  # type: ignore[no-untyped-def]
@@ -493,44 +389,10 @@ async def test_a_dismissed_suggestion_is_not_picked_up_and_stays_where_it_stoppe
     )
 
 
-@pytest.mark.asyncio
-async def test_a_suggestion_pantaray_picked_up_cannot_be_dismissed(
+def test_a_failed_change_count_leaves_no_action_and_the_next_pass_recovers(
     db: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(suggestion_repository_module, "read_todo_clock", lambda: NOW)
-    repository = await _save_suggestion(
-        db,
-        "s-go",
-        "action_offer",
-        SuggestionTodo(text="Send the reply", outcome="continue", note="Not sent."),
-    )
-    pickup.pick_up_todos(user_id=USER)
-
-    dismissed = await _dismiss(repository, "s-go")
-
-    assert (
-        dismissed.error
-        == suggestion_repository_module.SUGGESTION_HAS_CONVERSATION_ERROR
-    )
-    with closing(sqlite3.connect(db)) as connection:
-        reaction = connection.execute(
-            "SELECT user_reaction, rejected_at FROM agent_suggestions"
-        ).fetchone()
-        status = connection.execute("SELECT status FROM agent_actions").fetchone()
-    assert (reaction, status) == ((None, None), ("queued",))
-
-
-@pytest.mark.asyncio
-async def test_a_failed_change_count_leaves_no_action_and_the_next_pass_recovers(
-    db: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(suggestion_repository_module, "read_todo_clock", lambda: NOW)
-    await _save_suggestion(
-        db,
-        "s-go",
-        "action_offer",
-        SuggestionTodo(text="Send the reply", outcome="continue", note="Not sent."),
-    )
+    _insert_ai_todo(db, "todo-recur", origin="recurrence")
     revision = read_todo_revision(user_id=USER)
 
     def failing_count(connection, *, user_id):  # type: ignore[no-untyped-def]

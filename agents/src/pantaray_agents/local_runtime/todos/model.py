@@ -117,7 +117,7 @@ class NoConversation:
 @dataclass(frozen=True, slots=True)
 class SuggestionConversation:
     suggestion_id: str
-    # The user dismissed it, so neither Pantaray nor an approval continues it.
+    # The user dismissed it, so nothing continues its work.
     answered: bool
     kind: Literal["suggestion"] = "suggestion"
 

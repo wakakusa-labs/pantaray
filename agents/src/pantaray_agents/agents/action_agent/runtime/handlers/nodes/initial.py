@@ -82,26 +82,23 @@ async def initialize_context(
         if intervening_user_steps
         else current_user_message
     )
-    # An approved Suggestion carries its context on the approval; a Suggestion's
-    # TODO Pantaray picked up carries the same context on its hand-off.
-    handoff = context_user_message.todo_handoff
-    suggestion = context_user_message.suggestion_approval or (
-        None if handoff is None else handoff.suggestion
-    )
+    suggestion_approval = context_user_message.suggestion_approval
     is_continuation = any(state.get("history_by_scope", {}).values())
 
     request_summary = (
-        _normalize_optional_text(suggestion.summary) if suggestion is not None else None
+        _normalize_optional_text(suggestion_approval.summary)
+        if suggestion_approval is not None
+        else None
     )
     target_context: TargetContextState = {
         "organization_name": (
-            _normalize_optional_text(suggestion.organization_name)
-            if suggestion is not None
+            _normalize_optional_text(suggestion_approval.organization_name)
+            if suggestion_approval is not None
             else None
         ),
         "project_name": (
-            _normalize_optional_text(suggestion.project_name)
-            if suggestion is not None
+            _normalize_optional_text(suggestion_approval.project_name)
+            if suggestion_approval is not None
             else None
         ),
     }

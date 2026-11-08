@@ -160,7 +160,6 @@ def submit_action_message(
                         action_id=action_id,
                         process_id=process_id,
                         target=command.target,
-                        origin=command.origin,
                         created_at=created_at,
                     )
 
@@ -248,9 +247,8 @@ def submit_action_message(
                         message=command.message,
                         created_at=created_at,
                     )
-            # The TODO now shows its Action, and a Suggestion's TODO links the
-            # Suggestion to it: counted with the Action, so the open windows read
-            # again exactly when it exists.
+            # The TODO now shows its Action: counted with the Action, so the open
+            # windows read again exactly when it exists.
             if (
                 isinstance(command.target, NewActionTarget)
                 and command.message.todo_handoff is not None

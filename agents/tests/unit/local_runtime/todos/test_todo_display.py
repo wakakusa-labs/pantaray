@@ -76,7 +76,12 @@ def _reported(kind: ReportKind, run_id: str | None = "run-2") -> Todo:
             Waiting("reply", "needs_user note"),
         ),
         (_reported("partial", None), SUGGESTION, Partial("partial note")),
-        (_reported("continue", None), SUGGESTION, NotStarted("starting")),
+        # Nothing but the user's answer starts it, so it is not "about to".
+        (
+            _reported("continue", None),
+            SUGGESTION,
+            Waiting("approval", "continue note"),
+        ),
         # Dismissed, nothing continues it: it stays where the Suggestion left it.
         (_reported("continue", None), DISMISSED, Partial("continue note")),
         # A done Suggestion TODO the user unchecked.
@@ -102,11 +107,10 @@ def test_display_state(
         (make_todo(week_start=PREVIOUS_WEEK), NONE, START),
         (make_todo(origin=RecurrenceOrigin("todo-0")), NONE, START),
         (make_todo(author="ai", origin=RecurrenceOrigin("todo-0")), NONE, CONTINUE),
-        # Only a Suggestion left for Pantaray to continue is picked up; the
-        # user's approval or reply opens the others.
-        (_reported("continue", None), SUGGESTION, CONTINUE),
+        # Only the user's approval or reply opens a Suggestion's work, however
+        # it left the TODO.
+        (_reported("continue", None), SUGGESTION, None),
         (_reported("continue", None), DISMISSED, None),
-        # The Suggestion was deleted, so there is no message to open with.
         (_reported("continue", None), NONE, None),
         (_reported("continue", None), SUCCEEDED, None),
         (_reported("partial", None), SUGGESTION, None),

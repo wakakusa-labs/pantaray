@@ -86,7 +86,7 @@ def display_state(
         case ActionConversation():
             return _action_state(todo, conversation)
         case SuggestionConversation(answered=answered):
-            return _suggestion_state(todo, answered, current_week_start)
+            return _suggestion_state(todo, answered)
         case NoConversation():
             return _not_started(todo, current_week_start)
         case _:
@@ -118,17 +118,16 @@ def _action_state(todo: Todo, conversation: ActionConversation) -> TodoDisplaySt
             assert_never(run)
 
 
-def _suggestion_state(
-    todo: Todo, answered: bool, current_week_start: LocalDate
-) -> TodoDisplayState:
+def _suggestion_state(todo: Todo, answered: bool) -> TodoDisplayState:
     report = todo.ai_report
     if report is None:
         # A done Suggestion TODO the user unchecked: the Suggestion's reply
         # flow is how it continues.
         return Waiting(reason="reply", note=None)
-    # A dismissed Suggestion is not continued, so its work stays where it stopped.
+    # Nothing starts this work but the user's answer; once they dismissed the
+    # Suggestion, its work stays where it stopped.
     if report.kind == "continue" and not answered:
-        return _not_started(todo, current_week_start)
+        return Waiting(reason="approval", note=report.note)
     return _reported_state(report)
 
 
@@ -154,18 +153,9 @@ def pickup_target(
         or conversation.kind == "action"
     ):
         return None
-    # A Suggestion's TODO continues in a conversation opened with the
-    # Suggestion's message, and only when the Suggestion left its work for
-    # Pantaray to carry on with; the user's approval or reply opens the rest.
+    # A Suggestion's TODO is worked on in the Suggestion's own conversation,
+    # which only the user's approval or reply opens.
     if todo.origin.kind == "suggestion":
-        report = todo.ai_report
-        if (
-            isinstance(conversation, SuggestionConversation)
-            and not conversation.answered
-            and report is not None
-            and report.kind == "continue"
-        ):
-            return ContinueAiTodo(todo_id=todo.todo_id)
         return None
     if todo.author == "user":
         return StartWritten(todo_id=todo.todo_id)

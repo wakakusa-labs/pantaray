@@ -5,9 +5,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from starlette.websockets import WebSocketState
 
-from pantaray_agents.local_runtime.agent_state.suggestion_repository import (
-    SUGGESTION_HAS_CONVERSATION_ERROR,
-)
 from pantaray_agents.orchestration.session.store import InMemorySessionStore
 from pantaray_agents.orchestration.ws.handler import (
     SuggestionStatusPersistenceError,
@@ -114,24 +111,3 @@ async def test_handle_reject_persistence_failure_returns_dependency_error() -> N
     assert meta.get("kind") == "suggestion"
     assert meta.get("suggestion_id") == "sug-1"
     assert meta.get("failure_kind") == "persist_dismiss_reaction"
-
-
-@pytest.mark.asyncio
-async def test_dismissing_a_suggestion_pantaray_picked_up_is_not_allowed() -> None:
-    handler, websocket = _build_handler()
-    handler._get_suggestion_repository = AsyncMock(return_value=_build_repo_mock())  # type: ignore[method-assign]
-    handler._persist_suggestion_status = AsyncMock(  # type: ignore[method-assign]
-        side_effect=SuggestionStatusPersistenceError(SUGGESTION_HAS_CONVERSATION_ERROR)
-    )
-
-    await handler.handle_dismiss("sug-1", reason=None)
-
-    sent = [call.args[0] for call in websocket.send_json.call_args_list if call.args]
-    [error] = [payload for payload in sent if payload.get("event") == "error"]
-    assert error["data"]["error_code"] == "WS_ACTION_NOT_ALLOWED"
-    assert error["meta"]["stage"] == "dismiss_not_allowed"
-    assert not [
-        payload
-        for payload in sent
-        if payload.get("event") == "suggestion_reaction_committed"
-    ]

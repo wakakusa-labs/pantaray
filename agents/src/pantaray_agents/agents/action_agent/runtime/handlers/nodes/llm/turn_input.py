@@ -36,6 +36,7 @@ from pantaray_agents.agents.action_agent.support.world_state import (
     WorldStateUpdate,
     world_state_fields,
 )
+from pantaray_agents.agents.action_agent.tools.todo_tools import fill_todo_tool_rule
 from pantaray_agents.config_tunables import load_local_runtime_tunables
 from pantaray_agents.conversation.budget import input_bytes
 from pantaray_agents.conversation.prefix import (
@@ -344,8 +345,10 @@ def _system_instruction(agent: ActionAgent, *, language: str) -> str:
     )
     if ROLE_RULES_PLACEHOLDER not in instruction:
         return instruction
-    return role_system_instruction(
-        instruction, role_rule=agent.executing_role_rule(SUPERVISOR_ROLE)
+    return fill_todo_tool_rule(
+        role_system_instruction(
+            instruction, role_rule=agent.executing_role_rule(SUPERVISOR_ROLE)
+        )
     )
 
 

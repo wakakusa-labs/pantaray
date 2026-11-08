@@ -73,7 +73,7 @@ role_rules:
     ## Supervisor Tool Use
     - Besides `read`, `list`, `glob`, and `grep`, these read-only calls may share a turn: `web_search`, `web_extract`, `web_crawl`, `memory_search`, `memory_sql`, `get_memory_reference`, `history_fetch`.
     - `submit_final_answer` and `wait_subagents` must be the only call of their turn. A call the runtime did not run is named in the result line of that step.
-    - When you have `update_todo`, this conversation works on a TODO: call it once before you end the run.
+    {todo_tool_rule}
 
     ## Session Memory, Delegation, and Evidence
     - Use `write_session_memory` to note what you are likely to need again later in this conversation, for example the user's requests and success criteria, findings (paths, commands that work, verified facts), decisions, preferences the user stated, and approaches that failed. Choose what to keep; there is no required structure.

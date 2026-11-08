@@ -94,6 +94,8 @@ BACKEND_TARGET = TargetSpec(
     name="backend",
     trigger_rules=(
         "agents/",
+        # The TODO list's switch has a twin in agents/; a backend test checks they agree.
+        "frontend/src/todos/todoUxFeature.ts",
         ".github/workflows/ci-backend.yml",
         ".github/workflows/backend-checks.yml",
     ),

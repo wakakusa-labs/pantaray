@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from pantaray_agents import todo_ux_feature
 from pantaray_agents.local_runtime.runtime.admission import admission_closed
 from pantaray_agents.local_runtime.runtime.memory_embedding_scheduler import (
     MemoryEmbeddingProjectionResult,
@@ -231,6 +232,19 @@ def test_todo_pickup_waits_for_a_connection_background_jobs_could_use(
         now_monotonic=10.1,
     )
     assert (picked, owners) == ({"todo_pickup": 13.1}, [context.owner_user_id])
+
+
+def test_no_todo_is_picked_up_while_the_todo_list_is_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(todo_ux_feature, "TODO_UX_ENABLED", False)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        slot = MemoryEmbeddingProjectionSlot(executor, threading.Event())
+        names = [task.name for task in build_periodic_schedule(embedding_slot=slot)]
+
+    assert "todo_pickup" not in names
+    # Deleted TODOs still leave on time; nothing the user sees depends on it.
+    assert "todo_purge" in names
 
 
 def test_todo_purge_runs_for_the_current_owner_at_the_current_time(

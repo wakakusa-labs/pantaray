@@ -15,7 +15,6 @@ import { badgeClassName } from '@/components/history/statusTokens';
 import { acceleratorKeycaps, ariaKeyShortcuts } from '@/components/shortcut/acceleratorKeycaps';
 import { useGlobalShortcutHint } from '@/components/shortcut/useGlobalShortcutHint';
 import { useI18n } from '@/context/useI18n';
-import { SHOW_CONVERSATION_LISTS } from '@/history/conversationListsFeature';
 import { groupHistoryByDay } from '@/history/historyDayGroups';
 import type { HistoryLiveStage } from '@/history/historyLiveStage';
 import { historyItemSelection, type HistorySelection } from '@/history/historySelection';
@@ -23,6 +22,7 @@ import { useHistoryLiveStages } from '@/hooks/useHistoryLiveStages';
 import { itemIdentity, type useSuggestionHistory } from '@/hooks/useSuggestionHistory';
 import { getLocaleForUiLanguage } from '@/i18n/translate';
 import type { MessageKey } from '@/i18n/types';
+import { TODO_UX_ENABLED } from '@/todos/todoUxFeature';
 
 import { HistoryDeleteDialog } from './HistoryDeleteDialog';
 import { HistoryProjects, type WorkspaceProjects } from './HistoryProjects';
@@ -209,11 +209,12 @@ function ChatRow({
 }
 
 /**
- * The home page's sidebar: all TODOs, the projects (each selects its TODOs), the deleted TODOs,
- * and, while `SHOW_CONVERSATION_LISTS` is on, search, the chat and the other conversations by day
- * under their heading. The heading starts a new task in two places: ✎ in the detail pane, and the
- * small window's icon in the small window, as the global shortcut does. A conversation row
- * selects what the main area shows; the selected entry is marked current.
+ * The home page's sidebar. With the TODO list (`TODO_UX_ENABLED`): all TODOs, the projects (each
+ * selects its TODOs), the progress and the deleted TODOs. Without it, as before the TODO list:
+ * search, the projects, the chat and the conversations by day under their heading. The heading
+ * starts a new task in two places: ✎ in the detail pane, and the small window's icon in the small
+ * window, as the global shortcut does. A conversation row selects what the main area shows; the
+ * selected entry is marked current.
  */
 export function HistorySidebar({
   history,
@@ -482,56 +483,62 @@ export function HistorySidebar({
     <aside
       id={HISTORY_SIDEBAR_ID}
       className="history-sidebar"
-      aria-label={t(
-        SHOW_CONVERSATION_LISTS ? 'history.sidebar.label' : 'history.sidebar.todosLabel'
-      )}
+      aria-label={t(TODO_UX_ENABLED ? 'history.sidebar.todosLabel' : 'history.sidebar.label')}
       hidden={hidden}
     >
       <div className="history-sidebar__head">
         {/* The search filters the conversations only. */}
-        {SHOW_CONVERSATION_LISTS ? (
+        {TODO_UX_ENABLED ? null : (
           <HistorySearchField searchText={searchText} onSearch={setSearchText} />
-        ) : null}
+        )}
         {notice ? (
           <div className="history-error" role="alert">
             {notice}
           </div>
         ) : null}
       </div>
-      <div className="history-sidebar__chat">
-        <SidebarEntry
-          icon={<ListTodo size={16} strokeWidth={1.8} aria-hidden="true" />}
-          label={t('todo.nav.all')}
-          current={place?.kind === 'all'}
-          onShow={todoNav.onShowAll}
-        />
-      </div>
+      {TODO_UX_ENABLED ? (
+        <div className="history-sidebar__chat">
+          <SidebarEntry
+            icon={<ListTodo size={16} strokeWidth={1.8} aria-hidden="true" />}
+            label={t('todo.nav.all')}
+            current={place?.kind === 'all'}
+            onShow={todoNav.onShowAll}
+          />
+        </div>
+      ) : null}
       <HistoryProjects
         projects={projects}
         creating={creatingProject}
         onCreatingChange={onCreatingProjectChange}
-        selectedProjectId={
-          place?.kind === 'project' || place?.kind === 'progress' ? place.projectId : null
+        todos={
+          TODO_UX_ENABLED
+            ? {
+                selectedProjectId:
+                  place?.kind === 'project' || place?.kind === 'progress' ? place.projectId : null,
+                openCounts: todoNav.openCounts,
+                onSelectProject: todoNav.onSelectProject,
+              }
+            : null
         }
-        openCounts={todoNav.openCounts}
-        onSelectProject={todoNav.onSelectProject}
         t={t}
       />
-      <div className="history-sidebar__chat history-sidebar__deleted">
-        <SidebarEntry
-          icon={<ChartNoAxesColumn size={16} strokeWidth={1.8} aria-hidden="true" />}
-          label={t('todo.nav.progress')}
-          current={place?.kind === 'progress'}
-          onShow={todoNav.onShowProgress}
-        />
-        <SidebarEntry
-          icon={<Trash2 size={16} strokeWidth={1.8} aria-hidden="true" />}
-          label={t('todo.nav.deleted')}
-          current={place?.kind === 'deleted'}
-          onShow={todoNav.onShowDeleted}
-        />
-      </div>
-      {SHOW_CONVERSATION_LISTS ? (
+      {TODO_UX_ENABLED ? (
+        <div className="history-sidebar__chat history-sidebar__deleted">
+          <SidebarEntry
+            icon={<ChartNoAxesColumn size={16} strokeWidth={1.8} aria-hidden="true" />}
+            label={t('todo.nav.progress')}
+            current={place?.kind === 'progress'}
+            onShow={todoNav.onShowProgress}
+          />
+          <SidebarEntry
+            icon={<Trash2 size={16} strokeWidth={1.8} aria-hidden="true" />}
+            label={t('todo.nav.deleted')}
+            current={place?.kind === 'deleted'}
+            onShow={todoNav.onShowDeleted}
+          />
+        </div>
+      ) : (
         <>
           <ChatRow t={t} current={selected === 'chat'} onShow={() => onSelect('chat')} />
           <section className="history-tasks" aria-labelledby="history-tasks-title">
@@ -575,7 +582,7 @@ export function HistorySidebar({
             </div>
           </section>
         </>
-      ) : null}
+      )}
       {confirmingDelete ? (
         <HistoryDeleteDialog
           t={t}

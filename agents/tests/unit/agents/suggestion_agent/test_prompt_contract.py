@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
+from pantaray_agents import todo_ux_feature
 from pantaray_agents.agents.suggestion_agent import SuggestionAgent
 from pantaray_agents.agents.suggestion_agent.agent import (
     SUGGESTION_INITIAL_PROMPT_MAX_CHARS,
@@ -81,6 +82,71 @@ def test_real_prompt_renders_context_and_answer_language(
         assert value in rendered
     assert f"the suggestion itself in {label}," in instruction
     assert "{answer_language}" not in instruction
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_the_judge_reads_the_open_todos_only_while_the_todo_list_is_on(
+    mock_repository: MockSuggestionAgentRepository,
+    mock_llm_client: MockLLMClient,
+    monkeypatch: pytest.MonkeyPatch,
+    enabled: bool,
+) -> None:
+    monkeypatch.setattr(todo_ux_feature, "TODO_UX_ENABLED", enabled)
+    config = PromptLoader().load_config("suggestion/suggestion")
+    with patch(
+        "pantaray_agents.agents.core.base.prompt_loader.load_config",
+        return_value=config,
+    ):
+        agent = SuggestionAgent(
+            config={"llm_client": mock_llm_client},
+            repository=mock_repository,
+            research_tools=build_mock_suggestion_research_tools(),
+            stable_memory=SuggestionStableMemoryContext(
+                prompt="stable-memory-evidence",
+                has_facts=True,
+                has_insights=True,
+                pending_work="pending-work-evidence",
+                open_todos=SuggestionOpenTodos(
+                    (SuggestionOpenTodo("open-todo-evidence", None, None, "partial"),)
+                ),
+            ),
+        )
+    context: SuggestionFetchedContext = {
+        "short_term_insight": "current-work-evidence",
+        "reconsideration_reason": "reconsideration-hypothesis",
+        "stable_memory_context": "stable-memory-evidence",
+        "action_agent_capabilities": "action-capability-limits",
+        "recent_suggestions": "suggestions-with-user-responses",
+        "recent_activity_descriptions": "observed-activity-evidence",
+        "recent_activity_summary_1h": "hourly-summary-evidence",
+        "recent_activity_summary_24h": "daily-summary-evidence",
+        "context_density_signal": "context-availability-signal",
+        "workspace_context_prompt": "registered-workspace-context",
+    }
+    agent._current_language = "en"  # noqa: SLF001
+
+    rendered = agent._build_prompt(context)  # noqa: SLF001
+    instruction = agent._system_instruction_for_request()  # noqa: SLF001
+
+    section = (
+        "## Open TODOs\n"
+        "The user's TODO list: what is still open this week, including TODOs carried\n"
+        "over from earlier weeks, with each one's project, due date and state.\n"
+        "- open-todo-evidence (no project; partly done)\n\n"
+    )
+    rule = "- Do not propose work that an open TODO already covers.\n"
+    # Off, both read as they did before the TODO list, line for line.
+    assert (
+        "pending-work-evidence\n\n"
+        + (section if enabled else "")
+        + "## Why reconsider now\n"
+    ) in rendered
+    assert (
+        "do not offer to do it.\n"
+        + (rule if enabled else "")
+        + "\n## Evidence rules for facts\n"
+    ) in instruction
+    assert "open_todos" not in rendered + instruction
 
 
 def test_open_todos_take_only_the_room_the_other_sections_leave(

@@ -3,13 +3,16 @@ from __future__ import annotations
 import sqlite3
 from contextlib import closing
 from pathlib import Path
-from typing import cast
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
+from pantaray_agents import todo_ux_feature
 from pantaray_agents.agents.action_agent.runtime.handlers.nodes.act.helpers import (
     _resolve_act_tool_contract,
 )
+from pantaray_agents.agents.action_agent.runtime.handlers.nodes.llm import turn_input
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime import (
     todo as todo_runtime,
 )
@@ -37,9 +40,13 @@ from pantaray_agents.local_runtime.todos.writes import (
     update_todo,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.utils.prompt_loader import PromptLoader
 from pantaray_agents.utils.trace_context import TraceContextManager
 
 from .store_support import NOW, USER, execute, seed_action
+
+if TYPE_CHECKING:
+    from pantaray_agents.agents.action_agent import ActionAgent
 
 WEEKLY = TodoDue(date="2026-11-08", repeat="weekly")
 
@@ -130,6 +137,44 @@ def test_only_a_todos_action_is_offered_the_todo_tools() -> None:
 
     assert not set(TODO_TOOL_IDS) & set(plain_tools)
     assert set(todo_tools) - set(plain_tools) == set(TODO_TOOL_IDS)
+
+
+def test_no_action_is_offered_the_todo_tools_while_the_todo_list_is_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(todo_ux_feature, "TODO_UX_ENABLED", False)
+    _, plain_tools, _ = _resolve_act_tool_contract(_state(None))
+    _, todo_tools, _ = _resolve_act_tool_contract(_state("todo-1"))
+
+    assert todo_tools == plain_tools
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_the_supervisor_reads_the_todo_tool_rule_only_while_the_todo_list_is_on(
+    monkeypatch: pytest.MonkeyPatch, enabled: bool
+) -> None:
+    monkeypatch.setattr(todo_ux_feature, "TODO_UX_ENABLED", enabled)
+    config = PromptLoader().load_config("action/executing")
+    agent = SimpleNamespace(
+        executing_system_instruction=config.system_instruction,
+        executing_role_rule=config.require_role_rule,
+    )
+
+    instruction = turn_input._system_instruction(  # noqa: SLF001
+        cast("ActionAgent", agent), language="en"
+    )
+
+    rule = (
+        "- When you have `update_todo`, this conversation works on a TODO: call it "
+        "once before you end the run.\n"
+    )
+    # Off, the Supervisor's rules read as they did before the TODO list.
+    assert (
+        "the result line of that step.\n"
+        + (rule if enabled else "")
+        + "\n## Session Memory"
+    ) in instruction
+    assert "todo_tool_rule" not in instruction
 
 
 def test_done_checks_by_ai_and_adds_the_next_weekly_instance(db: Path) -> None:

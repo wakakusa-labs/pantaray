@@ -38,9 +38,15 @@ const mocks = vi.hoisted(() => ({
   unreadActionId: 'A1' as string | null,
   startCreatingProject: vi.fn(),
   workspace: null as WorkspaceProjects['settings'],
+  todoUx: false,
 }));
-// The chat and the conversation lists this covers are off in the main window for now.
-vi.mock('@/history/conversationListsFeature', () => ({ SHOW_CONVERSATION_LISTS: true }));
+// Off unless a test turns it on: most of this covers the conversation lists, which only the
+// sidebar without the TODO list holds.
+vi.mock('@/todos/todoUxFeature', () => ({
+  get TODO_UX_ENABLED() {
+    return mocks.todoUx;
+  },
+}));
 vi.mock('@/context/useI18n', () => ({
   useI18n: () => ({
     language: 'ja',
@@ -150,6 +156,7 @@ afterEach(() => {
   mocks.todoPlace = null;
   mocks.openCounts = new Map();
   mocks.workspace = null;
+  mocks.todoUx = false;
   vi.clearAllMocks();
 });
 
@@ -172,26 +179,34 @@ const WORKSPACE: NonNullable<WorkspaceProjects['settings']> = {
   ],
 };
 
-it('上から検索、すべての TODO、プロジェクト、進み具合、削除した TODO、チャット、そのほかの会話の順に並べ、＋で追加の流れを呼ぶ', async () => {
+const expectInOrder = (order: HTMLElement[]) => {
+  for (const [earlier, later] of order.slice(0, -1).map((node, i) => [node, order[i + 1]]))
+    expect(earlier.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+};
+
+it('上から検索、プロジェクト、チャット、作業の順に並べ、＋で追加の流れを呼ぶ', async () => {
   mocks.workspace = WORKSPACE;
   window.electron = {} as unknown as Window['electron'];
   render(<Sidebar />, { wrapper: SidebarWrapper });
 
-  const order = [
+  expect(screen.getByRole('complementary')).toHaveAccessibleName('history.sidebar.label');
+  expectInOrder([
     screen.getByRole('search'),
-    screen.getByRole('button', { name: 'todo.nav.all' }),
     screen.getByRole('region', { name: 'history.projects.title' }),
-    screen.getByRole('button', { name: 'todo.nav.progress' }),
-    screen.getByRole('button', { name: 'todo.nav.deleted' }),
     screen.getByRole('button', { name: 'history.chat.title' }),
     screen.getByRole('region', { name: 'history.tasks.title' }),
     screen.getByRole('button', { name: /^Conversation/ }),
-  ];
-  for (const [earlier, later] of order.slice(0, -1).map((node, i) => [node, order[i + 1]]))
-    expect(earlier.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  ]);
+  expect(screen.queryByRole('button', { name: 'todo.nav.all' })).toBeNull();
   const section = screen.getByRole('region', { name: 'history.projects.title' });
   const projectRows = within(section).getAllByRole('button', { name: /^(aurora|billing)$/u });
   expect(projectRows.map((row) => row.textContent)).toEqual(['aurora', 'billing']);
+  // Without the TODO list a project's name opens its folders, as before it.
+  expect(projectRows[0]).toHaveAttribute('aria-expanded', 'false');
+  projectRows[0].focus();
+  await userEvent.keyboard('{Enter}');
+  expect(projectRows[0]).toHaveAttribute('aria-expanded', 'true');
+  expect(mocks.selectProject).not.toHaveBeenCalled();
 
   const add = within(section).getByRole('button', { name: 'history.projects.add' });
   add.focus();
@@ -199,7 +214,27 @@ it('上から検索、すべての TODO、プロジェクト、進み具合、�
   expect(mocks.startCreatingProject).toHaveBeenCalledWith(true);
 });
 
+it('TODO の一覧では、すべての TODO、プロジェクト、進み具合、削除した TODO だけを並べる', () => {
+  mocks.todoUx = true;
+  mocks.workspace = WORKSPACE;
+  window.electron = {} as unknown as Window['electron'];
+  render(<Sidebar />, { wrapper: SidebarWrapper });
+
+  expect(screen.getByRole('complementary')).toHaveAccessibleName('history.sidebar.todosLabel');
+  expectInOrder([
+    screen.getByRole('button', { name: 'todo.nav.all' }),
+    screen.getByRole('region', { name: 'history.projects.title' }),
+    screen.getByRole('button', { name: 'todo.nav.progress' }),
+    screen.getByRole('button', { name: 'todo.nav.deleted' }),
+  ]);
+  // The search, the chat and the other conversations are the sidebar's without the TODO list.
+  expect(screen.queryByRole('search')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'history.chat.title' })).toBeNull();
+  expect(screen.queryByRole('region', { name: 'history.tasks.title' })).toBeNull();
+});
+
 it('TODO の入口は見ている一覧を current にし、押すとその一覧を選ぶ。会話を見ている間はどれも current でない', async () => {
+  mocks.todoUx = true;
   mocks.workspace = WORKSPACE;
   mocks.selected = null;
   mocks.todoPlace = { kind: 'project', projectId: 'p-1' };
@@ -213,9 +248,6 @@ it('TODO の入口は見ている一覧を current にし、押すとその一�
   expect(project).toHaveAttribute('aria-current', 'true');
   expect(project).toHaveAccessibleDescription('history.projects.openCount {"count":2}');
   expect(all).not.toHaveAttribute('aria-current');
-  expect(screen.getByRole('button', { name: 'history.chat.title' })).not.toHaveAttribute(
-    'aria-current'
-  );
 
   await userEvent.click(all);
   expect(mocks.showAll).toHaveBeenCalledOnce();
@@ -248,11 +280,8 @@ it('TODO の入口は見ている一覧を current にし、押すとその一�
   mocks.selected = 'chat';
   mocks.todoPlace = null;
   rerender(<Sidebar />);
-  expect(deleted).not.toHaveAttribute('aria-current');
-  expect(screen.getByRole('button', { name: 'history.chat.title' })).toHaveAttribute(
-    'aria-current',
-    'true'
-  );
+  for (const entry of [all, progress, deleted, project])
+    expect(entry).not.toHaveAttribute('aria-current');
 });
 
 it('作業の見出しは作業が無くても出し、✎ はメイン画面に、隣の小さく開くはショートカットと同じ小さい作業を開く', async () => {
@@ -267,8 +296,8 @@ it('作業の見出しは作業が無くても出し、✎ はメイン画面に
   render(<Sidebar />, { wrapper: SidebarWrapper });
 
   const tasks = screen.getByRole('region', { name: 'history.tasks.title' });
-  expect(HISTORY_MESSAGES.ja['history.tasks.title']).toBe('そのほかの会話');
-  expect(HISTORY_MESSAGES.en['history.tasks.title']).toBe('Other conversations');
+  expect(HISTORY_MESSAGES.ja['history.tasks.title']).toBe('作業');
+  expect(HISTORY_MESSAGES.en['history.tasks.title']).toBe('Tasks');
   expect(HISTORY_MESSAGES.ja['history.newTaskMain']).toBe('メイン画面で新しい作業');
   expect(HISTORY_MESSAGES.ja['history.newTaskSmall']).toBe('小さく新しい作業');
   // Pen first, then the small window, as one row beside the heading.

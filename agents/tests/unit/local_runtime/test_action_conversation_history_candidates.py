@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from pantaray_agents import todo_ux_feature
 from pantaray_agents.local_runtime.action_conversation.cursor_codec import (
     OpaqueCursorError,
 )
@@ -505,3 +506,81 @@ def test_a_todos_conversation_leaves_the_dated_list_and_its_search(
             item=item,
         )
         assert [candidate.stable_id for candidate in page.candidates] == [item[1]]
+
+
+def test_a_todos_conversation_is_a_dated_one_while_the_todo_list_is_off(
+    history_connection: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(todo_ux_feature, "TODO_UX_ENABLED", False)
+    _insert_action(
+        history_connection,
+        "action-pickup",
+        message=ActionUserMessageInput(
+            message_id="message-pickup",
+            content="Pantaray started this turn",
+            todo_handoff=TodoHandoffInput(todo_id="todo-picked", project=None),
+        ),
+        step_name="todo_pickup_request",
+        opening_text="Pickup needle",
+    )
+    before = _listed(history_connection)
+    # TODOs written while it was on keep their conversations, which nothing
+    # else would list.
+    _insert_todo(history_connection, "todo-picked")
+    _insert_todo(history_connection, "todo-accepted", suggestion_id="sug-1")
+    _insert_todo(
+        history_connection, "todo-unanswered", suggestion_id="suggestion-invalid"
+    )
+
+    assert {"act-1", "action-pickup", "suggestion-invalid"} <= before
+    assert _listed(history_connection) == before
+
+
+def test_a_deleted_todos_conversation_stays_out_while_the_todo_list_is_off(
+    history_connection: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(todo_ux_feature, "TODO_UX_ENABLED", False)
+    _insert_action(
+        history_connection,
+        "action-pickup",
+        message=ActionUserMessageInput(
+            message_id="message-pickup",
+            content="Pantaray started this turn",
+            todo_handoff=TodoHandoffInput(todo_id="todo-picked", project=None),
+        ),
+        step_name="todo_pickup_request",
+        opening_text="Pickup needle",
+    )
+    _insert_action(
+        history_connection,
+        "action-reply",
+        message=ActionUserMessageInput(message_id="message-reply", content="Go"),
+        opening_text="Reply needle",
+        reply_to="suggestion-message",
+    )
+    before = _listed(history_connection)
+    # Deleted TODOs wait for the purge, which erases their conversations too:
+    # work continued there would be lost, so none of them comes back.
+    _insert_todo(history_connection, "todo-picked", deleted=True)
+    _insert_todo(
+        history_connection, "todo-accepted", suggestion_id="sug-1", deleted=True
+    )
+    _insert_todo(
+        history_connection,
+        "todo-replied",
+        suggestion_id="suggestion-message",
+        deleted=True,
+    )
+    _insert_todo(
+        history_connection,
+        "todo-unanswered",
+        suggestion_id="suggestion-invalid",
+        deleted=True,
+    )
+
+    assert _listed(history_connection) == before - {
+        "action-pickup",
+        "act-1",
+        "action-reply",
+        "suggestion-invalid",
+    }

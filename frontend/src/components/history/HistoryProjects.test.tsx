@@ -98,7 +98,14 @@ function installApi() {
 const toggle = (name: string) =>
   screen.getByRole('button', { name: `history.projects.toggleFolders {"name":"${name}"}` });
 
-function Projects({ openCounts = new Map() }: { openCounts?: ReadonlyMap<string, number> }) {
+function Projects({
+  openCounts = new Map(),
+  withTodos = true,
+}: {
+  openCounts?: ReadonlyMap<string, number>;
+  /** False: the projects as they were before the TODO list. */
+  withTodos?: boolean;
+}) {
   const [creating, setCreating] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   return (
@@ -106,9 +113,9 @@ function Projects({ openCounts = new Map() }: { openCounts?: ReadonlyMap<string,
       projects={useWorkspaceSettingsController(t)}
       creating={creating}
       onCreatingChange={setCreating}
-      selectedProjectId={selected}
-      openCounts={openCounts}
-      onSelectProject={setSelected}
+      todos={
+        withTodos ? { selectedProjectId: selected, openCounts, onSelectProject: setSelected } : null
+      }
       t={t}
     />
   );
@@ -513,6 +520,30 @@ it('名前でそのプロジェクトを選び、山形でフォルダを開閉�
   expect(name).toHaveAttribute('aria-current', 'true');
   await userEvent.click(screen.getByRole('button', { name: 'b' }));
   expect(name).not.toHaveAttribute('aria-current');
+});
+
+it('TODO の一覧が無ければ、名前でフォルダを開閉し、目標の設定も TODO の行き先も出さない', async () => {
+  render(
+    <LocalOwnerContext.Provider value={{ kind: 'account', id: 'user-1' }}>
+      <Projects openCounts={new Map([['a', 3]])} withTodos={false} />
+    </LocalOwnerContext.Provider>
+  );
+  const name = await screen.findByRole('button', { name: 'a' });
+  expect(name).toHaveTextContent(/^a$/u);
+  expect(name).not.toHaveAccessibleDescription();
+  expect(screen.queryByRole('button', { name: /^history\.projects\.toggleFolders/u })).toBeNull();
+
+  expect(name).toHaveAttribute('aria-expanded', 'false');
+  await userEvent.click(name);
+  expect(name).toHaveAttribute('aria-expanded', 'true');
+  expect(name).not.toHaveAttribute('aria-current');
+
+  await userEvent.click(screen.getByRole('button', { name: 'history.projects.menu {"name":"a"}' }));
+  expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).not.toContain(
+    'history.projects.setGoal'
+  );
+  await userEvent.click(screen.getByRole('menuitem', { name: 'common.delete' }));
+  expect(screen.getByText('history.projects.deleteConfirmBody')).toBeInTheDocument();
 });
 
 it('キーボードで持ち上げて動かすと、並べ替えた順番を保存する', async () => {

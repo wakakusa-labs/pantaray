@@ -39,32 +39,37 @@ export type WorkspaceProjects = Pick<
 
 type OpenDialog = { kind: 'delete' | 'organizations' | 'goal'; project: WorkspaceProject };
 
+/** What the TODO list adds to the projects: each one selects its TODOs. */
+export type ProjectTodos = {
+  /** The project whose TODOs are in view, or null. */
+  selectedProjectId: string | null;
+  /** Open TODOs by project id, for the week in view. */
+  openCounts: ReadonlyMap<string, number>;
+  onSelectProject: (projectId: string) => void;
+};
+
 const menuButtonId = (projectId: string) => `history-project-menu:${projectId}`;
 
 /**
  * The sidebar's projects, managed in place: ＋ names a new project, which then takes its folders,
- * each row's menu renames it, adds folders, sets its organization or its goal, or deletes it, and
- * rows are dragged into order. A row's name shows that project's TODOs; the conversations
- * below are not filtered by it.
+ * each row's menu renames it, adds folders, sets its organization (and, with the TODO list, its
+ * goal), or deletes it, and rows are dragged into order. With the TODO list a row's name shows
+ * that project's TODOs; without it the name opens its folders, as before the TODO list. The
+ * conversations below are not filtered by it.
  */
 export function HistoryProjects({
   projects,
   creating,
   onCreatingChange,
-  selectedProjectId,
-  openCounts,
-  onSelectProject,
+  todos,
   t,
 }: {
   projects: WorkspaceProjects;
   /** Whether the new project's name field shows; the composers' add opens it as well. */
   creating: boolean;
   onCreatingChange: (creating: boolean) => void;
-  /** The project whose TODOs are in view, or null. */
-  selectedProjectId: string | null;
-  /** Open TODOs by project id, for the week in view. */
-  openCounts: ReadonlyMap<string, number>;
-  onSelectProject: (projectId: string) => void;
+  /** Null without the TODO list. */
+  todos: ProjectTodos | null;
   t: ReturnType<typeof useI18n>['t'];
 }) {
   const { settings, errorMessage, pending, dragController } = projects;
@@ -119,10 +124,14 @@ export function HistoryProjects({
         label: t('history.projects.setOrganization'),
         onSelect: () => setDialog({ kind: 'organizations', project }),
       },
-      {
-        label: t('history.projects.setGoal'),
-        onSelect: () => setDialog({ kind: 'goal', project }),
-      },
+      ...(todos
+        ? [
+            {
+              label: t('history.projects.setGoal'),
+              onSelect: () => setDialog({ kind: 'goal' as const, project }),
+            },
+          ]
+        : []),
       { label: t('common.delete'), onSelect: () => setDialog({ kind: 'delete', project }) },
     ];
   };
@@ -184,10 +193,14 @@ export function HistoryProjects({
                   menuButtonId={menuButtonId(project.project_id)}
                   renaming={renamingId === project.project_id}
                   dragDisabled={projects.busy}
-                  selected={selectedProjectId === project.project_id}
-                  openCount={openCounts.get(project.project_id) ?? 0}
+                  todo={
+                    todos && {
+                      selected: todos.selectedProjectId === project.project_id,
+                      openCount: todos.openCounts.get(project.project_id) ?? 0,
+                      onSelect: () => todos.onSelectProject(project.project_id),
+                    }
+                  }
                   t={t}
-                  onSelect={() => onSelectProject(project.project_id)}
                   onRename={(name) => projects.renameProject(project.project_id, name)}
                   onRenameEnd={() => endRename(project.project_id)}
                   onRemoveFolder={(folderId) =>
@@ -207,7 +220,9 @@ export function HistoryProjects({
         <HistoryDeleteDialog
           t={t}
           title={t('history.projects.deleteConfirmTitle', { name: dialog.project.display_name })}
-          body={t('history.projects.deleteConfirmBody')}
+          body={t(
+            todos ? 'history.projects.deleteConfirmBodyTodos' : 'history.projects.deleteConfirmBody'
+          )}
           onCancel={() => closeDialog(dialog.project)}
           onConfirm={() => void confirmDelete(dialog.project)}
         />

@@ -145,6 +145,7 @@ files = [
     "src/pantaray_agents/schema/todo_progress.py",
     "src/pantaray_agents/routers/todo_progress.py",
     "src/pantaray_agents/orchestration/ws/todo_relay.py",
+    "src/pantaray_agents/todo_ux_feature.py",
 ]
 warn_return_any = true
 warn_unused_configs = true

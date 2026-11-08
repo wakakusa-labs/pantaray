@@ -285,6 +285,7 @@ def _declined(extraction: SuggestionExtraction) -> SuggestionExtraction:
         "target_context": None,
         "has_suggestion": False,
         "interaction_contract": None,
+        "todo": None,
     }
 
 

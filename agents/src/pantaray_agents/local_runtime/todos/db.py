@@ -131,6 +131,18 @@ def owns_project(
     return row is not None
 
 
+def project_id_named(
+    connection: sqlite3.Connection, *, user_id: str, display_name: str
+) -> str | None:
+    """The user's project with exactly this name; names are unique per user."""
+
+    row = connection.execute(
+        "SELECT project_id FROM workspace_projects WHERE user_id = ? AND display_name = ?",
+        (user_id, display_name),
+    ).fetchone()
+    return None if row is None else str(row[0])
+
+
 def read_todo_row(
     connection: sqlite3.Connection, *, user_id: str, todo_id: TodoId
 ) -> Todo | None:

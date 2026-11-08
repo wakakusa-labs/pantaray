@@ -20,6 +20,12 @@ from pantaray_agents.local_runtime.runtime.welcome_suggestion import (
 from pantaray_agents.local_runtime.storage.transactions import (
     immediate_transaction,
 )
+from pantaray_agents.local_runtime.todos.clock import read_todo_clock
+from pantaray_agents.local_runtime.todos.core import Rejected
+from pantaray_agents.local_runtime.todos.writes import (
+    build_suggestion_todo,
+    insert_suggestion_todo,
+)
 from pantaray_agents.repositories.runtime_ports import (
     ActivityRepositoryPort,
     PatchRunStepKind,
@@ -121,7 +127,10 @@ class LocalSuggestionRepository(
         used_images_count: int = 0,
         on_committed: Callable[[], None] | None = None,
     ) -> RepositoryResult[DBRow]:
-        """``on_committed`` runs once the row is committed, before it is read back."""
+        """``on_committed`` runs once the row is committed, before it is read back.
+
+        A shown Suggestion is saved together with its TODO or not at all.
+        """
         error_payload = (
             suggestion.error.model_dump() if suggestion.error is not None else None
         )
@@ -133,6 +142,17 @@ class LocalSuggestionRepository(
             )
         except ValidationError:
             return RepositoryResult(error="artifacts must be valid artifact paths")
+        todo = (
+            None
+            if suggestion.todo is None
+            else build_suggestion_todo(
+                suggestion_id=str(suggestion.suggestion_id),
+                todo=suggestion.todo,
+                clock=read_todo_clock(),
+            )
+        )
+        if isinstance(todo, Rejected):
+            return RepositoryResult(error=f"the Suggestion's TODO is {todo.reason}")
         with self._connect() as connection:
             with immediate_transaction(connection):
                 updated = connection.execute(
@@ -188,6 +208,15 @@ class LocalSuggestionRepository(
                         source="suggestion",
                         source_record_id=str(suggestion.suggestion_id),
                         content=suggestion.answer,
+                    )
+                # A save replayed after the row finished writes neither again.
+                if updated.rowcount == 1 and todo is not None:
+                    target = suggestion.target_context
+                    insert_suggestion_todo(
+                        connection,
+                        user_id=str(suggestion.user_id),
+                        todo=todo,
+                        project_name=None if target is None else target.project_name,
                     )
         if updated.rowcount == 1 and on_committed is not None:
             on_committed()

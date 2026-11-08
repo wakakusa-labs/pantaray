@@ -11,6 +11,7 @@ import pytest
 from tests.integration.local_runtime_ws_test_fakes import (
     keep_decision,
     load_test_prompt_config,
+    writer_reply,
 )
 
 from pantaray_agents.agents.suggestion_agent import SuggestionAgent
@@ -180,8 +181,8 @@ def _prepare_job(
             nothing,
             {"tool_id": "select_suggestion", "args": {"choice": 1, "reason": "it"}},
             keep_decision("message_only", answer),
+            writer_reply("message_only", answer),
         ]
-        llm.responses["default"] = answer  # what the writer call returns
         await repository.create_processing_suggestion_row(
             user_id=USER_ID, suggestion_id=suggestion_id
         )

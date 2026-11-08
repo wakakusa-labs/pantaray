@@ -212,7 +212,7 @@ async def test_the_files_made_reach_the_agent_response(
 ) -> None:
     serve_lens_runs(mock_llm_client, SUBMIT)
     name, arguments = _finish()
-    mock_llm_client.queued_responses[-1] = {"tool_id": name, "args": arguments}
+    mock_llm_client.queued_responses[-2] = {"tool_id": name, "args": arguments}
     # The fixture's artifact folder, as the make stage left it.
     (tmp_path / "artifacts").mkdir()
     (tmp_path / "artifacts" / "reply.md").write_text("Hi\n")

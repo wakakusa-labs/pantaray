@@ -1,16 +1,26 @@
 """提案エージェント関連のスキーマ定義"""
 
-from typing import Annotated, Literal, TypedDict
+from typing import Annotated, Literal, Self, TypedDict
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    model_validator,
+)
 
 from pantaray_agents.schema.action_conversation import ActionStatus
 
 from .action_message import ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS
-from .base import AgentRequest, AgentResponse, JSONValue
+from .base import AgentRequest, AgentResponse, JSONValue, StatusType
 
 type SuggestionPayload = dict[str, JSONValue]
 type SuggestionInteractionContract = Literal["action_offer", "message_only"]
+# Where the Suggestion's work stands when its TODO is written: finished, made in
+# part with the rest left to the user, or for Pantaray to carry on with.
+type SuggestionTodoOutcome = Literal["done", "partial", "continue"]
 
 # File chips one notice can show; a run that names more is refused, not trimmed.
 SUGGESTION_ARTIFACTS_MAX_COUNT = 20
@@ -66,6 +76,25 @@ class SuggestionTargetContext(BaseModel):
     project_name: str | None = Field(
         description="対象 project 名。判断できない場合は None",
     )
+
+
+class SuggestionTodo(BaseModel):
+    """The AI-written TODO a Suggestion becomes; its project is `target_context`'s."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    text: str = Field(description="The TODO list's line for the Suggestion's work")
+    outcome: SuggestionTodoOutcome
+    # The line shown beside a partial or continuing TODO; a done TODO has none.
+    note: str | None
+
+    @model_validator(mode="after")
+    def _note_follows_outcome(self) -> Self:
+        if (self.outcome == "done") != (self.note is None):
+            raise ValueError(
+                "note is required for a partial or continuing TODO and null when done"
+            )
+        return self
 
 
 class SuggestionAgentRequest(AgentRequest):
@@ -131,7 +160,19 @@ class SuggestionAgentResponse(AgentResponse):
         default_factory=list,
         description="Files the Suggestion made, relative to its artifact folder",
     )
+    todo: SuggestionTodo | None = Field(
+        default=None,
+        description="The TODO a shown Suggestion becomes; None when none is shown",
+    )
     user_id: str = Field(description="提案対象のユーザーのID")
+
+    @model_validator(mode="after")
+    def _shown_suggestion_has_todo(self) -> Self:
+        # Every shown Suggestion is a TODO, so none can be saved without one.
+        shown = self.status == StatusType.SUCCESS and self.has_suggestion
+        if shown != (self.todo is not None):
+            raise ValueError("a TODO is required exactly when a Suggestion is shown")
+        return self
 
 
 class SuggestionPromptInsightItem(TypedDict, total=False):
@@ -176,6 +217,8 @@ class SuggestionExtraction(TypedDict):
     has_suggestion: bool
     interaction_contract: SuggestionInteractionContract | None
     artifacts: list[str]
+    # Written with the answer; None until then and when nothing is suggested.
+    todo: SuggestionTodo | None
 
 
 class SuggestionCandidate(BaseModel):

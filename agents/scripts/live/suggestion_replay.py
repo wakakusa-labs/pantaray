@@ -167,6 +167,8 @@ class _UsageRecorder:
     def _site(self, kwargs: dict[str, object]) -> str:
         tool_use = getattr(kwargs.get("config"), "tool_use", None)
         if tool_use is None:
+            return "unknown"
+        if any(tool.name == "write_suggestion" for tool in tool_use.tools):
             return "writer"
         if any(tool.name == "select_suggestion" for tool in tool_use.tools):
             return "selector"
@@ -299,6 +301,7 @@ async def _replay_one(
         "has_suggestion": response.has_suggestion,
         "interaction_contract": response.interaction_contract,
         "answer": response.answer,
+        "todo": None if response.todo is None else response.todo.model_dump(),
         "suggestion_summary": response.suggestion_summary,
         **_step_summary(db, suggestion_id),
     }
@@ -454,6 +457,8 @@ def _compare(args: argparse.Namespace) -> int:
                 f"selector={record.get('selector')}\n"
             )
             print(f"{record['answer'] or '(no suggestion)'}\n")
+            if record.get("todo"):
+                print(f"TODO: {record['todo']}\n")
     print("## Totals\n")
     for label, total in totals.items():
         print(

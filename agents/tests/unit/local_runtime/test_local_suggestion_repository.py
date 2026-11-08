@@ -3,16 +3,34 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import pytest
 
 from pantaray_agents.action_status import FinalizeActionTerminalCommand
 from pantaray_agents.local_runtime.agent_state import LocalSuggestionRepository
+from pantaray_agents.local_runtime.agent_state import (
+    suggestion_repository as suggestion_repository_module,
+)
 from pantaray_agents.local_runtime.storage.migrations import (
     load_default_migrations,
 )
+from pantaray_agents.local_runtime.todos.clock import TodoClock
+from pantaray_agents.local_runtime.todos.display import (
+    Done,
+    NotStarted,
+    Partial,
+    display_state,
+)
+from pantaray_agents.local_runtime.todos.model import SuggestionConversation
+from pantaray_agents.local_runtime.todos.reads import read_todo
+from pantaray_agents.local_runtime.todos.writes import suggestion_todo_id
 from pantaray_agents.schema.agent.base import StatusType
-from pantaray_agents.schema.agent.suggestion import SuggestionAgentResponse
+from pantaray_agents.schema.agent.suggestion import (
+    SuggestionAgentResponse,
+    SuggestionTargetContext,
+    SuggestionTodo,
+)
 
 from .migrated_db import prepare_test_database
 
@@ -86,6 +104,7 @@ def _success_response(*, answer: str) -> SuggestionAgentResponse:
         status=StatusType.SUCCESS,
         has_suggestion=True,
         interaction_contract="action_offer",
+        todo=SuggestionTodo(text="Reply", outcome="continue", note="Not sent yet."),
     )
 
 
@@ -99,6 +118,7 @@ def _message_only_response(*, answer: str) -> SuggestionAgentResponse:
         status=StatusType.SUCCESS,
         has_suggestion=True,
         interaction_contract="message_only",
+        todo=SuggestionTodo(text="Read the notice", outcome="done", note=None),
     )
 
 
@@ -837,3 +857,188 @@ async def test_recent_suggestions_carry_the_users_later_instructions_in_the_acti
         "Investigate only, do not update",
         "Keep going",
     ]
+
+
+TOKYO = ZoneInfo("Asia/Tokyo")
+# Wednesday in Tokyo; its week starts on Monday 2026-11-02.
+NOW = TodoClock(now="2026-11-04T03:00:00.000Z", zone=TOKYO)
+
+
+def _todo_rows(db_path: Path) -> list[dict[str, object]]:
+    with sqlite3.connect(db_path) as connection:
+        connection.row_factory = sqlite3.Row
+        return [
+            dict(row)
+            for row in connection.execute(
+                "SELECT * FROM todo_items WHERE user_id = ?", (USER_ID,)
+            )
+        ]
+
+
+def _todo_revision(db_path: Path) -> int:
+    with sqlite3.connect(db_path) as connection:
+        row = connection.execute(
+            "SELECT revision FROM todo_revisions WHERE user_id = ?", (USER_ID,)
+        ).fetchone()
+    return 0 if row is None else int(row[0])
+
+
+async def _save_with_todo(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    response: SuggestionAgentResponse,
+) -> tuple[Path, LocalSuggestionRepository]:
+    """Save `response` as the job does, in a database with the project Pantaray."""
+
+    db_path = _bootstrap_db(tmp_path)
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "INSERT INTO workspace_projects(project_id, user_id, display_name, "
+            "created_at, updated_at) VALUES ('project-p', ?, 'Pantaray', ?, ?)",
+            (USER_ID, NOW.now, NOW.now),
+        )
+    monkeypatch.setattr(suggestion_repository_module, "read_todo_clock", lambda: NOW)
+    monkeypatch.setenv("LOCAL_DB_PATH", str(db_path))
+    monkeypatch.setenv("LOCAL_DB_BUSY_TIMEOUT_MS", str(BUSY_TIMEOUT_MS))
+    repo = _repo(db_path)
+    await repo.create_processing_suggestion_row(
+        user_id=USER_ID, suggestion_id=SUGGESTION_ID, created_at=NOW.now
+    )
+    saved = await repo.save_suggestion(
+        response, prompt_name="suggestion", prompt_version="1.0"
+    )
+    assert saved.error is None
+    return db_path, repo
+
+
+def _offer(todo: SuggestionTodo) -> SuggestionAgentResponse:
+    return _success_response(answer="Send the reply?").model_copy(update={"todo": todo})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("todo", "expected"),
+    [
+        (
+            SuggestionTodo(text="Send the reply", outcome="done", note=None),
+            Done(by="ai", at=NOW.now),
+        ),
+        (
+            SuggestionTodo(text="Send the reply", outcome="partial", note="Drafted."),
+            Partial(note="Drafted."),
+        ),
+        # Continued work waits for its Action to start.
+        (
+            SuggestionTodo(text="Send the reply", outcome="continue", note="Not sent."),
+            NotStarted(reason="starting"),
+        ),
+    ],
+)
+async def test_an_offer_is_saved_with_exactly_one_ai_todo_in_its_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    todo: SuggestionTodo,
+    expected: object,
+) -> None:
+    db_path, repo = await _save_with_todo(tmp_path, monkeypatch, _offer(todo))
+
+    # A retried save finds the row finished and writes nothing again.
+    again = await repo.save_suggestion(
+        _offer(todo), prompt_name="suggestion", prompt_version="1.0"
+    )
+
+    assert again.error is None
+    [row] = _todo_rows(db_path)
+    assert _todo_revision(db_path) == 1
+    assert (
+        row["todo_id"],
+        row["text"],
+        row["author"],
+        row["origin_kind"],
+        row["suggestion_id"],
+        row["project_id"],
+        row["week_start"],
+        row["due_date"],
+    ) == (
+        suggestion_todo_id(SUGGESTION_ID),
+        "Send the reply",
+        "ai",
+        "suggestion",
+        SUGGESTION_ID,
+        "project-p",
+        "2026-11-02",
+        None,
+    )
+    entry = read_todo(user_id=USER_ID, todo_id=str(row["todo_id"]))
+    assert entry is not None
+    assert entry.conversation == SuggestionConversation(suggestion_id=SUGGESTION_ID)
+    assert display_state(entry.todo, entry.conversation, "2026-11-02") == expected
+
+
+@pytest.mark.asyncio
+async def test_a_message_only_suggestion_is_an_ai_todo_already_done(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path, _ = await _save_with_todo(
+        tmp_path, monkeypatch, _message_only_response(answer="FYI")
+    )
+
+    [row] = _todo_rows(db_path)
+    assert (
+        row["author"],
+        row["checked_by"],
+        row["checked_at"],
+        row["report_kind"],
+    ) == (
+        "ai",
+        "ai",
+        NOW.now,
+        None,
+    )
+    # No target project was named, so the TODO has none.
+    assert row["project_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_project_name_that_is_not_exactly_a_project_leaves_the_todo_without_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    response = _offer(
+        SuggestionTodo(text="Send the reply", outcome="done", note=None)
+    ).model_copy(
+        update={
+            "target_context": SuggestionTargetContext(
+                organization_name=None, project_name="pantaray"
+            )
+        }
+    )
+
+    db_path, _ = await _save_with_todo(tmp_path, monkeypatch, response)
+
+    [row] = _todo_rows(db_path)
+    assert row["project_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_todo_the_list_cannot_hold_fails_the_whole_save(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = _bootstrap_db(tmp_path)
+    monkeypatch.setattr(suggestion_repository_module, "read_todo_clock", lambda: NOW)
+    repo = _repo(db_path)
+    await repo.create_processing_suggestion_row(
+        user_id=USER_ID, suggestion_id=SUGGESTION_ID, created_at=NOW.now
+    )
+
+    saved = await repo.save_suggestion(
+        _offer(SuggestionTodo(text="Send\nthe reply", outcome="done", note=None)),
+        prompt_name="suggestion",
+        prompt_version="1.0",
+        on_committed=lambda: pytest.fail("nothing was committed"),
+    )
+
+    assert saved.error == "the Suggestion's TODO is invalid_text"
+    assert _todo_rows(db_path) == []
+    row = await repo.get_suggestion(user_id=USER_ID, suggestion_id=SUGGESTION_ID)
+    assert row.data is not None
+    assert (row.data["status"], row.data["answer"]) == ("processing", None)

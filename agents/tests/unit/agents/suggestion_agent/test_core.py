@@ -7,6 +7,7 @@ import pytest
 from tests.unit.agents.suggestion_agent.prompt_support import (
     prompt_configs,
     serve_lens_runs,
+    writer_call,
 )
 
 from pantaray_agents.agents.capability_envelopes import (
@@ -344,8 +345,11 @@ async def test_suggestion_agent_process_with_suggestion(
         reconsideration_reason="The user switched goals.",
     )
 
-    serve_lens_runs(mock_llm_client, _suggestion_output("Task 1 is ready."))
-    mock_llm_client.responses["default"] = "Try task 1?"  # the writer's reply
+    serve_lens_runs(
+        mock_llm_client,
+        _suggestion_output("Task 1 is ready."),
+        writer_call("Try task 1?"),
+    )
 
     response = await suggestion_agent.process(request)
 
@@ -589,8 +593,11 @@ async def test_suggestion_agent_repository_error_on_save(
         short_term_insight="# Insight\nThe user is fixing a parser bug.",
         reconsideration_reason="The user switched goals.",
     )
-    serve_lens_runs(mock_llm_client, _suggestion_output("Task 1 is ready."))
-    mock_llm_client.responses["default"] = "Try task 1?"  # the writer's reply
+    serve_lens_runs(
+        mock_llm_client,
+        _suggestion_output("Task 1 is ready."),
+        writer_call("Try task 1?"),
+    )
 
     response = await suggestion_agent.process(request)
 

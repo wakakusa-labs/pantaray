@@ -71,7 +71,10 @@ from pantaray_agents.local_runtime.tooling.suggestion_research.runtime import (
     suggestion_tool_results_root,
 )
 from pantaray_agents.schema.agent.base import StatusType
-from pantaray_agents.schema.agent.suggestion import SuggestionAgentResponse
+from pantaray_agents.schema.agent.suggestion import (
+    SuggestionAgentResponse,
+    SuggestionTodo,
+)
 from pantaray_agents.schema.context_source import (
     SourceBinding,
     SourceReady,
@@ -884,6 +887,7 @@ async def test_run_suggestion_job_retries_terminal_save_database_locked(
         suggestion_summary="summary",
         status=StatusType.SUCCESS,
         has_suggestion=True,
+        todo=SuggestionTodo(text="Reply", outcome="done", note=None),
         interaction_contract="action_offer",
     )
     save_attempts = 0
@@ -1164,6 +1168,7 @@ async def test_a_suggestion_answered_on_a_replaced_route_is_never_published(
             suggestion_summary="summary",
             status=StatusType.SUCCESS,
             has_suggestion=True,
+            todo=SuggestionTodo(text="Reply", outcome="done", note=None),
             interaction_contract="action_offer",
         )
 
@@ -1471,6 +1476,7 @@ async def test_a_run_that_lost_its_access_is_discarded_not_requeued(
             thinking="thinking",
             status=StatusType.SUCCESS,
             has_suggestion=True,
+            todo=SuggestionTodo(text="Reply", outcome="done", note=None),
             interaction_contract="message_only",
         )
 

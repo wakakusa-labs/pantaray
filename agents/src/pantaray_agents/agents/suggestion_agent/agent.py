@@ -453,29 +453,17 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
         extracted = decision.extraction
         decided = extracted["decided"]
         if decided is not None:
-
-            async def generate_text(
-                *, prompt: str, system_instruction: str, stage: str
-            ) -> str:
-                text = await self._generate_llm_response(
-                    prompt,
-                    sink=sink,
-                    system_instruction=system_instruction,
-                    stage=stage,
-                )
-                if not isinstance(text, str):
-                    raise RuntimeError("Suggestion writer returned a non-text response")
-                return text
-
-            extracted["answer"] = await write_suggestion_answer(
+            written = await write_suggestion_answer(
                 run_id=self._current_suggestion_id,
                 step_number=self._last_step_number + 1,
                 decided=decided,
                 answer_language=self._answer_language_label(),
                 config=self._writer_prompt_config,
-                generate_text=generate_text,
+                generate_tool_call=generate_tool_call,
                 record_step=self._record_react_step,
             )
+            extracted["answer"] = written.answer
+            extracted["todo"] = written.todo
         self._last_prompt_text = prompt
         self._last_response_text = extracted["response_text"]
         return extracted
@@ -533,6 +521,7 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
             has_suggestion=extracted_data["has_suggestion"],
             interaction_contract=extracted_data["interaction_contract"],
             artifacts=extracted_data["artifacts"],
+            todo=extracted_data["todo"],
             user_id=suggestion_request.user_id,
             status=StatusType.SUCCESS,
             error=None,

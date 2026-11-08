@@ -17,7 +17,8 @@ system_instruction: |
     user's decision.
   - Use plain sentences built on verbs, not long modifiers piled before a noun.
 
-  Return only the message text.
+  Then call `write_suggestion` once with the message and its TODO line, both
+  in {answer_language}.
 
 prompt: |
   Kind: {kind}

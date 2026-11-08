@@ -106,21 +106,31 @@ class ConversationHistoryCandidatePage:
 # dated list and its search leave it out; one row read by its key, as a link to
 # the conversation names it, still finds it. The pickup's first USER message
 # names the TODO it serves; a Suggestion's TODO owns the Action that accepted or
-# replied to it.
-_NOT_TODO_ACTION = """
+# replied to it. ``todos`` narrows which TODOs count.
+def _not_todo_scopes(todos: str) -> tuple[str, str]:
+    action = f"""
     AND NOT EXISTS (SELECT 1 FROM todo_items AS todo
       WHERE todo.todo_id=json_extract(initial.user_message_json,'$.todo_handoff.todo_id')
-        AND todo.user_id=action.user_id)
+        AND todo.user_id=action.user_id {todos})
     AND NOT EXISTS (SELECT 1 FROM todo_items AS todo
-      WHERE todo.user_id=action.user_id AND todo.suggestion_id=action.suggestion_id)
+      WHERE todo.user_id=action.user_id AND todo.suggestion_id=action.suggestion_id
+        {todos})
     AND action.action_id NOT IN (SELECT reply.action_id FROM todo_items AS todo
       JOIN agent_action_steps AS reply
         ON reply.user_id=todo.user_id AND reply.source_suggestion_id=todo.suggestion_id
-      WHERE todo.user_id=:user_id)"""
-_NOT_TODO_SUGGESTION = """
+      WHERE todo.user_id=:user_id {todos})"""
+    suggestion = f"""
     AND NOT EXISTS (SELECT 1 FROM todo_items AS todo
       WHERE todo.user_id=suggestion.user_id
-        AND todo.suggestion_id=suggestion.suggestion_id)"""
+        AND todo.suggestion_id=suggestion.suggestion_id {todos})"""
+    return action, suggestion
+
+
+_NOT_TODO_SCOPES: Final = _not_todo_scopes("")
+# Off, nothing lists the TODOs, so a live TODO's conversation is a dated one
+# again. A deleted TODO's stays out: the purge erases it with its TODO, which
+# would take any work continued in it.
+_NOT_DELETED_TODO_SCOPES: Final = _not_todo_scopes("AND todo.deleted_at IS NOT NULL")
 
 
 def _candidate_query(*, cursor_bound: bool, item_bound: bool) -> str:
@@ -129,11 +139,12 @@ def _candidate_query(*, cursor_bound: bool, item_bound: bool) -> str:
         suggestion_scope = (
             "AND :item_kind='suggestion' AND suggestion.suggestion_id=:item_id"
         )
-    elif todo_ux_feature.TODO_UX_ENABLED:
-        action_scope, suggestion_scope = _NOT_TODO_ACTION, _NOT_TODO_SUGGESTION
     else:
-        # Off, nothing lists the TODOs, so their conversations are dated ones.
-        action_scope = suggestion_scope = ""
+        action_scope, suggestion_scope = (
+            _NOT_TODO_SCOPES
+            if todo_ux_feature.TODO_UX_ENABLED
+            else _NOT_DELETED_TODO_SCOPES
+        )
     cursor_predicate = (
         """AND (raw_updated_at<:before_updated_at
       OR (raw_updated_at=:before_updated_at

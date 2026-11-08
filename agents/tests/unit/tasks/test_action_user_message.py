@@ -7,6 +7,9 @@ from pydantic import ValidationError
 
 from pantaray_agents import todo_ux_feature
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
+from pantaray_agents.repositories.action_runtime_resume_contract import (
+    parse_action_resume_user_step,
+)
 from pantaray_agents.schema.agent.action import (
     ActionUserMessageInput,
     SuggestionApprovalInput,
@@ -175,17 +178,47 @@ def test_todo_handoff_without_a_project_names_only_the_todo() -> None:
     )
 
 
-def test_todo_handoff_is_not_read_out_while_the_todo_list_is_off(
+def test_a_todo_handoff_saved_while_on_still_parses_and_resumes_while_off(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(todo_ux_feature, "TODO_UX_ENABLED", False)
     message = ActionUserMessageInput(
         message_id="message-1",
         content="Renew the passport",
         todo_handoff=TodoHandoffInput(todo_id="todo-1", project=None),
     )
+    stored_text = render_action_user_request_text(message)
+    monkeypatch.setattr(todo_ux_feature, "TODO_UX_ENABLED", False)
+    message_json = serialize_action_user_message(message)
 
-    assert render_action_user_request_text(message) == "Renew the passport"
+    # The stored text is the canonical rendering, which the switch never changes.
+    assert (
+        parse_stored_action_user_message(
+            message_id="message-1",
+            message_json=message_json,
+            user_request_text=stored_text,
+        )
+        == message
+    )
+    step = parse_action_resume_user_step(
+        {
+            "step_id": "step-1",
+            "user_id": "user-1",
+            "action_id": "action-1",
+            "step_type": "user_request",
+            "status": "success",
+            "step_number": 1,
+            "local_step_number": 1,
+            "short_step_id": "S-1-USER",
+            "adopted_process_id": "process-1",
+            "user_message_id": "message-1",
+            "user_message_json": message_json,
+            "user_request_text": stored_text,
+            "created_at": "2026-11-08T00:00:00Z",
+        },
+        expected_user_id="user-1",
+        expected_action_id="action-1",
+    )
+    assert step.message == message
 
 
 @pytest.mark.parametrize(

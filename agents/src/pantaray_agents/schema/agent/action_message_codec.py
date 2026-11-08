@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from pydantic import TypeAdapter, ValidationError
 
-from pantaray_agents import todo_ux_feature
-
 from .action_message import (
     ACTION_FILE_TYPE_LABEL_BY_EXTENSION,
     ActionProjectRef,
@@ -114,8 +112,7 @@ def render_action_user_request_text(message: ActionUserMessageInput) -> str:
                 + [f"- {path}" for path in message.suggestion_files]
             )
         )
-    # Off, a message from the TODO list's time reads as it would without it.
-    if message.todo_handoff is not None and todo_ux_feature.TODO_UX_ENABLED:
+    if message.todo_handoff is not None:
         sections.append(_render_todo_handoff(message.todo_handoff))
     project_refs = (*message.project_refs, *message.supplement_project_refs)
     if project_refs:

@@ -159,6 +159,7 @@ def submit_action_message(
                         action_id=action_id,
                         process_id=process_id,
                         target=command.target,
+                        origin=command.origin,
                         created_at=created_at,
                     )
 

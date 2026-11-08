@@ -99,9 +99,12 @@ def test_display_state(
         (make_todo(week_start=PREVIOUS_WEEK), NONE, START),
         (make_todo(origin=RecurrenceOrigin("todo-0")), NONE, START),
         (make_todo(author="ai", origin=RecurrenceOrigin("todo-0")), NONE, CONTINUE),
-        # Even marked to continue: only the user's approval or reply opens it.
-        (_reported("continue", None), SUGGESTION, None),
+        # Only a Suggestion left for Pantaray to continue is picked up; the
+        # user's approval or reply opens the others.
+        (_reported("continue", None), SUGGESTION, CONTINUE),
+        # The Suggestion was deleted, so there is no message to open with.
         (_reported("continue", None), NONE, None),
+        (_reported("continue", None), SUCCEEDED, None),
         (_reported("partial", None), SUGGESTION, None),
         (SUGGESTED_TODO, SUGGESTION, None),
         (make_todo(week_start=NEXT_WEEK), NONE, None),

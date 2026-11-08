@@ -36,7 +36,7 @@ from pantaray_agents.local_runtime.todos.display import (
     StartWritten,
     pickup_target,
 )
-from pantaray_agents.local_runtime.todos.model import Todo
+from pantaray_agents.local_runtime.todos.model import SuggestionOrigin, Todo
 from pantaray_agents.local_runtime.todos.reads import (
     read_pickup_candidates,
 )
@@ -105,10 +105,18 @@ def _command(
                 ),
             )
         case ContinueAiTodo():
+            # A Suggestion's TODO opens with the Suggestion's message, linked to
+            # it, so the Suggestion keeps one conversation.
+            origin = todo.origin
             return SubmitActionMessageCommand(
                 user_id=user_id,
                 origin="todo_pickup",
                 target=NewActionTarget(
+                    approval_mode="prompt_each_time",
+                    reply_to_suggestion_id=origin.suggestion_id,
+                )
+                if isinstance(origin, SuggestionOrigin)
+                else NewActionTarget(
                     approval_mode="prompt_each_time", todo_text=todo.text
                 ),
                 message=ActionUserMessageInput(

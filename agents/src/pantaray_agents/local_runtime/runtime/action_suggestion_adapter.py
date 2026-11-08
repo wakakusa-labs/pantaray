@@ -69,6 +69,13 @@ def validate_suggestion_action_start(
         raise ActionMessageConflictError(
             "Suggestion is not available for Action creation"
         )
+    # Pantaray may already have picked up the Suggestion's TODO in a conversation
+    # opened with its message; approving it now would start a second Action.
+    if connection.execute(
+        "SELECT 1 FROM agent_action_steps WHERE user_id = ? AND source_suggestion_id = ?",
+        (user_id, suggestion_id),
+    ).fetchone():
+        raise ActionMessageConflictError("Suggestion already has a conversation")
     if approval.suggestion_id != suggestion_id:
         raise ActionMessageConflictError(
             "Suggestion approval relation does not match suggestion_id"

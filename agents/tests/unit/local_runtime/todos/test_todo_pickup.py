@@ -10,19 +10,36 @@ from pathlib import Path
 
 import pytest
 
+from pantaray_agents.local_runtime.agent_state import LocalSuggestionRepository
+from pantaray_agents.local_runtime.agent_state import (
+    suggestion_repository as suggestion_repository_module,
+)
 from pantaray_agents.local_runtime.runtime.action_message_models import (
     ACTION_TODO_PICKUP_REQUEST_TEXT,
 )
+from pantaray_agents.local_runtime.runtime.suggestion_acceptance import (
+    SuggestionAcceptanceRejected,
+    accept_suggestion,
+)
 from pantaray_agents.local_runtime.todos import core, pickup
 from pantaray_agents.local_runtime.todos.conversation import todo_message_id
-from pantaray_agents.local_runtime.todos.model import Todo
+from pantaray_agents.local_runtime.todos.display import Working, display_state
+from pantaray_agents.local_runtime.todos.model import ActionConversation, Todo
+from pantaray_agents.local_runtime.todos.reads import read_todo
 from pantaray_agents.local_runtime.todos.writes import (
     create_todo_item,
     set_todo_check,
+    suggestion_todo_id,
     update_todo,
 )
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings import (
     create_workspace_folder,
+)
+from pantaray_agents.schema.agent.base import StatusType
+from pantaray_agents.schema.agent.suggestion import (
+    SuggestionAgentResponse,
+    SuggestionInteractionContract,
+    SuggestionTodo,
 )
 
 from .store_support import NOW, USER, T, execute
@@ -135,10 +152,6 @@ def test_an_ai_todo_continues_as_pantaray_and_asks_before_every_step(
     db: Path,
 ) -> None:
     _insert_ai_todo(db, "todo-recur", origin="recurrence")
-    # A Suggestion's TODO waits for the user to approve or reply to it, even
-    # when the AI marked it to continue.
-    _insert_ai_todo(db, "todo-go", origin="suggestion", report_kind="continue")
-    _insert_ai_todo(db, "todo-new", origin="suggestion")
 
     pickup.pick_up_todos(user_id=USER)
 
@@ -238,3 +251,155 @@ def test_a_failed_submit_skips_only_that_todo_and_is_retried_next_pass(
     monkeypatch.setattr(pickup, "submit_action_message", real_submit)
     pickup.pick_up_todos(user_id=USER)
     assert len(_actions(db)) == 2
+
+
+async def _save_suggestion(
+    db: Path,
+    suggestion_id: str,
+    contract: SuggestionInteractionContract,
+    todo: SuggestionTodo,
+) -> None:
+    """Save a shown Suggestion and its TODO as the Suggestion job does."""
+
+    repository = LocalSuggestionRepository(
+        db_path=str(db), busy_timeout_ms=1_000, activity_repository=object()
+    )
+    await repository.create_processing_suggestion_row(
+        user_id=USER, suggestion_id=suggestion_id, created_at=T
+    )
+    saved = await repository.save_suggestion(
+        SuggestionAgentResponse(
+            suggestion_id=suggestion_id,
+            user_id=USER,
+            created_at=T,
+            answer=f"Message of {suggestion_id}",
+            suggestion_summary="summary",
+            status=StatusType.SUCCESS,
+            has_suggestion=True,
+            interaction_contract=contract,
+            todo=todo,
+        ),
+        prompt_name="suggestion",
+        prompt_version="1",
+    )
+    assert saved.error is None
+
+
+def _pick_up_twice_at_once(db: Path) -> None:
+    # Both passes read before either writes, then contend for the first write.
+    with closing(sqlite3.connect(db, isolation_level=None)) as blocker:
+        blocker.execute("BEGIN IMMEDIATE")
+        threads = [
+            threading.Thread(target=pickup.pick_up_todos, kwargs={"user_id": USER})
+            for _ in range(2)
+        ]
+        for thread in threads:
+            thread.start()
+        time.sleep(0.2)
+        blocker.execute("ROLLBACK")
+        for thread in threads:
+            thread.join()
+
+
+@pytest.mark.asyncio
+async def test_a_suggestion_left_to_continue_opens_one_action_with_its_message(
+    db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(suggestion_repository_module, "read_todo_clock", lambda: NOW)
+    line = "Send the reply"
+    await _save_suggestion(
+        db,
+        "s-go",
+        "action_offer",
+        SuggestionTodo(text=line, outcome="continue", note="Not sent."),
+    )
+    await _save_suggestion(
+        db,
+        "s-part",
+        "action_offer",
+        SuggestionTodo(text=line, outcome="partial", note="Drafted."),
+    )
+    await _save_suggestion(
+        db,
+        "s-done",
+        "action_offer",
+        SuggestionTodo(text=line, outcome="done", note=None),
+    )
+    await _save_suggestion(
+        db,
+        "s-notice",
+        "message_only",
+        SuggestionTodo(text=line, outcome="done", note=None),
+    )
+
+    pickup.pick_up_todos(user_id=USER)
+    pickup.pick_up_todos(user_id=USER)
+    _pick_up_twice_at_once(db)
+
+    todo_id = suggestion_todo_id("s-go")
+    [row] = _actions(db)
+    message = json.loads(row["user_message_json"])
+    assert (
+        row["initial_user_message_id"],
+        row["step_name"],
+        row["initial_approval_mode"],
+        row["opening"],
+        message["content"],
+        message["todo_handoff"],
+    ) == (
+        todo_message_id(todo_id),
+        "todo_pickup_request",
+        "prompt_each_time",
+        "Message of s-go",
+        ACTION_TODO_PICKUP_REQUEST_TEXT,
+        {"todo_id": todo_id, "project": None},
+    )
+    with closing(sqlite3.connect(db)) as connection:
+        linked = connection.execute(
+            "SELECT action.suggestion_id, opening.source_suggestion_id "
+            "FROM agent_action_steps AS opening JOIN agent_actions AS action "
+            "ON action.action_id = opening.action_id "
+            "WHERE opening.step_type = 'assistant_message'"
+        ).fetchall()
+        reactions = connection.execute(
+            "SELECT user_reaction, accepted_at FROM agent_suggestions"
+        ).fetchall()
+    # Linked as a reply is, so nothing records an approval the user never gave.
+    assert linked == [(None, "s-go")]
+    assert set(reactions) == {(None, None)}
+    entry = read_todo(user_id=USER, todo_id=todo_id)
+    assert entry is not None
+    assert isinstance(entry.conversation, ActionConversation)
+    assert display_state(entry.todo, entry.conversation, NOW.current_week_start) == (
+        Working(note=None)
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_suggestion_pantaray_picked_up_cannot_be_approved_into_a_second_action(
+    db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(suggestion_repository_module, "read_todo_clock", lambda: NOW)
+    await _save_suggestion(
+        db,
+        "s-go",
+        "action_offer",
+        SuggestionTodo(text="Send the reply", outcome="continue", note="Not sent."),
+    )
+    pickup.pick_up_todos(user_id=USER)
+
+    accepted = await accept_suggestion(
+        user_id=USER,
+        suggestion_id="s-go",
+        command_id="11111111-1111-4111-8111-111111111111",
+        approval_mode="prompt_each_time",
+        language="ja",
+        supplement=None,
+        supplement_project_refs=(),
+        supplement_work_refs=(),
+        images=(),
+        files=(),
+    )
+
+    assert accepted == SuggestionAcceptanceRejected("creation_conflict")
+    assert len(_actions(db)) == 1

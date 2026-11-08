@@ -540,7 +540,8 @@ test('the home lists every organization’s week by project, with the rail and t
     .evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().height));
   expect(new Set(heights)).toEqual(new Set([40]));
 
-  // The sidebar: all TODOs (current), the projects with their open counts, deleted, chat, others.
+  // The sidebar: all TODOs (current), the projects with their open counts, and deleted; the chat
+  // and the other conversations are off.
   const sidebar = sidebarOf(page);
   await expect(sidebar.getByRole('button', { name: 'すべての TODO' })).toHaveAttribute(
     'aria-current',
@@ -554,11 +555,11 @@ test('the home lists every organization’s week by project, with the rail and t
     'false'
   );
   await expect(sidebar.getByRole('button', { name: '削除した TODO' })).toBeVisible();
-  await expect(sidebar.getByRole('button', { name: 'チャット', exact: true })).toBeVisible();
-  await expect(sidebar.getByRole('heading', { level: 2, name: 'そのほかの会話' })).toBeVisible();
-  await expect(
-    sidebar.getByRole('button', { name: /^競合 3 社の料金ページを調べる/ })
-  ).toBeVisible();
+  await expect(sidebar.getByRole('button', { name: 'チャット', exact: true })).toHaveCount(0);
+  await expect(sidebar.getByRole('heading', { level: 2, name: 'そのほかの会話' })).toHaveCount(0);
+  await expect(sidebar.getByRole('button', { name: /^競合 3 社の料金ページを調べる/ })).toHaveCount(
+    0
+  );
   expect(await hasNoSideScroll(page)).toBe(true);
   await capture(page, info, 'week-all');
 

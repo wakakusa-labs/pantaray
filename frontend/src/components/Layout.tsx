@@ -11,6 +11,7 @@ import { ChatUnreadTracker } from './chat/ChatUnreadTracker';
 import { ChatUnreadContext } from './chat/chatUnread';
 import { UpdateReadyNotice } from './UpdateReadyNotice';
 import { PANTARAY_ACCOUNT_LOGIN_ENABLED } from '../../electron/src/auth/accountLoginFeature';
+import { SHOW_CONVERSATION_LISTS } from '@/history/conversationListsFeature';
 import { useShowHistoryItem } from '@/history/useShowHistoryItem';
 import { OrganizationRail } from '@/components/todo/OrganizationRail';
 import type { WorkspaceOrganization } from '@/pages/settings/components/workspaceSettingsModel';
@@ -196,9 +197,11 @@ const Layout: React.FC = () => {
           </div>
         </nav>
         {/* The chat's unread count, for the rail and History's chat row on every page. */}
-        <LocalOwnerBoundary fallback={null}>
-          <ChatUnreadTracker onCount={setChatUnread} />
-        </LocalOwnerBoundary>
+        {SHOW_CONVERSATION_LISTS ? (
+          <LocalOwnerBoundary fallback={null}>
+            <ChatUnreadTracker onCount={setChatUnread} />
+          </LocalOwnerBoundary>
+        ) : null}
 
         {/* Recording belongs to the local owner; without one there is nothing to ask for. */}
         <LocalOwnerBoundary fallback={null}>

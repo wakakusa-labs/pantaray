@@ -1719,3 +1719,73 @@ test('a TODO change brings the Action Pantaray opened to an offer nobody answere
   assert.equal(linked.reactionState, null);
   assert.equal(harness.overlayPayloads.get('sug-open').snapshot.actionId, 'action-sug-open');
 });
+
+test('an offer picked up before it finished streaming finds its Action once it finishes', async () => {
+  const reads = [];
+  const harness = createManagerHarness({
+    readSuggestionSnapshot: async (suggestionId) => {
+      reads.push(suggestionId);
+      return persistedSnapshot({ suggestionId, actionId: `action-${suggestionId}` });
+    },
+  });
+  harness.manager.ensureConnected();
+  const hooks = harness.getWsHooks();
+  // Still streaming: main does not know yet that these are offers.
+  for (const suggestionId of ['sug-late', 'sug-other']) {
+    harness.manager.adoptSuggestionSnapshot(
+      persistedSnapshot({ suggestionId, interactionContract: null, lastSequence: 1 })
+    );
+  }
+
+  hooks.forwardEventToRenderers({ event: 'todo_changed', data: { revision: 2 } });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(reads, []);
+
+  hooks.forwardEventToRenderers(completedOffer('sug-late'));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  // Only the suggestion that finished is checked, and it shows the Action with no reaction.
+  assert.deepEqual(reads, ['sug-late']);
+  assert.equal(harness.manager.getOverlaySnapshot('sug-late').actionId, 'action-sug-late');
+  assert.equal(harness.manager.getOverlaySnapshot('sug-late').reactionState, null);
+});
+
+test('a new session checks the offers a missed TODO change would have linked', async () => {
+  let pickedUp = false;
+  const reads = [];
+  const harness = createManagerHarness({
+    readSuggestionSnapshot: async (suggestionId) => {
+      reads.push(suggestionId);
+      return persistedSnapshot({ suggestionId, actionId: pickedUp ? 'action-1' : null });
+    },
+  });
+  harness.manager.ensureConnected();
+  const hooks = harness.getWsHooks();
+  harness.manager.adoptSuggestionSnapshot(persistedSnapshot());
+  hooks.forwardStatusToRenderers({ status: 'session_started', session_id: 'session-1' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(harness.manager.getOverlaySnapshot('sug-1').actionId, null);
+
+  // Picked up while no session was live: its TODO change is not sent again.
+  pickedUp = true;
+  hooks.forwardStatusToRenderers({ status: 'session_started', session_id: 'session-2' });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(reads, ['sug-1', 'sug-1']);
+  assert.equal(harness.manager.getOverlaySnapshot('sug-1').actionId, 'action-1');
+});
+
+function completedOffer(suggestionId) {
+  return {
+    event: 'process_completed',
+    sequence: 5,
+    data: {
+      kind: 'suggestion',
+      process_id: `proc-${suggestionId}`,
+      suggestion_id: suggestionId,
+      status: 'success',
+      interaction_contract: 'action_offer',
+    },
+    meta: { kind: 'suggestion', process_id: `proc-${suggestionId}`, suggestion_id: suggestionId },
+  };
+}

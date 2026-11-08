@@ -422,29 +422,10 @@ export function createOrchestrationManager(params: {
     // The TODO list is the main window's alone too.
     if (isTodoChangedEvent(message)) {
       sendToMainWindow('todos:changed', parseTodoChanged(message.data));
-      relinkPickedUpOffers();
+      rendererBridge.relinkPickedUpOffers();
       return;
     }
     rendererBridge.forwardEventToRenderers(message);
-  }
-
-  // Pantaray picking up a suggestion's TODO opens the suggestion's conversation, as a reply does,
-  // and moves the TODO list. Only a read brings that Action to an offer nobody answered, so each
-  // window showing one stops offering 承認 and 見送る and shows the Action instead.
-  function relinkPickedUpOffers(): void {
-    const ownerId = params.getOwnerId();
-    for (const suggestionId of rendererBridge.unlinkedOffers()) {
-      params
-        .readSuggestionSnapshot(suggestionId)
-        .then((persisted) => {
-          if (persisted && persisted.actionId !== null && params.getOwnerId() === ownerId) {
-            rendererBridge.adoptSuggestionSnapshot(persisted);
-          }
-        })
-        .catch((error: unknown) => {
-          console.error('Failed to read a suggestion after a TODO change:', error);
-        });
-    }
   }
 
   function ensureOrchestrator(): void {
@@ -545,6 +526,8 @@ export function createOrchestrationManager(params: {
     notificationWindow,
     getMainWindow: () => params.getMainWindow(),
     latestActionPages: params.latestActionPages,
+    readSuggestionSnapshot: params.readSuggestionSnapshot,
+    getOwnerId: params.getOwnerId,
     sendFromRenderer,
     requestResume: (request) => {
       // An internal refresh may finish after owner loss; its resume is obsolete.

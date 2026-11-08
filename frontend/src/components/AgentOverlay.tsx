@@ -293,9 +293,12 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
   }, [visiblePages, setComposer]);
   const conversationCopy = useConversationCopy(actions, currentView?.action?.action_id ?? null);
   // An unanswered offer's composer holds 承認 / 見送る; while one is under way both stay, disabled.
+  // An offer whose conversation Pantaray already opened (its TODO was picked up) is answered in
+  // that conversation, so it shows the conversation's composer instead.
   const offersDecision =
     state.interactionContract === 'action_offer' &&
     state.reactionState === null &&
+    state.currentActionId === null &&
     Boolean(state.suggestionId) &&
     Boolean(state.suggestionText);
   const canDecide = offersDecision && !state.decisionLocked;

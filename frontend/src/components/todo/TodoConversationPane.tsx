@@ -9,16 +9,77 @@ import type { TodoView } from '../../../electron/src/todos/todoContracts';
 
 /**
  * A TODO's conversation beside the list: its Action, its suggestion while no Action answers it
- * yet, or a short note while it has neither. A TODO's suggestion is let go by deleting the TODO,
- * so its pane does not offer 見送る. The conversation itself is the task panes' to hold.
+ * yet, or a short note while it has neither. Under it, like a suggestion's 承認, Pantaray's pending
+ * request to delete the TODO, which only the user's 「消す」 carries out. A TODO's suggestion is let go by deleting the
+ * TODO, so its pane does not offer 見送る. The conversation itself is the task panes' to hold.
  */
 export function TodoConversationPane({
   todo,
+  pending,
+  onAnswerDeletion,
   onAddProject,
 }: {
   todo: TodoView;
+  /** A write on the TODO is waiting for its answer; the request's buttons wait with it. */
+  pending: boolean;
+  onAnswerDeletion: (requestId: string, answer: 'approve' | 'keep') => void;
   onAddProject: () => void;
 }) {
+  const request = todo.deletion_request;
+  return (
+    <>
+      <Conversation todo={todo} onAddProject={onAddProject} />
+      {request ? (
+        <DeletionRequest
+          reason={request.reason}
+          pending={pending}
+          onAnswer={(answer) => onAnswerDeletion(request.request_id, answer)}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function DeletionRequest({
+  reason,
+  pending,
+  onAnswer,
+}: {
+  reason: string;
+  pending: boolean;
+  onAnswer: (answer: 'approve' | 'keep') => void;
+}) {
+  const { t } = useI18n();
+  const titleId = useId();
+  return (
+    <div className="todo-deletion" role="group" aria-labelledby={titleId}>
+      <p className="todo-deletion__text">
+        <span id={titleId} className="todo-deletion__title">
+          {t('todo.deletionRequest.title')}
+        </span>
+        {reason}
+      </p>
+      <button
+        type="button"
+        className="history-filter-button todo-deletion__approve"
+        disabled={pending}
+        onClick={() => onAnswer('approve')}
+      >
+        {t('todo.deletionRequest.approve')}
+      </button>
+      <button
+        type="button"
+        className="history-filter-button"
+        disabled={pending}
+        onClick={() => onAnswer('keep')}
+      >
+        {t('todo.deletionRequest.keep')}
+      </button>
+    </div>
+  );
+}
+
+function Conversation({ todo, onAddProject }: { todo: TodoView; onAddProject: () => void }) {
   const { t } = useI18n();
   const titleId = useId();
   // An accepted suggestion's Action shows at once; the week names it once it is read again.

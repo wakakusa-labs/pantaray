@@ -1,27 +1,122 @@
-/* The TODO list takes its structure from type weight, hairlines and spacing; the due is the only chip. */
+/* The TODO list is greyscale: weight and grey levels carry its distinctions, hairlines its
+   structure. The one colour is the muted ochre of a due day gone by. */
 
+.todo-add,
+.todo-group,
+.todo-deleted {
+  --todo-faint: #687183;
+  --todo-late: #c4a782;
+  --todo-line-strong: rgba(214, 226, 248, 0.14);
+  --todo-state-size: 12.5px;
+}
+
+.todo-group__dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--fog-text-3);
+}
+
+/* The add row: one line above the groups. */
+.todo-add {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  gap: 10px;
+  height: 44px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--todo-line-strong);
+}
+
+.todo-add:focus-within {
+  border-bottom-color: var(--fog-text-3);
+}
+
+.todo-add__plus {
+  flex: none;
+  color: var(--fog-text-3);
+}
+
+.todo-add .todo-add__field {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 13.5px;
+}
+
+.todo-add .todo-add__field:focus {
+  background: transparent;
+}
+
+.todo-add__choice {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+
+/* A quiet text button: the native select with its frame taken off, as wide as its choice. */
+.todo-add__choice select {
+  max-width: 180px;
+  field-sizing: content;
+  height: 26px;
+  padding: 0 18px 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23828da1' d='M1 2.5h6L4 6z'/%3E%3C/svg%3E")
+    right 5px center / 8px no-repeat;
+  color: var(--fog-text-2);
+  font: inherit;
+  font-size: var(--todo-state-size);
+  text-overflow: ellipsis;
+  cursor: pointer;
+  appearance: none;
+}
+
+.todo-add__choice select:hover:not(:disabled) {
+  background-color: var(--fog-mist);
+}
+
+/* A group: its heading over a hairline, no box around it. */
 .todo-group {
-  margin-top: var(--space-xl);
+  margin-top: 26px;
 }
 
 .todo-group__head {
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 2px 10px;
-  padding-bottom: 6px;
-  color: var(--fog-text-3);
-  font-size: var(--text-meta-size);
-  font-variant-numeric: tabular-nums;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px 8px;
+  border-bottom: 1px solid var(--fog-line);
 }
 
 .todo-group__head h3 {
   min-width: 0;
   margin: 0;
+  overflow: hidden;
   color: var(--fog-text);
-  font-size: var(--text-heading-size);
-  font-weight: var(--text-heading-weight);
-  overflow-wrap: anywhere;
+  font-size: 13.5px;
+  font-weight: var(--weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.todo-group__organization,
+.todo-group__count {
+  flex: none;
+  color: var(--fog-text-3);
+  font-size: var(--text-meta-size);
+}
+
+.todo-group__count {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
 }
 
 .todo-group__rows {
@@ -30,68 +125,57 @@
   list-style: none;
 }
 
-.todo-group__head,
-.todo-row,
-.todo-add,
-.todo-deleted {
+/* A row: one 40px line. The check, then the body (title, state, due), then delete. */
+.todo-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 24px;
+  box-sizing: border-box;
+  column-gap: 10px;
+  align-items: center;
+  height: 40px;
+  padding: 0 6px 0 12px;
   border-bottom: 1px solid var(--fog-line);
 }
 
-.todo-row {
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) auto;
-  gap: 4px 10px;
-  align-items: start;
-  padding: 8px;
+.todo-row:hover {
+  background: var(--fog-mist);
 }
 
 .todo-row:has(> .todo-row__body[aria-current='true']) {
-  border-radius: 8px;
   background: var(--fog-mist-strong);
 }
 
-.todo-row__delete {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--fog-text-3);
-  cursor: pointer;
-}
-
 .todo-check {
-  appearance: none;
-  justify-self: center;
   box-sizing: border-box;
-  width: 18px;
-  height: 18px;
-  margin: 5px 0 0;
+  width: 16px;
+  height: 16px;
+  margin: 0;
   border: 1.5px solid var(--fog-text-3);
-  border-radius: 5px;
-  background: transparent center / 12px no-repeat;
+  border-radius: 50%;
+  background: transparent center / 14px no-repeat;
   cursor: pointer;
+  appearance: none;
 }
 
-.todo-check:hover:not(:disabled),
-.todo-check:checked {
-  border-color: var(--fog-text);
+.todo-check:hover:not(:disabled) {
+  border-color: var(--fog-text-2);
 }
 
-/* The check mark in --app-background on the --fog-text fill. */
+/* The check mark in --app-background on the faint fill. */
 .todo-check:checked {
-  background-color: var(--fog-text);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%2313171e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 6.2l2.3 2.3L9.5 3.8'/%3E%3C/svg%3E");
+  border-color: var(--todo-faint);
+  background-color: var(--todo-faint);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4.5 8.2l2.3 2.3 4.7-4.9' fill='none' stroke='%2313171e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
 .todo-row__body {
   display: grid;
-  gap: 2px;
+  grid-template-columns: minmax(0, 1fr) 96px 84px;
+  column-gap: 14px;
+  align-items: center;
+  height: 100%;
   min-width: 0;
-  padding: 3px 4px;
+  padding: 0 4px;
   border: none;
   border-radius: 6px;
   background: transparent;
@@ -101,59 +185,119 @@
   text-align: left;
 }
 
+.todo-row__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .todo-row__text {
+  min-width: 0;
+  overflow: hidden;
   color: var(--fog-text);
-  font-size: var(--text-body-size);
-  overflow-wrap: anywhere;
+  font-size: 13.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.todo-row__repeat {
+  flex: none;
+  color: var(--fog-text-3);
+}
+
+.todo-row__state,
+.todo-row__due {
+  justify-self: end;
+  font-size: var(--todo-state-size);
+  white-space: nowrap;
+}
+
+.todo-row__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fog-text-2);
+}
+
+/* The user's turn: in the text's own colour, bold. */
+.todo-row__state--turn,
+.todo-row__state--ask {
+  color: var(--fog-text);
+  font-weight: var(--weight-semibold);
+}
+
+.todo-row__state--turn::before,
+.todo-row__state--working::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.todo-row__state--working::before {
+  animation: todo-working 1.6s ease-in-out infinite;
+}
+
+.todo-row__state--done {
+  color: var(--todo-faint);
+}
+
+@keyframes todo-working {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .todo-row__state--working::before {
+    animation: none;
+  }
+}
+
+.todo-row__due {
+  color: var(--fog-text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.todo-row__due--late {
+  color: var(--todo-late);
 }
 
 .todo-row--done .todo-row__text {
   color: var(--fog-text-3);
   text-decoration: line-through;
+  text-decoration-color: rgba(130, 141, 161, 0.6);
 }
 
-/* One line of text that wraps as text, so a narrow column does not stack each part on its own. */
-.todo-row__meta {
-  min-width: 0;
-  color: var(--fog-text-3);
-  font-size: var(--text-meta-size);
-  overflow-wrap: anywhere;
+.todo-row--done .todo-row__due {
+  color: var(--todo-faint);
 }
 
-/* Drawn, not read: each part is its own phrase already. */
-.todo-row__meta > span + span::before {
-  content: '·' / '';
-  margin: 0 6px;
-  color: var(--fog-text-3);
-}
-
-.todo-row__state--working,
-.todo-row__state--partial {
-  color: var(--fog-text-2);
-}
-
-/* The blue of the app's info badge, as text: the user's turn. */
-.todo-row__state--waiting {
-  color: #9cc3ec;
-}
-
-.todo-due {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 22px;
-  padding: 0 8px;
-  border: 1px solid var(--control-border);
+/* Shown on the row's hover or focus, so the line stays calm. */
+.todo-row__delete {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
   border-radius: 6px;
-  color: var(--fog-text-2);
-  font-size: var(--text-meta-size);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+  background: transparent;
+  color: var(--fog-text-3);
+  cursor: pointer;
+  opacity: 0;
 }
 
-.todo-due--soon {
-  border-color: var(--warning-border);
-  color: var(--warning-color);
+.todo-row:hover .todo-row__delete,
+.todo-row__delete:focus-visible {
+  opacity: 1;
 }
 
 .todo-row__delete:hover:not(:disabled) {
@@ -167,36 +311,34 @@
   opacity: 0.45;
 }
 
+.todo-row:not(:hover) .todo-row__delete:disabled:not(:focus-visible) {
+  opacity: 0;
+}
+
 .todo-check:focus-visible,
 .todo-row__body:focus-visible,
-.todo-row__delete:focus-visible {
+.todo-row__delete:focus-visible,
+.todo-add__choice select:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
 }
 
-.todo-row__end,
-.todo-deletion,
-.todo-deleted {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 12px;
-}
-
-/* The due chip and the delete button stay side by side, however narrow the row. */
-.todo-row__end {
-  flex-wrap: nowrap;
-}
-
+/* Pantaray's request to delete the open TODO, under its conversation. */
 .todo-deletion {
-  grid-column: 2 / -1;
-  margin-top: 4px;
-  padding-top: 8px;
-  border-top: 1px dashed var(--control-border);
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 24px 14px;
+  border-top: 1px solid var(--fog-line);
+}
+
+.todo-deletion > button {
+  flex: none;
 }
 
 .todo-deletion__text {
-  flex: 1 1 240px;
+  flex: 1;
   min-width: 0;
   margin: 0;
   color: var(--fog-text);
@@ -212,26 +354,6 @@
 
 .todo-deletion__approve {
   color: var(--danger-color);
-}
-
-/* Lined up with the rows' text, past the check's column. */
-.todo-add {
-  padding: 8px 8px 8px 46px;
-}
-
-.todo-week {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 8px;
-  color: var(--fog-text-2);
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
-}
-
-.todo-week__step {
-  width: 34px;
-  padding: 0;
 }
 
 .todo-rail {
@@ -250,7 +372,12 @@
 }
 
 .todo-deleted {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
   padding: 10px 8px;
+  border-bottom: 1px solid var(--fog-line);
 }
 
 .todo-deleted__body {
@@ -258,4 +385,23 @@
   flex: 1 1 240px;
   gap: 2px;
   min-width: 0;
+}
+
+.todo-deleted__text {
+  color: var(--fog-text);
+  font-size: var(--text-body-size);
+  overflow-wrap: anywhere;
+}
+
+.todo-deleted__meta {
+  min-width: 0;
+  color: var(--fog-text-3);
+  font-size: var(--text-meta-size);
+  overflow-wrap: anywhere;
+}
+
+/* Drawn, not read: each part is its own phrase already. */
+.todo-deleted__meta > span + span::before {
+  content: '·' / '';
+  margin: 0 6px;
 }

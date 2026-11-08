@@ -22,11 +22,25 @@ export const momentMonthDay = (at: string) => {
   return `${moment.getMonth() + 1}/${moment.getDate()}`;
 };
 
-/** "11月2日(月)": one day of a week's range, with its weekday. */
-export const weekDay = (language: UiLanguage, date: string) =>
-  new Intl.DateTimeFormat(getLocaleForUiLanguage(language), {
-    month: 'short',
-    day: 'numeric',
-    weekday: 'short',
-    timeZone: 'UTC',
-  }).format(utcDay(date));
+const format = (
+  language: UiLanguage,
+  date: string,
+  options: Pick<Intl.DateTimeFormatOptions, 'month' | 'day' | 'weekday'>
+) =>
+  new Intl.DateTimeFormat(getLocaleForUiLanguage(language), { ...options, timeZone: 'UTC' }).format(
+    utcDay(date)
+  );
+
+/** "11月2日" and "8日", or "Nov 2" and "8": a week's two ends, its month named once when it is one. */
+export const weekEnds = (language: UiLanguage, start: string, end: string) => ({
+  start: format(language, start, { month: 'short', day: 'numeric' }),
+  end: format(
+    language,
+    end,
+    start.slice(0, 7) === end.slice(0, 7) ? { day: 'numeric' } : { month: 'short', day: 'numeric' }
+  ),
+});
+
+/** "日 11/8", "Sun 11/8": a due day with its weekday, as the TODO rows and the add row show it. */
+export const dueDay = (language: UiLanguage, date: string) =>
+  `${format(language, date, { weekday: 'short' })} ${monthDay(date)}`;

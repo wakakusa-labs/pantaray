@@ -9,39 +9,42 @@ import { expectIconButtonTooltips } from '@/tests/iconTooltip';
 import type { TodoView } from '../../../electron/src/todos/todoContracts';
 import { DeletedTodoRow } from './DeletedTodoRow';
 import { OrganizationRail } from './OrganizationRail';
+import { TodoAddRow } from './TodoAddRow';
+import { TodoConversationPane } from './TodoConversationPane';
 import { TodoProjectGroup } from './TodoProjectGroup';
 import { TodoRow } from './TodoRow';
-import { WeekSwitcher } from './WeekSwitcher';
 
 afterEach(cleanup);
 
 const TODAY = '2026-11-07';
 const ja = (ui: ReactNode) => <UiLanguageProvider initialLanguage="ja">{ui}</UiLanguageProvider>;
 
+const makeTodo = (overrides: Partial<TodoView> = {}): TodoView => ({
+  todo_id: 'todo-1',
+  project_id: 'project-1',
+  text: '見積書を送る',
+  author: 'user',
+  origin: 'written',
+  week_start: '2026-11-02',
+  carried: false,
+  due: null,
+  state: { kind: 'not_started', reason: 'starting' },
+  deletion_request: null,
+  conversation: { kind: 'none' },
+  ...overrides,
+});
+
 function renderRow(overrides: Partial<TodoView> = {}, selected = false, pending = false) {
-  const todo: TodoView = {
-    todo_id: 'todo-1',
-    project_id: 'project-1',
-    text: '見積書を送る',
-    author: 'user',
-    origin: 'written',
-    week_start: '2026-11-02',
-    carried: false,
-    due: null,
-    state: { kind: 'not_started', reason: 'starting' },
-    deletion_request: null,
-    conversation: { kind: 'none' },
-    ...overrides,
-  };
-  const handlers = {
-    onToggleCheck: vi.fn(),
-    onSelect: vi.fn(),
-    onDelete: vi.fn(),
-    onAnswerDeletion: vi.fn(),
-  };
+  const handlers = { onToggleCheck: vi.fn(), onSelect: vi.fn(), onDelete: vi.fn() };
   const row = (
     <ul>
-      <TodoRow todo={todo} today={TODAY} selected={selected} pending={pending} {...handlers} />
+      <TodoRow
+        todo={makeTodo(overrides)}
+        today={TODAY}
+        selected={selected}
+        pending={pending}
+        {...handlers}
+      />
     </ul>
   );
   cleanup();
@@ -63,76 +66,119 @@ it('checks the TODO with a checkbox of its own, apart from opening the TODO', as
 
   renderRow({ state: { kind: 'done', by: 'ai', at: '2026-11-06T12:00:00Z' } });
   expect(screen.getByRole('checkbox', { name: '完了: 見積書を送る' })).toBeChecked();
-  expect(body()).toHaveTextContent('Pantaray が完了（11/6）');
+  expect(body()).toHaveTextContent(/^見積書を送る済み$/);
 });
 
-it('says where the TODO stands, joining a note only when there is one', () => {
-  renderRow({ carried: true, state: { kind: 'partial', note: null } });
-  expect(body()).toHaveTextContent('先週から持ち越し');
-  expect(body()).toHaveTextContent('途中まで');
-  expect(body()).not.toHaveTextContent(/null|。/);
+it('says where the TODO stands in a word, Pantaray’s deletion request first', () => {
+  renderRow({ carried: true, state: { kind: 'waiting', reason: 'approval', note: '確認を' } });
+  expect(body()).toHaveTextContent(/^見積書を送る返事待ち$/);
 
-  renderRow({ author: 'ai', state: { kind: 'working', note: '下書き中' } });
-  expect(body()).toHaveTextContent('Pantaray が追加');
-  expect(body()).toHaveTextContent('Pantaray が作業中。下書き中');
+  renderRow({
+    state: { kind: 'working', note: '下書き中' },
+    deletion_request: { request_id: 'r1', reason: '重複です' },
+  });
+  expect(body()).toHaveTextContent(/^見積書を送る消してよい？$/);
 });
 
-it('draws a due date within two days in the warm tone, and never a done one', () => {
-  renderRow({ due: { date: '2026-11-09', repeat: 'weekly' } });
-  expect(screen.getByText('11/9 まで')).toHaveClass('todo-due--soon');
+it('draws a due day gone by in the late tone, never a done one, and marks a weekly one', () => {
+  renderRow({ due: { date: '2026-11-08', repeat: 'weekly' } });
+  expect(screen.getByText('日 11/8')).not.toHaveClass('todo-row__due--late');
   expect(screen.getByRole('img', { name: '毎週くり返す' })).toBeInTheDocument();
 
-  renderRow({ due: { date: '2026-11-10', repeat: 'none' } });
-  expect(screen.getByText('11/10 まで')).not.toHaveClass('todo-due--soon');
+  renderRow({ due: { date: '2026-11-06', repeat: 'none' } });
+  expect(screen.getByText('金 11/6')).toHaveClass('todo-row__due--late');
 
   renderRow({
     due: { date: '2026-11-05', repeat: 'none' },
     state: { kind: 'done', by: 'user', at: '2026-11-04T12:00:00Z' },
   });
-  expect(screen.getByText('11/5 まで')).not.toHaveClass('todo-due--soon');
+  expect(screen.getByText('木 11/5')).not.toHaveClass('todo-row__due--late');
 });
 
-it('answers Pantaray’s deletion request with the button pressed, and waits while pending', async () => {
-  const handlers = renderRow({ deletion_request: { request_id: 'r1', reason: '重複です' } });
+it('waits on a row while its write is pending', () => {
+  renderRow({}, true, true);
+  expect(body()).toHaveAttribute('aria-current', 'true');
+  expect(screen.getByRole('checkbox', { name: '完了: 見積書を送る' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '削除: 見積書を送る' })).toBeDisabled();
+});
+
+it('answers Pantaray’s deletion request under the conversation, and waits while pending', async () => {
+  const onAnswerDeletion = vi.fn();
+  const pane = (pending: boolean) =>
+    ja(
+      <TodoConversationPane
+        todo={makeTodo({ deletion_request: { request_id: 'r1', reason: '重複です' } })}
+        pending={pending}
+        onAnswerDeletion={onAnswerDeletion}
+        onAddProject={vi.fn()}
+      />
+    );
+  const { rerender } = render(pane(false));
   const prompt = screen.getByRole('group', {
     name: 'Pantaray がこの TODO を消したいと言っています',
   });
   expect(prompt).toHaveTextContent('重複です');
   await userEvent.click(within(prompt).getByRole('button', { name: '残す' }));
-  expect(handlers.onAnswerDeletion).toHaveBeenLastCalledWith('keep');
+  expect(onAnswerDeletion).toHaveBeenLastCalledWith('r1', 'keep');
   await userEvent.click(within(prompt).getByRole('button', { name: '消す' }));
-  expect(handlers.onAnswerDeletion).toHaveBeenLastCalledWith('approve');
-  expect(handlers.onDelete).not.toHaveBeenCalled();
+  expect(onAnswerDeletion).toHaveBeenLastCalledWith('r1', 'approve');
 
-  renderRow({ deletion_request: { request_id: 'r1', reason: '重複です' } }, true, true);
-  expect(body()).toHaveAttribute('aria-current', 'true');
-  expect(screen.getByRole('checkbox', { name: '完了: 見積書を送る' })).toBeDisabled();
-  for (const name of ['削除: 見積書を送る', '消す', '残す']) {
+  rerender(pane(true));
+  for (const name of ['消す', '残す']) {
     expect(screen.getByRole('button', { name })).toBeDisabled();
   }
 });
 
-it('counts a group’s done TODOs and heads it with its organization when one is given', () => {
-  const group = (done: number, total: number, organizationName: string | null = null) =>
+it('adds to the project and due day chosen, offering the week’s days from today', async () => {
+  const onSubmit = vi.fn(async () => true);
+  render(
+    ja(
+      <TodoAddRow
+        page={{
+          today: TODAY,
+          current_week_start: '2026-11-02',
+          week: { start: '2026-11-02', end: '2026-11-08' },
+          items: [],
+        }}
+        projects={[
+          { projectId: 'p1', projectName: '見積もり', organization: null },
+          { projectId: null, projectName: null, organization: null },
+        ]}
+        onSubmit={onSubmit}
+      />
+    )
+  );
+  const due = screen.getByRole('combobox', { name: '期限' });
+  expect(
+    within(due)
+      .getAllByRole('option')
+      .map((option) => option.textContent)
+  ).toEqual(['期限なし', '土 11/7', '日 11/8']);
+  await userEvent.type(screen.getByRole('textbox', { name: 'TODO を書く' }), '見積書を送る{Enter}');
+  expect(onSubmit).toHaveBeenLastCalledWith('p1', '見積書を送る', null);
+
+  await userEvent.selectOptions(screen.getByRole('combobox', { name: 'プロジェクト' }), '');
+  await userEvent.selectOptions(due, '2026-11-08');
+  await userEvent.type(screen.getByRole('textbox', { name: 'TODO を書く' }), '請求書{Enter}');
+  expect(onSubmit).toHaveBeenLastCalledWith(null, '請求書', { date: '2026-11-08', repeat: 'none' });
+});
+
+it('counts a group’s done TODOs and names its organization after it when one is given', () => {
+  const group = (organizationName: string | null) =>
     ja(
       <TodoProjectGroup
         projectName={organizationName ? null : '販路開拓'}
         organizationName={organizationName}
-        doneCount={done}
-        totalCount={total}
-        addField={null}
+        doneCount={2}
+        totalCount={5}
       >
         {null}
       </TodoProjectGroup>
     );
-  const { rerender } = render(group(2, 5));
-  expect(screen.getByRole('region', { name: '販路開拓' })).toHaveTextContent('2 / 5 済み');
-  rerender(group(5, 5));
-  expect(screen.getByRole('region')).toHaveTextContent('すべて済み');
-  rerender(group(0, 0));
-  expect(screen.getByRole('region')).not.toHaveTextContent(/済み/);
-  rerender(group(0, 1, 'Wakakusa'));
-  expect(screen.getByRole('region', { name: 'Wakakusa プロジェクトなし' })).toBeInTheDocument();
+  const { rerender } = render(group(null));
+  expect(screen.getByRole('region', { name: '販路開拓' })).toHaveTextContent('2 / 5');
+  rerender(group('Wakakusa'));
+  expect(screen.getByRole('region', { name: 'プロジェクトなし Wakakusa' })).toBeInTheDocument();
 });
 
 it('counts the days a deleted TODO can still be restored', async () => {
@@ -184,18 +230,4 @@ it('presses the organization in view and selects another', async () => {
   expect(['wakakusa', 'llm-jp', 'すべての組織'].map(pressed)).toEqual(['true', 'false', 'false']);
   await userEvent.click(screen.getByRole('button', { name: '組織なし' }));
   expect(onSelect).toHaveBeenCalledWith({ scope: 'no_organization' });
-});
-
-it('offers 「今週へ」 only away from this week', async () => {
-  const handlers = { onPrevious: vi.fn(), onNext: vi.fn(), onCurrent: vi.fn() };
-  const week = { start: '2026-11-09', end: '2026-11-15' };
-  const { rerender } = render(ja(<WeekSwitcher week={week} isCurrent={false} {...handlers} />));
-  expect(screen.getByText(/11月9日.*〜11月15日/)).toBeInTheDocument();
-  await userEvent.click(screen.getByRole('button', { name: '今週へ' }));
-  await userEvent.click(screen.getByRole('button', { name: '前の週' }));
-  expect(handlers.onCurrent).toHaveBeenCalledOnce();
-  expect(handlers.onPrevious).toHaveBeenCalledOnce();
-
-  rerender(ja(<WeekSwitcher week={week} isCurrent {...handlers} />));
-  expect(screen.queryByRole('button', { name: '今週へ' })).not.toBeInTheDocument();
 });

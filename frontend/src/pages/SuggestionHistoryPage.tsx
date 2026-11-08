@@ -160,16 +160,29 @@ const SuggestionHistoryPage = () => {
   const chatView = useRef<ChatViewHandle>(null);
   const isMac = window.electron?.process.platform === 'darwin';
 
-  const [sidebarHidden, setSidebarHidden] = useState(readSidebarHidden);
+  const [savedSidebarHidden, setSavedSidebarHidden] = useState(readSidebarHidden);
+  // Beside an open TODO the sidebar folds away so the list keeps its width; the toggle shows it
+  // there, unsaved, until the TODO closes.
+  const todoOpen =
+    selection === null &&
+    todoSelection.view === 'list' &&
+    (week.page?.items.some((todo) => todo.todo_id === todoSelection.todoId) ?? false);
+  const [sidebarBesideTodo, setSidebarBesideTodo] = useState(false);
+  if (!todoOpen && sidebarBesideTodo) setSidebarBesideTodo(false);
+  const sidebarHidden = todoOpen ? !sidebarBesideTodo : savedSidebarHidden;
   const sidebarToggle = useRef<HTMLButtonElement>(null);
   const toggleSidebar = useCallback(() => {
     const hidden = !sidebarHidden;
     // Focus inside a hidden sidebar would fall back to the page's start.
     if (hidden && document.getElementById(HISTORY_SIDEBAR_ID)?.contains(document.activeElement))
       sidebarToggle.current?.focus();
-    setSidebarHidden(hidden);
+    if (todoOpen) {
+      setSidebarBesideTodo(!hidden);
+      return;
+    }
+    setSavedSidebarHidden(hidden);
     saveSidebarHidden(hidden);
-  }, [sidebarHidden]);
+  }, [sidebarHidden, todoOpen]);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.repeat || !isSidebarShortcut(event, isMac)) return;

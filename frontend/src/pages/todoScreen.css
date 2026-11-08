@@ -16,10 +16,24 @@
   min-height: 0;
 }
 
-/* Beside a conversation the list keeps a reading width and the conversation takes the rest. */
-.todo-screen--with-pane .todo-screen__list {
-  flex: 0 1 420px;
-  min-width: 320px;
+.todo-screen > .todo-screen__conversation {
+  flex: 1 1 0;
+  margin: 0;
+  border-left: 1px solid var(--fog-line);
+}
+
+/* Beside a conversation the list keeps its width and the conversation takes a column, until a
+   file opens beside the conversation and needs the room. */
+@media (min-width: 1101px) {
+  .todo-screen
+    > .todo-screen__conversation:not(:has(.action-task--split, .suggestion-task--split)) {
+    flex: 0 0 400px;
+  }
+
+  .todo-screen--with-pane:has(.action-task--split, .suggestion-task--split) .todo-screen__list {
+    flex: 0 1 420px;
+    min-width: 320px;
+  }
 }
 
 /* Like the task panes' headers: above the window's drag strip so its close button takes the
@@ -27,8 +41,7 @@
 .todo-screen__header {
   position: relative;
   z-index: 3;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   -webkit-app-region: drag;
 }
 
@@ -38,9 +51,97 @@
 
 .todo-screen__header h1 {
   min-width: 0;
+  margin-right: 4px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The week's name is the page's title, a size up from the panes' headers. */
+.todo-screen__list:has(.todo-screen__steps) .todo-screen__header h1 {
+  font-size: 20px;
+  letter-spacing: -0.01em;
+}
+
+.todo-screen__range {
+  flex: none;
+  margin-right: 6px;
+  color: var(--fog-text-3);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.todo-screen__steps {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+
+.todo-screen__step {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fog-text-2);
+  cursor: pointer;
+}
+
+.todo-screen__step:hover {
+  background: var(--fog-mist-strong);
+  color: var(--fog-text);
+}
+
+.todo-screen__step:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.todo-screen__current {
+  height: 26px;
+  margin-left: 6px;
+  padding: 0 10px;
+  font-size: var(--text-meta-size);
+}
+
+.todo-screen__summary {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+  color: var(--fog-text-2);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.todo-screen__track {
+  width: 120px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--fog-mist-strong);
+}
+
+.todo-screen__track > span {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--fog-text-2);
+}
+
+/* With no summary, the close button still goes to the row's end. */
+.todo-screen__header > .action-task__icon-button {
+  margin-left: auto;
+}
+
+.todo-screen__summary + .action-task__icon-button {
+  margin-left: 4px;
 }
 
 .todo-screen__header h1:focus-visible {
@@ -65,6 +166,7 @@
 /* The week's groups; a plain block, with the fieldset's own frame taken off. */
 .todo-screen__week {
   min-width: 0;
+  max-width: 920px;
   margin: 0;
   padding: 0;
   border: 0;
@@ -92,16 +194,10 @@
 }
 
 .todo-screen__failure {
-  margin: 4px 8px 8px 46px;
+  margin: 4px 8px 8px 38px;
   color: var(--danger-color);
   font-size: 13px;
   overflow-wrap: anywhere;
-}
-
-.todo-screen > .todo-screen__conversation {
-  flex: 1 1 0;
-  margin: 0;
-  border-left: 1px solid var(--fog-line);
 }
 
 .todo-conversation-none {

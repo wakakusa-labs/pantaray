@@ -254,7 +254,7 @@ describe('DoneStep', () => {
 
     await act(async () => release());
     await waitFor(() => expect(isChecked('アプリ')).toBe(true));
-    expect(appsStep).toHaveTextContent('済み');
+    expect(appsStep).toHaveTextContent('完了');
   });
 
   it('says the services could not be read, and reads them again on request', async () => {

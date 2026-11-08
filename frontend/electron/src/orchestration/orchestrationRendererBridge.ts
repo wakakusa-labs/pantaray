@@ -513,8 +513,22 @@ export function createOrchestrationRendererBridge(params: {
     return suggestionRecords.getSnapshot(normalizedSuggestionId);
   }
 
+  // Offers nobody answered whose conversation no window knows of yet.
+  function unlinkedOffers(): string[] {
+    return Array.from(suggestionRecords.values())
+      .map((record) => record.snapshot)
+      .filter(
+        (snapshot) =>
+          snapshot.interactionContract === 'action_offer' &&
+          snapshot.reactionState === null &&
+          snapshot.actionId === null
+      )
+      .map((snapshot) => String(snapshot.suggestionId));
+  }
+
   return {
     acceptAction,
+    unlinkedOffers,
     adoptSuggestionSnapshot: suggestionRecords.adoptPersisted,
     recordSuggestionReply: suggestionRecords.recordReply,
     forwardEventToRenderers,

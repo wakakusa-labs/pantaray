@@ -134,6 +134,8 @@ export function createOrchestrationManager(params: {
   getRuntimeState: () => LocalRuntimeState;
   getUiLanguage: () => 'en' | 'ja';
   latestActionPages: ActionLatestPages;
+  /** Reads a suggestion's persisted snapshot; null when it is gone. */
+  readSuggestionSnapshot: (suggestionId: string) => Promise<OverlaySnapshot | null>;
   /** Answers a screen capture request; absent means no desktop capture support. */
   respondToScreenCapture?: (request: ScreenCaptureRequest) => Promise<void>;
   /** Prints an HTML file for the Action runtime; absent means no desktop rendering. */
@@ -420,9 +422,29 @@ export function createOrchestrationManager(params: {
     // The TODO list is the main window's alone too.
     if (isTodoChangedEvent(message)) {
       sendToMainWindow('todos:changed', parseTodoChanged(message.data));
+      relinkPickedUpOffers();
       return;
     }
     rendererBridge.forwardEventToRenderers(message);
+  }
+
+  // Pantaray picking up a suggestion's TODO opens the suggestion's conversation, as a reply does,
+  // and moves the TODO list. Only a read brings that Action to an offer nobody answered, so each
+  // window showing one stops offering 承認 and 見送る and shows the Action instead.
+  function relinkPickedUpOffers(): void {
+    const ownerId = params.getOwnerId();
+    for (const suggestionId of rendererBridge.unlinkedOffers()) {
+      params
+        .readSuggestionSnapshot(suggestionId)
+        .then((persisted) => {
+          if (persisted && persisted.actionId !== null && params.getOwnerId() === ownerId) {
+            rendererBridge.adoptSuggestionSnapshot(persisted);
+          }
+        })
+        .catch((error: unknown) => {
+          console.error('Failed to read a suggestion after a TODO change:', error);
+        });
+    }
   }
 
   function ensureOrchestrator(): void {

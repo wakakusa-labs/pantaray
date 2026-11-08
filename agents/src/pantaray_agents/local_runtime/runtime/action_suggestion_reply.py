@@ -30,6 +30,26 @@ _PICKABLE_SQL = """(interaction_contract='action_offer' AND user_reaction IS NUL
       AND approved.suggestion_id=agent_suggestions.suggestion_id))"""
 
 
+def suggestion_has_conversation(
+    connection: sqlite3.Connection, *, user_id: str, suggestion_id: str
+) -> bool:
+    """Whether an Action already opened with the Suggestion's message.
+
+    A reply opens one, and so does Pantaray picking up the Suggestion's TODO.
+    Then the Action owns what happens next: approving or dismissing the
+    Suggestion as well would start a second Action, or leave rejected work running.
+    """
+
+    return (
+        connection.execute(
+            "SELECT 1 FROM agent_action_steps "
+            "WHERE user_id = ? AND source_suggestion_id = ?",
+            (user_id, suggestion_id),
+        ).fetchone()
+        is not None
+    )
+
+
 def opening_assistant_text_sql(action: str) -> str:
     """SQL for the assistant message the Action aliased ``action`` opens with, or NULL.
 

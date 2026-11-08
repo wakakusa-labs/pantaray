@@ -40,6 +40,7 @@ from pantaray_agents.local_runtime.todos.model import SuggestionOrigin, Todo
 from pantaray_agents.local_runtime.todos.reads import (
     read_pickup_candidates,
 )
+from pantaray_agents.local_runtime.todos.writes import announce_todo_change
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings import (
     list_workspace_settings,
 )
@@ -73,10 +74,11 @@ def pick_up_todos(*, user_id: str) -> None:
     settings = list_workspace_settings(
         db_path=db_path, busy_timeout_ms=busy_timeout_ms, user_id=user_id
     )
+    started = False
     for todo, target in targets:
         try:
             command = _command(user_id, todo, target, _handoff(todo, settings))
-            submit_action_message(command)
+            started |= submit_action_message(command).inserted
         # A TODO the Action message cannot carry fails alone, so it never holds
         # back the TODOs after it.
         except (ValidationError, ActionMessageSubmissionError, sqlite3.Error) as exc:
@@ -87,6 +89,10 @@ def pick_up_todos(*, user_id: str) -> None:
             )
             continue
         logger.info("TODO picked up: todo_id=%s target=%s", todo.todo_id, target.kind)
+    # A started TODO now shows its Action, and a Suggestion's TODO links the
+    # Suggestion to it; the change counter tells the open windows to read again.
+    if started:
+        announce_todo_change(user_id=user_id)
 
 
 def _command(

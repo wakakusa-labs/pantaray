@@ -972,7 +972,9 @@ async def test_an_offer_is_saved_with_exactly_one_ai_todo_in_its_state(
     )
     entry = read_todo(user_id=USER_ID, todo_id=str(row["todo_id"]))
     assert entry is not None
-    assert entry.conversation == SuggestionConversation(suggestion_id=SUGGESTION_ID)
+    assert entry.conversation == SuggestionConversation(
+        suggestion_id=SUGGESTION_ID, answered=False
+    )
     assert display_state(entry.todo, entry.conversation, "2026-11-02") == expected
 
 

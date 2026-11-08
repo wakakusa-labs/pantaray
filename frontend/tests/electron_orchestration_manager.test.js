@@ -136,6 +136,7 @@ function createManagerHarness(overrides = {}) {
         ? await overrides.readLatestActionConversationPage(actionId)
         : conversationPage(actionId);
     }),
+    readSuggestionSnapshot: overrides.readSuggestionSnapshot || (async () => null),
     respondToHtmlRender: overrides.respondToHtmlRender,
     timers,
   });
@@ -1689,4 +1690,32 @@ test('a read brings the reply Action to a dismissal main recorded before the rep
   assert.equal(suggestionSnapshotsSentToMain(harness).at(-1).actionId, 'act-reply');
   assert.equal(harness.overlayPayloads.get('sug-1').snapshot.actionId, 'act-reply');
   assert.equal(harness.manager.getOverlaySnapshot('sug-1'), null);
+});
+
+test('a TODO change brings the Action Pantaray opened to an offer nobody answered', async () => {
+  const reads = [];
+  const harness = createManagerHarness({
+    readSuggestionSnapshot: async (suggestionId) => {
+      reads.push(suggestionId);
+      return persistedSnapshot({ suggestionId, actionId: `action-${suggestionId}` });
+    },
+  });
+  harness.manager.ensureConnected();
+  harness.manager.adoptSuggestionSnapshot(persistedSnapshot({ suggestionId: 'sug-open' }));
+  harness.manager.adoptSuggestionSnapshot(
+    persistedSnapshot({ suggestionId: 'sug-notice', interactionContract: 'message_only' })
+  );
+  harness.manager.adoptSuggestionSnapshot(
+    persistedSnapshot({ suggestionId: 'sug-linked', actionId: 'action-before' })
+  );
+
+  harness.getWsHooks().forwardEventToRenderers({ event: 'todo_changed', data: { revision: 2 } });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  // Only the open offer is read again; its windows now show the Action, with no reaction.
+  assert.deepEqual(reads, ['sug-open']);
+  const linked = harness.manager.getOverlaySnapshot('sug-open');
+  assert.equal(linked.actionId, 'action-sug-open');
+  assert.equal(linked.reactionState, null);
+  assert.equal(harness.overlayPayloads.get('sug-open').snapshot.actionId, 'action-sug-open');
 });

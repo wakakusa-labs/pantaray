@@ -20,6 +20,7 @@ from pantaray_agents.local_runtime.suggestion_state.public_projection import (
 from pantaray_agents.schema.agent.action import ActionUserMessageInput
 
 from .action_message_models import ActionMessageConflictError
+from .action_suggestion_reply import suggestion_has_conversation
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,10 +72,9 @@ def validate_suggestion_action_start(
         )
     # Pantaray may already have picked up the Suggestion's TODO in a conversation
     # opened with its message; approving it now would start a second Action.
-    if connection.execute(
-        "SELECT 1 FROM agent_action_steps WHERE user_id = ? AND source_suggestion_id = ?",
-        (user_id, suggestion_id),
-    ).fetchone():
+    if suggestion_has_conversation(
+        connection, user_id=user_id, suggestion_id=suggestion_id
+    ):
         raise ActionMessageConflictError("Suggestion already has a conversation")
     if approval.suggestion_id != suggestion_id:
         raise ActionMessageConflictError(

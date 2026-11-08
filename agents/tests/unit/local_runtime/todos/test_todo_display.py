@@ -38,7 +38,8 @@ from .support import NEXT_WEEK, PREVIOUS_WEEK, WEEK, make_todo
 type ReportKind = Literal["continue", "partial", "needs_user"]
 
 AT = "2026-11-04T09:00:00.000Z"
-SUGGESTION = SuggestionConversation(suggestion_id="sug-1")
+SUGGESTION = SuggestionConversation(suggestion_id="sug-1", answered=False)
+DISMISSED = SuggestionConversation(suggestion_id="sug-1", answered=True)
 RUNNING = ActionConversation("action-1", ActiveRun("run-2"))
 APPROVAL = ActionConversation("action-1", ApprovalPendingRun("run-2"))
 SUCCEEDED = ActionConversation("action-1", EndedRun("run-2", "success", "Answer"))
@@ -76,6 +77,8 @@ def _reported(kind: ReportKind, run_id: str | None = "run-2") -> Todo:
         ),
         (_reported("partial", None), SUGGESTION, Partial("partial note")),
         (_reported("continue", None), SUGGESTION, NotStarted("starting")),
+        # Dismissed, nothing continues it: it stays where the Suggestion left it.
+        (_reported("continue", None), DISMISSED, Partial("continue note")),
         # A done Suggestion TODO the user unchecked.
         (SUGGESTED_TODO, SUGGESTION, Waiting("reply", None)),
         (
@@ -102,6 +105,7 @@ def test_display_state(
         # Only a Suggestion left for Pantaray to continue is picked up; the
         # user's approval or reply opens the others.
         (_reported("continue", None), SUGGESTION, CONTINUE),
+        (_reported("continue", None), DISMISSED, None),
         # The Suggestion was deleted, so there is no message to open with.
         (_reported("continue", None), NONE, None),
         (_reported("continue", None), SUCCEEDED, None),

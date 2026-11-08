@@ -66,7 +66,7 @@ it('checks the TODO with a checkbox of its own, apart from opening the TODO', as
 
   renderRow({ state: { kind: 'done', by: 'ai', at: '2026-11-06T12:00:00Z' } });
   expect(screen.getByRole('checkbox', { name: '完了: 見積書を送る' })).toBeChecked();
-  expect(body()).toHaveTextContent(/^見積書を送る済み$/);
+  expect(body()).toHaveTextContent(/^見積書を送る完了$/);
 });
 
 it('says where the TODO stands in a word, Pantaray’s deletion request first', () => {

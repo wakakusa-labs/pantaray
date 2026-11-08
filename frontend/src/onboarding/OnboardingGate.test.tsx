@@ -98,7 +98,7 @@ describe('OnboardingGate', () => {
     fireEvent.click(next());
     expect(bridge.setState).toHaveBeenLastCalledWith({ status: 'in_progress', step: 'recording' });
     expect(screen.getByRole('heading', { name: /記録を始める/ })).toHaveFocus();
-    expect(steps().getByRole('button', { name: /AI をつなぐ/ })).toHaveTextContent('済み');
+    expect(steps().getByRole('button', { name: /AI をつなぐ/ })).toHaveTextContent('完了');
     expect(next()).toBeDisabled();
   });
 
@@ -110,7 +110,7 @@ describe('OnboardingGate', () => {
     renderGate();
     await screen.findByRole('heading', { name: /アプリをつなぐ/ });
     await waitFor(() =>
-      expect(steps().getByRole('button', { name: /記録を始める/ })).toHaveTextContent('済み')
+      expect(steps().getByRole('button', { name: /記録を始める/ })).toHaveTextContent('完了')
     );
     expect(steps().getByRole('button', { name: /Web 検索/ })).toHaveTextContent('スキップ');
 
@@ -178,7 +178,7 @@ describe('OnboardingGate', () => {
     ownerReady = true;
     rerender(tree(READY));
     await waitFor(() => expect(next()).toBeEnabled());
-    expect(steps().getByRole('button', { name: /記録を始める/ })).toHaveTextContent('済み');
+    expect(steps().getByRole('button', { name: /記録を始める/ })).toHaveTextContent('完了');
   });
 
   it('keeps the AI step usable when the runtime has no owner, since it is what repairs one', async () => {

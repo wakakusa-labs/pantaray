@@ -80,7 +80,7 @@ export const ONBOARDING_MESSAGES = defineMessages({
     'onboarding.step.done': '完了',
     'onboarding.required': '必須',
     'onboarding.optional': '任意',
-    'onboarding.stepDone': '済み',
+    'onboarding.stepDone': '完了',
     'onboarding.stepSkipped': 'スキップ',
     'onboarding.back': '戻る',
     'onboarding.skip': 'スキップ',

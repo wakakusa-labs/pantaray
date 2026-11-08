@@ -150,9 +150,10 @@ const dayCell = (name: RegExp) => screen.getByRole('button', { name });
 
 it('leads with the week holding today on the current page, and the one goal with its pace', () => {
   renderView(page());
-  // 11/2–11/8: r1, r2, r4 for 販路開拓 and r5 for 採用; 10/30's r3 is last week's.
+  // 11/2–11/8: r4, then r1 and r2 added up, for 販路開拓, and r5 for 採用; 10/30's r3 is last
+  // week's.
   expect(lead()).toHaveTextContent(
-    '今週は、販路開拓が 3 件、採用が 1 件進みました。済んだ TODO は 2 件です。' +
+    '今週は、販路開拓が 40 枚と 25,000,000 円、採用が 2 人進みました。済んだ TODO は 2 件です。' +
       '売上 300,000,000 円の目標に対して、いまは 10% です。' +
       'このペースなら 2027 年 6 月のはじめに届きます。'
   );
@@ -168,6 +169,37 @@ it('leads with the week holding today on the current page, and the one goal with
   // The 40 枚 is nowhere in the total.
   expect(row).not.toHaveTextContent('30,000,040');
   expect(row.querySelector('.todo-progress-goal__late')).toBeNull();
+});
+
+/** The amounts a calendar cell's lines show, without the project naming them. */
+const amountsIn = (cell: Element) =>
+  [...cell.querySelectorAll('.todo-progress-cell__line:not(.todo-progress-cell__line--muted)')].map(
+    (line) => line.textContent?.match(/[\d,.]+ \S+$/)?.[0]
+  );
+
+it('leads with the very totals the week column and the month cell show', () => {
+  renderView(page({ goals: [] }));
+  const week = document.querySelector('.todo-progress-week--now');
+  expect(amountsIn(week!)).toEqual(['40 枚', '25,000,000 円']);
+  for (const amount of amountsIn(week!)) expect(lead()).toHaveTextContent(amount!);
+  expect(week).toHaveTextContent('✓ 2 済み');
+  expect(lead()).toHaveTextContent('済んだ TODO は 2 件です。');
+
+  renderView(
+    page({
+      period: 'month',
+      page_start: '2026-01-01',
+      rows: Array.from({ length: 12 }, (_, index) => {
+        const start = `2026-${String(index + 1).padStart(2, '0')}-01`;
+        const end = index === 10 ? '2026-11-30' : start;
+        return { start, end, record_ids: index === 10 ? ['r1', 'r5'] : [], checked: [] };
+      }),
+      goals: [],
+    })
+  );
+  const november = screen.getByRole('button', { name: /^2026年11月/ });
+  expect(amountsIn(november)).toEqual(['10,000,000 円', '2 人']);
+  expect(lead()).toHaveTextContent(/^今月は、販路開拓が 10,000,000 円、採用が 2 人進みました。$/);
 });
 
 it('marks a pace that misses its deadline, in the goal and in the lead', () => {
@@ -199,7 +231,7 @@ it('leads with the whole month or year on any other page, never with the weeks s
       goals: [],
     })
   );
-  expect(lead()).toHaveTextContent(/^10月は、販路開拓が 1 件進みました。$/);
+  expect(lead()).toHaveTextContent(/^10月は、販路開拓が 5,000,000 円進みました。$/);
 
   renderView(
     page({
@@ -219,7 +251,7 @@ it('leads with the whole month or year on any other page, never with the weeks s
     })
   );
   expect(lead()).toHaveTextContent(
-    /^2026年は、販路開拓が 1 件、採用が 1 件進みました。済んだ TODO は 2 件です。$/
+    /^2026年は、販路開拓が 10,000,000 円、採用が 2 人進みました。済んだ TODO は 2 件です。$/
   );
 });
 

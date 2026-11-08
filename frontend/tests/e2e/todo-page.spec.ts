@@ -756,7 +756,7 @@ test('進み具合 lays out the month, keeps its page in the address, and opens 
   await page.getByRole('button', { name: '前の月' }).click();
   await expect(page).toHaveURL(/view=progress&on=2026-10-01$/);
   await expect(page.locator('.todo-progress__lead')).toContainText(
-    '10月は、見積もりが 2 件進みました。'
+    '10月は、見積もりが 3 件進みました。'
   );
   await page.reload();
   await expect(page.locator('.todo-screen__range')).toHaveText('2026年10月');
@@ -780,7 +780,7 @@ test('進み具合 lays out the month, keeps its page in the address, and opens 
   await sidebar.getByRole('button', { name: '進み具合' }).click();
   await expect(page).toHaveURL(/#\/history\?view=progress$/);
   await expect(page.locator('.todo-progress__lead')).toContainText(
-    '今週は、プロダクトが 1 件、見積もりが 1 件進みました。済んだ TODO は 2 件です。'
+    '今週は、プロダクトが 1 本、見積もりが 1 件進みました。済んだ TODO は 2 件です。'
   );
   await capture(page, info, 'progress-all');
 });

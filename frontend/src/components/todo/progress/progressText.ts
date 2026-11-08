@@ -13,6 +13,7 @@ import type { ProgressSpan } from '../../../todos/todoSelection';
 import {
   inPageMonth,
   isCurrentPage,
+  recordLines,
   spanOf,
   totalsOf,
   weekHolding,
@@ -212,13 +213,26 @@ export function recordsFor(
   });
 }
 
-/** How many of the records each project has, in the order the records come. */
-function countByProject(records: readonly ProgressRecordView[]) {
-  const counts = new Map<string | null, number>();
-  for (const record of records) {
-    counts.set(record.project_id, (counts.get(record.project_id) ?? 0) + 1);
+/**
+ * Each project's amounts in the order the records come, one per unit, as the calendar's lines add
+ * them up: 「見積もりが 10 件と 1,200 万円」.
+ */
+function amountsByProject(
+  i18n: ProgressI18n,
+  records: readonly ProgressRecordView[],
+  projectName: ProjectNameOf
+): string[] {
+  const amounts = new Map<string | null, string[]>();
+  for (const line of recordLines(records)) {
+    const amount = formatQuantity(i18n, line.quantity, line.unit);
+    amounts.set(line.projectId, [...(amounts.get(line.projectId) ?? []), amount]);
   }
-  return [...counts].map(([projectId, count]) => ({ projectId, count }));
+  return [...amounts].map(([projectId, quantities]) =>
+    i18n.t('todoProgress.lead.recordsItem', {
+      project: projectLabel(i18n, projectName, projectId),
+      amounts: quantities.join(i18n.t('todoProgress.lead.amountSeparator')),
+    })
+  );
 }
 
 /**
@@ -270,20 +284,14 @@ function periodSentences(
   projectName: ProjectNameOf
 ): string[] {
   const { t } = i18n;
-  const counts = countByProject(recordsFor(totals.record_ids, recordsById));
+  // The same totals as the calendar's cells: the week's lead and its 週の合計 never disagree.
+  const items = amountsByProject(i18n, recordsFor(totals.record_ids, recordsById), projectName);
   const sentences = [
-    counts.length === 0
+    items.length === 0
       ? t('todoProgress.lead.noRecords', { period: subject })
       : t('todoProgress.lead.records', {
           period: subject,
-          items: counts
-            .map(({ projectId, count }) =>
-              t('todoProgress.lead.recordsItem', {
-                project: projectLabel(i18n, projectName, projectId),
-                records: recordCount(i18n, count),
-              })
-            )
-            .join(t('todoProgress.listSeparator')),
+          items: items.join(t('todoProgress.listSeparator')),
         }),
   ];
   if (totals.checked.length > 0) {

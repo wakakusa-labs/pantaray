@@ -234,21 +234,6 @@ def update_todo[R: str](
     return result
 
 
-def announce_todo_change(*, user_id: str) -> None:
-    """Count a change to what a TODO shows that wrote no `todo_items` row.
-
-    The triggers count every row change; starting a TODO's Action changes its
-    state through the Action alone.
-    """
-
-    with todo_db_connection() as connection, immediate_transaction(connection):
-        connection.execute(
-            "INSERT INTO todo_revisions(user_id, revision) VALUES (?, 1) "
-            "ON CONFLICT(user_id) DO UPDATE SET revision = revision + 1",
-            (user_id,),
-        )
-
-
 def delete_purged_todo(*, user_id: str, todo: Todo) -> None:
     """Remove the row, unless its deletion changed since it was read."""
 

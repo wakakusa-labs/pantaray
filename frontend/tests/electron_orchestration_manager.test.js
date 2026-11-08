@@ -94,7 +94,8 @@ function createManagerHarness(overrides = {}) {
         overrides.onSendToOverlay?.(id, channel);
       },
       registerProcessAssociation: () => {},
-      adoptActionAssociation: () => {},
+      adoptActionAssociation: (actionId, overlayId) =>
+        overrides.onAdoptActionAssociation?.(actionId, overlayId),
       cleanupMappingsForProcess: (id) => overrides.onCleanupProcess?.(id),
       cleanupMappingsForAction: (id) => overrides.onCleanupAction?.(id),
       clearActionAssociations: () => overrides.onClearActionAssociations?.(),
@@ -132,6 +133,7 @@ function createManagerHarness(overrides = {}) {
     getRuntimeState: overrides.getRuntimeState || (() => ({ status: 'ready', message: null })),
     getUiLanguage: overrides.getUiLanguage || (() => 'en'),
     latestActionPages: immediateLatestPages(async (actionId) => {
+      overrides.onReadLatestPage?.(actionId);
       return overrides.readLatestActionConversationPage
         ? await overrides.readLatestActionConversationPage(actionId)
         : conversationPage(actionId);
@@ -1789,3 +1791,29 @@ function completedOffer(suggestionId) {
     meta: { kind: 'suggestion', process_id: `proc-${suggestionId}`, suggestion_id: suggestionId },
   };
 }
+
+test('linking a picked-up offer reads its conversation and resumes its run, with no event sent', async () => {
+  const pagesRead = [];
+  const resumed = [];
+  const associated = [];
+  const harness = createManagerHarness({
+    readSuggestionSnapshot: async (suggestionId) =>
+      persistedSnapshot({ suggestionId, actionId: 'action-picked' }),
+    onReadLatestPage: (actionId) => pagesRead.push(actionId),
+    onResumeProcess: (request) => resumed.push(request),
+    onAdoptActionAssociation: (actionId, overlayId) => associated.push([actionId, overlayId]),
+  });
+  harness.manager.ensureConnected();
+  harness.manager.adoptSuggestionSnapshot(persistedSnapshot());
+
+  harness.getWsHooks().forwardEventToRenderers({ event: 'todo_changed', data: { revision: 2 } });
+  for (let i = 0; i < 5; i += 1) await new Promise((resolve) => setImmediate(resolve));
+
+  // The suggestion's panel follows the Action, its page is read, and its run, which may wait
+  // for the user's approval, is attached live.
+  assert.deepEqual(associated, [['action-picked', 'sug-1']]);
+  assert.deepEqual(pagesRead, ['action-picked']);
+  assert.deepEqual(resumed, [
+    { kind: 'action', actionId: 'action-picked', processId: 'run-1', fromStart: true },
+  ]);
+});

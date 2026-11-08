@@ -540,12 +540,17 @@ export function createOrchestrationRendererBridge(params: {
       params
         .readSuggestionSnapshot(suggestionId)
         .then((persisted) => {
-          if (persisted && persisted.actionId !== null && params.getOwnerId() === ownerId) {
-            suggestionRecords.adoptPersisted(persisted);
-          }
+          const actionId = persisted?.actionId ?? null;
+          if (persisted === null || actionId === null || params.getOwnerId() !== ownerId) return;
+          suggestionRecords.adoptPersisted(persisted);
+          // No approve or reply went through this window, so nothing follows the Action yet:
+          // attach the suggestion's panel to it, read its conversation and resume its live
+          // run, whose first step may already wait for the user's approval.
+          notificationWindow.adoptActionAssociation(actionId, suggestionId);
+          return refreshAndResumeActionConversation(actionId);
         })
         .catch((error: unknown) => {
-          console.error('Failed to read a suggestion for the Action Pantaray opened:', error);
+          console.error('Failed to link a suggestion to the Action Pantaray opened:', error);
         });
     }
   }

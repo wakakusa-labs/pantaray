@@ -12,6 +12,7 @@ from .action_message import (
     FileAttachmentInput,
     SuggestionApprovalInput,
     TodoHandoffInput,
+    TodoHandoffSuggestion,
 )
 
 _ACTION_USER_MESSAGE_ADAPTER = TypeAdapter(ActionUserMessageInput)
@@ -125,15 +126,18 @@ def render_action_user_request_text(message: ActionUserMessageInput) -> str:
     return "\n\n".join(sections)
 
 
-def _render_suggestion_metadata(approval: SuggestionApprovalInput) -> list[str]:
-    metadata_lines = [f"- Suggestion: {approval.suggestion_id}"]
-    if approval.summary:
-        metadata_lines.append(f"- Suggestion summary: {approval.summary}")
-    if approval.organization_name:
-        metadata_lines.append(f"- Organization: {approval.organization_name}")
-    if approval.project_name:
-        metadata_lines.append(f"- Project: {approval.project_name}")
-    metadata_lines.append(f"- Approved at: {approval.approved_at}")
+def _render_suggestion_metadata(
+    suggestion: SuggestionApprovalInput | TodoHandoffSuggestion,
+) -> list[str]:
+    metadata_lines = [f"- Suggestion: {suggestion.suggestion_id}"]
+    if suggestion.summary:
+        metadata_lines.append(f"- Suggestion summary: {suggestion.summary}")
+    if suggestion.organization_name:
+        metadata_lines.append(f"- Organization: {suggestion.organization_name}")
+    if suggestion.project_name:
+        metadata_lines.append(f"- Project: {suggestion.project_name}")
+    if isinstance(suggestion, SuggestionApprovalInput):
+        metadata_lines.append(f"- Approved at: {suggestion.approved_at}")
     return metadata_lines
 
 
@@ -143,6 +147,11 @@ def _render_todo_handoff(handoff: TodoHandoffInput) -> str:
         lines += [
             "Its workspace project:",
             _render_project_line(handoff.project.display_name, handoff.project.paths),
+        ]
+    if handoff.suggestion is not None:
+        lines += [
+            "It came from a Suggestion the user has not approved:",
+            *_render_suggestion_metadata(handoff.suggestion),
         ]
     return "\n".join(lines)
 

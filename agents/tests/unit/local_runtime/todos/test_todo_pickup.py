@@ -14,6 +14,7 @@ from pantaray_agents.local_runtime.agent_state import LocalSuggestionRepository
 from pantaray_agents.local_runtime.agent_state import (
     suggestion_repository as suggestion_repository_module,
 )
+from pantaray_agents.local_runtime.runtime import action_messages
 from pantaray_agents.local_runtime.runtime.action_message_models import (
     ACTION_TODO_PICKUP_REQUEST_TEXT,
 )
@@ -26,6 +27,7 @@ from pantaray_agents.local_runtime.suggestion_state.repository import (
 )
 from pantaray_agents.local_runtime.todos import core, pickup
 from pantaray_agents.local_runtime.todos.conversation import todo_message_id
+from pantaray_agents.local_runtime.todos.db import count_todo_change
 from pantaray_agents.local_runtime.todos.display import (
     Partial,
     Working,
@@ -46,6 +48,7 @@ from pantaray_agents.schema.agent.base import StatusType
 from pantaray_agents.schema.agent.suggestion import (
     SuggestionAgentResponse,
     SuggestionInteractionContract,
+    SuggestionTargetContext,
     SuggestionTodo,
 )
 
@@ -103,7 +106,7 @@ def _actions(db: Path) -> list[sqlite3.Row]:
         connection.row_factory = sqlite3.Row
         return connection.execute(
             """SELECT action.initial_user_message_id, action.initial_approval_mode,
-                      step.step_name, step.user_message_json,
+                      step.step_name, step.user_message_json, step.user_request_text,
                       (SELECT llm_response_text FROM agent_action_steps
                        WHERE action_id = action.action_id
                          AND step_type = 'assistant_message') AS opening
@@ -148,11 +151,16 @@ def test_a_written_todo_starts_one_action_with_its_text_and_project(
     assert message["todo_handoff"] == {
         "todo_id": todo.todo_id,
         "project": {"display_name": "One", "paths": [str(folder.resolve())]},
+        "suggestion": None,
     }
     loose_message = json.loads(
         rows[todo_message_id(loose.todo_id)]["user_message_json"]
     )
-    assert loose_message["todo_handoff"] == {"todo_id": loose.todo_id, "project": None}
+    assert loose_message["todo_handoff"] == {
+        "todo_id": loose.todo_id,
+        "project": None,
+        "suggestion": None,
+    }
 
 
 def test_an_ai_todo_continues_as_pantaray_and_asks_before_every_step(
@@ -280,7 +288,11 @@ async def _save_suggestion(
             user_id=USER,
             created_at=T,
             answer=f"Message of {suggestion_id}",
-            suggestion_summary="summary",
+            # What the shown message leaves out, as only the summary says it.
+            suggestion_summary="Draft the reply only; do not send it.",
+            target_context=SuggestionTargetContext(
+                organization_name="Wakakusa", project_name="Pantaray"
+            ),
             status=StatusType.SUCCESS,
             has_suggestion=True,
             interaction_contract=contract,
@@ -364,7 +376,24 @@ async def test_a_suggestion_left_to_continue_opens_one_action_with_its_message(
         "prompt_each_time",
         "Message of s-go",
         ACTION_TODO_PICKUP_REQUEST_TEXT,
-        {"todo_id": todo_id, "project": None},
+        {
+            "todo_id": todo_id,
+            "project": None,
+            # The Suggestion's context, as an approval carries it, but no approval.
+            "suggestion": {
+                "suggestion_id": "s-go",
+                "summary": "Draft the reply only; do not send it.",
+                "organization_name": "Wakakusa",
+                "project_name": "Pantaray",
+            },
+        },
+    )
+    assert (
+        "suggestion_approval" not in message or message["suggestion_approval"] is None
+    )
+    assert (
+        "- Suggestion summary: Draft the reply only; do not send it."
+        in (row["user_request_text"])
     )
     with closing(sqlite3.connect(db)) as connection:
         linked = connection.execute(
@@ -489,3 +518,33 @@ async def test_a_suggestion_pantaray_picked_up_cannot_be_dismissed(
         ).fetchone()
         status = connection.execute("SELECT status FROM agent_actions").fetchone()
     assert (reaction, status) == ((None, None), ("queued",))
+
+
+@pytest.mark.asyncio
+async def test_a_failed_change_count_leaves_no_action_and_the_next_pass_recovers(
+    db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(suggestion_repository_module, "read_todo_clock", lambda: NOW)
+    await _save_suggestion(
+        db,
+        "s-go",
+        "action_offer",
+        SuggestionTodo(text="Send the reply", outcome="continue", note="Not sent."),
+    )
+    revision = read_todo_revision(user_id=USER)
+
+    def failing_count(connection, *, user_id):  # type: ignore[no-untyped-def]
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(action_messages, "count_todo_change", failing_count)
+    pickup.pick_up_todos(user_id=USER)
+
+    # Counted with the Action or not at all: nothing was started, nothing announced.
+    assert _actions(db) == []
+    assert read_todo_revision(user_id=USER) == revision
+
+    monkeypatch.setattr(action_messages, "count_todo_change", count_todo_change)
+    pickup.pick_up_todos(user_id=USER)
+
+    assert len(_actions(db)) == 1
+    assert read_todo_revision(user_id=USER) == revision + 1

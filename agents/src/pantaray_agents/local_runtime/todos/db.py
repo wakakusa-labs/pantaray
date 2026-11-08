@@ -143,6 +143,20 @@ def project_id_named(
     return None if row is None else str(row[0])
 
 
+def count_todo_change(connection: sqlite3.Connection, *, user_id: str) -> None:
+    """Move the counter the live session follows, in the caller's transaction.
+
+    The `todo_items` triggers count every row change; a TODO whose Action
+    starts changes what it shows through the Action alone.
+    """
+
+    connection.execute(
+        "INSERT INTO todo_revisions(user_id, revision) VALUES (?, 1) "
+        "ON CONFLICT(user_id) DO UPDATE SET revision = revision + 1",
+        (user_id,),
+    )
+
+
 def read_todo_row(
     connection: sqlite3.Connection, *, user_id: str, todo_id: TodoId
 ) -> Todo | None:

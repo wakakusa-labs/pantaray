@@ -129,8 +129,9 @@ def test_a_goal_and_a_users_record_show_as_measured_progress(
 
     record_id = record.json()["record_id"]
     (goal,) = view["goals"]
+    (this_week,) = [row for row in view["rows"] if row["start"] == "2026-11-02"]
     assert (goal["kind"], goal["total"], goal["share"]) == ("measured", 3e7, 0.1)
-    assert goal["record_ids"] == view["rows"][0]["record_ids"] == [record_id]
+    assert goal["record_ids"] == this_week["record_ids"] == [record_id]
     assert view["records"][0]["evidence"] == {"kind": "user"}
 
     deleted = client.delete(f"{TODOS}/progress-records/{record_id}")
@@ -152,6 +153,48 @@ def test_a_pace_too_slow_to_date_is_still_a_view(client: TestClient) -> None:
     (goal,) = response.json()["goals"]
     assert (goal["total"], goal["pace"]["kind"]) == (3.0, "beyond_horizon")
     assert "projected_on" not in goal["pace"]
+
+
+def test_any_month_or_year_is_a_page_and_the_goal_counts_to_today(
+    client: TestClient,
+) -> None:
+    client.put(GOAL, json=GOAL_BODY)
+    record_id = _record(client, _todo_id(client)).json()["record_id"]
+
+    current = _progress(client).json()
+    october = _progress(client, period="day", on="2026-10-15").json()
+    year = _progress(client, period="month", on="2026-02-28").json()
+
+    assert (current["page_start"], current["today"]) == ("2026-11-01", "2026-11-04")
+    rows = october["rows"]
+    assert (october["page_start"], october["today"], len(rows)) == (
+        "2026-10-01",
+        "2026-11-04",
+        35,
+    )
+    assert (rows[0]["start"], rows[-1]["end"]) == ("2026-09-28", "2026-11-01")
+    assert all(row["record_ids"] == [] for row in rows)
+    assert year["page_start"] == "2026-01-01"
+    assert [row["start"] for row in year["rows"]][::11] == ["2026-01-01", "2026-12-01"]
+    assert year["rows"][10]["record_ids"] == [record_id]
+    assert october["goals"] == year["goals"] == current["goals"]
+    assert october["records"] == current["records"]
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        {"on": "1969-12-31"},
+        {"on": "9999-01-01"},
+        {"on": "2026-02-30"},
+        {"on": "2026-11"},
+        {"period": "year"},
+    ],
+)
+def test_a_page_outside_the_calendar_is_refused(
+    client: TestClient, query: dict[str, str]
+) -> None:
+    assert _progress(client, **query).status_code == 422
 
 
 def test_refusals_carry_error_codes(client: TestClient) -> None:

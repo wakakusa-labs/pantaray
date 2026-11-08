@@ -176,7 +176,14 @@ def delete_progress_record_route(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.get("/{user_id}/todos/progress", response_model=TodoProgressPage)
+@router.get(
+    "/{user_id}/todos/progress",
+    response_model=TodoProgressPage,
+    description=(
+        "The rows of `period` on the month (day, week) or year (month) holding "
+        "`on`, today's when absent. The goals count to today on every page."
+    ),
+)
 def get_todo_progress(
     user_id: str,
     query: Annotated[TodoProgressQuery, Query()],
@@ -188,6 +195,7 @@ def get_todo_progress(
         scope=query.todo_scope(),
         project=query.project_filter(),
         period=query.period,
+        on=None if query.on is None else query.on.isoformat(),
         clock=read_todo_clock(),
     )
     return TodoProgressPage.model_validate(view)

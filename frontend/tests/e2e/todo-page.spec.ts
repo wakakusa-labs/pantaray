@@ -245,21 +245,21 @@ async function openHome(page: Page, search = '') {
       const inFilter = (projectId: string | null, query: TodoProgressQuery) =>
         query.project === 'any' ||
         (query.project === 'no_project' ? projectId === null : projectId === query.project_id);
-      // The rows up to today, newest first: 7 days, 4 weeks or 2 months.
+      // Part of the page holding today, oldest first: 7 days, 4 weeks or 2 months.
       const rowBounds = (period: TodoProgressQuery['period']) => {
         if (period === 'day')
           return Array.from({ length: 7 }, (_, i) => ({
-            start: shift(TODAY, -i),
-            end: shift(TODAY, -i),
+            start: shift(TODAY, i - 6),
+            end: shift(TODAY, i - 6),
           }));
         if (period === 'week')
           return Array.from({ length: 4 }, (_, i) => ({
-            start: shift(CURRENT, -7 * i),
-            end: shift(CURRENT, 6 - 7 * i),
+            start: shift(CURRENT, 7 * (i - 3)),
+            end: shift(CURRENT, 7 * (i - 3) + 6),
           }));
         return [
-          { start: '2026-11-01', end: '2026-11-30' },
           { start: '2026-10-01', end: '2026-10-31' },
+          { start: '2026-11-01', end: '2026-11-30' },
         ];
       };
       const goalProgress = (projectId: string, shown: ProgressRecordView[]): GoalProgress => {
@@ -329,6 +329,7 @@ async function openHome(page: Page, search = '') {
         return {
           today: TODAY,
           period: query.period,
+          page_start: query.period === 'month' ? '2026-01-01' : '2026-11-01',
           rows,
           goals: goalProjects.map((projectId) => goalProgress(projectId, shown)),
           records: shown,

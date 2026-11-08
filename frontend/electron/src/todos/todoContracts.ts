@@ -75,9 +75,18 @@ export const TodoWeekQuerySchema = z
   .refine(scopeMatches, SCOPE_MISMATCH)
   .refine(projectMatches, PROJECT_MISMATCH);
 
-/** The progress view's rows are the `period`s up to today; scope and project as for the week. */
+/**
+ * The progress view's rows are the `period`s of the month (day, week) or year (month) holding
+ * `on`; no `on` is the page holding today, and the backend bounds it. Scope and project as for
+ * the week.
+ */
 export const TodoProgressQuerySchema = z
-  .object({ ...scopeShape, ...projectShape, period: PeriodKindSchema })
+  .object({
+    ...scopeShape,
+    ...projectShape,
+    period: PeriodKindSchema,
+    on: LocalDateSchema.optional(),
+  })
   .strict()
   .refine(scopeMatches, SCOPE_MISMATCH)
   .refine(projectMatches, PROJECT_MISMATCH);
@@ -325,7 +334,10 @@ const TodoProgressPageSchema = z
   .object({
     today: LocalDateSchema,
     period: PeriodKindSchema,
-    // Newest first.
+    // The first day of the month (day, week) or year (month) the rows lay out.
+    page_start: LocalDateSchema,
+    // Oldest first. Day and week rows cover the Monday-start weeks holding any day of the month,
+    // spilling into the months either side; month rows are the year's twelve months.
     rows: z.array(ProgressPeriodViewSchema),
     goals: z.array(GoalProgressSchema),
     // Every record an id above names.

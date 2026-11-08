@@ -35,7 +35,7 @@ export function ProgressPane({
   onFocusLost: () => void;
 }) {
   const { t } = useI18n();
-  const progress = useTodoProgress(scope, projectFilter, period);
+  const progress = useTodoProgress(scope, projectFilter, period, null);
   const mutations = useTodoProgressMutations({ reloadProgress: progress.reload });
   const [goalFormFor, setGoalFormFor] = useState<string | null>(null);
   const { page } = progress;

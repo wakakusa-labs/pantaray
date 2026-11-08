@@ -38,6 +38,7 @@ from pantaray_agents.local_runtime.todos.progress import (
     ProgressView,
     RecordEvidence,
     UserEvidence,
+    page_start_of,
     period_bounds,
     progress_view,
 )
@@ -258,16 +259,19 @@ def read_progress(
     scope: TodoScope,
     project: TodoProjectFilter,
     period: PeriodKind,
+    on: LocalDate | None,
     clock: TodoClock,
 ) -> ProgressView:
     """The view of the TODOs `scope` and `project` cover, as of the clock.
 
-    A goal is reported for the one project `project` names, with or without
-    one, or else for each project in scope that has one.
+    The rows are the page holding `on`, or today when it is None. A goal is
+    reported for the one project `project` names, with or without one, or
+    else for each project in scope that has one.
     """
 
     today = clock.today
-    rows_start = period_bounds(period, today)[-1][0]
+    page_start = page_start_of(period, today if on is None else on)
+    rows_start = period_bounds(period, page_start)[0][0]
     scope_sql, scope_params = todo_scope_sql(scope)
     project_sql, project_params = todo_project_sql(project)
     params: dict[str, str] = {"user_id": user_id, **scope_params, **project_params}
@@ -296,6 +300,7 @@ def read_progress(
         ).fetchall()
     return progress_view(
         period=period,
+        page_start=page_start,
         today=today,
         zone=clock.zone,
         goals=goals,

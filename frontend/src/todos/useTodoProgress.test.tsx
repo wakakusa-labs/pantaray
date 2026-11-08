@@ -19,6 +19,7 @@ const deleteProgressRecord = vi.fn();
 const progressPage = (today: string): TodoProgressPage => ({
   today,
   period: 'week',
+  page_start: '2026-11-01',
   rows: [],
   goals: [],
   records: [],
@@ -58,13 +59,14 @@ const wrapper = ({ children }: { children: ReactNode }) => (
 it('reads the progress asked for, and again when the TODOs change or a WS session starts', async () => {
   progress.mockResolvedValue(progressPage('2026-11-07'));
   const { result, rerender } = renderHook(
-    ({ period }: { period: ProgressPeriod }) =>
+    ({ period, on }: { period: ProgressPeriod; on: string | null }) =>
       useTodoProgress(
         { scope: 'organization', organization_id: 'org-1' },
         { project: 'project', project_id: 'p1' },
-        period
+        period,
+        on
       ),
-    { initialProps: { period: 'week' } }
+    { initialProps: { period: 'week', on: null } }
   );
   await waitFor(() => expect(result.current.page?.today).toBe('2026-11-07'));
   expect(progress).toHaveBeenCalledWith({
@@ -75,9 +77,11 @@ it('reads the progress asked for, and again when the TODOs change or a WS sessio
     period: 'week',
   });
 
-  rerender({ period: 'month' });
+  rerender({ period: 'month', on: '2025-03-01' });
   await waitFor(() =>
-    expect(progress).toHaveBeenLastCalledWith(expect.objectContaining({ period: 'month' }))
+    expect(progress).toHaveBeenLastCalledWith(
+      expect.objectContaining({ period: 'month', on: '2025-03-01' })
+    )
   );
 
   progress.mockResolvedValue(progressPage('2026-11-08'));

@@ -7,6 +7,7 @@ the view says so instead of showing a number.
 
 from __future__ import annotations
 
+import calendar
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -15,18 +16,11 @@ from typing import Final, Literal
 from zoneinfo import ZoneInfo
 
 from pantaray_agents.local_runtime.todos.model import LocalDate, TodoId
-from pantaray_agents.local_runtime.todos.week import (
-    local_date_at,
-    shift_days,
-    week_start_of,
-)
+from pantaray_agents.local_runtime.todos.week import local_date_at, shift_days
 from pantaray_agents.utils.timestamps import parse_iso8601_utc
 
 type PeriodKind = Literal["day", "week", "month"]
 
-# Rows the view lists, newest first: a week of days, about a month of weeks,
-# half a year of months.
-PERIOD_ROWS: Final[Mapping[PeriodKind, int]] = {"day": 7, "week": 4, "month": 6}
 # The pace comes from the last four weeks, so a weekly rhythm evens out and an
 # old burst no longer drives the projection.
 PACE_WINDOW_DAYS: Final = 28
@@ -169,7 +163,9 @@ type GoalProgress = NoGoal | NoRecords | Measured
 class ProgressView:
     today: LocalDate
     period: PeriodKind
-    rows: tuple[PeriodRow, ...]  # newest first
+    # The first day of the month (day and week rows) or year (month rows).
+    page_start: LocalDate
+    rows: tuple[PeriodRow, ...]  # oldest first; see `period_bounds`
     goals: tuple[GoalProgress, ...]
     # Every record an id above names, newest first.
     records: tuple[ProgressRecord, ...]
@@ -178,6 +174,7 @@ class ProgressView:
 def progress_view(
     *,
     period: PeriodKind,
+    page_start: LocalDate,
     today: LocalDate,
     zone: ZoneInfo,
     goals: Mapping[str, Goal | None],
@@ -187,12 +184,13 @@ def progress_view(
     """`goals` holds, by project id, each project whose goal the view reports.
 
     `records` and `checked` are those of the TODOs the view covers; ones
-    outside the rows or before a goal was set are left out here.
+    outside the rows or before a goal was set are left out here. The goals
+    count up to `today` whichever page the rows show.
     """
 
     rows = tuple(
         _row(start, end, records=records, checked=checked, zone=zone)
-        for start, end in period_bounds(period, today)
+        for start, end in period_bounds(period, page_start)
     )
     progress = tuple(
         NoGoal(project_id=project_id)
@@ -209,6 +207,7 @@ def progress_view(
     return ProgressView(
         today=today,
         period=period,
+        page_start=page_start,
         rows=rows,
         goals=progress,
         records=tuple(
@@ -221,34 +220,46 @@ def progress_view(
     )
 
 
+def page_start_of(period: PeriodKind, day: LocalDate) -> LocalDate:
+    """The first day of the month (day and week rows) or year (month rows)
+    holding `day`: any day of a page names that page."""
+
+    parsed = date.fromisoformat(day)
+    first = parsed.replace(month=1) if period == "month" else parsed
+    return first.replace(day=1).isoformat()
+
+
 def period_bounds(
-    period: PeriodKind, today: LocalDate
+    period: PeriodKind, page_start: LocalDate
 ) -> tuple[tuple[LocalDate, LocalDate], ...]:
-    """The first and last day of each row, the period containing today first."""
+    """The first and last day of each row of the page, oldest first.
 
-    bounds: list[tuple[LocalDate, LocalDate]] = []
-    start = _period_start(period, today)
-    for _ in range(PERIOD_ROWS[period]):
-        end = _next_period_start(period, start)
-        bounds.append((start, shift_days(end, -1)))
-        start = _period_start(period, shift_days(start, -1))
-    return tuple(bounds)
+    Month rows are the year's twelve months. Day and week rows cover the
+    Monday-to-Sunday weeks that hold any day of the month, so they spill into
+    the months either side: four to six weeks, as on a wall calendar.
+    """
+
+    first = date.fromisoformat(page_start)
+    if period == "month":
+        months = [first.replace(month=month) for month in range(1, 13)]
+        return tuple(
+            (month.isoformat(), _month_end(month).isoformat()) for month in months
+        )
+    last = _month_end(first)
+    grid_start = first - timedelta(days=first.weekday())
+    grid_end = last + timedelta(days=6 - last.weekday())
+    step = 1 if period == "day" else 7
+    return tuple(
+        (
+            (grid_start + timedelta(days=offset)).isoformat(),
+            (grid_start + timedelta(days=offset + step - 1)).isoformat(),
+        )
+        for offset in range(0, (grid_end - grid_start).days + 1, step)
+    )
 
 
-def _period_start(period: PeriodKind, day: LocalDate) -> LocalDate:
-    if period == "day":
-        return day
-    if period == "week":
-        return week_start_of(day)
-    return date.fromisoformat(day).replace(day=1).isoformat()
-
-
-def _next_period_start(period: PeriodKind, start: LocalDate) -> LocalDate:
-    if period == "day":
-        return shift_days(start, 1)
-    if period == "week":
-        return shift_days(start, 7)
-    return _period_start("month", shift_days(start, 31))
+def _month_end(first: date) -> date:
+    return first.replace(day=calendar.monthrange(first.year, first.month)[1])
 
 
 def _row(

@@ -21,6 +21,7 @@ from pantaray_agents.local_runtime.todos.progress import (
     Reached,
     TooFewRecords,
     UserEvidence,
+    page_start_of,
     period_bounds,
     progress_view,
 )
@@ -66,9 +67,11 @@ def _view(
     checked: Sequence[CheckedTodo] = (),
     period: PeriodKind = "week",
     today: str = TODAY,
+    on: str = TODAY,
 ) -> ProgressView:
     return progress_view(
         period=period,
+        page_start=page_start_of(period, on),
         today=today,
         zone=TOKYO,
         goals={"project-1": GOAL} if goals is None else goals,
@@ -214,19 +217,72 @@ def test_rows_follow_the_local_calendar_and_list_checked_todos() -> None:
     day = _view([monday_early, sunday_late], goals={}, checked=checked, period="day")
 
     assert [(row.start, row.end, row.record_ids) for row in week.rows[:2]] == [
-        ("2026-11-02", "2026-11-08", ("r-mon",)),
         ("2026-10-26", "2026-11-01", ("r-sun",)),
+        ("2026-11-02", "2026-11-08", ("r-mon",)),
     ]
-    assert [todo.text for todo in day.rows[1].checked] == [
+    (tuesday,) = [row for row in day.rows if row.start == "2026-11-03"]
+    assert tuesday.end == "2026-11-03"
+    assert [todo.text for todo in tuesday.checked] == [
         "Send the quote",
         "Book the room",
     ]
-    assert day.rows[1].start == day.rows[1].end == "2026-11-03"
 
 
-def test_month_rows_cover_whole_calendar_months() -> None:
-    assert period_bounds("month", "2026-03-31")[:3] == (
-        ("2026-03-01", "2026-03-31"),
-        ("2026-02-01", "2026-02-28"),
-        ("2026-01-01", "2026-01-31"),
-    )
+def _grid(page_start: str) -> tuple[str, str, int]:
+    days = period_bounds("day", page_start)
+    weeks = period_bounds("week", page_start)
+    # The day rows and the week rows lay out the same weeks.
+    assert [start for start, _ in days[::7]] == [start for start, _ in weeks]
+    assert [end for _, end in days[6::7]] == [end for _, end in weeks]
+    return days[0][0], days[-1][1], len(weeks)
+
+
+def test_a_month_starting_on_monday_fills_its_own_weeks() -> None:
+    # February 2027 is four whole weeks, Monday 1st to Sunday 28th.
+    assert _grid("2027-02-01") == ("2027-02-01", "2027-02-28", 4)
+    # June 2026 starts on a Monday and spills into July.
+    assert _grid("2026-06-01") == ("2026-06-01", "2026-07-05", 5)
+
+
+def test_a_month_starting_on_sunday_opens_with_the_last_months_week() -> None:
+    assert _grid("2026-02-01") == ("2026-01-26", "2026-03-01", 5)
+
+
+def test_a_long_month_starting_late_in_the_week_takes_six_weeks() -> None:
+    assert _grid("2026-03-01") == ("2026-02-23", "2026-04-05", 6)
+    assert _grid("2026-11-01") == ("2026-10-26", "2026-12-06", 6)
+
+
+def test_any_day_names_its_month_or_year() -> None:
+    assert page_start_of("day", "2026-11-30") == "2026-11-01"
+    assert page_start_of("week", "2026-11-30") == "2026-11-01"
+    assert page_start_of("month", "2026-11-30") == "2026-01-01"
+    assert period_bounds("month", "2028-01-01")[1] == ("2028-02-01", "2028-02-29")
+    assert period_bounds("month", "2026-01-01")[-1] == ("2026-12-01", "2026-12-31")
+
+
+def test_the_goals_count_to_today_whichever_page_is_shown() -> None:
+    # The goal runs to 2026-12-31; the pages before it was set, across its
+    # deadline and after it all report it as of today.
+    records = [
+        _record("r-oct", "2026-10-20T01:00:00.000Z"),  # before the goal was set
+        _record("r-1", "2026-11-02T01:00:00.000Z"),
+        _record("r-2", "2026-11-03T01:00:00.000Z"),
+    ]
+    current = _view(records)
+    year = _view(records, period="month", on="2026-06-15")
+    october = _view(records, period="day", on="2026-10-01")
+    next_year = _view(records, period="month", on="2027-03-01")
+
+    assert year.goals == october.goals == next_year.goals == current.goals
+    assert _measured(year).record_ids == ("r-2", "r-1")
+    assert [(row.start, row.record_ids) for row in year.rows[9:11]] == [
+        ("2026-10-01", ("r-oct",)),
+        ("2026-11-01", ("r-2", "r-1")),
+    ]
+    assert next_year.page_start == "2027-01-01"
+    assert all(row.record_ids == () for row in next_year.rows)
+    # October's grid ends on Sunday 1 November, before the records toward the
+    # goal; the goal still names them, so the page carries them.
+    assert october.rows[-1].end == "2026-11-01"
+    assert {record.record_id for record in october.records} == {"r-oct", "r-1", "r-2"}

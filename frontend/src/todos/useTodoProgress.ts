@@ -17,14 +17,16 @@ export type TodoProgressRead = {
 };
 
 /**
- * The progress of the TODOs in view, by `period`, read again when the TODOs or their progress
- * change. Nothing in it follows a conversation's state (an Action's record arrives as a TODO
- * change), so an Action's history changes do not read it again.
+ * The progress of the TODOs in view, by `period` on the month or year holding `on` (null is
+ * today's), read again when the TODOs or their progress change. Nothing in it follows a
+ * conversation's state (an Action's record arrives as a TODO change), so an Action's history
+ * changes do not read it again.
  */
 export function useTodoProgress(
   scope: TodoScopeQuery,
   projectFilter: TodoProjectFilter,
-  period: ProgressPeriod
+  period: ProgressPeriod,
+  on: string | null
 ): TodoProgressRead {
   const { scope: scopeKind, organization_id: organizationId } = scope;
   const { project, project_id: projectId } = projectFilter;
@@ -36,8 +38,9 @@ export function useTodoProgress(
         project,
         ...(projectId === undefined ? {} : { project_id: projectId }),
         period,
+        ...(on === null ? {} : { on }),
       }),
-    [scopeKind, organizationId, project, projectId, period]
+    [scopeKind, organizationId, project, projectId, period, on]
   );
   const { data, error, reload } = useTodoRead(read, false);
   return { page: data, error, reload };

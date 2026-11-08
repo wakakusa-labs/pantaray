@@ -209,8 +209,8 @@ function ChatRow({
 }
 
 /**
- * The home page's sidebar: search, all TODOs, the projects (each selects its TODOs), the deleted
- * TODOs, and, while `SHOW_CONVERSATION_LISTS` is on, the chat and the other conversations by day
+ * The home page's sidebar: all TODOs, the projects (each selects its TODOs), the deleted TODOs,
+ * and, while `SHOW_CONVERSATION_LISTS` is on, search, the chat and the other conversations by day
  * under their heading. The heading starts a new task in two places: ✎ in the detail pane, and the
  * small window's icon in the small window, as the global shortcut does. A conversation row
  * selects what the main area shows; the selected entry is marked current.
@@ -482,11 +482,16 @@ export function HistorySidebar({
     <aside
       id={HISTORY_SIDEBAR_ID}
       className="history-sidebar"
-      aria-label={t('history.sidebar.label')}
+      aria-label={t(
+        SHOW_CONVERSATION_LISTS ? 'history.sidebar.label' : 'history.sidebar.todosLabel'
+      )}
       hidden={hidden}
     >
       <div className="history-sidebar__head">
-        <HistorySearchField searchText={searchText} onSearch={setSearchText} />
+        {/* The search filters the conversations only. */}
+        {SHOW_CONVERSATION_LISTS ? (
+          <HistorySearchField searchText={searchText} onSearch={setSearchText} />
+        ) : null}
         {notice ? (
           <div className="history-error" role="alert">
             {notice}

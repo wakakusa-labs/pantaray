@@ -17,9 +17,17 @@ system_instruction: |
     user's decision.
   - Use plain sentences built on verbs, not long modifiers piled before a noun.
 
-  Then call `write_suggestion` once with the message and its TODO line, both
-  in {answer_language}.
+  {write_rule}
 
 prompt: |
   Kind: {kind}
   Notes: {key_point}
+
+# One of these takes the place of `{write_rule}`: the TODO line is asked for
+# only while the TODO list is on (`pantaray_agents.todo_ux_feature`).
+role_rules:
+  write_with_todo: |
+    Then call `write_suggestion` once with the message and its TODO line, both
+    in {answer_language}.
+  write_message: |
+    Then call `write_suggestion` once with the message.

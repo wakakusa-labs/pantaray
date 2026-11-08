@@ -20,7 +20,7 @@ from pantaray_agents.agents.suggestion_agent.context_types import (
 from pantaray_agents.agents.suggestion_agent.output import parse_suggestion_output
 from pantaray_agents.agents.suggestion_agent.writer import (
     SUGGESTION_WRITER_PROMPT_NAME,
-    build_writer_messages,
+    build_writer_request,
 )
 from pantaray_agents.mock.mock_agent_repository import MockSuggestionAgentRepository
 from pantaray_agents.mock.mock_llm_client import MockLLMClient
@@ -201,7 +201,7 @@ def test_open_todos_take_only_the_room_the_other_sections_leave(
 
 @pytest.mark.parametrize("label", ["Japanese", "English"])
 def test_real_writer_prompt_renders_only_the_decided_content(label: str) -> None:
-    system, prompt = build_writer_messages(
+    request = build_writer_request(
         PromptLoader().load_config(SUGGESTION_WRITER_PROMPT_NAME),
         {
             "interaction_contract": "action_offer",
@@ -210,10 +210,36 @@ def test_real_writer_prompt_renders_only_the_decided_content(label: str) -> None
         answer_language=label,
     )
 
-    assert f"natural {label}" in system
-    assert "{" not in prompt
+    assert f"natural {label}" in request.system
+    assert "{" not in request.system + request.prompt
     for value in ("offer", "decided-point"):
-        assert value in prompt
+        assert value in request.prompt
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+@pytest.mark.parametrize("contract", ["action_offer", "message_only"])
+def test_the_writer_is_asked_for_a_todo_only_while_the_todo_list_is_on(
+    monkeypatch: pytest.MonkeyPatch, enabled: bool, contract: str
+) -> None:
+    monkeypatch.setattr(todo_ux_feature, "TODO_UX_ENABLED", enabled)
+
+    request = build_writer_request(
+        PromptLoader().load_config(SUGGESTION_WRITER_PROMPT_NAME),
+        {"interaction_contract": contract, "key_point": "decided-point"},
+        answer_language="Japanese",
+    )
+
+    fields = set(request.tool.parameters["properties"])
+    if enabled:
+        assert "todo" in fields
+        assert "TODO line" in request.system
+    else:
+        # Off, the writer is asked for the message alone, as before the TODO list.
+        assert fields == {"message"}
+        assert "TODO" not in request.system
+        assert request.system.endswith(
+            "Then call `write_suggestion` once with the message."
+        )
 
 
 def test_prompt_examples_are_accepted_by_the_suggestion_parser(

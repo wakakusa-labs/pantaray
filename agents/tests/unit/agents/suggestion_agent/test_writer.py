@@ -8,6 +8,7 @@ from tests.unit.agents.suggestion_agent.prompt_support import (
     writer_call,
 )
 
+from pantaray_agents import todo_ux_feature
 from pantaray_agents.agents.core.mixins import llm_generation_mixin as mixin_mod
 from pantaray_agents.agents.suggestion_agent import SuggestionAgent
 from pantaray_agents.agents.suggestion_agent.writer import parse_written_suggestion
@@ -140,6 +141,25 @@ async def test_advice_opens_its_todo_done_without_asking_the_writer(
     assert offered == [{"message", "todo"}]
 
 
+@pytest.mark.asyncio
+async def test_off_the_writer_writes_the_message_alone_and_no_todo(
+    suggestion_agent: SuggestionAgent,
+    mock_llm_client: MockLLMClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(todo_ux_feature, "TODO_UX_ENABLED", False)
+    serve_lens_runs(
+        mock_llm_client,
+        _decision(),
+        {"tool_id": "write_suggestion", "args": {"message": WRITTEN}},
+    )
+
+    response = await suggestion_agent.process(_request())
+
+    assert response.status == StatusType.SUCCESS
+    assert (response.answer, response.todo) == (WRITTEN, None)
+
+
 @pytest.mark.parametrize(
     ("state", "note", "expected"),
     [
@@ -160,9 +180,10 @@ def test_an_offers_todo_state_needs_a_note_unless_done(
     arguments = {"message": "m", "todo": "t", "todo_state": state, "todo_note": note}
     if expected is ValueError:
         with pytest.raises(ValueError, match="todo_note"):
-            parse_written_suggestion(arguments, "action_offer")
+            parse_written_suggestion(arguments, "action_offer", with_todo=True)
         return
-    assert parse_written_suggestion(arguments, "action_offer").todo == expected
+    written = parse_written_suggestion(arguments, "action_offer", with_todo=True)
+    assert written.todo == expected
 
 
 @pytest.mark.asyncio

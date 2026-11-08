@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from pantaray_agents import todo_ux_feature
 from pantaray_agents.action_status import FinalizeActionTerminalCommand
 from pantaray_agents.local_runtime.agent_state import LocalSuggestionRepository
 from pantaray_agents.local_runtime.agent_state import (
@@ -1042,3 +1043,42 @@ async def test_a_todo_the_list_cannot_hold_fails_the_whole_save(
     row = await repo.get_suggestion(user_id=USER_ID, suggestion_id=SUGGESTION_ID)
     assert row.data is not None
     assert (row.data["status"], row.data["answer"]) == ("processing", None)
+
+
+@pytest.mark.asyncio
+async def test_off_a_shown_suggestion_is_saved_without_a_todo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(todo_ux_feature, "TODO_UX_ENABLED", False)
+    response = _success_response(answer="Send the reply?").model_copy(
+        update={"todo": None}
+    )
+
+    db_path, repo = await _save_with_todo(tmp_path, monkeypatch, response)
+
+    assert _todo_rows(db_path) == []
+    assert _todo_revision(db_path) == 0
+    row = await repo.get_suggestion(user_id=USER_ID, suggestion_id=SUGGESTION_ID)
+    assert row.data is not None
+    assert (row.data["status"], row.data["answer"]) == ("success", "Send the reply?")
+
+
+@pytest.mark.asyncio
+async def test_on_a_shown_suggestion_without_its_todo_is_not_saved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = _bootstrap_db(tmp_path)
+    monkeypatch.setattr(suggestion_repository_module, "read_todo_clock", lambda: NOW)
+    repo = _repo(db_path)
+    await repo.create_processing_suggestion_row(
+        user_id=USER_ID, suggestion_id=SUGGESTION_ID, created_at=NOW.now
+    )
+
+    saved = await repo.save_suggestion(
+        _success_response(answer="Send the reply?").model_copy(update={"todo": None}),
+        prompt_name="suggestion",
+        prompt_version="1.0",
+    )
+
+    assert saved.error == "a shown Suggestion needs its TODO"
+    assert _todo_rows(db_path) == []

@@ -6,6 +6,7 @@ from datetime import timedelta
 
 from pydantic import ValidationError
 
+from pantaray_agents import todo_ux_feature
 from pantaray_agents.local_runtime.memory_catalog.domain_registration import (
     register_inline_domain_memory,
 )
@@ -21,7 +22,8 @@ from pantaray_agents.local_runtime.storage.transactions import (
     immediate_transaction,
 )
 from pantaray_agents.local_runtime.todos.clock import read_todo_clock
-from pantaray_agents.local_runtime.todos.core import Rejected
+from pantaray_agents.local_runtime.todos.core import CreateRejection, Rejected
+from pantaray_agents.local_runtime.todos.model import Todo
 from pantaray_agents.local_runtime.todos.writes import (
     build_suggestion_todo,
     insert_suggestion_todo,
@@ -142,17 +144,19 @@ class LocalSuggestionRepository(
             )
         except ValidationError:
             return RepositoryResult(error="artifacts must be valid artifact paths")
-        todo = (
-            None
-            if suggestion.todo is None
-            else build_suggestion_todo(
+        # Every shown Suggestion is a TODO while the TODO list is on; off, the
+        # Suggestion is saved as it was before the TODO list.
+        todo: Todo | Rejected[CreateRejection] | None = None
+        if todo_ux_feature.TODO_UX_ENABLED and suggestion.shown:
+            if suggestion.todo is None:
+                return RepositoryResult(error="a shown Suggestion needs its TODO")
+            todo = build_suggestion_todo(
                 suggestion_id=str(suggestion.suggestion_id),
                 todo=suggestion.todo,
                 clock=read_todo_clock(),
             )
-        )
-        if isinstance(todo, Rejected):
-            return RepositoryResult(error=f"the Suggestion's TODO is {todo.reason}")
+            if isinstance(todo, Rejected):
+                return RepositoryResult(error=f"the Suggestion's TODO is {todo.reason}")
         with self._connect() as connection:
             with immediate_transaction(connection):
                 updated = connection.execute(

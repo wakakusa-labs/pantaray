@@ -162,17 +162,23 @@ class SuggestionAgentResponse(AgentResponse):
     )
     todo: SuggestionTodo | None = Field(
         default=None,
-        description="The TODO a shown Suggestion becomes; None when none is shown",
+        description=(
+            "The TODO a shown Suggestion becomes; None when none is shown or "
+            "the TODO list is off"
+        ),
     )
     user_id: str = Field(description="提案対象のユーザーのID")
 
     @model_validator(mode="after")
-    def _shown_suggestion_has_todo(self) -> Self:
-        # Every shown Suggestion is a TODO, so none can be saved without one.
-        shown = self.status == StatusType.SUCCESS and self.has_suggestion
-        if shown != (self.todo is not None):
-            raise ValueError("a TODO is required exactly when a Suggestion is shown")
+    def _only_a_shown_suggestion_has_a_todo(self) -> Self:
+        # The save requires one for every shown Suggestion while the TODO list is on.
+        if self.todo is not None and not self.shown:
+            raise ValueError("only a shown Suggestion has a TODO")
         return self
+
+    @property
+    def shown(self) -> bool:
+        return self.status == StatusType.SUCCESS and self.has_suggestion
 
 
 class SuggestionPromptInsightItem(TypedDict, total=False):

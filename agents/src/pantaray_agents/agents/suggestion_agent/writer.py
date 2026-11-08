@@ -112,12 +112,7 @@ def writer_tool(
     properties |= {
         "todo": {
             "type": "string",
-            "description": (
-                "The work the message is about, as one line for the user's TODO list."
-                if offer
-                else "What the message did for the user, as one line for their "
-                "TODO list, where it shows as done."
-            ),
+            "description": "The TODO line.",
         },
     }
     if offer:

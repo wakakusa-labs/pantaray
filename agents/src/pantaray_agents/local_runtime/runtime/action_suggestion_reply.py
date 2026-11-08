@@ -4,9 +4,7 @@ A Suggestion the user answers in words opens this way. A message-only Suggestion
 answered so, and so is an offer the user dismissed: writing after dismissing it asks
 for something else. The dismissal stays as recorded. A TODO the AI wrote opens this
 way too when Pantaray picks it up: the TODO is the AI's words, and the USER row that
-follows is Pantaray's, not the user's. A TODO a Suggestion became opens with that
-Suggestion's message, linked to it as a reply is, so an offer nobody answered yet
-gets one conversation and no approval is recorded for it.
+follows is Pantaray's, not the user's.
 """
 
 import sqlite3
@@ -15,19 +13,8 @@ import uuid
 from .action_message_models import (
     ACTION_HOST_STEP_NAMES_SQL,
     ActionMessageConflictError,
-    ActionMessageOrigin,
     NewActionTarget,
 )
-
-# What a reply can answer: a notice, or an offer the user dismissed.
-_REPLYABLE_SQL = """(interaction_contract='message_only'
-  OR (interaction_contract='action_offer' AND user_reaction='rejected'))"""
-# What a TODO pickup can continue: an offer nobody answered and no approval
-# has started an Action for.
-_PICKABLE_SQL = """(interaction_contract='action_offer' AND user_reaction IS NULL
-  AND NOT EXISTS (SELECT 1 FROM agent_actions AS approved
-    WHERE approved.user_id=agent_suggestions.user_id
-      AND approved.suggestion_id=agent_suggestions.suggestion_id))"""
 
 
 def suggestion_has_conversation(
@@ -35,9 +22,10 @@ def suggestion_has_conversation(
 ) -> bool:
     """Whether an Action already opened with the Suggestion's message.
 
-    A reply opens one, and so does Pantaray picking up the Suggestion's TODO.
     Then the Action owns what happens next: approving or dismissing the
     Suggestion as well would start a second Action, or leave rejected work running.
+    Besides replies, stored Actions the TODO pickup once opened for a Suggestion
+    that nobody had answered are such conversations.
     """
 
     return (
@@ -85,7 +73,6 @@ def insert_opening_assistant_message(
     action_id: str,
     process_id: str,
     target: NewActionTarget,
-    origin: ActionMessageOrigin,
     created_at: str,
 ) -> None:
     """Join the first USER's transaction after its process exists, before numbering it."""
@@ -96,7 +83,6 @@ def insert_opening_assistant_message(
             action_id=action_id,
             process_id=process_id,
             suggestion_id=target.reply_to_suggestion_id,
-            available_sql=_PICKABLE_SQL if origin == "todo_pickup" else _REPLYABLE_SQL,
         )
     elif target.todo_text is not None:
         _insert_opening_step(
@@ -117,12 +103,13 @@ def _insert_suggestion_reply_message(
     action_id: str,
     process_id: str,
     suggestion_id: str,
-    available_sql: str,
 ) -> None:
     source = connection.execute(
-        f"""SELECT answer,created_at FROM agent_suggestions
+        """SELECT answer,created_at FROM agent_suggestions
         WHERE user_id=? AND suggestion_id=? AND status='success' AND has_suggestion=1
-          AND {available_sql} AND LENGTH(TRIM(answer))>0""",
+          AND (interaction_contract='message_only'
+               OR (interaction_contract='action_offer' AND user_reaction='rejected'))
+          AND LENGTH(TRIM(answer))>0""",
         (user_id, suggestion_id),
     ).fetchone()
     if source is None:

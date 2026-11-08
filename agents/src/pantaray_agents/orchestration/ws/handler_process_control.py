@@ -112,7 +112,7 @@ class WSHandlerProcessControlMixin:
                 dismiss_reason=reason,
             )
         except SuggestionStatusPersistenceError as exc:
-            # Pantaray picked up its TODO meanwhile; the Action's own controls stop it.
+            # An Action already opened with its message; that Action's controls stop it.
             if str(exc) == SUGGESTION_HAS_CONVERSATION_ERROR:
                 await self._send_dismiss_not_allowed(suggestion_id)
                 return

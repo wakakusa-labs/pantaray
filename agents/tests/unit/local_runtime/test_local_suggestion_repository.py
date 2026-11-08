@@ -19,8 +19,8 @@ from pantaray_agents.local_runtime.storage.migrations import (
 from pantaray_agents.local_runtime.todos.clock import TodoClock
 from pantaray_agents.local_runtime.todos.display import (
     Done,
-    NotStarted,
     Partial,
+    Waiting,
     display_state,
 )
 from pantaray_agents.local_runtime.todos.model import SuggestionConversation
@@ -928,10 +928,10 @@ def _offer(todo: SuggestionTodo) -> SuggestionAgentResponse:
             SuggestionTodo(text="Send the reply", outcome="partial", note="Drafted."),
             Partial(note="Drafted."),
         ),
-        # Continued work waits for its Action to start.
+        # Continued work waits for the user's answer to the offer.
         (
             SuggestionTodo(text="Send the reply", outcome="continue", note="Not sent."),
-            NotStarted(reason="starting"),
+            Waiting(reason="approval", note="Not sent."),
         ),
     ],
 )

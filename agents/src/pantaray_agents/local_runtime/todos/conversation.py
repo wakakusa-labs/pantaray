@@ -47,9 +47,8 @@ def todo_message_id(todo_id: TodoId) -> str:
     return str(uuid.uuid5(_NAMESPACE_TODO_MESSAGE, todo_id))
 
 
-# A Suggestion's conversation is the Action that accepted it, or that opened
-# with its message: a reply, or the pickup continuing its TODO;
-# any TODO's is also the Action opened with its own message id, which is how the
+# A Suggestion's conversation is the Action that accepted it or that opened
+# with its message; any TODO's is also the Action opened with its own message id, which is how the
 # pickup starts one. An Action's latest run is the newest adopted USER row's,
 # and agent_actions keeps that run's status and answer; any paused process of
 # the Action, a subagent's too, is waiting on the user's approval.

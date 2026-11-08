@@ -117,7 +117,7 @@ async def test_handle_reject_persistence_failure_returns_dependency_error() -> N
 
 
 @pytest.mark.asyncio
-async def test_dismissing_a_suggestion_pantaray_picked_up_is_not_allowed() -> None:
+async def test_dismissing_a_suggestion_with_a_conversation_is_not_allowed() -> None:
     handler, websocket = _build_handler()
     handler._get_suggestion_repository = AsyncMock(return_value=_build_repo_mock())  # type: ignore[method-assign]
     handler._persist_suggestion_status = AsyncMock(  # type: ignore[method-assign]

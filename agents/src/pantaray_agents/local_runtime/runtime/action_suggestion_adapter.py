@@ -70,8 +70,8 @@ def validate_suggestion_action_start(
         raise ActionMessageConflictError(
             "Suggestion is not available for Action creation"
         )
-    # Pantaray may already have picked up the Suggestion's TODO in a conversation
-    # opened with its message; approving it now would start a second Action.
+    # An Action that already opened with its message owns the work; approving
+    # the Suggestion too would start a second one.
     if suggestion_has_conversation(
         connection, user_id=user_id, suggestion_id=suggestion_id
     ):

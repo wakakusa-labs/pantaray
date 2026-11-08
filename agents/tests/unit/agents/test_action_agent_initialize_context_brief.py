@@ -391,7 +391,7 @@ async def test_initialize_context_projects_followup_to_restored_history_once(
 
 
 @pytest.mark.asyncio
-async def test_a_picked_up_suggestions_todo_reads_its_summary_and_target_unapproved(
+async def test_a_stored_suggestion_handoff_reads_its_summary_and_target_unapproved(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

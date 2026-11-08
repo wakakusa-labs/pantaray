@@ -367,8 +367,8 @@ class TodoHandoffProject(BaseModel):
 class TodoHandoffSuggestion(BaseModel):
     """What the Suggestion a TODO came from left for the work, as an approval carries it.
 
-    The user approved nothing: Pantaray picked the TODO up. So it sits on the
-    hand-off, apart from ``suggestion_approval``.
+    The user approved nothing: the TODO pickup opened that Action. So it sits on
+    the hand-off, apart from ``suggestion_approval``.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
@@ -392,7 +392,8 @@ class TodoHandoffInput(BaseModel):
 
     todo_id: str
     project: TodoHandoffProject | None
-    # Set for a Suggestion's TODO; messages stored before it read as None.
+    # Nothing writes this any more. Actions the pickup once opened for a
+    # Suggestion's TODO stored it, and they must keep parsing and running.
     suggestion: TodoHandoffSuggestion | None = None
 
     _validate_todo_id = field_validator("todo_id")(_bounded_id)

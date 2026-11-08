@@ -82,8 +82,8 @@ async def initialize_context(
         if intervening_user_steps
         else current_user_message
     )
-    # An approved Suggestion carries its context on the approval; a Suggestion's
-    # TODO Pantaray picked up carries the same context on its hand-off.
+    # An approved Suggestion carries its context on the approval; an Action the
+    # pickup once opened for a Suggestion's TODO stored it on its hand-off.
     handoff = context_user_message.todo_handoff
     suggestion = context_user_message.suggestion_approval or (
         None if handoff is None else handoff.suggestion

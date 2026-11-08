@@ -94,8 +94,7 @@ function createManagerHarness(overrides = {}) {
         overrides.onSendToOverlay?.(id, channel);
       },
       registerProcessAssociation: () => {},
-      adoptActionAssociation: (actionId, overlayId) =>
-        overrides.onAdoptActionAssociation?.(actionId, overlayId),
+      adoptActionAssociation: () => {},
       cleanupMappingsForProcess: (id) => overrides.onCleanupProcess?.(id),
       cleanupMappingsForAction: (id) => overrides.onCleanupAction?.(id),
       clearActionAssociations: () => overrides.onClearActionAssociations?.(),
@@ -133,12 +132,10 @@ function createManagerHarness(overrides = {}) {
     getRuntimeState: overrides.getRuntimeState || (() => ({ status: 'ready', message: null })),
     getUiLanguage: overrides.getUiLanguage || (() => 'en'),
     latestActionPages: immediateLatestPages(async (actionId) => {
-      overrides.onReadLatestPage?.(actionId);
       return overrides.readLatestActionConversationPage
         ? await overrides.readLatestActionConversationPage(actionId)
         : conversationPage(actionId);
     }),
-    readSuggestionSnapshot: overrides.readSuggestionSnapshot || (async () => null),
     respondToHtmlRender: overrides.respondToHtmlRender,
     timers,
   });
@@ -1692,128 +1689,4 @@ test('a read brings the reply Action to a dismissal main recorded before the rep
   assert.equal(suggestionSnapshotsSentToMain(harness).at(-1).actionId, 'act-reply');
   assert.equal(harness.overlayPayloads.get('sug-1').snapshot.actionId, 'act-reply');
   assert.equal(harness.manager.getOverlaySnapshot('sug-1'), null);
-});
-
-test('a TODO change brings the Action Pantaray opened to an offer nobody answered', async () => {
-  const reads = [];
-  const harness = createManagerHarness({
-    readSuggestionSnapshot: async (suggestionId) => {
-      reads.push(suggestionId);
-      return persistedSnapshot({ suggestionId, actionId: `action-${suggestionId}` });
-    },
-  });
-  harness.manager.ensureConnected();
-  harness.manager.adoptSuggestionSnapshot(persistedSnapshot({ suggestionId: 'sug-open' }));
-  harness.manager.adoptSuggestionSnapshot(
-    persistedSnapshot({ suggestionId: 'sug-notice', interactionContract: 'message_only' })
-  );
-  harness.manager.adoptSuggestionSnapshot(
-    persistedSnapshot({ suggestionId: 'sug-linked', actionId: 'action-before' })
-  );
-
-  harness.getWsHooks().forwardEventToRenderers({ event: 'todo_changed', data: { revision: 2 } });
-  await new Promise((resolve) => setImmediate(resolve));
-
-  // Only the open offer is read again; its windows now show the Action, with no reaction.
-  assert.deepEqual(reads, ['sug-open']);
-  const linked = harness.manager.getOverlaySnapshot('sug-open');
-  assert.equal(linked.actionId, 'action-sug-open');
-  assert.equal(linked.reactionState, null);
-  assert.equal(harness.overlayPayloads.get('sug-open').snapshot.actionId, 'action-sug-open');
-});
-
-test('an offer picked up before it finished streaming finds its Action once it finishes', async () => {
-  const reads = [];
-  const harness = createManagerHarness({
-    readSuggestionSnapshot: async (suggestionId) => {
-      reads.push(suggestionId);
-      return persistedSnapshot({ suggestionId, actionId: `action-${suggestionId}` });
-    },
-  });
-  harness.manager.ensureConnected();
-  const hooks = harness.getWsHooks();
-  // Still streaming: main does not know yet that these are offers.
-  for (const suggestionId of ['sug-late', 'sug-other']) {
-    harness.manager.adoptSuggestionSnapshot(
-      persistedSnapshot({ suggestionId, interactionContract: null, lastSequence: 1 })
-    );
-  }
-
-  hooks.forwardEventToRenderers({ event: 'todo_changed', data: { revision: 2 } });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(reads, []);
-
-  hooks.forwardEventToRenderers(completedOffer('sug-late'));
-  await new Promise((resolve) => setImmediate(resolve));
-
-  // Only the suggestion that finished is checked, and it shows the Action with no reaction.
-  assert.deepEqual(reads, ['sug-late']);
-  assert.equal(harness.manager.getOverlaySnapshot('sug-late').actionId, 'action-sug-late');
-  assert.equal(harness.manager.getOverlaySnapshot('sug-late').reactionState, null);
-});
-
-test('a new session checks the offers a missed TODO change would have linked', async () => {
-  let pickedUp = false;
-  const reads = [];
-  const harness = createManagerHarness({
-    readSuggestionSnapshot: async (suggestionId) => {
-      reads.push(suggestionId);
-      return persistedSnapshot({ suggestionId, actionId: pickedUp ? 'action-1' : null });
-    },
-  });
-  harness.manager.ensureConnected();
-  const hooks = harness.getWsHooks();
-  harness.manager.adoptSuggestionSnapshot(persistedSnapshot());
-  hooks.forwardStatusToRenderers({ status: 'session_started', session_id: 'session-1' });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(harness.manager.getOverlaySnapshot('sug-1').actionId, null);
-
-  // Picked up while no session was live: its TODO change is not sent again.
-  pickedUp = true;
-  hooks.forwardStatusToRenderers({ status: 'session_started', session_id: 'session-2' });
-  await new Promise((resolve) => setImmediate(resolve));
-
-  assert.deepEqual(reads, ['sug-1', 'sug-1']);
-  assert.equal(harness.manager.getOverlaySnapshot('sug-1').actionId, 'action-1');
-});
-
-function completedOffer(suggestionId) {
-  return {
-    event: 'process_completed',
-    sequence: 5,
-    data: {
-      kind: 'suggestion',
-      process_id: `proc-${suggestionId}`,
-      suggestion_id: suggestionId,
-      status: 'success',
-      interaction_contract: 'action_offer',
-    },
-    meta: { kind: 'suggestion', process_id: `proc-${suggestionId}`, suggestion_id: suggestionId },
-  };
-}
-
-test('linking a picked-up offer reads its conversation and resumes its run, with no event sent', async () => {
-  const pagesRead = [];
-  const resumed = [];
-  const associated = [];
-  const harness = createManagerHarness({
-    readSuggestionSnapshot: async (suggestionId) =>
-      persistedSnapshot({ suggestionId, actionId: 'action-picked' }),
-    onReadLatestPage: (actionId) => pagesRead.push(actionId),
-    onResumeProcess: (request) => resumed.push(request),
-    onAdoptActionAssociation: (actionId, overlayId) => associated.push([actionId, overlayId]),
-  });
-  harness.manager.ensureConnected();
-  harness.manager.adoptSuggestionSnapshot(persistedSnapshot());
-
-  harness.getWsHooks().forwardEventToRenderers({ event: 'todo_changed', data: { revision: 2 } });
-  for (let i = 0; i < 5; i += 1) await new Promise((resolve) => setImmediate(resolve));
-
-  // The suggestion's panel follows the Action, its page is read, and its run, which may wait
-  // for the user's approval, is attached live.
-  assert.deepEqual(associated, [['action-picked', 'sug-1']]);
-  assert.deepEqual(pagesRead, ['action-picked']);
-  assert.deepEqual(resumed, [
-    { kind: 'action', actionId: 'action-picked', processId: 'run-1', fromStart: true },
-  ]);
 });

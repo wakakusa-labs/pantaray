@@ -165,9 +165,27 @@ def test_an_answer_from_the_server_thread_wakes_the_waiting_loop_at_once() -> No
     ]
     worker.join(timeout=10)
 
-    assert statuses == ["accepted", "already_answered"]
+    # The woken waiter may close the request before the second answer arrives,
+    # so that answer finds it either answered or gone; never accepted twice.
+    assert statuses[0] == "accepted"
+    assert statuses[1] in ("already_answered", "unknown_request")
     assert waited["outcome"] is refusal
     assert waited["seconds"] < 0.5  # type: ignore[operator]
+
+
+async def test_a_second_answer_to_a_waiting_request_is_refused() -> None:
+    broker = OneShotRequests[ScreenCaptureOutcome]()
+    refusal = ScreenCaptureRefused(code="CAPTURE_REFUSED_URL_UNAVAILABLE", details={})
+    request_id = broker.open(user_id="user-1")
+
+    # Both answers land before this loop runs the waiter, so it is still open.
+    statuses = [
+        broker.answer(request_id=request_id, user_id="user-1", outcome=refusal)
+        for _ in range(2)
+    ]
+
+    assert statuses == ["accepted", "already_answered"]
+    assert await broker.wait(request_id=request_id, timeout_seconds=1) is refusal
 
 
 async def test_an_answer_that_races_a_closing_waiter_is_dropped_quietly() -> None:

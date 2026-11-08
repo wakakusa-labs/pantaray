@@ -9,11 +9,14 @@ import type {
   GoalProgress,
   GoalView,
   ProgressPace,
+  ProgressPeriodView,
   ProgressRecordView,
   TodoProgressPage,
 } from '../../../../electron/src/todos/todoContracts';
 import { GoalForm } from './GoalForm';
+import { ProgressDayPane, type RecordActions } from './ProgressDayPane';
 import { ProjectGoalDialog } from './ProjectGoalDialog';
+import { pageStartOf, shiftPage, totalsOf, weekHolding } from './progressPages';
 import { percentValue } from './progressText';
 import { ProgressView } from './ProgressView';
 
@@ -33,31 +36,64 @@ const GOAL: GoalView = {
 
 const record = (
   record_id: string,
+  day: string,
   note: string,
   quantity: number,
   unit: string,
-  evidence: ProgressRecordView['evidence'] = { kind: 'user' }
+  evidence: ProgressRecordView['evidence'] = { kind: 'user' },
+  project_id: string | null = 'p-sales'
 ): ProgressRecordView => ({
   record_id,
   todo_id: `todo-${record_id}`,
-  project_id: 'p-sales',
+  project_id,
   quantity,
   unit,
   note,
   evidence,
-  recorded_at: '2026-11-05T12:00:00Z',
+  recorded_at: `${day}T12:00:00Z`,
 });
 
 const RECORDS = [
-  record('r1', '丸和商事から受注', 10_000_000, '円'),
-  record('r2', '北星から受注', 15_000_000, '円', {
+  record('r1', '2026-11-05', '丸和商事から受注', 10_000_000, '円'),
+  record('r2', '2026-11-05', '北星から受注', 15_000_000, '円', {
     kind: 'action_steps',
     action_id: 'action-1',
     step_ids: ['s1'],
   }),
-  record('r3', '東和から受注', 5_000_000, '円'),
-  record('r4', '展示会で名刺交換', 40, '枚'),
+  record('r3', '2026-10-30', '東和から受注', 5_000_000, '円'),
+  record('r4', '2026-11-03', '展示会で名刺交換', 40, '枚'),
+  record('r5', '2026-11-05', '面接', 2, '人', { kind: 'user' }, 'p-hiring'),
 ];
+
+const checked = (todo_id: string, day: string, text: string) => ({
+  todo_id,
+  project_id: 'p-sales',
+  text,
+  checked_at: `${day}T12:00:00Z`,
+});
+
+const CHECKED = [
+  checked('t1', '2026-11-03', '見積書を送る'),
+  checked('t2', '2026-11-04', '名刺を入れる'),
+];
+
+const DAY_MS = 86_400_000;
+
+/** November 2026's calendar, 10/26 to 12/6, a row a day as the backend lays it out. */
+function dayRows(records: readonly ProgressRecordView[], done = CHECKED): ProgressPeriodView[] {
+  const start = Date.parse('2026-10-26T00:00:00Z');
+  return Array.from({ length: 42 }, (_, index) => {
+    const day = new Date(start + index * DAY_MS).toISOString().slice(0, 10);
+    return {
+      start: day,
+      end: day,
+      record_ids: records
+        .filter((item) => item.recorded_at.startsWith(day))
+        .map((item) => item.record_id),
+      checked: done.filter((todo) => todo.checked_at.startsWith(day)),
+    };
+  });
+}
 
 const PROJECTED: ProgressPace = {
   kind: 'projected',
@@ -83,32 +119,9 @@ const measured = (overrides: Partial<Extract<GoalProgress, { kind: 'measured' }>
 
 const page = (overrides: Partial<TodoProgressPage> = {}): TodoProgressPage => ({
   today: '2026-11-07',
-  period: 'week',
+  period: 'day',
   page_start: '2026-11-01',
-  // Oldest first, as the backend lays the page out.
-  rows: [
-    { start: '2026-10-26', end: '2026-11-01', record_ids: ['r3', 'r4'], checked: [] },
-    {
-      start: '2026-11-02',
-      end: '2026-11-08',
-      record_ids: ['r1', 'r2'],
-      checked: [
-        {
-          todo_id: 't1',
-          project_id: 'p-sales',
-          text: '見積書を送る',
-          checked_at: '2026-11-03T12:00:00Z',
-        },
-        {
-          todo_id: 't2',
-          project_id: null,
-          text: '名刺を入れる',
-          checked_at: '2026-11-04T12:00:00Z',
-        },
-      ],
-    },
-    { start: '2026-11-09', end: '2026-11-15', record_ids: [], checked: [] },
-  ],
+  rows: dayRows(RECORDS),
   goals: [measured()],
   records: RECORDS,
   ...overrides,
@@ -118,117 +131,128 @@ const NAMES = new Map([
   ['p-sales', '販路開拓'],
   ['p-hiring', '採用'],
 ]);
+const projectName = (projectId: string) => NAMES.get(projectId) ?? projectId;
 
-function renderView(data: TodoProgressPage, pendingRecordIds: ReadonlySet<string> = new Set()) {
-  const handlers = {
-    onPeriodChange: vi.fn(),
-    onOpenEvidence: vi.fn(),
-    onDeleteRecord: vi.fn(),
-    onSetGoal: vi.fn(),
-  };
+function renderView(data: TodoProgressPage, selectedDay: string | null = null) {
+  const handlers = { onSelectDay: vi.fn(), onSelectMonth: vi.fn(), onSetGoal: vi.fn() };
   cleanup();
   render(
     ja(
-      <ProgressView
-        page={data}
-        projectName={(projectId) => NAMES.get(projectId) ?? projectId}
-        pendingRecordIds={pendingRecordIds}
-        recordFailure={null}
-        {...handlers}
-      />
+      <ProgressView page={data} projectName={projectName} selectedDay={selectedDay} {...handlers} />
     )
   );
   return handlers;
 }
 
 const lead = () => document.querySelector('.todo-progress__lead');
-const goalBlock = () => screen.getByRole('region', { name: '販路開拓の目標' });
-const disclosure = (name: RegExp) =>
-  within(goalBlock()).getByText(name).closest('details') as HTMLDetailsElement;
-const notesIn = (details: HTMLElement) =>
-  within(details)
-    .getAllByRole('listitem')
-    .map((item) => item.querySelector('.todo-progress-record__note')?.textContent);
+const goalRow = (name = '販路開拓の目標') => screen.getByRole('region', { name });
+const dayCell = (name: RegExp) => screen.getByRole('button', { name });
 
-it('builds the lead from the newest period and the one goal, with only the numbers the page has', () => {
+it('leads with the week holding today on the current page, and the one goal with its pace', () => {
   renderView(page());
+  // 11/2–11/8: r1, r2, r4 for 販路開拓 and r5 for 採用; 10/30's r3 is last week's.
   expect(lead()).toHaveTextContent(
-    '今週は、販路開拓が 2 件進みました。済んだ TODO は 2 件です。' +
+    '今週は、販路開拓が 3 件、採用が 1 件進みました。済んだ TODO は 2 件です。' +
       '売上 300,000,000 円の目標に対して、いまは 10% です。' +
       'このペースなら 2027 年 6 月のはじめに届きます。'
   );
 
-  const block = goalBlock();
-  expect(block).toHaveTextContent('2027/8/31 までに 売上 300,000,000 円。10/1 に決めました。');
-  expect(block).toHaveTextContent('いま 10%（30,000,000 円）');
-  expect(block).toHaveTextContent('期限から逆算した今の位置 11%');
-  expect(block).toHaveTextContent('目標 300,000,000 円');
-  expect(block).toHaveTextContent('10% は、10/1 からの記録 3 件、あわせて 30,000,000 円です。');
-  expect(block).toHaveTextContent(
-    '10/11 からの記録 3 件で、1 日あたり 1,071,429 円ずつ進んでいます。' +
-      'このペースなら 2027 年 6 月のはじめに届きます。'
+  const row = goalRow();
+  expect(row).toHaveTextContent('売上 300,000,000 円');
+  expect(row).toHaveTextContent('販路開拓');
+  expect(row).toHaveTextContent('2027/8/31 まで');
+  expect(row).toHaveTextContent('30,000,000 円');
+  expect(row).toHaveTextContent('期限から逆算した今の位置 11%');
+  expect(row).toHaveTextContent('10%');
+  expect(row).toHaveTextContent('単位が「枚」の記録 1 件は、合計に入れていません。');
+  // The 40 枚 is nowhere in the total.
+  expect(row).not.toHaveTextContent('30,000,040');
+  expect(row.querySelector('.todo-progress-goal__late')).toBeNull();
+});
+
+it('marks a pace that misses its deadline, in the goal and in the lead', () => {
+  renderView(page({ goals: [measured({ goal: { ...GOAL, deadline: '2027-03-31' } })] }));
+  expect(lead()).toHaveTextContent(
+    'このペースなら 2027 年 6 月のはじめに届きます。期限の 2027/3/31 には間に合いません。'
+  );
+  expect(goalRow().querySelector('.todo-progress-goal__late')).toHaveTextContent(
+    'このペースなら 2027 年 6 月のはじめに届きます。期限の 2027/3/31 には間に合いません。'
+  );
+
+  renderView(page({ goals: [measured({ deadline_passed: true })] }));
+  expect(goalRow().querySelector('.todo-progress-goal__late')).toHaveTextContent(
+    '期限の 2027/8/31 を過ぎています。'
   );
 });
 
-it('lists exactly the records behind the number, and names other-unit records without summing them', () => {
-  renderView(page());
-  expect(notesIn(disclosure(/^この数字のもとになった記録（3 件）/))).toEqual([
-    '丸和商事から受注',
-    '北星から受注',
-    '東和から受注',
-  ]);
-  expect(goalBlock()).toHaveTextContent('単位が「枚」の記録 1 件は、合計に入れていません。');
-  expect(notesIn(disclosure(/^合計に入れていない記録（1 件）/))).toEqual(['展示会で名刺交換']);
-  // The 40 枚 is nowhere in the total.
-  expect(goalBlock()).not.toHaveTextContent('30,000,040');
+it('leads with the whole month or year on any other page, never with the weeks spilling in', () => {
+  // October's page seen from November: 10/30's r3, while 11/1's row spills in from November.
+  const october = record('r6', '2026-11-01', '11/1 の受注', 1_000, '円');
+  renderView(
+    page({
+      today: '2026-12-02',
+      page_start: '2026-10-01',
+      rows: dayRows([RECORDS[2], october])
+        .slice(0, 35)
+        .map((row) => row),
+      records: [RECORDS[2], october],
+      goals: [],
+    })
+  );
+  expect(lead()).toHaveTextContent(/^10月は、販路開拓が 1 件進みました。$/);
+
+  renderView(
+    page({
+      today: '2027-02-01',
+      period: 'month',
+      page_start: '2026-01-01',
+      rows: Array.from({ length: 12 }, (_, index) => {
+        const start = `2026-${String(index + 1).padStart(2, '0')}-01`;
+        return {
+          start,
+          end: start,
+          record_ids: index === 10 ? ['r1', 'r5'] : [],
+          checked: index === 10 ? CHECKED : [],
+        };
+      }),
+      goals: [],
+    })
+  );
+  expect(lead()).toHaveTextContent(
+    /^2026年は、販路開拓が 1 件、採用が 1 件進みました。済んだ TODO は 2 件です。$/
+  );
 });
 
-it('says who wrote each record, opens the conversation behind an AI record, and deletes one', async () => {
-  const handlers = renderView(page(), new Set(['r3']));
-  const counted = disclosure(/^この数字のもとになった記録/);
-  const [byUser, byAi, pending] = within(counted).getAllByRole('listitem');
-  expect(byUser).toHaveTextContent('あなたが記録');
-  expect(within(byUser).queryByRole('button', { name: /^会話を開く/ })).toBeNull();
-  expect(byAi).toHaveTextContent('Pantaray が会話の中の結果から記録');
-  expect(byUser).toHaveTextContent('10,000,000 円');
-  expect(byUser).toHaveTextContent('11/5');
+it('shows no number for a goal without records, and offers a goal to a project without one', () => {
+  renderView(page({ goals: [{ kind: 'no_records', goal: GOAL, other_unit_record_ids: [] }] }));
+  expect(goalRow()).toHaveTextContent('まだ記録がありません。');
+  expect(goalRow()).not.toHaveTextContent('%');
+  expect(lead()).toHaveTextContent('売上 300,000,000 円の目標には、まだ記録がありません。');
 
-  await userEvent.click(within(byAi).getByRole('button', { name: '会話を開く: 北星から受注' }));
-  expect(handlers.onOpenEvidence).toHaveBeenCalledWith('action-1');
-  await userEvent.click(within(byUser).getByRole('button', { name: '削除: 丸和商事から受注' }));
-  expect(handlers.onDeleteRecord).toHaveBeenCalledWith('r1');
-  expect(within(pending).getByRole('button', { name: '削除: 東和から受注' })).toBeDisabled();
+  renderView(page({ goals: [{ kind: 'no_records', goal: GOAL, other_unit_record_ids: ['r4'] }] }));
+  expect(goalRow()).toHaveTextContent('まだ「円」の記録がありません。');
+  expect(goalRow()).toHaveTextContent('単位が「枚」の記録 1 件は、合計に入れていません。');
+
+  const handlers = renderView(page({ goals: [{ kind: 'no_goal', project_id: 'p-sales' }] }));
+  expect(goalRow()).toHaveTextContent('まだ目標がありません。');
+  expect(goalRow()).not.toHaveTextContent(/\d/);
+  expect(lead()).not.toHaveTextContent('目標');
+  fireEvent.click(within(goalRow()).getByRole('button', { name: '目標を設定' }));
+  expect(handlers.onSetGoal).toHaveBeenCalledWith('p-sales');
 });
 
 it('tells each pace without a number it does not have', () => {
-  const tooFew: ProgressPace = {
-    kind: 'too_few_records',
-    window_start: '2026-10-11',
-    record_ids: ['r1'],
-  };
-  renderView(page({ goals: [measured({ pace: tooFew })] }));
-  expect(goalBlock()).toHaveTextContent('記録がまだ少ないので、届く時期は出していません。');
-  expect(goalBlock()).not.toHaveTextContent('1 日あたり');
-  expect(lead()).not.toHaveTextContent('このペースなら');
-
   renderView(
     page({
       goals: [
         measured({
-          pace: {
-            kind: 'beyond_horizon',
-            window_start: '2026-10-11',
-            record_ids: ['r1', 'r2', 'r3'],
-            per_day: 0.5,
-          },
+          pace: { kind: 'too_few_records', window_start: '2026-10-11', record_ids: ['r1'] },
         }),
       ],
     })
   );
-  expect(goalBlock()).toHaveTextContent(
-    '10/11 からの記録 3 件で、1 日あたり 0.5 円ずつ進んでいます。このペースでは 100 年以内に届きません。'
-  );
-  expect(goalBlock()).not.toHaveTextContent('届きます');
+  expect(goalRow()).toHaveTextContent('記録がまだ少ないので、届く時期は出していません。');
+  expect(lead()).not.toHaveTextContent('このペースなら');
 
   renderView(
     page({
@@ -242,170 +266,163 @@ it('tells each pace without a number it does not have', () => {
       ],
     })
   );
-  expect(goalBlock()).toHaveTextContent('いま 120%（360,000,000 円）');
-  expect(goalBlock()).toHaveTextContent('目標に届きました。');
+  expect(goalRow()).toHaveTextContent('120%');
+  expect(goalRow()).toHaveTextContent('目標に届きました。');
   // A reached goal is not late, whatever the date.
-  expect(goalBlock()).not.toHaveTextContent('過ぎています');
-
-  renderView(page({ goals: [measured({ deadline_passed: true })] }));
-  expect(goalBlock()).toHaveTextContent('期限の 2027/8/31 を過ぎています。');
+  expect(goalRow()).not.toHaveTextContent('過ぎています');
+  expect(goalRow().querySelector('.todo-progress-goal__late')).toBeNull();
 });
 
-it('shows no number for a goal without records, or a project without a goal', () => {
-  renderView(page({ goals: [{ kind: 'no_records', goal: GOAL, other_unit_record_ids: [] }] }));
-  expect(goalBlock()).toHaveTextContent('まだ記録がありません。');
-  expect(goalBlock()).not.toHaveTextContent('%');
-  expect(goalBlock().querySelector('details')).toBeNull();
-  expect(lead()).toHaveTextContent('売上 300,000,000 円の目標には、まだ記録がありません。');
+it('gives each day up to today its records by project and unit, and its checked TODOs', async () => {
+  const handlers = renderView(page(), '2026-11-05');
+  const thursday = dayCell(/^11月5日（木）/);
+  expect(thursday).toHaveAccessibleName('11月5日（木）、記録 3 件、済んだ TODO 0 件');
+  expect(thursday).toHaveAttribute('aria-pressed', 'true');
+  // r1 and r2 add up; 採用's 人 stays its own line.
+  expect(thursday).toHaveTextContent('販路開拓 25,000,000 円');
+  expect(thursday).toHaveTextContent('採用 2 人');
+  expect(dayCell(/^11月3日（火）/)).toHaveTextContent('販路開拓 40 枚✓ 1');
+  expect(dayCell(/^11月7日（土）/)).toHaveAttribute('aria-current', 'date');
+  // The weeks spilling in from the months either side show their days too.
+  expect(dayCell(/^10月30日（金）/)).toHaveTextContent('販路開拓 5,000,000 円');
+  // A day ahead holds nothing and opens nothing.
+  expect(screen.queryByRole('button', { name: /^11月8日/ })).toBeNull();
+  expect(screen.getByRole('button', { name: /^11月1日/ })).toBeInTheDocument();
 
-  renderView(page({ goals: [{ kind: 'no_records', goal: GOAL, other_unit_record_ids: ['r4'] }] }));
-  expect(goalBlock()).toHaveTextContent('まだ「円」の記録がありません。');
-  expect(goalBlock()).toHaveTextContent('単位が「枚」の記録 1 件は、合計に入れていません。');
-  expect(goalBlock()).not.toHaveTextContent('あわせて');
-
-  const handlers = renderView(page({ goals: [{ kind: 'no_goal', project_id: 'p-sales' }] }));
-  expect(goalBlock()).toHaveTextContent('まだ目標がありません。');
-  expect(goalBlock()).not.toHaveTextContent(/\d/);
-  expect(lead()).not.toHaveTextContent('目標');
-  // The project in view without a goal offers to set one, for that project.
-  fireEvent.click(within(goalBlock()).getByRole('button', { name: '目標を設定' }));
-  expect(handlers.onSetGoal).toHaveBeenCalledWith('p-sales');
-
-  renderView(page({ goals: [] }));
-  expect(screen.getByRole('heading', { name: '目標' }).parentElement).toHaveTextContent(
-    'まだ目標がありません。'
-  );
-  // No project is in view to set one for.
-  expect(screen.queryByRole('button', { name: '目標を設定' })).toBeNull();
+  await userEvent.click(dayCell(/^11月3日（火）/));
+  expect(handlers.onSelectDay).toHaveBeenCalledWith('2026-11-03');
 });
 
-it('leaves the goals out of the lead when several speak, and says when the period has no records', () => {
-  const hiring = measured({
-    goal: { ...GOAL, project_id: 'p-hiring', text: '採用', target: 5, unit: '人' },
-  });
-  renderView(
-    page({
-      goals: [measured(), hiring],
-      rows: [{ start: '2026-11-02', end: '2026-11-08', record_ids: [], checked: [] }],
-    })
-  );
-  expect(lead()).toHaveTextContent(/^今週は、まだ記録がありません。$/);
-  expect(screen.getByRole('region', { name: '採用の目標' })).toBeInTheDocument();
+it('tells how many lines a busy day leaves out, and totals each begun week from its days', () => {
+  const busy = [
+    record('b1', '2026-11-04', 'a', 1, '件'),
+    record('b2', '2026-11-04', 'b', 2, '円'),
+    record('b3', '2026-11-04', 'c', 3, '人'),
+    record('b4', '2026-11-04', 'd', 4, '回'),
+  ];
+  const records = [...RECORDS, ...busy];
+  renderView(page({ rows: dayRows(records), records }));
+  expect(dayCell(/^11月4日（水）/)).toHaveTextContent('販路開拓 1 件販路開拓 2 円ほか 2✓ 1');
+
+  const weeks = document.querySelectorAll('.todo-progress-week');
+  expect(weeks).toHaveLength(6);
+  // 11/2–11/8: six lines from its days' records, and both TODOs checked in it.
+  expect(weeks[1]).toHaveTextContent('販路開拓 40 枚販路開拓 1 件ほか 4✓ 2 済み');
+  expect(weeks[0]).toHaveTextContent(/^販路開拓 5,000,000 円$/);
+  // Weeks not begun have no totals.
+  expect(weeks[2]).toHaveTextContent(/^$/);
 });
 
-it('marks the period in view as pressed and asks for another', async () => {
-  const handlers = renderView(page());
-  const group = screen.getByRole('group', { name: '区切り' });
-  expect(within(group).getByRole('button', { name: '週ごと' })).toHaveAttribute(
-    'aria-pressed',
-    'true'
-  );
-  expect(within(group).getByRole('button', { name: '日ごと' })).toHaveAttribute(
-    'aria-pressed',
-    'false'
-  );
-  await userEvent.click(within(group).getByRole('button', { name: '月ごと' }));
-  expect(handlers.onPeriodChange).toHaveBeenCalledWith('month');
-});
-
-it('gives each period its records by project, its checked count and the checked TODOs as written', () => {
-  renderView(page());
-  const rows = screen.getByRole('region', { name: '週ごと' }).querySelectorAll(':scope > ul > li');
-  expect(rows[0]).toHaveTextContent('11/2 の週');
-  expect(rows[0]).toHaveTextContent('販路開拓 +2');
-  expect(rows[0]).toHaveTextContent('済み 2');
-  expect(rows[0]).toHaveTextContent('見積書を送る、名刺を入れる');
-  // The bar is against the busiest row: both have 2 records.
-  expect(rows[1].querySelector('i')).toHaveStyle({ width: '100%' });
-  expect(rows[1]).toHaveTextContent('済み 0');
-
-  renderView(
+it('lays out the year as its months, each opening its calendar', async () => {
+  const handlers = renderView(
     page({
       period: 'month',
       page_start: '2026-01-01',
-      rows: [
-        { start: '2026-10-01', end: '2026-10-31', record_ids: [], checked: [] },
-        { start: '2026-11-01', end: '2026-11-30', record_ids: ['r1'], checked: [] },
-        { start: '2026-12-01', end: '2026-12-31', record_ids: [], checked: [] },
-      ],
+      rows: Array.from({ length: 12 }, (_, index) => {
+        const start = `2026-${String(index + 1).padStart(2, '0')}-01`;
+        return {
+          start,
+          end: start,
+          record_ids: index === 10 ? ['r1', 'r2', 'r5'] : [],
+          checked: index === 10 ? CHECKED : [],
+        };
+      }),
     })
   );
-  const months = screen
-    .getByRole('region', { name: '月ごと' })
-    .querySelectorAll(':scope > ul > li');
-  // The rows run up to today, newest first.
-  expect(months).toHaveLength(2);
-  expect(months[0]).toHaveTextContent('11 月（11/7 まで）');
-  expect(lead()).toHaveTextContent(/^今月は、販路開拓が 1 件進みました。/);
-  expect(months[1]).toHaveTextContent('10 月');
-  expect(months[1]).toHaveTextContent('記録なし');
-  expect(months[1].querySelector('i')).toHaveStyle({ width: '0%' });
-
-  renderView(
-    page({
-      period: 'day',
-      rows: [{ start: '2026-11-07', end: '2026-11-07', record_ids: [], checked: [] }],
-    })
-  );
-  expect(screen.getByRole('region', { name: '日ごと' })).toHaveTextContent('11/7（土）');
-  expect(lead()).toHaveTextContent(/^今日（11\/7）は、まだ記録がありません。/);
+  const months = within(screen.getByRole('group', { name: '2026年' })).getAllByRole('button');
+  expect(months).toHaveLength(12);
+  expect(months[10]).toHaveAccessibleName('2026年11月、記録 3 件、済んだ TODO 2 件');
+  expect(months[10]).toHaveTextContent('11月販路開拓 25,000,000 円採用 2 人✓ 2');
+  await userEvent.click(months[11]);
+  expect(handlers.onSelectMonth).toHaveBeenCalledWith('2026-12-01');
 });
 
-it("opens a period's records and deletes one, with no goal to count them toward", async () => {
-  const handlers = renderView(page({ goals: [] }));
-  const [current] = screen
-    .getByRole('region', { name: '週ごと' })
-    .querySelectorAll<HTMLElement>(':scope > ul > li');
-  const records = within(current)
-    .getByText('この期間の記録（2 件）')
-    .closest('details') as HTMLElement;
-  expect(notesIn(records)).toEqual(['丸和商事から受注', '北星から受注']);
-  await userEvent.click(within(records).getByRole('button', { name: '会話を開く: 北星から受注' }));
+function renderDay(row: ProgressPeriodView, pendingRecordIds: ReadonlySet<string> = new Set()) {
+  const handlers: Pick<RecordActions, 'onOpenEvidence' | 'onDeleteRecord'> = {
+    onOpenEvidence: vi.fn(),
+    onDeleteRecord: vi.fn(),
+  };
+  cleanup();
+  render(
+    ja(
+      <ProgressDayPane
+        row={row}
+        page={page()}
+        projectName={projectName}
+        pendingRecordIds={pendingRecordIds}
+        recordFailure={null}
+        {...handlers}
+      />
+    )
+  );
+  return handlers;
+}
+
+it('opens a day onto its records, the conversation behind an AI record, and the TODOs it checked', async () => {
+  const [thursday] = page().rows.filter((row) => row.start === '2026-11-05');
+  const handlers = renderDay(thursday, new Set(['r1']));
+  const pane = screen.getByRole('region', { name: '11月5日（木）' });
+  expect(pane).toHaveTextContent('記録 3 件済んだ TODO 0 件');
+  const [byUser, byAi, other] = within(pane).getAllByRole('listitem');
+  expect(byUser).toHaveTextContent('丸和商事から受注10,000,000 円販路開拓');
+  expect(within(byUser).queryByRole('button', { name: /会話を開く/ })).toBeNull();
+  expect(within(byUser).getByRole('button', { name: '削除: 丸和商事から受注' })).toBeDisabled();
+  expect(other).toHaveTextContent('採用');
+
+  await userEvent.click(
+    within(byAi).getByRole('button', { name: 'この記録の会話を開く: 北星から受注' })
+  );
   expect(handlers.onOpenEvidence).toHaveBeenCalledWith('action-1');
-  await userEvent.click(within(records).getByRole('button', { name: '削除: 北星から受注' }));
+  await userEvent.click(within(byAi).getByRole('button', { name: '削除: 北星から受注' }));
   expect(handlers.onDeleteRecord).toHaveBeenCalledWith('r2');
+
+  const [tuesday] = page().rows.filter((row) => row.start === '2026-11-03');
+  renderDay(tuesday);
+  expect(screen.getByRole('heading', { name: '済んだ TODO' })).toBeInTheDocument();
+  expect(screen.getByRole('region', { name: '11月3日（火）' })).toHaveTextContent('見積書を送る');
+});
+
+it('steps pages across years and finds the week holding a day', () => {
+  expect(pageStartOf('month', '2026-11-30')).toBe('2026-11-01');
+  expect(pageStartOf('year', '2026-11-30')).toBe('2026-01-01');
+  expect(shiftPage('month', '2026-12-01', 1)).toBe('2027-01-01');
+  expect(shiftPage('month', '2026-01-01', -1)).toBe('2025-12-01');
+  expect(shiftPage('year', '2026-01-01', -1)).toBe('2025-01-01');
+  // Sunday 11/1 belongs to the week of Monday 10/26.
+  expect(weekHolding(page().rows, '2026-11-01').map((row) => row.start)).toEqual([
+    '2026-10-26',
+    '2026-10-27',
+    '2026-10-28',
+    '2026-10-29',
+    '2026-10-30',
+    '2026-10-31',
+    '2026-11-01',
+  ]);
+  const doubled = { start: 'x', end: 'x', record_ids: ['r1'], checked: [] };
+  expect(totalsOf([doubled, doubled]).record_ids).toEqual(['r1']);
 });
 
 it('never writes a positive share or quantity as 0, and never rounds a share up to 100%', () => {
-  const small = { ...record('r1', '一部入金', 1_000, '円'), recorded_at: '2026-11-05T12:00:00Z' };
-  const tiny = record('r2', '打ち合わせ', 0.001, '時間');
   renderView(
     page({
-      records: [small, tiny],
-      rows: [{ start: '2026-11-02', end: '2026-11-08', record_ids: ['r1', 'r2'], checked: [] }],
       goals: [
         measured({
           total: 1_000,
           share: 1_000 / 300_000_000,
-          record_ids: ['r1'],
-          other_unit_record_ids: ['r2'],
           expected_share: 0.996,
           pace: { kind: 'too_few_records', window_start: '2026-10-11', record_ids: ['r1'] },
         }),
       ],
     })
   );
-  expect(goalBlock()).toHaveTextContent('いま 0.0003%（1,000 円）');
-  expect(goalBlock()).toHaveTextContent('期限から逆算した今の位置 99%');
+  expect(goalRow()).toHaveTextContent('0.0003%');
+  expect(goalRow()).toHaveTextContent('期限から逆算した今の位置 99%');
   expect(lead()).toHaveTextContent('いまは 0.0003% です。');
-  expect(notesIn(disclosure(/^合計に入れていない記録/))).toEqual(['打ち合わせ']);
-  expect(disclosure(/^合計に入れていない記録/)).toHaveTextContent('0.001 時間');
 
-  renderView(
-    page({
-      goals: [
-        measured({
-          pace: {
-            kind: 'beyond_horizon',
-            window_start: '2026-10-11',
-            record_ids: ['r1', 'r2', 'r3'],
-            per_day: 0.0004,
-          },
-        }),
-      ],
-    })
-  );
-  expect(goalBlock()).toHaveTextContent('1 日あたり 0.0004 円ずつ');
+  const tiny = record('r9', '2026-11-06', '打ち合わせ', 0.001, '時間');
+  renderView(page({ rows: dayRows([tiny]), records: [tiny], goals: [] }));
+  // One project's records only: the line need not name it.
+  expect(dayCell(/^11月6日（金）/)).toHaveTextContent(/^6\s*0\.001 時間$/);
 });
 
 it('rounds a share down and keeps a small step visible', () => {

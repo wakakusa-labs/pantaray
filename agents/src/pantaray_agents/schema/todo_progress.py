@@ -184,10 +184,10 @@ class MeasuredView(_View):
 class TodoProgressPage(_View):
     today: LocalDate  # the backend owns the clock
     period: PeriodKind
-    # The first day of the month (day, week) or year (month) the rows lay out.
+    # The first day of the month (day) or year (month) the rows lay out.
     page_start: LocalDate
-    # Oldest first. Day and week rows cover the Monday-start weeks holding any
-    # day of the month; month rows are the year's twelve months.
+    # Oldest first. Day rows cover the Monday-start weeks holding any day of
+    # the month; month rows are the year's twelve months.
     rows: tuple[ProgressPeriodView, ...]
     goals: tuple[
         Annotated[

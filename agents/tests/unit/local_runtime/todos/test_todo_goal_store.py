@@ -213,7 +213,7 @@ def test_a_deleted_todo_takes_no_record_and_its_records_stop_counting(
         user_id=USER,
         scope=AllScope(),
         project=OneProject("project-1"),
-        period="week",
+        period="day",
         on=None,
         clock=NOW,
     )
@@ -322,7 +322,7 @@ def test_the_same_figure_from_the_same_steps_is_recorded_once(db: Path) -> None:
         user_id=USER,
         scope=AllScope(),
         project=OneProject("project-1"),
-        period="week",
+        period="day",
         on=None,
         clock=NOW,
     )

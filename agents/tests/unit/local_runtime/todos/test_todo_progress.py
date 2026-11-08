@@ -65,7 +65,7 @@ def _view(
     *,
     goals: Mapping[str, Goal | None] | None = None,
     checked: Sequence[CheckedTodo] = (),
-    period: PeriodKind = "week",
+    period: PeriodKind = "day",
     today: str = TODAY,
     on: str = TODAY,
 ) -> ProgressView:
@@ -213,12 +213,13 @@ def test_rows_follow_the_local_calendar_and_list_checked_todos() -> None:
         CheckedTodo("todo-b", None, "Book the room", "2026-11-03T02:00:00.000Z"),
     ]
 
-    week = _view([monday_early, sunday_late], goals={}, checked=checked)
-    day = _view([monday_early, sunday_late], goals={}, checked=checked, period="day")
+    day = _view([monday_early, sunday_late], goals={}, checked=checked)
 
-    assert [(row.start, row.end, row.record_ids) for row in week.rows[:2]] == [
-        ("2026-10-26", "2026-11-01", ("r-sun",)),
-        ("2026-11-02", "2026-11-08", ("r-mon",)),
+    assert [
+        (row.start, row.end, row.record_ids) for row in day.rows if row.record_ids
+    ] == [
+        ("2026-11-01", "2026-11-01", ("r-sun",)),
+        ("2026-11-02", "2026-11-02", ("r-mon",)),
     ]
     (tuesday,) = [row for row in day.rows if row.start == "2026-11-03"]
     assert tuesday.end == "2026-11-03"
@@ -230,11 +231,10 @@ def test_rows_follow_the_local_calendar_and_list_checked_todos() -> None:
 
 def _grid(page_start: str) -> tuple[str, str, int]:
     days = period_bounds("day", page_start)
-    weeks = period_bounds("week", page_start)
-    # The day rows and the week rows lay out the same weeks.
-    assert [start for start, _ in days[::7]] == [start for start, _ in weeks]
-    assert [end for _, end in days[6::7]] == [end for _, end in weeks]
-    return days[0][0], days[-1][1], len(weeks)
+    # Whole Monday-to-Sunday weeks, a row a day.
+    assert len(days) % 7 == 0
+    assert all(start == end for start, end in days)
+    return days[0][0], days[-1][1], len(days) // 7
 
 
 def test_a_month_starting_on_monday_fills_its_own_weeks() -> None:
@@ -255,7 +255,6 @@ def test_a_long_month_starting_late_in_the_week_takes_six_weeks() -> None:
 
 def test_any_day_names_its_month_or_year() -> None:
     assert page_start_of("day", "2026-11-30") == "2026-11-01"
-    assert page_start_of("week", "2026-11-30") == "2026-11-01"
     assert page_start_of("month", "2026-11-30") == "2026-01-01"
     assert period_bounds("month", "2028-01-01")[1] == ("2028-02-01", "2028-02-29")
     assert period_bounds("month", "2026-01-01")[-1] == ("2026-12-01", "2026-12-31")

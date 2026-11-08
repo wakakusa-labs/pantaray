@@ -161,28 +161,31 @@ const SuggestionHistoryPage = () => {
   const isMac = window.electron?.process.platform === 'darwin';
 
   const [savedSidebarHidden, setSavedSidebarHidden] = useState(readSidebarHidden);
-  // Beside an open TODO the sidebar folds away so the list keeps its width; the toggle shows it
-  // there, unsaved, until the TODO closes.
-  const todoOpen =
+  // Beside an open TODO, or a day of the progress, the sidebar folds away so the list keeps its
+  // width; the toggle shows it there, unsaved, until the pane closes.
+  const paneOpen =
     selection === null &&
-    todoSelection.view === 'list' &&
-    (week.page?.items.some((todo) => todo.todo_id === todoSelection.todoId) ?? false);
-  const [sidebarBesideTodo, setSidebarBesideTodo] = useState(false);
-  if (!todoOpen && sidebarBesideTodo) setSidebarBesideTodo(false);
-  const sidebarHidden = todoOpen ? !sidebarBesideTodo : savedSidebarHidden;
+    (todoSelection.view === 'list'
+      ? (week.page?.items.some((todo) => todo.todo_id === todoSelection.todoId) ?? false)
+      : todoSelection.view === 'progress' &&
+        todoSelection.progressSpan === 'month' &&
+        todoSelection.progressDay !== null);
+  const [sidebarBesidePane, setSidebarBesidePane] = useState(false);
+  if (!paneOpen && sidebarBesidePane) setSidebarBesidePane(false);
+  const sidebarHidden = paneOpen ? !sidebarBesidePane : savedSidebarHidden;
   const sidebarToggle = useRef<HTMLButtonElement>(null);
   const toggleSidebar = useCallback(() => {
     const hidden = !sidebarHidden;
     // Focus inside a hidden sidebar would fall back to the page's start.
     if (hidden && document.getElementById(HISTORY_SIDEBAR_ID)?.contains(document.activeElement))
       sidebarToggle.current?.focus();
-    if (todoOpen) {
-      setSidebarBesideTodo(!hidden);
+    if (paneOpen) {
+      setSidebarBesidePane(!hidden);
       return;
     }
     setSavedSidebarHidden(hidden);
     saveSidebarHidden(hidden);
-  }, [sidebarHidden, todoOpen]);
+  }, [sidebarHidden, paneOpen]);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.repeat || !isSidebarShortcut(event, isMac)) return;
@@ -233,7 +236,7 @@ const SuggestionHistoryPage = () => {
     openCounts,
     onShowAll: () =>
       selectTodos({ ...DEFAULT_TODO_SELECTION, scope, weekStart: todoSelection.weekStart }),
-    // The progress of what is in view, by the period last chosen for it.
+    // The progress of what is in view, as a month or a year as last chosen, from today's.
     onShowProgress: () =>
       selectTodos({
         ...DEFAULT_TODO_SELECTION,
@@ -241,7 +244,7 @@ const SuggestionHistoryPage = () => {
         project: todoSelection.project,
         weekStart: todoSelection.weekStart,
         view: 'progress',
-        period: todoSelection.period,
+        progressSpan: todoSelection.progressSpan,
       }),
     onShowDeleted: () => selectTodos({ ...DEFAULT_TODO_SELECTION, scope, view: 'deleted' }),
     onSelectProject: (projectId) => {

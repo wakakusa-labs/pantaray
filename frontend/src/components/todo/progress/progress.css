@@ -1,188 +1,447 @@
-/* The progress view takes its structure from type, hairlines and two thin tracks; no boxes. */
+/* The progress is greyscale like the TODO list: weight and grey levels carry its distinctions,
+   hairlines its structure, and a cell's shade how much it holds. The one colour is the list's
+   muted ochre (todo.css --todo-late), for a pace that misses its deadline. */
 
-.todo-progress__head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 16px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid var(--fog-line);
+.todo-progress,
+.todo-progress-day {
+  --todo-progress-line-strong: rgba(214, 226, 248, 0.14);
+  --todo-progress-faint: #687183;
+  --todo-progress-late: #c4a782;
 }
 
-.todo-progress__head h2 {
+.todo-progress-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.todo-progress-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fog-text-3);
+}
+
+/* The month and year switch: bordered buttons, the one in view a step lighter. */
+.todo-progress__spans {
+  display: inline-flex;
+  flex: none;
+  gap: 4px;
+  margin-left: 10px;
+}
+
+.todo-progress__span {
+  height: 26px;
+  min-width: 34px;
+  padding: 0 10px;
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: none;
+}
+
+.todo-progress__span[aria-pressed='true'] {
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* The page; a plain block, with the fieldset's own frame taken off. */
+.todo-progress__page {
+  min-width: 0;
   margin: 0;
-  color: var(--fog-text);
-  font-size: var(--text-heading-size-lg);
-  font-weight: var(--text-heading-weight);
+  padding: 0;
+  border: 0;
 }
 
-.todo-progress__periods {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-left: auto;
-}
-
-/* The chosen period keeps its face and gains a ring, so it does not hang on colour alone. */
-.todo-progress__period[aria-pressed='true'] {
-  border-color: var(--focus-ring-color);
-  box-shadow: inset 0 0 0 1px var(--focus-ring-color);
-  color: var(--fog-light);
+/* The last page, while the one asked for is read (or failed to be). */
+.todo-progress__page--stale {
+  opacity: 0.5;
 }
 
 .todo-progress__lead {
-  margin: 20px 0 0;
+  max-width: 820px;
+  margin: 4px 0 22px;
   color: var(--fog-text);
-  font-size: 18px;
-  font-weight: var(--weight-semibold);
-  line-height: 1.65;
+  font-size: 16px;
+  line-height: 1.6;
   overflow-wrap: anywhere;
+  word-break: auto-phrase;
   text-wrap: pretty;
 }
 
-.todo-progress-goal,
-.todo-progress-rows {
-  margin-top: 28px;
-  padding-top: 14px;
-  border-top: 1px solid var(--fog-line);
+/* One ruled row a goal: its name, its track, and the share with what the pace says. */
+.todo-progress__goals {
+  margin-bottom: 26px;
+  border-top: 1px solid var(--todo-progress-line-strong);
 }
 
-.todo-progress-goal h3,
-.todo-progress-rows h3 {
-  margin: 0;
+.todo-progress-goal {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr) minmax(160px, 260px);
+  align-items: center;
+  column-gap: 28px;
+  padding: 14px 4px;
+  border-bottom: 1px solid var(--fog-line);
+}
+
+.todo-progress-goal__name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.todo-progress-goal__name > div {
+  min-width: 0;
+}
+
+.todo-progress-goal__name b {
+  display: block;
   color: var(--fog-text);
-  font-size: var(--text-heading-size);
-  font-weight: var(--text-heading-weight);
-  overflow-wrap: anywhere;
-}
-
-.todo-progress-goal p {
-  margin: 8px 0 0;
-  color: var(--fog-text-2);
   font-size: 13.5px;
+  font-weight: var(--weight-semibold);
   overflow-wrap: anywhere;
 }
 
-.todo-progress-goal p b {
-  color: var(--fog-text);
-  font-weight: var(--weight-semibold);
+.todo-progress-goal__name small {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 10px;
+  margin-top: 2px;
+  color: var(--fog-text-3);
+  font-size: 12px;
 }
 
-.todo-progress-goal .todo-progress-goal__statement {
-  margin-top: 2px;
+.todo-progress-goal__empty {
+  margin: 0;
   color: var(--fog-text-3);
   font-size: 12.5px;
 }
 
-.todo-progress-track {
-  margin: 14px 0 12px;
-  font-size: var(--text-meta-size);
+.todo-progress-goal__pace {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  color: var(--fog-text-2);
+  font-size: 12.5px;
+  line-height: 1.5;
+  word-break: auto-phrase;
+}
+
+.todo-progress-goal__pace b {
+  color: var(--fog-text);
+  font-size: 15px;
+  font-weight: var(--weight-semibold);
   font-variant-numeric: tabular-nums;
 }
 
-.todo-progress-track__over {
-  margin-bottom: 6px;
+.todo-progress-goal__pace small {
+  color: var(--fog-text-3);
+  font-size: 12px;
 }
 
-.todo-progress-track__expected {
+.todo-progress-goal__late {
+  color: var(--todo-progress-late);
+}
+
+.todo-progress-goal__set {
+  justify-self: start;
+  height: 28px;
+}
+
+.todo-progress-track {
   position: relative;
-  display: inline-block;
-  max-width: 100%;
-  color: var(--warning-color);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
 }
 
 .todo-progress-track__bar {
   position: relative;
   height: 4px;
-  border-radius: 2px;
-  background: var(--fog-mist-strong);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .todo-progress-track__fill {
   position: absolute;
   inset: 0 auto 0 0;
-  border-radius: 2px;
-  background: var(--fog-text);
+  border-radius: 3px;
+  background: #c3cad6;
 }
 
 .todo-progress-track__tick {
   position: absolute;
-  top: -6px;
-  width: 1px;
-  height: 16px;
-  background: var(--warning-color);
+  top: -4px;
+  width: 1.5px;
+  height: 12px;
+  border-radius: 1px;
+  background: var(--fog-text-3);
 }
 
 .todo-progress-track__under {
   display: flex;
-  flex-wrap: wrap;
   justify-content: space-between;
-  gap: 2px 12px;
-  margin-top: 8px;
-  color: var(--fog-text);
-}
-
-.todo-progress-track__under span:last-child {
+  gap: 12px;
+  margin-top: 7px;
   color: var(--fog-text-3);
 }
 
-.todo-progress-records {
-  margin-top: 10px;
-  font-size: 13px;
+/* The calendar: seven days and the week's totals, ruled by hairlines. */
+.todo-progress-calendar {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr)) 132px;
+  border-top: 1px solid var(--todo-progress-line-strong);
+  border-left: 1px solid var(--fog-line);
 }
 
-.todo-progress-records summary {
-  width: fit-content;
-  border-radius: 6px;
+.todo-progress-calendar--year {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.todo-progress-calendar__weekday {
+  padding: 8px 10px;
+  border-right: 1px solid var(--fog-line);
+  border-bottom: 1px solid var(--fog-line);
+  color: var(--fog-text-3);
+  font-size: 12px;
+}
+
+.todo-progress-calendar__weekday--total {
   color: var(--fog-text-2);
+}
+
+.todo-progress-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  min-height: 92px;
+  padding: 7px 9px 8px;
+  border: 0;
+  border-right: 1px solid var(--fog-line);
+  border-bottom: 1px solid var(--fog-line);
+  border-radius: 0;
+  /* Neutral white, stronger the more the cell holds against the fullest one. */
+  background: rgba(255, 255, 255, calc(var(--todo-progress-shade, 0) * 0.07));
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.todo-progress-calendar--year .todo-progress-cell {
+  min-height: 108px;
+  padding: 10px 12px;
+}
+
+button.todo-progress-cell {
   cursor: pointer;
 }
 
-.todo-progress-records summary:focus-visible,
-.todo-progress-link:focus-visible {
+button.todo-progress-cell:hover {
+  box-shadow: inset 0 0 0 1px var(--todo-progress-line-strong);
+}
+
+button.todo-progress-cell:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
 }
 
-.todo-progress-records ul,
-.todo-progress-rows ul {
-  margin: 4px 0 0;
+.todo-progress-cell[aria-pressed='true'] {
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.55);
+}
+
+.todo-progress-cell__date {
+  margin-bottom: 2px;
+  color: var(--fog-text-2);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.todo-progress-cell--other-month .todo-progress-cell__date {
+  color: var(--todo-progress-faint);
+}
+
+.todo-progress-cell--today .todo-progress-cell__date {
+  display: inline-grid;
+  place-items: center;
+  align-self: flex-start;
+  min-width: 22px;
+  height: 22px;
+  margin: -2px 0 0 -4px;
+  padding: 0 6px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: var(--fog-text);
+  color: #0e1218;
+  font-weight: var(--weight-semibold);
+}
+
+.todo-progress-cell--now .todo-progress-cell__date {
+  color: var(--fog-text);
+  font-weight: var(--weight-semibold);
+}
+
+.todo-progress-cell__line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fog-text);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.todo-progress-cell__line > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.todo-progress-cell--other-month .todo-progress-cell__line {
+  color: var(--fog-text-2);
+}
+
+.todo-progress-calendar .todo-progress-cell__line.todo-progress-cell__line--muted {
+  color: var(--fog-text-3);
+  font-weight: 400;
+}
+
+.todo-progress-week {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px 12px;
+  border-right: 1px solid var(--fog-line);
+  border-bottom: 1px solid var(--fog-line);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.todo-progress-week--now {
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.todo-progress-week .todo-progress-cell__line {
+  align-items: baseline;
+  font-size: 13px;
+  font-weight: var(--weight-semibold);
+  white-space: normal;
+}
+
+.todo-progress-week .todo-progress-dot {
+  transform: translateY(-1px);
+}
+
+.todo-progress-week small {
+  color: var(--fog-text-3);
+  font-size: 11.5px;
+}
+
+/* The day beside the calendar. */
+.todo-progress-day {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.todo-progress-day__head {
+  padding: 20px 22px 14px;
+  border-bottom: 1px solid var(--fog-line);
+}
+
+.todo-progress-day__crumb {
+  color: var(--fog-text-3);
+  font-size: 12px;
+}
+
+.todo-progress-day__head h2 {
+  margin: 6px 0 10px;
+  color: var(--fog-text);
+  font-size: 16px;
+  font-weight: var(--weight-semibold);
+}
+
+.todo-progress-day__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 0;
+  color: var(--fog-text-2);
+  font-size: 12px;
+}
+
+.todo-progress-day__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 22px 22px;
+}
+
+.todo-progress-day__body h3 {
+  margin: 18px 0 8px;
+  color: var(--fog-text-3);
+  font-size: 12px;
+  font-weight: var(--weight-semibold);
+}
+
+.todo-progress-day__body ul {
+  margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.todo-progress-record {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 12px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--fog-line);
+.todo-progress-day__empty {
+  margin: 18px 0 0;
+  color: var(--fog-text-3);
+  font-size: 13px;
 }
 
-.todo-progress-record__body {
+.todo-progress-entry {
   display: grid;
-  flex: 1 1 240px;
-  gap: 2px;
-  min-width: 0;
+  grid-template-columns: 6px minmax(0, 1fr) auto;
+  align-items: baseline;
+  column-gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--fog-line);
+  color: var(--fog-text);
+  font-size: 13px;
+  line-height: 1.5;
 }
 
-.todo-progress-record__note {
-  color: var(--fog-text);
+.todo-progress-entry .todo-progress-dot {
+  transform: translateY(-1px);
+}
+
+.todo-progress-entry__text {
   overflow-wrap: anywhere;
 }
 
-.todo-progress-record__meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0 12px;
-  color: var(--fog-text-3);
-  font-size: var(--text-meta-size);
-  font-variant-numeric: tabular-nums;
+.todo-progress-entry--checked {
+  color: var(--fog-text-2);
 }
 
-.todo-progress-record__error,
+.todo-progress-entry__quantity {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.todo-progress-entry__meta,
+.todo-progress-entry__error {
+  display: flex;
+  flex-wrap: wrap;
+  grid-column: 2 / -1;
+  gap: 0 12px;
+  color: var(--fog-text-3);
+  font-size: 12px;
+}
+
+.todo-progress-entry__error,
 .todo-goal-form__error,
 .todo-goal-form__failure {
   color: var(--danger-color);
@@ -195,64 +454,25 @@
   border: none;
   border-radius: 4px;
   background: transparent;
-  color: var(--fog-text-2);
+  color: var(--fog-text-3);
   cursor: pointer;
   font: inherit;
+}
+
+.todo-progress-link:hover:not(:disabled) {
+  color: var(--fog-text-2);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 
-.todo-progress-link:hover {
-  color: var(--fog-text);
+.todo-progress-link:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
-.todo-progress-row {
-  display: grid;
-  grid-template-columns: minmax(5.5em, auto) minmax(40px, 1fr) minmax(0, auto) auto;
-  gap: 4px 14px;
-  align-items: center;
-  padding: 9px 0;
-  border-bottom: 1px solid var(--fog-line);
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
-}
-
-.todo-progress-row__label,
-.todo-progress-row__records {
-  color: var(--fog-text);
-  overflow-wrap: anywhere;
-}
-
-.todo-progress-row__bar {
-  position: relative;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--fog-mist-strong);
-}
-
-.todo-progress-row__bar i {
-  position: absolute;
-  inset: 0 auto 0 0;
-  border-radius: 2px;
-  background: rgb(var(--accent-rgb));
-}
-
-.todo-progress-row .todo-progress-records {
-  margin-top: 0;
-}
-
-.todo-progress-row__checked {
-  color: var(--fog-text-3);
-  text-align: right;
-  white-space: nowrap;
-}
-
-.todo-progress-row__texts,
-.todo-progress-row__records-list {
-  grid-column: 1 / -1;
-  color: var(--fog-text-2);
-  font-size: 12.5px;
-  overflow-wrap: anywhere;
+.todo-progress-link:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .todo-goal-form {

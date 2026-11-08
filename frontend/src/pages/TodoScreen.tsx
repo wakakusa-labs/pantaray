@@ -4,7 +4,7 @@ import { useRef, type ReactNode } from 'react';
 import { AiConnectionNotice } from '@/components/AiConnectionNotice';
 import { OpenWorkContext } from '@/components/action-conversation/sentMessageRefs';
 import { DeletedTodoRow } from '@/components/todo/DeletedTodoRow';
-import { ProgressPane } from '@/components/todo/progress/ProgressPane';
+import { ProgressScreen } from '@/components/todo/progress/ProgressScreen';
 import { TodoAddRow } from '@/components/todo/TodoAddRow';
 import { TodoConversationPane } from '@/components/todo/TodoConversationPane';
 import { TodoProjectGroup } from '@/components/todo/TodoProjectGroup';
@@ -96,13 +96,7 @@ export function TodoScreen({
     ? isCurrentWeek
       ? t('todo.week.title')
       : weekRange
-    : showingDeleted
-      ? t('todo.nav.deleted')
-      : selection.project.project === 'project'
-        ? (projectName(selection.project.project_id ?? null) ?? t('todo.nav.all'))
-        : selection.project.project === 'no_project'
-          ? t('todo.noProject')
-          : t('todo.nav.all');
+    : t('todo.nav.deleted');
 
   // Focus stays in the list: 「今週へ」 and the close button go away once they are used.
   const focusHeading = () => headingRef.current?.focus();
@@ -265,23 +259,6 @@ export function TodoScreen({
     );
   };
 
-  // The projects' names come with the workspace, so the progress waits for it as the week does.
-  const renderProgress = (): ReactNode => {
-    if (!settings) return settingsFailed ? loadFailed : loading;
-    return (
-      <ProgressPane
-        scope={selection.scope}
-        projectFilter={selection.project}
-        period={selection.period}
-        // A project created since the workspace was read is named once it is read again.
-        projectName={(projectId) => projectName(projectId) ?? t('todo.noProject')}
-        onPeriodChange={(period) => onSelect({ ...selection, period })}
-        onOpenEvidence={(actionId) => onOpenWork(`action:${actionId}`)}
-        onFocusLost={focusHeading}
-      />
-    );
-  };
-
   const renderDeleted = (): ReactNode => {
     const { items } = deleted;
     if (!items || !page) return deleted.error || (week.error && !page) ? loadFailed : loading;
@@ -323,6 +300,20 @@ export function TodoScreen({
     );
   };
 
+  // The progress is a page of its own under the same layout, with its own header and pane. The
+  // projects' names come with the workspace, so it waits for it as the week does.
+  if (selection.view === 'progress')
+    return (
+      <ProgressScreen
+        selection={selection}
+        // A project created since the workspace was read is named once it is read again.
+        projectName={settings ? (projectId) => projectName(projectId) ?? t('todo.noProject') : null}
+        settingsFailed={settingsFailed}
+        onSelect={onSelect}
+        onOpenEvidence={(actionId) => onOpenWork(`action:${actionId}`)}
+      />
+    );
+
   return (
     <div className={selectedTodo ? 'todo-screen todo-screen--with-pane' : 'todo-screen'}>
       <section className="todo-screen__list" aria-labelledby="todo-screen-title">
@@ -348,11 +339,7 @@ export function TodoScreen({
         </header>
         <div className="todo-screen__scroll">
           <AiConnectionNotice />
-          {showingDeleted
-            ? renderDeleted()
-            : selection.view === 'progress'
-              ? renderProgress()
-              : renderWeek()}
+          {showingDeleted ? renderDeleted() : renderWeek()}
         </div>
       </section>
       {selectedTodo ? (

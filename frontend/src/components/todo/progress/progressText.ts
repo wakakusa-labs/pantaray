@@ -3,11 +3,21 @@ import { getLocaleForUiLanguage } from '@/i18n/translate';
 import type { UiLanguage } from '@/i18n/types';
 
 import type {
+  GoalProgress,
   GoalView,
   ProgressPace,
   ProgressRecordView,
   TodoProgressPage,
 } from '../../../../electron/src/todos/todoContracts';
+import type { ProgressSpan } from '../../../todos/todoSelection';
+import {
+  inPageMonth,
+  isCurrentPage,
+  spanOf,
+  totalsOf,
+  weekHolding,
+  type PeriodTotals,
+} from './progressPages';
 
 /** The words and number formats of the UI language. */
 export type ProgressI18n = Pick<UiLanguageContextValue, 't' | 'language'>;
@@ -35,21 +45,13 @@ const SMALL_SIGNIFICANT_DIGITS = 2;
  * Records are held to positive quantities: two decimals keep 0.5 or 1.25 as written, and a
  * smaller one keeps its significant digits, so a positive amount never reads as 0.
  */
-export const formatNumber = (language: UiLanguage, value: number): string =>
+const formatNumber = (language: UiLanguage, value: number): string =>
   new Intl.NumberFormat(
     getLocaleForUiLanguage(language),
     value > 0 && value < SMALLEST_TWO_DECIMALS
       ? { maximumSignificantDigits: SMALL_SIGNIFICANT_DIGITS }
       : { maximumFractionDigits: 2 }
   ).format(value);
-
-/** A pace of large amounts a day is told in whole units; a small one as any quantity. */
-const formatRate = (language: UiLanguage, value: number): string =>
-  value >= 10
-    ? new Intl.NumberFormat(getLocaleForUiLanguage(language), { maximumFractionDigits: 0 }).format(
-        value
-      )
-    : formatNumber(language, value);
 
 export const formatQuantity = ({ t, language }: ProgressI18n, value: number, unit: string) =>
   t('todoProgress.quantity', { number: formatNumber(language, value), unit });
@@ -90,13 +92,6 @@ const dateParts = (date: string) => {
   return { year, month, day };
 };
 
-/** The local calendar date of a moment the backend recorded. */
-export function momentLocalDate(at: string): string {
-  const moment = new Date(at);
-  const pad = (value: number) => String(value).padStart(2, '0');
-  return `${moment.getFullYear()}-${pad(moment.getMonth() + 1)}-${pad(moment.getDate())}`;
-}
-
 /** 「8/31」 in today's year, 「2027/8/31」 in another. */
 export function formatDate({ t }: ProgressI18n, today: string, date: string): string {
   const parts = dateParts(date);
@@ -111,7 +106,7 @@ const monthName = (language: UiLanguage, date: string) =>
     timeZone: 'UTC',
   }).format(utcDay(date));
 
-/** 「11 月」 / "November". */
+/** 「11月」 / "November". */
 export const formatMonth = ({ t, language }: ProgressI18n, date: string) =>
   t('todoProgress.month', {
     month: dateParts(date).month,
@@ -124,8 +119,31 @@ export const formatWeekday = (language: UiLanguage, date: string) =>
     timeZone: 'UTC',
   }).format(utcDay(date));
 
+/** 「2026年11月」 or 「2026年」: the page in view. */
+export function formatPage(i18n: ProgressI18n, span: ProgressSpan, pageStart: string): string {
+  const { year } = dateParts(pageStart);
+  return span === 'year'
+    ? i18n.t('todoProgress.page.year', { year })
+    : i18n.t('todoProgress.page.month', {
+        year,
+        month: dateParts(pageStart).month,
+        monthName: monthName(i18n.language, pageStart),
+      });
+}
+
+/** 「12月1日」: a day of another month on the page. */
+export const formatMonthDay = ({ t, language }: ProgressI18n, date: string) =>
+  t('todoProgress.monthDay', { ...dateParts(date), monthName: monthName(language, date) });
+
+/** 「11月4日（水）」. */
+export const formatDay = (i18n: ProgressI18n, date: string) =>
+  i18n.t('todoProgress.day', {
+    date: formatMonthDay(i18n, date),
+    weekday: formatWeekday(i18n.language, date),
+  });
+
 /** 「2027 年 6 月のはじめ」: a projection is not precise to the day. */
-export function formatProjectedDay(i18n: ProgressI18n, date: string): string {
+function formatProjectedDay(i18n: ProgressI18n, date: string): string {
   const { t, language } = i18n;
   const { year, month, day } = dateParts(date);
   const yearMonth = t('todoProgress.yearMonth', {
@@ -166,26 +184,8 @@ export function paceOutcome(i18n: ProgressI18n, pace: ProgressPace): string {
   }
 }
 
-/** The pace itself and the records it comes from; null when there is no pace to tell. */
-export function paceRate(
-  i18n: ProgressI18n,
-  today: string,
-  pace: ProgressPace,
-  unit: string
-): string | null {
-  if (pace.kind !== 'projected' && pace.kind !== 'beyond_horizon') return null;
-  return i18n.t('todoProgress.pace.rate', {
-    start: formatDate(i18n, today, pace.window_start),
-    records: recordCount(i18n, pace.record_ids.length),
-    perDay: i18n.t('todoProgress.quantity', {
-      number: formatRate(i18n.language, pace.per_day),
-      unit,
-    }),
-  });
-}
-
 /** Sentences side by side, as the language writes them. */
-export const joinSentences = ({ t }: ProgressI18n, sentences: readonly string[]) =>
+const joinSentences = ({ t }: ProgressI18n, sentences: readonly string[]) =>
   sentences.join(t('todoProgress.sentenceSeparator'));
 
 /** The name of a project, or of the TODOs in none. */
@@ -194,6 +194,10 @@ export const projectLabel = (
   projectName: ProjectNameOf,
   projectId: string | null
 ) => (projectId === null ? t('todoProgress.noProject') : projectName(projectId));
+
+/** The page's records by id, which every number on it names. */
+export const indexRecords = (records: readonly ProgressRecordView[]) =>
+  new Map(records.map((record) => [record.record_id, record]));
 
 /** The records behind ids the page names; every id it names comes with its record. */
 export function recordsFor(
@@ -209,7 +213,7 @@ export function recordsFor(
 }
 
 /** How many of the records each project has, in the order the records come. */
-export function countByProject(records: readonly ProgressRecordView[]) {
+function countByProject(records: readonly ProgressRecordView[]) {
   const counts = new Map<string | null, number>();
   for (const record of records) {
     counts.set(record.project_id, (counts.get(record.project_id) ?? 0) + 1);
@@ -218,9 +222,82 @@ export function countByProject(records: readonly ProgressRecordView[]) {
 }
 
 /**
- * The sentence above the view: what the period holding today recorded and checked, and, when the
- * page reports a single goal, where that goal stands. With several goals each speaks in its own
- * block.
+ * The projection lands after the deadline. Only a projected day can say so: too few records
+ * name no day, and a pace beyond the horizon already says it will not be reached.
+ */
+export const missesDeadline = (progress: Extract<GoalProgress, { kind: 'measured' }>) =>
+  progress.pace.kind === 'projected' && progress.pace.projected_on > progress.goal.deadline;
+
+/**
+ * What the lead speaks of: on the page holding today, the week (a month's page) or month (a
+ * year's) holding today; on any other page, the whole month or year.
+ */
+function leadPeriod(i18n: ProgressI18n, page: TodoProgressPage) {
+  const { t } = i18n;
+  const span = spanOf(page);
+  if (isCurrentPage(page)) {
+    return span === 'month'
+      ? {
+          subject: t('todoProgress.lead.week'),
+          totals: totalsOf(weekHolding(page.rows, page.today)),
+        }
+      : {
+          subject: t('todoProgress.lead.month'),
+          totals: totalsOf(
+            page.rows.filter((row) => row.start <= page.today && page.today <= row.end)
+          ),
+        };
+  }
+  const sameYear = page.page_start.slice(0, 4) === page.today.slice(0, 4);
+  return {
+    subject: t('todoProgress.lead.page', {
+      page:
+        span === 'month' && sameYear
+          ? formatMonth(i18n, page.page_start)
+          : formatPage(i18n, span, page.page_start),
+    }),
+    totals: totalsOf(
+      span === 'month' ? page.rows.filter((row) => inPageMonth(page, row)) : page.rows
+    ),
+  };
+}
+
+function periodSentences(
+  i18n: ProgressI18n,
+  subject: string,
+  totals: PeriodTotals,
+  recordsById: ReadonlyMap<string, ProgressRecordView>,
+  projectName: ProjectNameOf
+): string[] {
+  const { t } = i18n;
+  const counts = countByProject(recordsFor(totals.record_ids, recordsById));
+  const sentences = [
+    counts.length === 0
+      ? t('todoProgress.lead.noRecords', { period: subject })
+      : t('todoProgress.lead.records', {
+          period: subject,
+          items: counts
+            .map(({ projectId, count }) =>
+              t('todoProgress.lead.recordsItem', {
+                project: projectLabel(i18n, projectName, projectId),
+                records: recordCount(i18n, count),
+              })
+            )
+            .join(t('todoProgress.listSeparator')),
+        }),
+  ];
+  if (totals.checked.length > 0) {
+    sentences.push(
+      t('todoProgress.lead.checked', { todos: todoCount(i18n, totals.checked.length) })
+    );
+  }
+  return sentences;
+}
+
+/**
+ * The sentence above the calendar: what the period it speaks of recorded and checked, and, when
+ * the page reports a single goal, where that goal stands. With several goals each speaks in its
+ * own row.
  */
 export function leadSentence(
   i18n: ProgressI18n,
@@ -229,35 +306,8 @@ export function leadSentence(
   projectName: ProjectNameOf
 ): string {
   const { t } = i18n;
-  const sentences: string[] = [];
-  const current = page.rows.find((row) => row.start <= page.today && page.today <= row.end);
-  if (current) {
-    const period =
-      page.period === 'day'
-        ? t('todoProgress.lead.day', { date: formatDate(i18n, page.today, current.start) })
-        : t(page.period === 'week' ? 'todoProgress.lead.week' : 'todoProgress.lead.month');
-    const counts = countByProject(recordsFor(current.record_ids, recordsById));
-    sentences.push(
-      counts.length === 0
-        ? t('todoProgress.lead.noRecords', { period })
-        : t('todoProgress.lead.records', {
-            period,
-            items: counts
-              .map(({ projectId, count }) =>
-                t('todoProgress.lead.recordsItem', {
-                  project: projectLabel(i18n, projectName, projectId),
-                  records: recordCount(i18n, count),
-                })
-              )
-              .join(t('todoProgress.listSeparator')),
-          })
-    );
-    if (current.checked.length > 0) {
-      sentences.push(
-        t('todoProgress.lead.checked', { todos: todoCount(i18n, current.checked.length) })
-      );
-    }
-  }
+  const { subject, totals } = leadPeriod(i18n, page);
+  const sentences = periodSentences(i18n, subject, totals, recordsById, projectName);
   const [only] = page.goals;
   if (page.goals.length === 1 && only.kind === 'measured') {
     sentences.push(
@@ -267,9 +317,14 @@ export function leadSentence(
       }),
       paceOutcome(i18n, only.pace)
     );
+    if (missesDeadline(only)) sentences.push(lateSentence(i18n, page.today, only.goal));
   }
   if (page.goals.length === 1 && only.kind === 'no_records') {
     sentences.push(t('todoProgress.goal.towardNoRecords', { goal: goalName(i18n, only.goal) }));
   }
   return joinSentences(i18n, sentences);
 }
+
+/** 「期限の 3/31 には間に合いません。」 */
+export const lateSentence = (i18n: ProgressI18n, today: string, goal: GoalView) =>
+  i18n.t('todoProgress.pace.late', { deadline: formatDate(i18n, today, goal.deadline) });

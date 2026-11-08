@@ -19,7 +19,7 @@ from pantaray_agents.local_runtime.todos.model import LocalDate, TodoId
 from pantaray_agents.local_runtime.todos.week import local_date_at, shift_days
 from pantaray_agents.utils.timestamps import parse_iso8601_utc
 
-type PeriodKind = Literal["day", "week", "month"]
+type PeriodKind = Literal["day", "month"]
 
 # The pace comes from the last four weeks, so a weekly rhythm evens out and an
 # old burst no longer drives the projection.
@@ -84,7 +84,7 @@ class CheckedTodo:
 
 @dataclass(frozen=True, slots=True)
 class PeriodRow:
-    """One day, week or month: what was recorded and checked in it."""
+    """One day or month: what was recorded and checked in it."""
 
     start: LocalDate
     end: LocalDate
@@ -163,7 +163,7 @@ type GoalProgress = NoGoal | NoRecords | Measured
 class ProgressView:
     today: LocalDate
     period: PeriodKind
-    # The first day of the month (day and week rows) or year (month rows).
+    # The first day of the month (day rows) or year (month rows).
     page_start: LocalDate
     rows: tuple[PeriodRow, ...]  # oldest first; see `period_bounds`
     goals: tuple[GoalProgress, ...]
@@ -221,7 +221,7 @@ def progress_view(
 
 
 def page_start_of(period: PeriodKind, day: LocalDate) -> LocalDate:
-    """The first day of the month (day and week rows) or year (month rows)
+    """The first day of the month (day rows) or year (month rows)
     holding `day`: any day of a page names that page."""
 
     parsed = date.fromisoformat(day)
@@ -234,7 +234,7 @@ def period_bounds(
 ) -> tuple[tuple[LocalDate, LocalDate], ...]:
     """The first and last day of each row of the page, oldest first.
 
-    Month rows are the year's twelve months. Day and week rows cover the
+    Month rows are the year's twelve months. Day rows cover the
     Monday-to-Sunday weeks that hold any day of the month, so they spill into
     the months either side: four to six weeks, as on a wall calendar.
     """
@@ -248,13 +248,9 @@ def period_bounds(
     last = _month_end(first)
     grid_start = first - timedelta(days=first.weekday())
     grid_end = last + timedelta(days=6 - last.weekday())
-    step = 1 if period == "day" else 7
     return tuple(
-        (
-            (grid_start + timedelta(days=offset)).isoformat(),
-            (grid_start + timedelta(days=offset + step - 1)).isoformat(),
-        )
-        for offset in range(0, (grid_end - grid_start).days + 1, step)
+        ((grid_start + timedelta(days=offset)).isoformat(),) * 2
+        for offset in range((grid_end - grid_start).days + 1)
     )
 
 

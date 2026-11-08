@@ -18,7 +18,7 @@ const deleteProgressRecord = vi.fn();
 
 const progressPage = (today: string): TodoProgressPage => ({
   today,
-  period: 'week',
+  period: 'day',
   page_start: '2026-11-01',
   rows: [],
   goals: [],
@@ -66,7 +66,7 @@ it('reads the progress asked for, and again when the TODOs change or a WS sessio
         period,
         on
       ),
-    { initialProps: { period: 'week', on: null } }
+    { initialProps: { period: 'day', on: null } }
   );
   await waitFor(() => expect(result.current.page?.today).toBe('2026-11-07'));
   expect(progress).toHaveBeenCalledWith({
@@ -74,7 +74,7 @@ it('reads the progress asked for, and again when the TODOs change or a WS sessio
     organization_id: 'org-1',
     project: 'project',
     project_id: 'p1',
-    period: 'week',
+    period: 'day',
   });
 
   rerender({ period: 'month', on: '2025-03-01' });

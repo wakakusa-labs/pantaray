@@ -100,7 +100,7 @@ def _progress(client: TestClient, **query: str) -> Response:
         "scope": "all",
         "project": "project",
         "project_id": "project-1",
-        "period": "week",
+        "period": "day",
         **query,
     }
     return client.get(f"{TODOS}/progress", params=params)
@@ -129,9 +129,9 @@ def test_a_goal_and_a_users_record_show_as_measured_progress(
 
     record_id = record.json()["record_id"]
     (goal,) = view["goals"]
-    (this_week,) = [row for row in view["rows"] if row["start"] == "2026-11-02"]
+    (today,) = [row for row in view["rows"] if row["start"] == view["today"]]
     assert (goal["kind"], goal["total"], goal["share"]) == ("measured", 3e7, 0.1)
-    assert goal["record_ids"] == this_week["record_ids"] == [record_id]
+    assert goal["record_ids"] == today["record_ids"] == [record_id]
     assert view["records"][0]["evidence"] == {"kind": "user"}
 
     deleted = client.delete(f"{TODOS}/progress-records/{record_id}")

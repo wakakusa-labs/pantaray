@@ -180,7 +180,7 @@ def delete_progress_record_route(
     "/{user_id}/todos/progress",
     response_model=TodoProgressPage,
     description=(
-        "The rows of `period` on the month (day, week) or year (month) holding "
+        "The rows of `period` on the month (day) or year (month) holding "
         "`on`, today's when absent. The goals count to today on every page."
     ),
 )

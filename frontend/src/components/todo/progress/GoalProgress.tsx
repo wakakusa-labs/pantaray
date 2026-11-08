@@ -1,5 +1,3 @@
-import { useId } from 'react';
-
 import { useI18n } from '@/context/useI18n';
 
 import type {
@@ -7,15 +5,14 @@ import type {
   GoalView,
   ProgressRecordView,
 } from '../../../../electron/src/todos/todoContracts';
-import { ProgressRecordList, type RecordActions } from './ProgressRecordList';
 import {
   formatDate,
   formatPercent,
   formatQuantity,
   goalName,
-  momentLocalDate,
+  lateSentence,
+  missesDeadline,
   paceOutcome,
-  paceRate,
   recordCount,
   recordsFor,
   setGoalButtonId,
@@ -28,33 +25,29 @@ import './progress.css';
 function GoalTrack({
   share,
   expectedShare,
-  nowLabel,
   expectedLabel,
+  nowLabel,
   targetLabel,
 }: {
   share: number;
   expectedShare: number;
-  nowLabel: string;
   expectedLabel: string;
+  nowLabel: string;
   targetLabel: string;
 }) {
-  const fill = `${Math.min(share, 1) * 100}%`;
-  const tick = `${expectedShare * 100}%`;
   return (
     <div className="todo-progress-track">
-      {/* Placed over the tick and shifted by the same share of its own width, so it never runs
-          past either end. */}
-      <div className="todo-progress-track__over">
-        <span
-          className="todo-progress-track__expected"
-          style={{ left: tick, transform: `translateX(-${tick})` }}
-        >
-          {expectedLabel}
-        </span>
-      </div>
-      <div className="todo-progress-track__bar" aria-hidden="true">
-        <i className="todo-progress-track__fill" style={{ width: fill }} />
-        <i className="todo-progress-track__tick" style={{ left: tick }} />
+      <div className="todo-progress-track__bar">
+        <i
+          className="todo-progress-track__fill"
+          style={{ width: `${Math.min(share, 1) * 100}%` }}
+        />
+        <i
+          className="todo-progress-track__tick"
+          style={{ left: `${Math.min(expectedShare, 1) * 100}%` }}
+          title={expectedLabel}
+        />
+        <span className="todo-progress-sr-only">{expectedLabel}</span>
       </div>
       <div className="todo-progress-track__under">
         <span>{nowLabel}</span>
@@ -75,16 +68,39 @@ function otherUnitSentence(i18n: ProgressI18n, records: readonly ProgressRecordV
   });
 }
 
-const goalStatement = (i18n: ProgressI18n, today: string, goal: GoalView) =>
-  i18n.t('todoProgress.goal.statement', {
-    deadline: formatDate(i18n, today, goal.deadline),
-    goal: goalName(i18n, goal),
-    setOn: formatDate(i18n, today, momentLocalDate(goal.set_at)),
-  });
+/** The goal's name over its project and deadline. */
+function GoalName({
+  goal,
+  projectName,
+  today,
+}: {
+  goal: GoalView;
+  projectName: string;
+  today: string;
+}) {
+  const i18n = useI18n();
+  return (
+    <div className="todo-progress-goal__name">
+      <span className="todo-progress-dot" aria-hidden="true" />
+      <div>
+        <b>{goalName(i18n, goal)}</b>
+        <small>
+          <span>{projectName}</span>
+          <span>
+            {i18n.t('todoProgress.goal.deadline', {
+              deadline: formatDate(i18n, today, goal.deadline),
+            })}
+          </span>
+        </small>
+      </div>
+    </div>
+  );
+}
 
 /**
- * One project's goal and how far its records have come. Only a measured goal shows numbers, and
- * each one opens onto the records it was counted from.
+ * One project's goal on one ruled row: its name, a track of how far its records have come, and
+ * the share with what the pace says. Only a measured goal shows numbers; the pace is ochre only
+ * when it misses the deadline.
  */
 export function GoalProgress({
   progress,
@@ -92,7 +108,6 @@ export function GoalProgress({
   today,
   recordsById,
   onSetGoal,
-  ...recordActions
 }: {
   progress: GoalProgressData;
   projectName: string;
@@ -100,109 +115,84 @@ export function GoalProgress({
   recordsById: ReadonlyMap<string, ProgressRecordView>;
   /** Opens the goal form for a project without one. */
   onSetGoal: () => void;
-} & RecordActions) {
+}) {
   const i18n = useI18n();
   const { t } = i18n;
-  const headingId = useId();
-  const heading = (
-    <h3 id={headingId}>{t('todoProgress.goal.heading', { project: projectName })}</h3>
-  );
+  const label = t('todoProgress.goal.heading', { project: projectName });
   if (progress.kind === 'no_goal') {
     return (
-      <section className="todo-progress-goal" aria-labelledby={headingId}>
-        {heading}
-        <p>{t('todoProgress.goal.none')}</p>
-        <button
-          type="button"
-          id={setGoalButtonId(progress.project_id)}
-          className="history-filter-button"
-          onClick={onSetGoal}
-        >
-          {t('todoProgress.goal.set')}
-        </button>
+      <section className="todo-progress-goal" aria-label={label}>
+        <div className="todo-progress-goal__name">
+          <span className="todo-progress-dot" aria-hidden="true" />
+          <div>
+            <b>{projectName}</b>
+            <small>{t('todoProgress.goal.none')}</small>
+          </div>
+        </div>
+        <span />
+        <div className="todo-progress-goal__pace">
+          <button
+            type="button"
+            id={setGoalButtonId(progress.project_id)}
+            className="history-filter-button todo-progress-goal__set"
+            onClick={onSetGoal}
+          >
+            {t('todoProgress.goal.set')}
+          </button>
+        </div>
       </section>
     );
   }
 
   const { goal } = progress;
   const otherUnit = recordsFor(progress.other_unit_record_ids, recordsById);
-  const otherUnitParts =
-    otherUnit.length === 0 ? null : (
-      <>
-        <p>{otherUnitSentence(i18n, otherUnit)}</p>
-        <ProgressRecordList
-          summary={t('todoProgress.records.otherUnit', {
-            records: recordCount(i18n, otherUnit.length),
-          })}
-          records={otherUnit}
-          today={today}
-          {...recordActions}
-        />
-      </>
-    );
+  const otherUnitNote =
+    otherUnit.length === 0 ? null : <small>{otherUnitSentence(i18n, otherUnit)}</small>;
 
   if (progress.kind === 'no_records') {
     return (
-      <section className="todo-progress-goal" aria-labelledby={headingId}>
-        {heading}
-        <p className="todo-progress-goal__statement">{goalStatement(i18n, today, goal)}</p>
-        <p>
+      <section className="todo-progress-goal" aria-label={label}>
+        <GoalName goal={goal} projectName={projectName} today={today} />
+        <p className="todo-progress-goal__empty">
           {otherUnit.length === 0
             ? t('todoProgress.goal.noRecords')
             : t('todoProgress.goal.noRecordsInUnit', {
                 unit: t('todoProgress.unitQuoted', { unit: goal.unit }),
               })}
         </p>
-        {otherUnitParts}
+        <div className="todo-progress-goal__pace">{otherUnitNote}</div>
       </section>
     );
   }
 
-  const counted = recordsFor(progress.record_ids, recordsById);
-  const share = formatPercent(i18n, progress.share);
-  const total = formatQuantity(i18n, progress.total, goal.unit);
   const { pace } = progress;
-  // What leads up to the outcome: a passed deadline, then the pace the outcome comes from.
-  const paceLead = [
+  const late = (progress.deadline_passed && pace.kind !== 'reached') || missesDeadline(progress);
+  const paceText = [
     progress.deadline_passed && pace.kind !== 'reached'
       ? t('todoProgress.goal.deadlinePassed', { deadline: formatDate(i18n, today, goal.deadline) })
       : null,
-    paceRate(i18n, today, pace, goal.unit),
-  ].filter((sentence): sentence is string => sentence !== null);
+    paceOutcome(i18n, pace),
+    missesDeadline(progress) ? lateSentence(i18n, today, goal) : null,
+  ]
+    .filter((sentence): sentence is string => sentence !== null)
+    .join(t('todoProgress.sentenceSeparator'));
   return (
-    <section className="todo-progress-goal" aria-labelledby={headingId}>
-      {heading}
-      <p className="todo-progress-goal__statement">{goalStatement(i18n, today, goal)}</p>
+    <section className="todo-progress-goal" aria-label={label}>
+      <GoalName goal={goal} projectName={projectName} today={today} />
       <GoalTrack
         share={progress.share}
         expectedShare={progress.expected_share}
-        nowLabel={t('todoProgress.goal.now', { share, total })}
         expectedLabel={t('todoProgress.goal.expected', {
           share: formatPercent(i18n, progress.expected_share),
         })}
-        targetLabel={t('todoProgress.goal.target', {
-          target: formatQuantity(i18n, goal.target, goal.unit),
-        })}
+        nowLabel={formatQuantity(i18n, progress.total, goal.unit)}
+        targetLabel={formatQuantity(i18n, goal.target, goal.unit)}
       />
-      <p>
-        {t('todoProgress.goal.counted', {
-          share,
-          setOn: formatDate(i18n, today, momentLocalDate(goal.set_at)),
-          records: recordCount(i18n, counted.length),
-          total,
-        })}
-      </p>
-      <p>
-        {paceLead.map((sentence) => sentence + t('todoProgress.sentenceSeparator')).join('')}
-        <b>{paceOutcome(i18n, pace)}</b>
-      </p>
-      <ProgressRecordList
-        summary={t('todoProgress.records.counted', { records: recordCount(i18n, counted.length) })}
-        records={counted}
-        today={today}
-        {...recordActions}
-      />
-      {otherUnitParts}
+      <div className="todo-progress-goal__pace">
+        <b>{formatPercent(i18n, progress.share)}</b>
+        <span className={late ? 'todo-progress-goal__late' : undefined}>{paceText}</span>
+        {otherUnitNote}
+      </div>
     </section>
   );
 }

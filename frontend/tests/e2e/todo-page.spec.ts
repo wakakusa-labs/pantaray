@@ -245,22 +245,32 @@ async function openHome(page: Page, search = '') {
       const inFilter = (projectId: string | null, query: TodoProgressQuery) =>
         query.project === 'any' ||
         (query.project === 'no_project' ? projectId === null : projectId === query.project_id);
-      // Part of the page holding today, oldest first: 7 days, 4 weeks or 2 months.
-      const rowBounds = (period: TodoProgressQuery['period']) => {
-        if (period === 'day')
-          return Array.from({ length: 7 }, (_, i) => ({
-            start: shift(TODAY, i - 6),
-            end: shift(TODAY, i - 6),
+      // The page holding `on` (today without one), as the backend lays it out: the Monday-start
+      // weeks of the month a row a day, or the year's twelve months.
+      const pageStart = (query: TodoProgressQuery) => {
+        const on = query.on ?? TODAY;
+        return query.period === 'month' ? `${on.slice(0, 4)}-01-01` : `${on.slice(0, 7)}-01`;
+      };
+      const rowBounds = (query: TodoProgressQuery) => {
+        const first = pageStart(query);
+        const year = Number(first.slice(0, 4));
+        const monthEnd = (month: number) =>
+          new Date(Date.UTC(year, month + 1, 0)).toISOString().slice(0, 10);
+        if (query.period === 'month')
+          return Array.from({ length: 12 }, (_, i) => ({
+            start: `${year}-${String(i + 1).padStart(2, '0')}-01`,
+            end: monthEnd(i),
           }));
-        if (period === 'week')
-          return Array.from({ length: 4 }, (_, i) => ({
-            start: shift(CURRENT, 7 * (i - 3)),
-            end: shift(CURRENT, 7 * (i - 3) + 6),
-          }));
-        return [
-          { start: '2026-10-01', end: '2026-10-31' },
-          { start: '2026-11-01', end: '2026-11-30' },
-        ];
+        const weekday = (date: string) => (new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7;
+        const last = monthEnd(Number(first.slice(5, 7)) - 1);
+        const gridStart = shift(first, -weekday(first));
+        const days = Math.round(
+          (Date.parse(shift(last, 6 - weekday(last))) - Date.parse(gridStart)) / 86_400_000
+        );
+        return Array.from({ length: days + 1 }, (_, i) => ({
+          start: shift(gridStart, i),
+          end: shift(gridStart, i),
+        }));
       };
       const goalProgress = (projectId: string, shown: ProgressRecordView[]): GoalProgress => {
         const goal = goals.get(projectId);
@@ -292,7 +302,7 @@ async function openHome(page: Page, search = '') {
         const shown = records.filter(
           (record) => inScope(record.project_id, query) && inFilter(record.project_id, query)
         );
-        const rows: ProgressPeriodView[] = rowBounds(query.period).map(({ start, end }) => {
+        const rows: ProgressPeriodView[] = rowBounds(query).map(({ start, end }) => {
           const within = (at: string) => at.slice(0, 10) >= start && at.slice(0, 10) <= end;
           return {
             start,
@@ -329,7 +339,7 @@ async function openHome(page: Page, search = '') {
         return {
           today: TODAY,
           period: query.period,
-          page_start: query.period === 'month' ? '2026-01-01' : '2026-11-01',
+          page_start: pageStart(query),
           rows,
           goals: goalProjects.map((projectId) => goalProgress(projectId, shown)),
           records: shown,
@@ -681,7 +691,7 @@ test('a narrow window tells a failed answer to Pantaray’s deletion request in 
   await capture(page, info, 'narrow-deletion-failure');
 });
 
-test('進み具合 shows the progress in view, keeps its period in the address, and opens where a number came from', async ({
+test('進み具合 lays out the month, keeps its page in the address, and opens a day’s records', async ({
   page,
 }, info) => {
   await openHome(page);
@@ -698,54 +708,79 @@ test('進み具合 shows the progress in view, keeps its period in the address, 
     'aria-current',
     'true'
   );
-  await expect(page.getByRole('heading', { level: 1, name: '見積もり' })).toBeVisible();
-
-  const goal = page.getByRole('region', { name: '見積もりの目標' });
-  await expect(goal).toContainText('12/25 までに 受注 10 件。10/1 に決めました。');
-  await expect(goal).toContainText('いま 40%（4 件）');
-  await expect(goal).toContainText('このペースなら 2026 年 12 月のなかばに届きます。');
-  await expect(page.locator('.todo-progress__lead')).toHaveText(
-    '今週は、見積もりが 1 件進みました。済んだ TODO は 1 件です。受注 10 件の目標に対して、いまは 40% です。このペースなら 2026 年 12 月のなかばに届きます。'
-  );
-
-  // A period's count opens onto its records, each with who wrote it.
-  const rows = page.getByRole('region', { name: '週ごと' }).getByRole('listitem');
-  const lastWeek = rows.filter({ hasText: '10/26 の週' }).first();
-  await expect(lastWeek).toContainText('見積もり +1');
-  await lastWeek.getByText('この期間の記録（1 件）').click();
-  await expect(lastWeek.getByText('北星と東和から受注')).toBeVisible();
-  await expect(lastWeek).toContainText('あなたが記録');
-  const thisWeek = rows.filter({ hasText: '11/2 の週' }).first();
-  await thisWeek.getByText('この期間の記録（1 件）').click();
-  await expect(thisWeek).toContainText('Pantaray が会話の中の結果から記録');
-  expect(await hasNoSideScroll(page)).toBe(true);
-  await capture(page, info, 'progress-week');
-
-  // The period is the address's: a reload keeps it.
-  await page.getByRole('button', { name: '月ごと' }).click();
-  await expect(page).toHaveURL(/#\/history\?project=project:estimate&view=progress&period=month$/);
-  await expect(page.getByRole('region', { name: '月ごと' })).toContainText('11 月（11/4 まで）');
-  await page.reload();
-  await expect(page.getByRole('button', { name: '月ごと' })).toHaveAttribute(
+  const heading = page.getByRole('heading', { level: 1, name: '進み具合' });
+  await expect(heading).toBeVisible();
+  await expect(page.locator('.todo-screen__range')).toHaveText('2026年11月');
+  await expect(page.getByRole('button', { name: '今月へ' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '月', exact: true })).toHaveAttribute(
     'aria-pressed',
     'true'
   );
 
-  // The record's conversation opens as any conversation does, and back returns to the progress.
-  const current = page.getByRole('region', { name: '月ごと' }).getByRole('listitem').first();
-  await current.getByText('この期間の記録（1 件）').click();
-  await current.getByRole('button', { name: '会話を開く: 丸和商事から受注' }).click();
+  const goal = page.getByRole('region', { name: '見積もりの目標' });
+  await expect(goal).toContainText('受注 10 件');
+  await expect(goal).toContainText('12/25 まで');
+  await expect(goal).toContainText('40%');
+  await expect(goal).toContainText('このペースなら 2026 年 12 月のなかばに届きます。');
+  await expect(page.locator('.todo-progress__lead')).toHaveText(
+    '今週は、見積もりが 1 件進みました。済んだ TODO は 1 件です。受注 10 件の目標に対して、いまは 40% です。このペースなら 2026 年 12 月のなかばに届きます。'
+  );
+  // A day ahead opens nothing.
+  await expect(page.getByRole('button', { name: /^11月5日/ })).toHaveCount(0);
+  expect(await hasNoSideScroll(page)).toBe(true);
+  await capture(page, info, 'progress-month');
+
+  // A day opens beside the calendar, in the conversation's place, and the sidebar folds away.
+  await page.getByRole('button', { name: '11月3日（火）、記録 1 件、済んだ TODO 1 件' }).click();
+  await expect(page).toHaveURL(/view=progress&day=2026-11-03$/);
+  const day = page.getByRole('region', { name: '11月3日（火）' });
+  await expect(day).toContainText('記録 1 件');
+  await expect(day).toContainText('丸和商事から受注');
+  await expect(day).toContainText('名刺 40 枚を入れておく');
+  await expect(sidebarOf(page)).toHaveCount(0);
+  expect(await hasNoSideScroll(page)).toBe(true);
+  await capture(page, info, 'progress-day');
+
+  // The record's conversation opens as any conversation does, and back returns to the day.
+  await day.getByRole('button', { name: 'この記録の会話を開く: 丸和商事から受注' }).click();
   await expect(page).toHaveURL(/#\/history\?item=action:action-resubmit$/);
   await page.goBack();
-  await expect(page).toHaveURL(/#\/history\?project=project:estimate&view=progress&period=month$/);
-  await expect(page.getByRole('region', { name: '見積もりの目標' })).toBeVisible();
+  await expect(page).toHaveURL(/view=progress&day=2026-11-03$/);
+  await expect(day).toBeVisible();
+  await page.getByRole('button', { name: 'この日を閉じる' }).click();
+  await expect(day).toHaveCount(0);
+  await expect(heading).toBeFocused();
+  await expect(sidebar).toBeVisible();
+
+  // The month is the address's: a reload keeps it, and 今月へ returns to today's.
+  await page.getByRole('button', { name: '前の月' }).click();
+  await expect(page).toHaveURL(/view=progress&on=2026-10-01$/);
+  await expect(page.locator('.todo-progress__lead')).toContainText(
+    '10月は、見積もりが 3 件進みました。'
+  );
+  await page.reload();
+  await expect(page.locator('.todo-screen__range')).toHaveText('2026年10月');
+  await page.getByRole('button', { name: '今月へ' }).click();
+  await expect(page).toHaveURL(/#\/history\?project=project:estimate&view=progress$/);
+  await expect(heading).toBeFocused();
+
+  // The year lays out its months, and a month opens as its calendar.
+  await page.getByRole('button', { name: '年', exact: true }).click();
+  await expect(page).toHaveURL(/view=progress&span=year$/);
+  await expect(page.locator('.todo-screen__range')).toHaveText('2026年');
+  const months = page.getByRole('group', { name: '2026年' }).getByRole('button');
+  await expect(months).toHaveCount(12);
+  await capture(page, info, 'progress-year');
+  await page.getByRole('button', { name: '2026年10月、記録 2 件、済んだ TODO 0 件' }).click();
+  await expect(page).toHaveURL(/view=progress&on=2026-10-01$/);
+  await expect(page.locator('.todo-screen__range')).toHaveText('2026年10月');
 
   // Every organization's progress, with each goal there is.
   await sidebar.getByRole('button', { name: 'すべての TODO' }).click();
   await sidebar.getByRole('button', { name: '進み具合' }).click();
   await expect(page).toHaveURL(/#\/history\?view=progress$/);
   await expect(page.locator('.todo-progress__lead')).toContainText(
-    '今週は、見積もりが 1 件、プロダクトが 1 件進みました。'
+    '今週は、プロダクトが 1 本、見積もりが 1 件進みました。済んだ TODO は 2 件です。'
   );
   await capture(page, info, 'progress-all');
 });
@@ -803,9 +838,10 @@ test('a project’s goal is set from its menu or from its progress, opening on t
   await fromProgress.getByRole('button', { name: '保存' }).click();
   await expect(fromProgress).toHaveCount(0);
   // Its 「目標を設定」 is gone with the goal set, so focus goes to the page's heading.
-  await expect(goal).toContainText('12/25 までに 面接 5 回。11/4 に決めました。');
+  await expect(goal).toContainText('面接 5 回');
+  await expect(goal).toContainText('12/25 まで');
   await expect(goal).toContainText('まだ記録がありません。');
-  await expect(page.getByRole('heading', { level: 1, name: '採用' })).toBeFocused();
+  await expect(page.getByRole('heading', { level: 1, name: '進み具合' })).toBeFocused();
 });
 
 test('beside a conversation the sidebar folds away and the rows keep their one line', async ({

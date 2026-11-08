@@ -36,7 +36,7 @@ const TodoIdSchema = textSchema(TODO_ID_MAX_CODEPOINTS);
 const QuantitySchema = z.number().positive().finite();
 const GoalUnitSchema = textSchema(GOAL_UNIT_MAX_CODEPOINTS);
 /** `PeriodKind`: what one row of the progress view spans. */
-const PeriodKindSchema = z.enum(['day', 'week', 'month']);
+const PeriodKindSchema = z.enum(['day', 'month']);
 
 const TodoDueSchema = z
   .object({ date: LocalDateSchema, repeat: z.enum(['none', 'weekly']) })
@@ -76,7 +76,7 @@ export const TodoWeekQuerySchema = z
   .refine(projectMatches, PROJECT_MISMATCH);
 
 /**
- * The progress view's rows are the `period`s of the month (day, week) or year (month) holding
+ * The progress view's rows are the `period`s of the month (day) or year (month) holding
  * `on`; no `on` is the page holding today, and the backend bounds it. Scope and project as for
  * the week.
  */
@@ -334,10 +334,10 @@ const TodoProgressPageSchema = z
   .object({
     today: LocalDateSchema,
     period: PeriodKindSchema,
-    // The first day of the month (day, week) or year (month) the rows lay out.
+    // The first day of the month (day) or year (month) the rows lay out.
     page_start: LocalDateSchema,
-    // Oldest first. Day and week rows cover the Monday-start weeks holding any day of the month,
-    // spilling into the months either side; month rows are the year's twelve months.
+    // Oldest first. Day rows cover the Monday-start weeks holding any day of the month, spilling
+    // into the months either side; month rows are the year's twelve months.
     rows: z.array(ProgressPeriodViewSchema),
     goals: z.array(GoalProgressSchema),
     // Every record an id above names.

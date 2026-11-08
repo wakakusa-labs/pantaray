@@ -298,13 +298,13 @@ const GOAL_VARIANTS = [
 
 const PROGRESS_PAGE = {
   today: '2026-11-04',
-  period: 'week',
+  period: 'day',
   page_start: '2026-11-01',
   rows: [
-    { start: '2026-10-26', end: '2026-11-01', record_ids: [], checked: [] },
+    { start: '2026-11-02', end: '2026-11-02', record_ids: [], checked: [] },
     {
-      start: '2026-11-02',
-      end: '2026-11-08',
+      start: '2026-11-03',
+      end: '2026-11-03',
       record_ids: ['rec-1', 'rec-2'],
       checked: [
         {
@@ -336,7 +336,7 @@ test('every progress route reaches its backend path, and each goal, pace and evi
           scope: 'no_organization',
           project: 'project',
           project_id: 'project 1',
-          period: 'week',
+          period: 'day',
           on: '2026-10-15',
         }),
         PROGRESS_PAGE
@@ -364,7 +364,7 @@ test('every progress route reaches its backend path, and each goal, pace and evi
         [
           [
             'GET',
-            '/progress?scope=no_organization&project=project&project_id=project+1&period=week&on=2026-10-15',
+            '/progress?scope=no_organization&project=project&project_id=project+1&period=day&on=2026-10-15',
             undefined,
           ],
           ['PUT', '/projects/project%201/goal', goalBody],

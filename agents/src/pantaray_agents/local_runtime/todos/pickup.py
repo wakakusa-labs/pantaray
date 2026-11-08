@@ -30,13 +30,14 @@ from pantaray_agents.local_runtime.todos.clock import (
     read_todo_clock,
 )
 from pantaray_agents.local_runtime.todos.conversation import todo_message_id
+from pantaray_agents.local_runtime.todos.db import todo_db_connection
 from pantaray_agents.local_runtime.todos.display import (
     ContinueAiTodo,
     PickupTarget,
     StartWritten,
     pickup_target,
 )
-from pantaray_agents.local_runtime.todos.model import Todo
+from pantaray_agents.local_runtime.todos.model import SuggestionOrigin, Todo
 from pantaray_agents.local_runtime.todos.reads import (
     read_pickup_candidates,
 )
@@ -50,7 +51,9 @@ from pantaray_agents.schema.agent.action_message import (
     ActionUserMessageInput,
     TodoHandoffInput,
     TodoHandoffProject,
+    TodoHandoffSuggestion,
 )
+from pantaray_agents.schema.agent.suggestion import SuggestionTargetContext
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +78,8 @@ def pick_up_todos(*, user_id: str) -> None:
     )
     for todo, target in targets:
         try:
-            command = _command(user_id, todo, target, _handoff(todo, settings))
+            handoff = _handoff(todo, settings, _suggestion(user_id, todo))
+            command = _command(user_id, todo, target, handoff)
             submit_action_message(command)
         # A TODO the Action message cannot carry fails alone, so it never holds
         # back the TODOs after it.
@@ -105,10 +109,18 @@ def _command(
                 ),
             )
         case ContinueAiTodo():
+            # A Suggestion's TODO opens with the Suggestion's message, linked to
+            # it, so the Suggestion keeps one conversation.
+            origin = todo.origin
             return SubmitActionMessageCommand(
                 user_id=user_id,
                 origin="todo_pickup",
                 target=NewActionTarget(
+                    approval_mode="prompt_each_time",
+                    reply_to_suggestion_id=origin.suggestion_id,
+                )
+                if isinstance(origin, SuggestionOrigin)
+                else NewActionTarget(
                     approval_mode="prompt_each_time", todo_text=todo.text
                 ),
                 message=ActionUserMessageInput(
@@ -121,7 +133,42 @@ def _command(
             assert_never(target)
 
 
-def _handoff(todo: Todo, settings: WorkspaceSettings) -> TodoHandoffInput:
+def _suggestion(user_id: str, todo: Todo) -> TodoHandoffSuggestion | None:
+    """What the Suggestion a TODO came from left for its work, as an approval passes it.
+
+    Its summary holds what the shown message leaves out, such as which target
+    or "draft only, do not send", so the Action must read it too.
+    """
+
+    if not isinstance(todo.origin, SuggestionOrigin):
+        return None
+    suggestion_id = todo.origin.suggestion_id
+    with todo_db_connection() as connection:
+        row = connection.execute(
+            "SELECT suggestion_summary, target_context_json FROM agent_suggestions "
+            "WHERE user_id = ? AND suggestion_id = ?",
+            (user_id, suggestion_id),
+        ).fetchone()
+    # A Suggestion deleted meanwhile cannot open the Action; the submit refuses it.
+    if row is None:
+        return None
+    raw_target = row["target_context_json"]
+    target = (
+        None
+        if raw_target is None
+        else SuggestionTargetContext.model_validate_json(raw_target)
+    )
+    return TodoHandoffSuggestion(
+        suggestion_id=suggestion_id,
+        summary=row["suggestion_summary"],
+        organization_name=None if target is None else target.organization_name,
+        project_name=None if target is None else target.project_name,
+    )
+
+
+def _handoff(
+    todo: Todo, settings: WorkspaceSettings, suggestion: TodoHandoffSuggestion | None
+) -> TodoHandoffInput:
     """The TODO's project with the folders the Action composer would send for it."""
 
     project = next(
@@ -129,6 +176,7 @@ def _handoff(todo: Todo, settings: WorkspaceSettings) -> TodoHandoffInput:
     )
     return TodoHandoffInput(
         todo_id=todo.todo_id,
+        suggestion=suggestion,
         project=None
         if project is None
         else TodoHandoffProject(

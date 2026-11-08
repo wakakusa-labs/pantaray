@@ -1747,6 +1747,25 @@ describe('AgentOverlay broader E2E', () => {
     expect(submitMessage).not.toHaveBeenCalled();
   });
 
+  it('shows the conversation Pantaray opened for an unanswered offer instead of Accept and Dismiss', async () => {
+    render(
+      <UiLanguageProvider initialLanguage="en">
+        <AgentOverlay />
+      </UiLanguageProvider>
+    );
+    // Pantaray picked up the offer's TODO: an Action, and no approval.
+    const snapshot = createCommentOnlySnapshot();
+    snapshot.snapshot.interactionContract = 'action_offer';
+    snapshot.snapshot.actionId = 'act-1';
+    await act(async () => snapshotListener?.(snapshot));
+    await act(async () => conversationListener?.(createConversationUpdate(null, true)));
+
+    expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Dismiss suggestion' })).toBeNull();
+    expect(screen.getByLabelText('Message')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
+  });
+
   it('approves with images and consent, blocks pending uploads and invalid instructions, and preserves a failed request', async () => {
     render(
       <UiLanguageProvider initialLanguage="en">

@@ -29,6 +29,7 @@ from pantaray_agents.tasks.action_user_message import (
     serialize_action_user_message,
 )
 
+from ..todos.db import count_todo_change
 from .action_file_attachments import ActionFileAttachmentLinks
 from .action_invalidation_events import append_action_invalidation_event
 from .action_message_models import (
@@ -159,6 +160,7 @@ def submit_action_message(
                         action_id=action_id,
                         process_id=process_id,
                         target=command.target,
+                        origin=command.origin,
                         created_at=created_at,
                     )
 
@@ -246,6 +248,14 @@ def submit_action_message(
                         message=command.message,
                         created_at=created_at,
                     )
+            # The TODO now shows its Action, and a Suggestion's TODO links the
+            # Suggestion to it: counted with the Action, so the open windows read
+            # again exactly when it exists.
+            if (
+                isinstance(command.target, NewActionTarget)
+                and command.message.todo_handoff is not None
+            ):
+                count_todo_change(connection, user_id=command.user_id)
             if command.message.files:
                 attachment_links.link(
                     connection=connection,

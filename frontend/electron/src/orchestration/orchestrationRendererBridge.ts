@@ -25,6 +25,7 @@ import { broadcastHistoryChanged } from './historyNotifications';
 import {
   getEventMeta,
   isProcessCompletedActionEvent,
+  isProcessCompletedSuggestionEvent,
   isProcessPausedActionEvent,
   isProcessStartedActionEvent,
   isProcessStartedSuggestionEvent,
@@ -49,6 +50,8 @@ export function createOrchestrationRendererBridge(params: {
   notificationWindow: NotificationWindowApi;
   getMainWindow: () => BrowserWindow | null;
   latestActionPages: ActionLatestPages;
+  readSuggestionSnapshot: (suggestionId: string) => Promise<OverlaySnapshot | null>;
+  getOwnerId: () => string | null;
   sendFromRenderer: (message: unknown) => Promise<void>;
   requestResume: (request: ResumeProcessRequest) => void;
   getUiLanguage: () => 'en' | 'ja';
@@ -278,6 +281,7 @@ export function createOrchestrationRendererBridge(params: {
 
     const liveResult = actionLive.handleEvent(msg);
     syncCommandStateFromEvent(msg, liveResult.route);
+    if (isProcessCompletedSuggestionEvent(msg) && suggestionId) relinkPickedUpOffers(suggestionId);
     if (
       msg.event === 'suggestion_reaction_committed' ||
       msg.event === 'action_requested' ||
@@ -365,6 +369,8 @@ export function createOrchestrationRendererBridge(params: {
           for (const [processId, actionId] of liveProcesses) {
             params.requestResume({ kind: 'action', processId, actionId, fromStart: false });
           }
+          // A TODO change sent while no session was live is not sent again.
+          relinkPickedUpOffers();
         }
         syncPrestartReplayLoop();
       } else if (status === 'session_resumed') {
@@ -513,8 +519,45 @@ export function createOrchestrationRendererBridge(params: {
     return suggestionRecords.getSnapshot(normalizedSuggestionId);
   }
 
+  // Pantaray picking up a suggestion's TODO opens the suggestion's conversation, as a reply does,
+  // and moves the TODO list. Only a read brings that Action to an offer nobody answered, so each
+  // window showing one stops offering 承認 and 見送る and shows the Action instead. A TODO change
+  // can arrive before the suggestion it links has finished streaming, so a finished suggestion
+  // and a new session check again; `only` narrows the check to one suggestion.
+  function relinkPickedUpOffers(only: string | null = null): void {
+    const ownerId = params.getOwnerId();
+    for (const record of suggestionRecords.values()) {
+      const snapshot = record.snapshot;
+      const suggestionId = String(snapshot.suggestionId);
+      if (
+        snapshot.interactionContract !== 'action_offer' ||
+        snapshot.reactionState !== null ||
+        snapshot.actionId !== null ||
+        (only !== null && suggestionId !== only)
+      ) {
+        continue;
+      }
+      params
+        .readSuggestionSnapshot(suggestionId)
+        .then((persisted) => {
+          const actionId = persisted?.actionId ?? null;
+          if (persisted === null || actionId === null || params.getOwnerId() !== ownerId) return;
+          suggestionRecords.adoptPersisted(persisted);
+          // No approve or reply went through this window, so nothing follows the Action yet:
+          // attach the suggestion's panel to it, read its conversation and resume its live
+          // run, whose first step may already wait for the user's approval.
+          notificationWindow.adoptActionAssociation(actionId, suggestionId);
+          return refreshAndResumeActionConversation(actionId);
+        })
+        .catch((error: unknown) => {
+          console.error('Failed to link a suggestion to the Action Pantaray opened:', error);
+        });
+    }
+  }
+
   return {
     acceptAction,
+    relinkPickedUpOffers: () => relinkPickedUpOffers(),
     adoptSuggestionSnapshot: suggestionRecords.adoptPersisted,
     recordSuggestionReply: suggestionRecords.recordReply,
     forwardEventToRenderers,

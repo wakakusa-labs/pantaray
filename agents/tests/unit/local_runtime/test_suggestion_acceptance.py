@@ -22,7 +22,10 @@ from pantaray_agents.local_runtime.runtime.suggestion_acceptance import (
 )
 from pantaray_agents.local_runtime.storage.migrations import load_default_migrations
 from pantaray_agents.schema.agent.base import StatusType
-from pantaray_agents.schema.agent.suggestion import SuggestionAgentResponse
+from pantaray_agents.schema.agent.suggestion import (
+    SuggestionAgentResponse,
+    SuggestionTodo,
+)
 
 from .migrated_db import prepare_test_database
 
@@ -82,6 +85,7 @@ async def _save_action_offer(db_path: Path) -> None:
             suggestion_summary="summary",
             status=StatusType.SUCCESS,
             has_suggestion=True,
+            todo=SuggestionTodo(text="Reply", outcome="done", note=None),
             interaction_contract="action_offer",
         ),
         prompt_name="suggestion",

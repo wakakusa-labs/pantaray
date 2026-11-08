@@ -85,7 +85,7 @@ def test_a_suggestion_todo_is_the_suggestions_conversation_until_an_action_takes
         else conversation
         for conversation in _resolve(db, *todos)
     ] == [
-        SuggestionConversation(suggestion_id="s-alone"),
+        SuggestionConversation(suggestion_id="s-alone", answered=False),
         "accepted",
         "replied",
         "picked",

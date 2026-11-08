@@ -79,6 +79,7 @@ def parse_suggestion_output(
             "has_suggestion": True,
             "interaction_contract": parsed.interaction_contract,
             "artifacts": [],
+            "todo": None,
         }
 
     if key_point:
@@ -100,4 +101,5 @@ def parse_suggestion_output(
         "has_suggestion": False,
         "interaction_contract": None,
         "artifacts": [],
+        "todo": None,
     }

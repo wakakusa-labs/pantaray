@@ -35,6 +35,7 @@ from pantaray_agents.schema.agent.base import StatusType
 from pantaray_agents.schema.agent.suggestion import (
     SuggestionAgentResponse,
     SuggestionInteractionContract,
+    SuggestionTodo,
 )
 
 from .migrated_db import prepare_test_database
@@ -110,6 +111,7 @@ async def _save_suggestion(
             suggestion_summary="summary",
             status=StatusType.SUCCESS,
             has_suggestion=True,
+            todo=SuggestionTodo(text="Reply", outcome="done", note=None),
             interaction_contract=contract,
             artifacts=artifacts,
         ),

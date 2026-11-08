@@ -202,6 +202,8 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     getRuntimeState: params.supabaseWiring.getRuntimeState,
     getUiLanguage: params.getUiLanguage,
     latestActionPages: latestActionPageReader,
+    readSuggestionSnapshot: async (suggestionId) =>
+      (await resolveOverlayBootstrap(suggestionId))?.snapshot ?? null,
     // `requestJson` is defined just below; the responder only calls it once a
     // capture request actually arrives, long after this module finished loading.
     respondToScreenCapture: createScreenCaptureResponder({

@@ -47,7 +47,8 @@ def todo_message_id(todo_id: TodoId) -> str:
     return str(uuid.uuid5(_NAMESPACE_TODO_MESSAGE, todo_id))
 
 
-# A Suggestion's conversation is the Action that accepted it or replied to it;
+# A Suggestion's conversation is the Action that accepted it, or that opened
+# with its message: a reply, or the pickup continuing its TODO;
 # any TODO's is also the Action opened with its own message id, which is how the
 # pickup starts one. An Action's latest run is the newest adopted USER row's,
 # and agent_actions keeps that run's status and answer; any paused process of
@@ -70,7 +71,10 @@ WITH wanted AS (
     ) AS action_id,
     EXISTS (SELECT 1 FROM agent_suggestions
             WHERE user_id = :user_id AND suggestion_id = wanted.suggestion_id)
-      AS suggestion_exists
+      AS suggestion_exists,
+    EXISTS (SELECT 1 FROM agent_suggestions
+            WHERE user_id = :user_id AND suggestion_id = wanted.suggestion_id
+              AND user_reaction IS NOT NULL) AS suggestion_answered
   FROM wanted
 )
 SELECT linked.todo_id, linked.suggestion_id, linked.suggestion_exists,
@@ -81,7 +85,8 @@ SELECT linked.todo_id, linked.suggestion_id, linked.suggestion_exists,
   (SELECT adopted_process_id FROM agent_action_steps
    WHERE user_id = :user_id AND action_id = linked.action_id
      AND adopted_process_id IS NOT NULL
-   ORDER BY accepted_sequence DESC LIMIT 1) AS latest_run_id
+   ORDER BY accepted_sequence DESC LIMIT 1) AS latest_run_id,
+  linked.suggestion_answered
 FROM linked
 LEFT JOIN agent_actions AS action
   ON action.user_id = :user_id AND action.action_id = linked.action_id
@@ -115,10 +120,12 @@ def resolve_todo_conversations(
 
 def _conversation(row: sqlite3.Row) -> TodoConversation:
     _, suggestion_id, suggestion_exists, action_id, status, final_output = row[:6]
-    paused, latest_run_id = row[6], row[7]
+    paused, latest_run_id, answered = row[6], row[7], row[8]
     if action_id is None:
         if suggestion_id is not None and suggestion_exists:
-            return SuggestionConversation(suggestion_id=str(suggestion_id))
+            return SuggestionConversation(
+                suggestion_id=str(suggestion_id), answered=bool(answered)
+            )
         return NoConversation()
     if latest_run_id is None:
         raise ActionConversationIntegrityError("A TODO's Action has no adopted run")

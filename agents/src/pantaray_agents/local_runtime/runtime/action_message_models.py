@@ -123,7 +123,8 @@ class SubmitActionMessageCommand(BaseModel):
     # ``resume`` is the user asking for the stopped run to be continued. It is an
     # ordinary follow-up turn; only the step name and this guard differ.
     # ``todo_pickup`` is Pantaray starting an AI-written TODO: a new Action that
-    # opens with ``todo_text`` and carries the fixed request as its USER row.
+    # opens with ``todo_text``, or with the message of the Suggestion the TODO
+    # came from, and carries the fixed request as its USER row.
     origin: ActionMessageOrigin = "user"
 
     _validate_message = field_validator("message")(
@@ -137,8 +138,14 @@ class SubmitActionMessageCommand(BaseModel):
             if isinstance(target, NewActionTarget) and target.todo_text is not None:
                 raise ValueError("Only a TODO pickup opens with TODO text")
             return self
-        if not isinstance(target, NewActionTarget) or target.todo_text is None:
-            raise ValueError("A TODO pickup opens a new Action with its TODO text")
+        # A Suggestion's TODO opens with the Suggestion's message instead, as a
+        # reply to it does, so that message stays its one conversation.
+        if not isinstance(target, NewActionTarget) or (
+            target.todo_text is None and target.reply_to_suggestion_id is None
+        ):
+            raise ValueError(
+                "A TODO pickup opens a new Action with its TODO text or Suggestion"
+            )
         # Nobody asked for this work, so it asks before every edit or command
         # whatever the user's own setting is; the Action-level mode is what the
         # tool broker reads first.

@@ -134,6 +134,8 @@ export function createOrchestrationManager(params: {
   getRuntimeState: () => LocalRuntimeState;
   getUiLanguage: () => 'en' | 'ja';
   latestActionPages: ActionLatestPages;
+  /** Reads a suggestion's persisted snapshot; null when it is gone. */
+  readSuggestionSnapshot: (suggestionId: string) => Promise<OverlaySnapshot | null>;
   /** Answers a screen capture request; absent means no desktop capture support. */
   respondToScreenCapture?: (request: ScreenCaptureRequest) => Promise<void>;
   /** Prints an HTML file for the Action runtime; absent means no desktop rendering. */
@@ -420,6 +422,7 @@ export function createOrchestrationManager(params: {
     // The TODO list is the main window's alone too.
     if (isTodoChangedEvent(message)) {
       sendToMainWindow('todos:changed', parseTodoChanged(message.data));
+      rendererBridge.relinkPickedUpOffers();
       return;
     }
     rendererBridge.forwardEventToRenderers(message);
@@ -523,6 +526,8 @@ export function createOrchestrationManager(params: {
     notificationWindow,
     getMainWindow: () => params.getMainWindow(),
     latestActionPages: params.latestActionPages,
+    readSuggestionSnapshot: params.readSuggestionSnapshot,
+    getOwnerId: params.getOwnerId,
     sendFromRenderer,
     requestResume: (request) => {
       // An internal refresh may finish after owner loss; its resume is obsolete.

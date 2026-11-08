@@ -1,4 +1,5 @@
-"""Store the core's results: each write is one transaction over `todo_items`.
+"""Store the core's results: each write is one transaction over `todo_items`,
+except a Suggestion's TODO, which joins the Suggestion's save.
 
 A write that changes nothing writes nothing, so a replayed request leaves the
 row and the revision the live session follows as they were.
@@ -9,6 +10,7 @@ from __future__ import annotations
 import sqlite3
 import uuid
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Final, Literal
 
 from pantaray_agents.local_runtime.runtime.identity import verify_current_owner
@@ -21,19 +23,23 @@ from pantaray_agents.local_runtime.todos.db import (
     TODO_COLUMNS,
     TODO_SELECT,
     owns_project,
+    project_id_named,
     read_todo_row,
     todo_db_connection,
     todo_from_row,
     todo_params,
 )
 from pantaray_agents.local_runtime.todos.model import (
+    AiReport,
     LocalDate,
+    SuggestionOrigin,
     Todo,
     TodoAuthor,
     TodoDue,
     TodoId,
     WrittenOrigin,
 )
+from pantaray_agents.schema.agent.suggestion import SuggestionTodo
 
 _INSERT_SQL: Final = (
     f"INSERT INTO todo_items(user_id, client_todo_id, {', '.join(TODO_COLUMNS)}) "
@@ -46,6 +52,10 @@ _UPDATE_SQL: Final = (
 )
 
 type CreateItemRejection = Literal["project_not_found", "client_todo_conflict"]
+
+_NAMESPACE_SUGGESTION_TODO: Final = uuid.uuid5(
+    uuid.NAMESPACE_URL, "pantaray:suggestion_todo:v1"
+)
 
 
 def create_todo_item(
@@ -100,6 +110,74 @@ def create_todo_item(
             },
         )
     return created
+
+
+def suggestion_todo_id(suggestion_id: str) -> TodoId:
+    return str(uuid.uuid5(_NAMESPACE_SUGGESTION_TODO, suggestion_id))
+
+
+def build_suggestion_todo(
+    *, suggestion_id: str, todo: SuggestionTodo, clock: TodoClock
+) -> Todo | Rejected[core.CreateRejection]:
+    """The AI-written TODO a Suggestion becomes, before its project is known.
+
+    It opens in the current week without a due date: checked when its work is
+    done, otherwise with the Suggestion's report on it.
+    """
+
+    created = core.create_todo(
+        todo_id=suggestion_todo_id(suggestion_id),
+        text=todo.text,
+        author="ai",
+        origin=SuggestionOrigin(suggestion_id=suggestion_id),
+        project_id=None,
+        week_of=clock.today,
+        due=None,
+        now=clock.now,
+    )
+    if isinstance(created, Rejected):
+        return created
+    if todo.outcome == "done":
+        checked = core.set_check(
+            created, by="ai", checked=True, now=clock.now, zone=clock.zone
+        )
+        assert isinstance(checked, CheckSet)  # A new TODO is not deleted.
+        return checked.todo
+    assert todo.note is not None  # SuggestionTodo requires it.
+    reported = core.report_progress(
+        created,
+        AiReport(kind=todo.outcome, note=todo.note, run_id=None, at=clock.now),
+    )
+    assert isinstance(reported, Todo)  # A new TODO is not deleted.
+    return reported
+
+
+def insert_suggestion_todo(
+    connection: sqlite3.Connection,
+    *,
+    user_id: str,
+    todo: Todo,
+    project_name: str | None,
+) -> None:
+    """Store `build_suggestion_todo`'s TODO in the Suggestion's save transaction.
+
+    Its project is the user's project of exactly ``project_name``; any other
+    name leaves it without one rather than guessing.
+    """
+
+    project_id = (
+        None
+        if project_name is None
+        else project_id_named(connection, user_id=user_id, display_name=project_name)
+    )
+    connection.execute(
+        _INSERT_SQL,
+        {
+            **todo_params(replace(todo, project_id=project_id)),
+            "user_id": user_id,
+            "client_todo_id": None,
+        },
+    )
 
 
 def set_todo_check(

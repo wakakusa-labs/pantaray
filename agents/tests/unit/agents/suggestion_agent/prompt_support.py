@@ -57,10 +57,30 @@ SELECT_FIRST = {
 }
 
 
-def serve_lens_runs(client: MockLLMClient, first: object) -> None:
+def writer_call(
+    message: str, contract: str = "action_offer", **todo: object
+) -> dict[str, object]:
+    """The writer's tool call; an offer's TODO continues unless `todo` says otherwise."""
+
+    offer = {"todo_state": "continue", "todo_note": "Waiting for approval."}
+    return {
+        "tool_id": "write_suggestion",
+        "args": {
+            "message": message,
+            "todo": "Send the reply",
+            **(offer if contract == "action_offer" else {}),
+            **todo,
+        },
+    }
+
+
+def serve_lens_runs(
+    client: MockLLMClient, first: object, written: object | None = None
+) -> None:
     """The first lens run submits `first`, the other two find nothing, and the
     selector picks the first candidate when there is one, which then finishes
-    its make stage with the same decision and no files."""
+    its make stage with the same decision and no files, and the writer returns
+    `written` (by default a short message and its TODO)."""
 
     client.set_next_response(first)
     suggested = isinstance(first, dict) and first.get("has_suggestion") is True
@@ -80,5 +100,13 @@ def serve_lens_runs(client: MockLLMClient, first: object) -> None:
     client.queued_responses = [
         NO_SUGGESTION,
         NO_SUGGESTION,
-        *([SELECT_FIRST, kept] if suggested else []),
+        *(
+            [
+                SELECT_FIRST,
+                kept,
+                written or writer_call("Try it?", first["interaction_contract"]),
+            ]
+            if suggested
+            else []
+        ),
     ]

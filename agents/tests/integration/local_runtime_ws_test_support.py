@@ -20,6 +20,7 @@ from tests.integration.local_runtime_ws_test_fakes import (
     LocalWsSuggestionRepository,
     keep_decision,
     load_test_prompt_config,
+    writer_reply,
 )
 
 import pantaray_agents.config as runtime_config
@@ -230,11 +231,10 @@ def local_runtime_ws_harness(
         nothing,
         {"tool_id": "select_suggestion", "args": {"choice": 1, "reason": "it"}},
         keep_decision("action_offer", "The local runtime verification is half done."),
+        writer_reply(
+            "action_offer", "Continue the focused local runtime verification."
+        ),
     ]
-    # The writer's call is the next plain-text call on this client.
-    suggestion_llm.responses["default"] = (
-        "Continue the focused local runtime verification."
-    )
     monkeypatch.setattr(deps, "get_llm_client", lambda: activity_llm, raising=False)
     monkeypatch.setattr(
         deps,

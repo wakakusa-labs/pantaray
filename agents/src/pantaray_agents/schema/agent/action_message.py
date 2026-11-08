@@ -364,6 +364,23 @@ class TodoHandoffProject(BaseModel):
     _validate_paths = field_validator("paths", mode="before")(_bounded_project_paths)
 
 
+class TodoHandoffSuggestion(BaseModel):
+    """What the Suggestion a TODO came from left for the work, as an approval carries it.
+
+    The user approved nothing: Pantaray picked the TODO up. So it sits on the
+    hand-off, apart from ``suggestion_approval``.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    suggestion_id: str
+    summary: str | None
+    organization_name: str | None
+    project_name: str | None
+
+    _validate_suggestion_id = field_validator("suggestion_id")(_bounded_id)
+
+
 class TodoHandoffInput(BaseModel):
     """The TODO this Action was started for, set only by the system that starts it.
 
@@ -375,6 +392,8 @@ class TodoHandoffInput(BaseModel):
 
     todo_id: str
     project: TodoHandoffProject | None
+    # Set for a Suggestion's TODO; messages stored before it read as None.
+    suggestion: TodoHandoffSuggestion | None = None
 
     _validate_todo_id = field_validator("todo_id")(_bounded_id)
 
@@ -524,6 +543,7 @@ __all__ = [
     "SuggestionApprovalInput",
     "TodoHandoffInput",
     "TodoHandoffProject",
+    "TodoHandoffSuggestion",
     "bounded_content",
     "bounded_files",
     "bounded_images",

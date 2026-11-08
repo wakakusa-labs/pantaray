@@ -1,6 +1,7 @@
 import pytest
 
 from pantaray_agents.action_status import build_finalize_action_terminal_command
+from pantaray_agents.schema.agent.suggestion import SuggestionTodo
 
 from .shared import (
     UTC,
@@ -23,6 +24,7 @@ class TestMockSuggestionAgentRepository:
             answer="Test suggestion content",
             thinking="Test thinking process",
             has_suggestion=True,
+            todo=SuggestionTodo(text="Reply", outcome="done", note=None),
             status=StatusType.SUCCESS,
             error=None,
             created_at=datetime.now().isoformat(),
@@ -128,6 +130,7 @@ class TestMockSuggestionAgentRepository:
                 answer="Actionable suggestion",
                 thinking="thinking",
                 has_suggestion=True,
+                todo=SuggestionTodo(text="Reply", outcome="done", note=None),
                 interaction_contract="action_offer",
                 status=StatusType.SUCCESS,
                 error=None,

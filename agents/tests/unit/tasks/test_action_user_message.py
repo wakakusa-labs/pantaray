@@ -5,6 +5,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
+from pantaray_agents import todo_ux_feature
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
 from pantaray_agents.schema.agent.action import (
     ActionUserMessageInput,
@@ -172,6 +173,19 @@ def test_todo_handoff_without_a_project_names_only_the_todo() -> None:
         )
         == message
     )
+
+
+def test_todo_handoff_is_not_read_out_while_the_todo_list_is_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(todo_ux_feature, "TODO_UX_ENABLED", False)
+    message = ActionUserMessageInput(
+        message_id="message-1",
+        content="Renew the passport",
+        todo_handoff=TodoHandoffInput(todo_id="todo-1", project=None),
+    )
+
+    assert render_action_user_request_text(message) == "Renew the passport"
 
 
 @pytest.mark.parametrize(

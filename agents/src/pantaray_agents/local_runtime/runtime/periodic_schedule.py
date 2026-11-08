@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from pantaray_agents import todo_ux_feature
+
 from ..todos.pickup import pick_up_todos
 from ..todos.retention import purge_expired_todos
 from .activity_summary_scheduler import (
@@ -202,11 +204,18 @@ def build_periodic_schedule(
             ),
             run=embedding_slot.submit,
         ),
-        PeriodicTask(
-            name="todo_pickup",
-            interval_seconds=TODO_PICKUP_INTERVAL_SECONDS,
-            is_ready=_todo_pickup_is_ready,
-            run=lambda context: pick_up_todos(user_id=context.owner_user_id),
+        # Off, no TODO turns into an Action, as before the TODO list.
+        *(
+            (
+                PeriodicTask(
+                    name="todo_pickup",
+                    interval_seconds=TODO_PICKUP_INTERVAL_SECONDS,
+                    is_ready=_todo_pickup_is_ready,
+                    run=lambda context: pick_up_todos(user_id=context.owner_user_id),
+                ),
+            )
+            if todo_ux_feature.TODO_UX_ENABLED
+            else ()
         ),
         PeriodicTask(
             name="todo_purge",

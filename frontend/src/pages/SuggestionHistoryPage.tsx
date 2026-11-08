@@ -36,6 +36,7 @@ import {
   type TodoProjectFilter,
   type TodoSelection,
 } from '@/todos/todoSelection';
+import { TODO_UX_ENABLED } from '@/todos/todoUxFeature';
 import { useTodoWeek } from '@/todos/useTodoWeek';
 
 import type { TodoScopeQuery } from '../../electron/src/todos/todoContracts';
@@ -48,7 +49,10 @@ const UNLISTED_TITLE = {
   ja: { action: '作業', suggestion: '提案' },
 } as const;
 
-/** The query parameter `historySelectionSearch` writes; without it the page shows the TODOs. */
+/**
+ * The query parameter `historySelectionSearch` writes; without it the page shows the TODOs, or,
+ * without the TODO list, the chat.
+ */
 const ITEM_PARAM = 'item';
 /** The week is read whole: the sidebar counts every project's open TODOs. */
 const ANY_PROJECT: TodoProjectFilter = { project: 'any' };
@@ -113,9 +117,10 @@ function isSidebarShortcut(event: KeyboardEvent, isMac: boolean): boolean {
 /**
  * The home page: the sidebar, and beside it the TODO list with the selected TODO's conversation,
  * or, once the sidebar's chat or another conversation is chosen (`?item=`), that one alone, as
- * History always showed it. What is shown is the URL's query, so it survives a reload and the
- * back button returns to it. A toggle in the title bar row (and ⌘B / Ctrl+B) hides the sidebar
- * so the main area widens.
+ * History always showed it. Without the TODO list (`TODO_UX_ENABLED`) it is History as it was
+ * before: the chat unless another conversation is chosen. What is shown is the URL's query, so it
+ * survives a reload and the back button returns to it. A toggle in the title bar row (and ⌘B /
+ * Ctrl+B) hides the sidebar so the main area widens.
  */
 const SuggestionHistoryPage = () => {
   const { chat, composer } = useChatSession();
@@ -125,9 +130,10 @@ const SuggestionHistoryPage = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { publishOrganizations } = useOutletContext<LayoutOutletContext>();
-  const selection = new URLSearchParams(location.search).has(ITEM_PARAM)
-    ? parseHistorySelection(location.search)
-    : null;
+  const selection =
+    TODO_UX_ENABLED && !new URLSearchParams(location.search).has(ITEM_PARAM)
+      ? null
+      : parseHistorySelection(location.search);
   const todoSelection = parseTodoSelection(location.search);
   const { scope } = todoSelection;
   const week = useTodoWeek(scope, ANY_PROJECT, todoSelection.weekStart);

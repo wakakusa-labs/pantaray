@@ -378,12 +378,3 @@
   outline: var(--focus-ring-width) solid var(--focus-ring-color);
   outline-offset: 2px;
 }
-
-/* The organizations' entries; the chat's unread dot sits on the first, the whole home. */
-.app-rail-scopes {
-  position: relative;
-}
-
-.app-rail-scopes > .app-rail-unread-dot {
-  pointer-events: none;
-}

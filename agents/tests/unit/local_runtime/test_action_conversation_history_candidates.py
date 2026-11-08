@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from pantaray_agents import todo_ux_feature
 from pantaray_agents.local_runtime.action_conversation.cursor_codec import (
     OpaqueCursorError,
 )
@@ -505,3 +506,19 @@ def test_a_todos_conversation_leaves_the_dated_list_and_its_search(
             item=item,
         )
         assert [candidate.stable_id for candidate in page.candidates] == [item[1]]
+
+
+def test_a_todos_conversation_is_a_dated_one_while_the_todo_list_is_off(
+    history_connection: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(todo_ux_feature, "TODO_UX_ENABLED", False)
+    before = _listed(history_connection)
+    # TODOs written while it was on keep their conversations, which nothing
+    # else would list.
+    _insert_todo(history_connection, "todo-accepted", suggestion_id="sug-1")
+    _insert_todo(
+        history_connection, "todo-unanswered", suggestion_id="suggestion-invalid"
+    )
+
+    assert {"act-1", "suggestion-invalid"} <= before
+    assert _listed(history_connection) == before

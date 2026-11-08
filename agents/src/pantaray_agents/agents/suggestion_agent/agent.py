@@ -5,6 +5,7 @@ import random
 from datetime import UTC, datetime
 from typing import TypedDict
 
+from pantaray_agents import todo_ux_feature
 from pantaray_agents.agents.artifact_react import ReactLoopStep
 from pantaray_agents.agents.capability_envelopes import (
     ACTION_AGENT_CAPABILITY_ENVELOPE,
@@ -105,6 +106,10 @@ type SuggestionLlmPayload = dict[str, JSONValue]
 # todos.md exceeds about 20 KB after Memory has run on it, revisit the Memory rules
 # rather than raising these limits.
 SUGGESTION_INITIAL_PROMPT_MAX_CHARS = 124_000
+# The TODO list's parts of `suggestion/suggestion.yaml`, kept as its `role_rules`
+# and left out while the TODO list is off.
+OPEN_TODOS_RULE = "open_todos_rule"
+OPEN_TODOS_SECTION = "open_todos_section"
 # Design limit: the 123 Suggestions shown in four weeks of production use, with
 # their Actions, took 0.7 s to read; revisit when the history's read nears 2 s.
 SUGGESTION_HISTORY_MAX_ROWS = 1_000
@@ -214,10 +219,19 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
         """Render request-scoped placeholders in the YAML system instruction."""
 
         base_instruction = self.system_instruction or self.DEFAULT_SYSTEM_INSTRUCTION
-        return base_instruction.replace(
+        instruction = base_instruction.replace(
             "{answer_language}",
             self._answer_language_label(),
         )
+        placeholder = f"{{{OPEN_TODOS_RULE}}}\n"
+        if placeholder not in instruction:
+            return instruction
+        rule = (
+            self._prompt_config.require_role_rule(OPEN_TODOS_RULE) + "\n"
+            if todo_ux_feature.TODO_UX_ENABLED
+            else ""
+        )
+        return instruction.replace(placeholder, rule)
 
     def _format_activity_descriptions(
         self, rows: list[ActivityDescriptionRow] | None
@@ -357,7 +371,7 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
             "stable_memory_context": context_data["stable_memory_context"],
             "pending_work_context": self.stable_memory.pending_work.strip()
             or "(No pending work recorded.)",
-            "open_todos_context": "",
+            "open_todos_section": "",
             "action_agent_capabilities": context_data["action_agent_capabilities"],
             "recent_suggestions": context_data["recent_suggestions"],
             "recent_activity_descriptions": context_data[
@@ -370,14 +384,23 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
             "answer_language": self._answer_language_label(),
         }
         self._recent_suggestions_text = context_data["recent_suggestions"]
-        # The other sections have no fixed worst case, so the TODO list takes
-        # what they leave under the limit, dropping its oldest TODOs first.
-        others = len(self.task_suggestion_prompt.format(**values))
-        values["open_todos_context"] = format_open_todos(
-            self.stable_memory.open_todos,
-            max_chars=SUGGESTION_INITIAL_PROMPT_MAX_CHARS - others,
-        )
         rendered = self.task_suggestion_prompt.format(**values)
+        if (
+            todo_ux_feature.TODO_UX_ENABLED
+            and f"{{{OPEN_TODOS_SECTION}}}" in self.task_suggestion_prompt
+        ):
+            section = self._prompt_config.require_role_rule(OPEN_TODOS_SECTION)
+            # The other sections have no fixed worst case, so the TODO list takes
+            # what they leave under the limit, dropping its oldest TODOs first.
+            others = len(rendered) + len(section.format(open_todos_context="")) + 2
+            todos = format_open_todos(
+                self.stable_memory.open_todos,
+                max_chars=SUGGESTION_INITIAL_PROMPT_MAX_CHARS - others,
+            )
+            values["open_todos_section"] = (
+                section.format(open_todos_context=todos) + "\n\n"
+            )
+            rendered = self.task_suggestion_prompt.format(**values)
         if len(rendered) > SUGGESTION_INITIAL_PROMPT_MAX_CHARS:
             raise ValueError(
                 f"Suggestion initial prompt has {len(rendered)} characters, exceeding "

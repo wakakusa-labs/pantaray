@@ -13,6 +13,12 @@ vi.mock('../electron/src/auth/accountLoginFeature', () => ({
 
 const pageMocks = vi.hoisted(() => ({
   organizations: [] as { organization_id: string; display_name: string }[],
+  todoUx: true,
+}));
+vi.mock('./todos/todoUxFeature', () => ({
+  get TODO_UX_ENABLED() {
+    return pageMocks.todoUx;
+  },
 }));
 // The home page hands the rail the organizations it read, as the real one does.
 vi.mock('./pages/SuggestionHistoryPage', async () => {
@@ -79,6 +85,7 @@ beforeEach(() => {
 
 afterEach(() => {
   pageMocks.organizations = [];
+  pageMocks.todoUx = true;
   cleanup();
   delete window.electron;
   vi.clearAllMocks();
@@ -131,6 +138,30 @@ it('opens a scope’s TODOs from the rail, and from another page returns to wher
   expect(rail.getByRole('button', { name: '組織なし' })).toHaveAttribute('aria-pressed', 'true');
   await user.click(all);
   expect(window.location.hash).toBe('#/history');
+});
+
+it('without the TODO list, the rail holds Home and Settings, and Home reopens what History last showed', async () => {
+  pageMocks.todoUx = false;
+  const user = userEvent.setup();
+  window.history.replaceState(null, '', '/#/history?item=action:task-1');
+  render(subject());
+  const rail = within(await screen.findByRole('navigation'));
+  expect(
+    rail
+      .getAllByRole('button', { name: /^(すべての組織|組織なし|設定|ホーム|ワークスペース)$/ })
+      .map((button) => button.getAttribute('aria-label'))
+  ).toEqual(['ホーム', '設定']);
+  const home = rail.getByRole('button', { name: 'ホーム' });
+  expect(home).toHaveAttribute('aria-current', 'page');
+  // On History, Home leaves the selection as it is.
+  await user.click(home);
+  expect(window.location.hash).toBe('#/history?item=action:task-1');
+
+  await user.click(rail.getByRole('button', { name: '設定' }));
+  expect(await screen.findByRole('heading', { name: 'Local settings' })).toBeVisible();
+  await user.click(home);
+  expect(await screen.findByRole('heading', { name: 'Local history' })).toBeVisible();
+  expect(window.location.hash).toBe('#/history?item=action:task-1');
 });
 
 it('shows the organizations the home page read in the rail, each opening its TODOs', async () => {

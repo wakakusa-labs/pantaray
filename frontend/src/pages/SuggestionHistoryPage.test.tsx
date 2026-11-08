@@ -21,10 +21,22 @@ import { historySelectionSearch, parseHistorySelection } from '@/history/history
 import type { LayoutOutletContext } from '@/components/Layout';
 import SuggestionHistoryPage from './SuggestionHistoryPage';
 
-const mocks = vi.hoisted(() => ({ showNewest: vi.fn(), publishOrganizations: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  showNewest: vi.fn(),
+  publishOrganizations: vi.fn(),
+  todoUx: true,
+}));
 
-// The chat and the conversation lists this covers are off in the main window for now.
-vi.mock('@/history/conversationListsFeature', () => ({ SHOW_CONVERSATION_LISTS: true }));
+// On unless a test turns it off: off, the page is History as it was before the TODO list.
+vi.mock('@/todos/todoUxFeature', () => ({
+  get TODO_UX_ENABLED() {
+    return mocks.todoUx;
+  },
+}));
+/** Turns the TODO list off: the sidebar holds the search, the chat and the conversations. */
+const withoutTodoList = () => {
+  mocks.todoUx = false;
+};
 // The panes and the chat have their own tests; here they only show what the page gave them.
 vi.mock('@/components/AiConnectionNotice', () => ({ AiConnectionNotice: () => null }));
 vi.mock('@/components/chat/ChatView', () => ({
@@ -180,6 +192,7 @@ const selectFolder = vi.fn(async () => ({ canceled: true, path: null }));
 const stored = new Map<string, string>();
 
 beforeEach(() => {
+  mocks.todoUx = true;
   stored.clear();
   listWeek.mockImplementation(async () => WEEK);
   listDeleted.mockImplementation(async () => []);
@@ -319,7 +332,21 @@ it('shows what `?item=` names, the TODOs without one, and the chat for a malform
   }
 });
 
+it('without the TODO list, shows the chat where `?item=` names nothing, as History did', async () => {
+  withoutTodoList();
+  renderPage(['/history']);
+  expect(screen.getByRole('region', { name: 'chat' })).toBeInTheDocument();
+  expect(screen.queryByRole('heading', { level: 1, name: '今週' })).toBeNull();
+  const sidebar = screen.getByRole('complementary', HISTORY_SIDEBAR);
+  expect(within(sidebar).getByRole('button', { name: 'チャット' })).toHaveAttribute(
+    'aria-current',
+    'true'
+  );
+  expect(within(sidebar).queryByRole('button', { name: 'すべての TODO' })).toBeNull();
+});
+
 it('selects a row into the URL and marks it current; the Chat row of the chat shows the newest', async () => {
+  withoutTodoList();
   renderPage(['/history?item=chat']);
   const row = await screen.findByRole('button', { name: /^見積書を直す/ });
   const chatRow = screen.getByRole('button', { name: 'チャット' });
@@ -358,6 +385,7 @@ it('replaces an accepted suggestion with its Action in the same history entry', 
 });
 
 it('keeps the file open beside a suggestion open in its Action, until the selection moves', async () => {
+  withoutTodoList();
   renderPage(['/history?item=suggestion:S1']);
   await userEvent.click(screen.getByRole('button', { name: 'reply with a file open' }));
   expect(location()).toHaveTextContent('/history?item=action:A9');
@@ -387,6 +415,7 @@ it('drops the handed-over file when the address moves away without a selection',
 });
 
 it('does not hand the file over again when the suggestion is shown after its Action', async () => {
+  withoutTodoList();
   renderPage(['/history?item=suggestion:S1']);
   await userEvent.click(screen.getByRole('button', { name: 'reply with a file open' }));
   expect(screen.getByRole('region', { name: 'action A9' })).toHaveTextContent(
@@ -401,6 +430,7 @@ it('does not hand the file over again when the suggestion is shown after its Act
 });
 
 it('opens a new task from ✎ and replaces it with the Action its send opened', async () => {
+  withoutTodoList();
   renderPage(['/history?item=chat']);
   await userEvent.click(await screen.findByRole('button', { name: NEW_TASK }));
   expect(location()).toHaveTextContent('/history?item=new');
@@ -410,6 +440,7 @@ it('opens a new task from ✎ and replaces it with the Action its send opened', 
 });
 
 it('moves the selection off a deleted task in place of its history entry', async () => {
+  withoutTodoList();
   renderPage(['/history?item=chat', '/history?item=action:A1']);
   await userEvent.click(await screen.findByRole('button', { name: '削除 見積書を直す' }));
   await userEvent.click(screen.getByRole('button', { name: '削除' }));
@@ -450,7 +481,8 @@ it('writes the selection as `?item=kind:id`, encoding only the id', () => {
   expect(parseHistorySelection(historySelectionSearch('action:a b&c:d'))).toBe('action:a b&c:d');
 });
 
-const SIDEBAR = { name: 'TODO と会話' } as const;
+const SIDEBAR = { name: 'TODO' } as const;
+const HISTORY_SIDEBAR = { name: 'チャットと作業' } as const;
 
 it('hides the sidebar and shows it again, keeping the detail pane and the choice', async () => {
   renderPage(['/history?item=action:A1']);
@@ -474,16 +506,17 @@ it('hides the sidebar and shows it again, keeping the detail pane and the choice
 });
 
 it('⌘B hides the sidebar and moves focus out of it to the toggle', async () => {
+  withoutTodoList();
   renderPage(['/history']);
   const search = screen.getByRole('searchbox', { name: '作業を検索' });
   search.focus();
 
   fireEvent.keyDown(search, { key: 'b', metaKey: true });
-  expect(screen.queryByRole('complementary', SIDEBAR)).toBeNull();
+  expect(screen.queryByRole('complementary', HISTORY_SIDEBAR)).toBeNull();
   expect(screen.getByRole('button', { name: 'サイドバーを表示' })).toHaveFocus();
 
   fireEvent.keyDown(document.body, { key: 'b', metaKey: true });
-  expect(screen.getByRole('complementary', SIDEBAR)).toBeVisible();
+  expect(screen.getByRole('complementary', HISTORY_SIDEBAR)).toBeVisible();
 });
 
 it('starts with the sidebar shown when storage is unavailable', () => {
@@ -570,10 +603,12 @@ it('a project selects its TODOs, keeping the scope that holds it and otherwise s
   expect(await screen.findByText('削除した TODO はありません。')).toBeVisible();
 });
 
-it('keeps the scope while the chat is shown, and drops an organization that is gone', async () => {
+it('keeps the scope while a conversation is shown, and drops an organization that is gone', async () => {
   renderPage(['/history?scope=organization:O1']);
-  await userEvent.click(screen.getByRole('button', { name: 'チャット' }));
-  expect(location()).toHaveTextContent('/history?item=chat&scope=organization:O1');
+  await userEvent.click(await screen.findByRole('button', { name: /^TODO T1/ }));
+  // A suggestion the TODO's conversation names opens alone, under the scope in view.
+  await userEvent.click(screen.getByRole('link', { name: '「請求書を作りましょうか」を開く' }));
+  expect(location()).toHaveTextContent('/history?item=suggestion:S1&scope=organization:O1');
   cleanup();
 
   renderPage(['/history?scope=organization:GONE']);

@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping
 
+from pantaray_agents import todo_ux_feature
 from pantaray_agents.tools.contract import ToolConcurrency
 
 from .apply_patch_tool import APPLY_PATCH_TOOL
@@ -251,12 +252,14 @@ def select_tool_registry(tool_ids: tuple[str, ...]) -> dict[str, ToolDefinition]
 def select_supervisor_act_tool_ids(
     *, integrations: bool, todo: bool
 ) -> tuple[str, ...]:
-    """``todo``: the Action is a TODO's conversation, so its TODO tools are offered."""
+    """``todo``: the Action is a TODO's conversation, so its TODO tools are offered
+    while the TODO list is on."""
 
+    todo_tools = todo and todo_ux_feature.TODO_UX_ENABLED
     return (
         *SUPERVISOR_SINGLE_REACT_ACT_TOOL_IDS,
         *(INTEGRATION_TOOL_IDS if integrations else ()),
-        *(TODO_TOOL_IDS if todo else ()),
+        *(TODO_TOOL_IDS if todo_tools else ()),
     )
 
 

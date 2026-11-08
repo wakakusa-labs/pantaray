@@ -41,6 +41,7 @@
 .history-project__handle:focus-visible,
 .history-project__toggle:focus-visible,
 .history-project__select:focus-visible,
+.history-project__name-toggle:focus-visible,
 .history-project__folder-action:focus-visible,
 .history-project__path:focus-visible,
 .history-project-menu__item:focus-visible {
@@ -103,6 +104,23 @@
 
 .history-project__toggle:hover {
   color: var(--fog-text);
+}
+
+/* Without the TODO list, the name, chevron and all, opens the folders. */
+.history-project__name-toggle {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 6px 4px 6px 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fog-text-3);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
 }
 
 /* The name selects the project's TODOs; the selected one is the row's current. */

@@ -8,18 +8,17 @@ import { installTaskDrafts } from './taskDrafts';
 // The main window's History page from the production entry, with deterministic IPC inputs.
 let vite: ViteDevServer;
 let baseUrl: string;
-// The main window ships with the chat and the conversation lists off; this spec turns them on.
-const showConversationLists: Plugin = {
-  name: 'e2e-show-conversation-lists',
+// The chat and the conversation lists are the main window's without the TODO list; this spec
+// turns it off.
+const withoutTodoList: Plugin = {
+  name: 'e2e-without-todo-list',
   load: (id) =>
-    id.endsWith('/src/history/conversationListsFeature.ts')
-      ? 'export const SHOW_CONVERSATION_LISTS = true;'
-      : null,
+    id.endsWith('/src/todos/todoUxFeature.ts') ? 'export const TODO_UX_ENABLED = false;' : null,
 };
 test.beforeAll(async () => {
   vite = await createServer({
     server: { host: '127.0.0.1', port: 0 },
-    plugins: [showConversationLists],
+    plugins: [withoutTodoList],
   });
   await vite.listen();
   baseUrl = vite.resolvedUrls!.local[0];
@@ -263,11 +262,10 @@ async function installBridge(
     { chat: chatPage, history: historyItems }
   );
   await installTaskDrafts(page);
-  // The home page shows the TODOs until the sidebar's chat is chosen.
-  await page.goto(`${baseUrl}#/history?item=chat`);
+  await page.goto(`${baseUrl}#/history`);
 }
 
-const sidebarOf = (page: Page) => page.getByRole('complementary', { name: 'TODO と会話' });
+const sidebarOf = (page: Page) => page.getByRole('complementary', { name: 'チャットと作業' });
 
 test('the chat pane: bubbles, cards with latest-only status, no event bubbles', async ({
   page,
@@ -312,7 +310,7 @@ test('the chat pane: bubbles, cards with latest-only status, no event bubbles', 
   ).toHaveAttribute('aria-current', 'true');
 });
 
-test('the sidebar holds search, the chat row, and the other conversations by day under their New task', async ({
+test('the sidebar holds search, the chat row, and the tasks by day under their New task', async ({
   page,
 }, info) => {
   await installBridge(page);
@@ -320,7 +318,7 @@ test('the sidebar holds search, the chat row, and the other conversations by day
   await expect(sidebar.getByRole('button', { name: 'メイン画面で新しい作業' })).toBeVisible();
   await expect(sidebar.getByRole('searchbox', { name: '作業を検索' })).toBeVisible();
   await expect(sidebar.getByRole('button', { name: 'チャット', exact: true })).toBeVisible();
-  await expect(sidebar.getByRole('heading', { level: 2, name: 'そのほかの会話' })).toBeVisible();
+  await expect(sidebar.getByRole('heading', { level: 2, name: '作業' })).toBeVisible();
   await expect(sidebar.getByRole('heading', { level: 3, name: '今日' })).toBeVisible();
   const row = sidebar.getByRole('button', { name: /^見積書のたたき台を作る/ });
   // A running task shows its title alone, with no badge and no dot, and is heard as running.
@@ -526,11 +524,7 @@ test('unread Pantaray messages mark the rail and the chat row until the chat is 
     sessionStorage.setItem('read-seeded', '1');
   }, READ_POSITION_KEY);
   await installBridge(page);
-  // The rail's home entry carries the dot, heard as the chat's unread count.
-  const rail = page.getByRole('navigation');
-  const railUnread = (count: number) =>
-    rail.getByRole('img', { name: `チャットの未読 ${count} 件` });
-  const anyRailUnread = rail.getByRole('img', { name: /^チャットの未読/ });
+  const history = page.getByRole('button', { name: 'ホーム' });
   const chatRow = sidebarOf(page).getByRole('button', { name: 'チャット', exact: true });
 
   // The chat opens on its newest message, so everything is read.
@@ -538,7 +532,8 @@ test('unread Pantaray messages mark the rail and the chat row until the chat is 
   await expect
     .poll(() => page.evaluate((key) => localStorage.getItem(key), READ_POSITION_KEY))
     .toBe('9');
-  await expect(anyRailUnread).toHaveCount(0);
+  await expect(history).not.toHaveAccessibleDescription(/未読/);
+  await expect(history.locator('.app-rail-unread-dot')).toHaveCount(0);
   await expect(chatRow).toHaveText('チャット');
 
   // A reply that arrives while the newest message is in view is read as it lands.
@@ -546,7 +541,7 @@ test('unread Pantaray messages mark the rail and the chat row until the chat is 
   await expect(
     page.getByRole('list', { name: 'Pantaray とのチャット' }).getByText('下書きを直しました。')
   ).toBeVisible();
-  await expect(anyRailUnread).toHaveCount(0);
+  await expect(history).not.toHaveAccessibleDescription(/未読/);
 
   // A reader who scrolled up to older messages has not seen a reply that lands below.
   const chatList = page.getByRole('list', { name: 'Pantaray とのチャット' });
@@ -554,15 +549,16 @@ test('unread Pantaray messages mark the rail and the chat row until the chat is 
   await page.mouse.wheel(0, -400);
   await expect(page.getByText('じゃあスライドの下書きから始めますね。')).toBeInViewport();
   await appendLive(page, reply(11, 41, '表紙も作りました。'));
-  await expect(railUnread(1)).toBeVisible();
+  await expect(history).toHaveAccessibleDescription('未読 1 件');
   await expect(chatRow).toHaveAccessibleDescription('未読 1 件');
   await expect(chatRow).toHaveText('チャット1');
+  await expect(history.locator('.app-rail-unread-dot')).toBeVisible();
   expect(await page.evaluate((key) => localStorage.getItem(key), READ_POSITION_KEY)).toBe('10');
 
   // Pantaray's replies count and the user's own messages never do.
   await appendLive(page, user(12, 42, 'ありがとう'));
   await appendLive(page, reply(13, 43, 'ほかに直すところがあれば言ってください。'));
-  await expect(railUnread(2)).toBeVisible();
+  await expect(history).toHaveAccessibleDescription('未読 2 件');
   await expect(chatRow).toHaveText('チャット2');
   await waitForAnimationsToSettle(page);
   await page.screenshot({ path: info.outputPath('unread-rail-and-row.png') });
@@ -574,7 +570,7 @@ test('unread Pantaray messages mark the rail and the chat row until the chat is 
   // The Chat row takes the reader back to the newest message, which reads it.
   await chatRow.click();
   await expect(chatList.getByText('ほかに直すところがあれば言ってください。')).toBeInViewport();
-  await expect(anyRailUnread).toHaveCount(0);
+  await expect(history).not.toHaveAccessibleDescription(/未読/);
   await expect(chatRow).toHaveText('チャット');
   expect(await page.evaluate((key) => localStorage.getItem(key), READ_POSITION_KEY)).toBe('13');
 
@@ -582,7 +578,7 @@ test('unread Pantaray messages mark the rail and the chat row until the chat is 
   await page.reload();
   await expect(chatRow).toBeVisible();
   expect(await page.evaluate((key) => localStorage.getItem(key), READ_POSITION_KEY)).toBe('13');
-  await expect(anyRailUnread).toHaveCount(0);
+  await expect(history).not.toHaveAccessibleDescription(/未読/);
 });
 
 test('a first run marks the existing chat read instead of showing it all as unread', async ({
@@ -592,9 +588,9 @@ test('a first run marks the existing chat read instead of showing it all as unre
   await expect
     .poll(() => page.evaluate((key) => localStorage.getItem(key), READ_POSITION_KEY))
     .toBe('9');
-  await expect(
-    page.getByRole('navigation').getByRole('img', { name: /^チャットの未読/ })
-  ).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'ホーム' })).not.toHaveAccessibleDescription(
+    /未読/
+  );
 });
 
 test('a suggestion the user has not answered has a chip and opens in the detail pane', async ({

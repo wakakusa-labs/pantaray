@@ -55,7 +55,7 @@ system_instruction: |
     doing and is not about to do.
   - When the user is visibly acting on the item themselves, such as writing a
     reply in that thread or editing that file, do not offer to do it.
-  - Do not propose work that an open TODO already covers.
+  {open_todos_rule}
 
   ## Evidence rules for facts
   These rules govern every factual claim, including the facts behind an idea.
@@ -192,12 +192,7 @@ prompt: |
   even for items labeled "observed pending".
   {pending_work_context}
 
-  ## Open TODOs
-  The user's TODO list: what is still open this week, including TODOs carried
-  over from earlier weeks, with each one's project, due date and state.
-  {open_todos_context}
-
-  ## Why reconsider now
+  {open_todos_section}## Why reconsider now
   An earlier agent's hypothesis, not proof of an opportunity. Periodic review alone
   does not justify a suggestion.
   {reconsideration_reason}
@@ -227,3 +222,16 @@ prompt: |
 
   ## Action Agent Capability Envelope
   {action_agent_capabilities}
+
+# The TODO list's parts of the prompt, left out while the TODO list is off
+# (`pantaray_agents.todo_ux_feature`): the rule takes the place of
+# `{open_todos_rule}`, and the section, followed by a blank line, the place of
+# `{open_todos_section}`.
+role_rules:
+  open_todos_rule: |
+    - Do not propose work that an open TODO already covers.
+  open_todos_section: |
+    ## Open TODOs
+    The user's TODO list: what is still open this week, including TODOs carried
+    over from earlier weeks, with each one's project, due date and state.
+    {open_todos_context}

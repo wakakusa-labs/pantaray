@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Settings, UserRound } from 'lucide-react';
+import { House, Settings, UserRound, type LucideIcon } from 'lucide-react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useI18n } from '@/context/useI18n';
@@ -11,7 +11,6 @@ import { ChatUnreadTracker } from './chat/ChatUnreadTracker';
 import { ChatUnreadContext } from './chat/chatUnread';
 import { UpdateReadyNotice } from './UpdateReadyNotice';
 import { PANTARAY_ACCOUNT_LOGIN_ENABLED } from '../../electron/src/auth/accountLoginFeature';
-import { SHOW_CONVERSATION_LISTS } from '@/history/conversationListsFeature';
 import { useShowHistoryItem } from '@/history/useShowHistoryItem';
 import { OrganizationRail } from '@/components/todo/OrganizationRail';
 import type { WorkspaceOrganization } from '@/pages/settings/components/workspaceSettingsModel';
@@ -20,6 +19,7 @@ import {
   parseTodoSelection,
   todoSelectionSearch,
 } from '@/todos/todoSelection';
+import { TODO_UX_ENABLED } from '@/todos/todoUxFeature';
 import type { TodoScopeQuery } from '../../electron/src/todos/todoContracts';
 import './Layout.css';
 
@@ -32,6 +32,41 @@ export type LayoutOutletContext = {
 
 const sameScope = (a: TodoScopeQuery, b: TodoScopeQuery) =>
   a.scope === b.scope && a.organization_id === b.organization_id;
+
+const CHAT_UNREAD_ID = 'app-rail-chat-unread';
+
+/** A rail entry that opens a page, marked while that page is shown. */
+function RailPageButton({
+  label,
+  Icon,
+  active,
+  unread,
+  onClick,
+}: {
+  label: string;
+  Icon: LucideIcon;
+  active: boolean;
+  /** The chat has unread replies: a dot, heard as the count. */
+  unread: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={['app-rail-item', active ? 'app-rail-item--active' : null]
+        .filter(Boolean)
+        .join(' ')}
+      aria-label={label}
+      data-tooltip={label}
+      aria-current={active ? 'page' : undefined}
+      aria-describedby={unread ? CHAT_UNREAD_ID : undefined}
+    >
+      <Icon size={19} strokeWidth={1.8} aria-hidden="true" />
+      {unread ? <span className="app-rail-unread-dot" aria-hidden="true" /> : null}
+    </button>
+  );
+}
 
 /**
  * The main window's shell: an icon rail on the left on every page, and the page beside it.
@@ -54,7 +89,8 @@ const Layout: React.FC = () => {
     () => ({ publishOrganizations: setOrganizations }),
     []
   );
-  // The rail's scope reopens what the home page last showed, for as long as the window is open.
+  // The rail's scope, or without the TODO list its Home, reopens what the home page last showed,
+  // for as long as the window is open.
   const onHome = location.pathname === HOME_PATH;
   const [lastHomeSearch, setLastHomeSearch] = useState('');
   if (onHome && lastHomeSearch !== location.search) setLastHomeSearch(location.search);
@@ -126,30 +162,28 @@ const Layout: React.FC = () => {
         {/* The window has no title bar; this strip above the content is what drags it. */}
         <div className="app-titlebar" aria-hidden="true" />
         <nav className="app-rail">
-          {/* The home: the TODOs of all organizations, of one, or of none. */}
-          <div className="app-rail-scopes">
+          {TODO_UX_ENABLED ? (
+            // The home: the TODOs of all organizations, of one, or of none.
             <OrganizationRail organizations={organizations} selected={scope} onSelect={openScope} />
-            {/* The chat lives on the home page; its unread replies mark the home from any page. */}
-            {chatUnread > 0 ? (
-              <span
-                className="app-rail-unread-dot"
-                role="img"
-                aria-label={t('history.chat.unreadInRail', { count: chatUnread })}
-              />
-            ) : null}
-          </div>
-          <button
-            type="button"
+          ) : (
+            // On the home page, Home leaves the selection as it is.
+            <RailPageButton
+              label={t('nav.home')}
+              Icon={House}
+              active={onHome}
+              unread={chatUnread > 0}
+              onClick={() => {
+                if (!onHome) navigate({ pathname: HOME_PATH, search: lastHomeSearch });
+              }}
+            />
+          )}
+          <RailPageButton
+            label={t('nav.settings')}
+            Icon={Settings}
+            active={settingsActive}
+            unread={false}
             onClick={() => navigate('/settings')}
-            className={['app-rail-item', settingsActive ? 'app-rail-item--active' : null]
-              .filter(Boolean)
-              .join(' ')}
-            aria-label={t('nav.settings')}
-            data-tooltip={t('nav.settings')}
-            aria-current={settingsActive ? 'page' : undefined}
-          >
-            <Settings size={19} strokeWidth={1.8} aria-hidden="true" />
-          </button>
+          />
           <div className="app-rail-bottom">
             {/* Recording belongs to the local owner; without one there is nothing to show. */}
             <LocalOwnerBoundary fallback={null}>
@@ -196,12 +230,19 @@ const Layout: React.FC = () => {
             )}
           </div>
         </nav>
-        {/* The chat's unread count, for the rail and History's chat row on every page. */}
-        {SHOW_CONVERSATION_LISTS ? (
+        {chatUnread > 0 ? (
+          <span id={CHAT_UNREAD_ID} hidden>
+            {t('history.chat.unread', { count: chatUnread })}
+          </span>
+        ) : null}
+
+        {/* The chat's unread count, for the rail and History's chat row on every page. The TODO
+            list has no chat row, so nothing counts there. */}
+        {TODO_UX_ENABLED ? null : (
           <LocalOwnerBoundary fallback={null}>
             <ChatUnreadTracker onCount={setChatUnread} />
           </LocalOwnerBoundary>
-        ) : null}
+        )}
 
         {/* Recording belongs to the local owner; without one there is nothing to ask for. */}
         <LocalOwnerBoundary fallback={null}>

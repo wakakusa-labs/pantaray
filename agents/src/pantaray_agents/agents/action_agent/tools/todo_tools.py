@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Final, Literal
 
+from pantaray_agents import todo_ux_feature
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import ToolConcurrency
 
@@ -30,6 +31,22 @@ TODO_TOOL_IDS: Final = (
     REQUEST_TODO_DELETION_TOOL_ID,
     RECORD_PROGRESS_TOOL_ID,
 )
+
+# Where the Supervisor's rules hold the line on these tools.
+_TODO_TOOL_RULE_PLACEHOLDER: Final = "{todo_tool_rule}"
+_TODO_TOOL_RULE: Final = (
+    "- When you have `update_todo`, this conversation works on a TODO: call it "
+    "once before you end the run."
+)
+
+
+def fill_todo_tool_rule(instruction: str) -> str:
+    """The Supervisor's instruction with its line on these tools, which is left
+    out, with its line break, while the TODO list is off."""
+
+    line = f"{_TODO_TOOL_RULE}\n" if todo_ux_feature.TODO_UX_ENABLED else ""
+    return instruction.replace(f"{_TODO_TOOL_RULE_PLACEHOLDER}\n", line)
+
 
 type TodoStatus = Literal["done", "partial", "needs_user"]
 

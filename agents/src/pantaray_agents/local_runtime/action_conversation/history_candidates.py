@@ -7,6 +7,7 @@ import sqlite3
 from dataclasses import dataclass
 from typing import ClassVar, Final, Literal, cast
 
+from pantaray_agents import todo_ux_feature
 from pantaray_agents.local_runtime.runtime.action_message_models import (
     ACTION_HOST_STEP_NAMES_SQL,
 )
@@ -123,14 +124,16 @@ _NOT_TODO_SUGGESTION = """
 
 
 def _candidate_query(*, cursor_bound: bool, item_bound: bool) -> str:
-    action_scope, suggestion_scope = (
-        (
-            "AND :item_kind='conversation' AND action.action_id=:item_id",
-            "AND :item_kind='suggestion' AND suggestion.suggestion_id=:item_id",
+    if item_bound:
+        action_scope = "AND :item_kind='conversation' AND action.action_id=:item_id"
+        suggestion_scope = (
+            "AND :item_kind='suggestion' AND suggestion.suggestion_id=:item_id"
         )
-        if item_bound
-        else (_NOT_TODO_ACTION, _NOT_TODO_SUGGESTION)
-    )
+    elif todo_ux_feature.TODO_UX_ENABLED:
+        action_scope, suggestion_scope = _NOT_TODO_ACTION, _NOT_TODO_SUGGESTION
+    else:
+        # Off, nothing lists the TODOs, so their conversations are dated ones.
+        action_scope = suggestion_scope = ""
     cursor_predicate = (
         """AND (raw_updated_at<:before_updated_at
       OR (raw_updated_at=:before_updated_at

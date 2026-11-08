@@ -20,8 +20,8 @@ import { ChatSessionProvider } from './ChatSessionProvider';
 import { ChatUnreadTracker } from './ChatUnreadTracker';
 import { ChatUnreadContext } from './chatUnread';
 
-// The chat and the conversation lists this covers are off in the main window for now.
-vi.mock('@/history/conversationListsFeature', () => ({ SHOW_CONVERSATION_LISTS: true }));
+// The chat's sidebar row and the conversation lists this covers are there without the TODO list.
+vi.mock('@/todos/todoUxFeature', () => ({ TODO_UX_ENABLED: false }));
 // The AI-connection notice reads the account; its own tests cover it.
 vi.mock('@/components/AiConnectionNotice', () => ({ AiConnectionNotice: () => null }));
 // The task panes have their own tests; here they only stand for the selected work.
@@ -463,7 +463,7 @@ it('a task pane’s Add project names a new project in the sidebar', async () =>
 it('shows the chat in the pane beside the sidebar of the chat row and the tasks', async () => {
   pages = [{ items: [reply(1, '始めます。')], next_cursor: null }];
   renderPage();
-  const sidebar = screen.getByRole('complementary', { name: 'TODO と会話' });
+  const sidebar = screen.getByRole('complementary', { name: 'チャットと作業' });
   const chatRow = within(sidebar).getByRole('button', { name: 'チャット' });
   expect(chatRow).toHaveAttribute('aria-current', 'true');
   expect(

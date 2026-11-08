@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useId, useState, type ReactNode } from 'react';
 
 import { SuggestionTaskPane } from '@/components/task/SuggestionTaskPane';
 import { TaskWorkspace } from '@/components/task/TaskWorkspace';
@@ -16,12 +16,15 @@ import type { TodoView } from '../../../electron/src/todos/todoContracts';
 export function TodoConversationPane({
   todo,
   pending,
+  deletionFailure,
   onAnswerDeletion,
   onAddProject,
 }: {
   todo: TodoView;
   /** A write on the TODO is waiting for its answer; the request's buttons wait with it. */
   pending: boolean;
+  /** Why the last answer to the request failed, told under it. */
+  deletionFailure: ReactNode;
   onAnswerDeletion: (requestId: string, answer: 'approve' | 'keep') => void;
   onAddProject: () => void;
 }) {
@@ -36,6 +39,7 @@ export function TodoConversationPane({
           onAnswer={(answer) => onAnswerDeletion(request.request_id, answer)}
         />
       ) : null}
+      {request ? deletionFailure : null}
     </>
   );
 }

@@ -234,3 +234,8 @@
     border-top: 1px solid var(--fog-line);
   }
 }
+
+/* Under the deletion request, in line with it. */
+.todo-screen__conversation > .todo-screen__failure {
+  margin: 0 24px 14px;
+}

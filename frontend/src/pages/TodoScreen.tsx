@@ -362,6 +362,9 @@ export function TodoScreen({
               key={selectedTodo.todo_id}
               todo={selectedTodo}
               pending={mutations.pending.has(selectedTodo.todo_id)}
+              deletionFailure={failureFor(
+                (target) => target.kind === 'deletion' && target.todoId === selectedTodo.todo_id
+              )}
               onAnswerDeletion={(requestId, answer) =>
                 void mutations.answerDeletion(selectedTodo.todo_id, requestId, answer)
               }

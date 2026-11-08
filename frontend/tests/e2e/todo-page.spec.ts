@@ -431,6 +431,8 @@ async function openHome(page: Page, search = '') {
               return { kind: 'ok', result: null };
             },
             deleteProgressRecord: async () => undefined,
+            // The request's conversation is still going, so the backend keeps the TODO.
+            answerDeletion: async () => ({ kind: 'refused', code: 'TODO_BUSY' }),
             onChanged: () => noop,
           },
           suggestions: {
@@ -657,6 +659,26 @@ test('a narrow window stacks the conversation under the list header, with nothin
   await capture(page, info, 'narrow-conversation');
   await page.getByRole('button', { name: '会話を閉じる' }).click();
   await expect(page.getByRole('checkbox', { name: '完了: 名刺 40 枚を入れておく' })).toBeVisible();
+});
+
+test('a narrow window tells a failed answer to Pantaray’s deletion request in the conversation', async ({
+  page,
+}, info) => {
+  await page.setViewportSize({ width: 960, height: 820 });
+  await openHome(page);
+  await page.getByRole('button', { name: /^古いブランチを消す/ }).click();
+  const request = page.getByRole('group', {
+    name: 'Pantaray がこの TODO を消したいと言っています',
+  });
+  await request.getByRole('button', { name: '消す' }).click();
+  // The list is hidden at this width; the failure is told under the request, and only there.
+  const alerts = page.getByRole('alert');
+  await expect(alerts).toHaveCount(1);
+  await expect(alerts).toBeVisible();
+  await expect(alerts).toHaveText(
+    'この TODO の会話が進んでいるあいだは消せません。終わってから、または止めてから消してください。'
+  );
+  await capture(page, info, 'narrow-deletion-failure');
 });
 
 test('進み具合 shows the progress in view, keeps its period in the address, and opens where a number came from', async ({

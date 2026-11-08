@@ -10,8 +10,14 @@ import type {
 } from '../../electron/src/todos/todoContracts';
 import type { TodosBridge } from './useTodoRead';
 
-/** Where a failed write is told: next to its row, or under the add row. */
-export type TodoMutationTarget = { kind: 'todo'; todoId: string } | { kind: 'add' };
+/**
+ * Where a failed write is told: next to its row, under the add row, or under the deletion
+ * request in the TODO's conversation, which stays in view when a narrow window hides the list.
+ */
+export type TodoMutationTarget =
+  | { kind: 'todo'; todoId: string }
+  | { kind: 'add' }
+  | { kind: 'deletion'; todoId: string };
 
 export type TodoMutationFailure = { target: TodoMutationTarget; message: string };
 
@@ -80,13 +86,14 @@ export function useTodoMutations({ reloadWeek, reloadDeleted }: TodoReloads) {
   const writeRow = async <T>(
     todoId: string,
     request: (todos: TodosBridge) => Promise<TodoWriteResult<T>>,
-    reload: () => Promise<unknown>
+    reload: () => Promise<unknown>,
+    target: TodoMutationTarget = { kind: 'todo', todoId }
   ): Promise<boolean> => {
     setPending((current) => new Set(current).add(todoId));
     try {
       // A refused or unanswered write changed nothing the screen shows; a change still reads
       // again on `todos:changed`.
-      if ((await send({ kind: 'todo', todoId }, request)) !== 'ok') return false;
+      if ((await send(target, request)) !== 'ok') return false;
       await reload();
       return true;
     } finally {
@@ -146,7 +153,8 @@ export function useTodoMutations({ reloadWeek, reloadDeleted }: TodoReloads) {
       writeRow(
         todoId,
         (todos) => todos.answerDeletion({ todo_id: todoId, request_id: requestId, answer }),
-        reloadWeek
+        reloadWeek,
+        { kind: 'deletion', todoId }
       ),
     restore: (todoId: string) =>
       writeRow(todoId, (todos) => todos.restore({ todo_id: todoId }), reloadBoth),

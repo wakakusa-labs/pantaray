@@ -109,6 +109,7 @@ it('answers Pantaray’s deletion request under the conversation, and waits whil
       <TodoConversationPane
         todo={makeTodo({ deletion_request: { request_id: 'r1', reason: '重複です' } })}
         pending={pending}
+        deletionFailure={null}
         onAnswerDeletion={onAnswerDeletion}
         onAddProject={vi.fn()}
       />

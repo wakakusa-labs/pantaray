@@ -238,3 +238,19 @@
 .todo-screen__conversation > .todo-screen__failure {
   margin: 0 24px 14px;
 }
+
+/* The add bar stays under the list, whatever the list's scroll. */
+.todo-screen__add {
+  flex: none;
+  padding: 0 28px 20px;
+}
+
+.todo-screen__add > .todo-screen__failure {
+  margin: 0 4px 8px;
+}
+
+@media (max-width: 1100px) {
+  .todo-screen--with-pane .todo-screen__add {
+    display: none;
+  }
+}

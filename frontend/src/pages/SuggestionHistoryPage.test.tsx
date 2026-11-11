@@ -625,21 +625,21 @@ it('「今週へ」 returns to this week and leaves focus on the list heading', 
     await screen.findByRole('heading', { level: 1, name: '10月26日 – 11月1日' })
   ).toBeVisible();
   // An ended week takes no TODOs, so it has no add field.
-  expect(screen.queryByRole('textbox', { name: /TODO を書く/ })).toBeNull();
+  expect(screen.queryByRole('textbox', { name: /TODO を追加/ })).toBeNull();
   await userEvent.click(screen.getByRole('button', { name: '今週へ' }));
   expect(location()).toHaveTextContent(/^\/history$/);
   expect(screen.getByRole('heading', { level: 1, name: '今週' })).toHaveFocus();
 });
 
-it('adds to the project chosen in the add row, and tells a refused write under its row', async () => {
+it('adds to the project chosen in the add bar from today, and tells a refused write under its row', async () => {
   renderPage(['/history']);
   await screen.findByRole('checkbox', { name: '完了: TODO T1' });
   await userEvent.selectOptions(screen.getByRole('combobox', { name: 'プロジェクト' }), '採用');
-  await userEvent.type(screen.getByRole('textbox', { name: 'TODO を書く' }), '請求書を送る{Enter}');
+  await userEvent.type(screen.getByRole('textbox', { name: 'TODO を追加' }), '請求書を送る{Enter}');
   expect(createTodo).toHaveBeenCalledWith(
     expect.objectContaining({
       project_id: 'P2',
-      starts_on: '2026-11-02',
+      starts_on: '2026-11-04',
       text: '請求書を送る',
       due: null,
     })
@@ -655,7 +655,7 @@ it('adds to the project chosen in the add row, and tells a refused write under i
 });
 
 const NEXT_WEEK = '2026-11-09';
-const addFields = () => screen.getAllByRole('textbox', { name: /TODO を書く/ });
+const addFields = () => screen.getAllByRole('textbox', { name: /TODO を追加/ });
 
 it("closes the week's writes while another week is read, so nothing is added to the last one", async () => {
   renderPage(['/history']);

@@ -5,7 +5,7 @@ import { AiConnectionNotice } from '@/components/AiConnectionNotice';
 import { OpenWorkContext } from '@/components/action-conversation/sentMessageRefs';
 import { DeletedTodoRow } from '@/components/todo/DeletedTodoRow';
 import { ProgressScreen } from '@/components/todo/progress/ProgressScreen';
-import { TodoAddRow } from '@/components/todo/TodoAddRow';
+import { TodoAddBar } from '@/components/todo/TodoAddBar';
 import { TodoConversationPane } from '@/components/todo/TodoConversationPane';
 import { TodoProjectGroup } from '@/components/todo/TodoProjectGroup';
 import { TodoRow } from '@/components/todo/TodoRow';
@@ -145,18 +145,6 @@ export function TodoScreen({
           disabled={!weekShowsSelection}
           aria-busy={!weekShowsSelection && !week.error}
         >
-          {weekTakesTodos(page) && projects.length > 0 ? (
-            <>
-              <TodoAddRow
-                page={page}
-                projects={projects}
-                onSubmit={(projectId, text, due) =>
-                  mutations.create(projectId, page.week.start, text, due)
-                }
-              />
-              {failureFor((target) => target.kind === 'add')}
-            </>
-          ) : null}
           {groups.length === 0 ? (
             <p className="todo-screen__empty">
               {projects.length === 0 ? t('todo.page.noProjects') : t('todo.page.emptyWeek')}
@@ -192,6 +180,8 @@ export function TodoScreen({
                     }
                     onSelect={() => onSelect({ ...selection, todoId: todo.todo_id })}
                     onDelete={() => void mutations.deleteTodo(todo.todo_id)}
+                    onSetDue={(due) => void mutations.setDue(todo.todo_id, due)}
+                    onSetStart={(startsOn) => void mutations.setStart(todo.todo_id, startsOn)}
                   />,
                   rowFailure ? (
                     <li key={`${todo.todo_id}:failure`} className="todo-screen__failure-row">
@@ -256,6 +246,22 @@ export function TodoScreen({
           </span>
         ) : null}
       </>
+    );
+  };
+
+  /** The bar under the week that adds a TODO, in a week that takes them. */
+  const renderAddBar = (): ReactNode => {
+    if (!page || !settings || !weekTakesTodos(page) || projects.length === 0) return null;
+    return (
+      <div className="todo-screen__add">
+        {failureFor((target) => target.kind === 'add')}
+        <TodoAddBar
+          today={page.today}
+          projects={projects}
+          disabled={!weekShowsSelection}
+          onSubmit={mutations.create}
+        />
+      </div>
     );
   };
 
@@ -327,6 +333,7 @@ export function TodoScreen({
           <AiConnectionNotice />
           {showingDeleted ? renderDeleted() : renderWeek()}
         </div>
+        {showingWeek ? renderAddBar() : null}
       </section>
       {selectedTodo ? (
         <div className="history-detail todo-screen__conversation">

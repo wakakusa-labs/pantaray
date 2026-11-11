@@ -14,13 +14,15 @@ import type { HistorySelection } from '@/history/historySelection';
 import { useSuggestionHistory } from '@/hooks/useSuggestionHistory';
 import { HISTORY_MESSAGES } from '@/i18n/messageCatalog/history';
 import type { WorkspaceProjects } from './HistoryProjects';
-import { HistorySidebar, type TodoListPlace } from './HistorySidebar';
+import { HistorySidebar } from './HistorySidebar';
+import type { TodoListPlace } from './TodoSidebarNav';
 
 const mocks = vi.hoisted(() => ({
   chatUnread: 0,
   select: vi.fn(),
   selected: 'chat' as HistorySelection | null,
   todoPlace: null as TodoListPlace | null,
+  scopeName: 'Wakakusa' as string | null,
   openCounts: new Map<string, number>(),
   showAll: vi.fn(),
   showProgress: vi.fn(),
@@ -107,6 +109,7 @@ function Sidebar() {
       onCreatingProjectChange={mocks.startCreatingProject}
       todoNav={{
         current: mocks.todoPlace,
+        scopeName: mocks.scopeName,
         openCounts: mocks.openCounts,
         onShowAll: mocks.showAll,
         onShowProgress: mocks.showProgress,
@@ -154,6 +157,7 @@ afterEach(() => {
   mocks.chatUnread = 0;
   mocks.selected = 'chat';
   mocks.todoPlace = null;
+  mocks.scopeName = 'Wakakusa';
   mocks.openCounts = new Map();
   mocks.workspace = null;
   mocks.todoUx = false;
@@ -214,19 +218,24 @@ it('上から検索、プロジェクト、チャット、作業の順に並べ�
   expect(mocks.startCreatingProject).toHaveBeenCalledWith(true);
 });
 
-it('TODO の一覧では、すべての TODO、プロジェクト、進み具合、削除した TODO だけを並べる', () => {
+it('TODO の一覧では、見ている範囲の名前、すべての TODO、進み具合、プロジェクト、削除した TODO だけを並べる', () => {
   mocks.todoUx = true;
   mocks.workspace = WORKSPACE;
   window.electron = {} as unknown as Window['electron'];
-  render(<Sidebar />, { wrapper: SidebarWrapper });
+  const { rerender } = render(<Sidebar />, { wrapper: SidebarWrapper });
 
   expect(screen.getByRole('complementary')).toHaveAccessibleName('history.sidebar.todosLabel');
   expectInOrder([
+    screen.getByRole('heading', { name: 'Wakakusa' }),
     screen.getByRole('button', { name: 'todo.nav.all' }),
-    screen.getByRole('region', { name: 'history.projects.title' }),
     screen.getByRole('button', { name: 'todo.nav.progress' }),
+    screen.getByRole('region', { name: 'history.projects.title' }),
     screen.getByRole('button', { name: 'todo.nav.deleted' }),
   ]);
+  // An organization not read yet has no name to show; the heading waits for it.
+  mocks.scopeName = null;
+  rerender(<Sidebar />);
+  expect(screen.queryByRole('heading', { name: 'Wakakusa' })).toBeNull();
   // The search, the chat and the other conversations are the sidebar's without the TODO list.
   expect(screen.queryByRole('search')).toBeNull();
   expect(screen.queryByRole('button', { name: 'history.chat.title' })).toBeNull();

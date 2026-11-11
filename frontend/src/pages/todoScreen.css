@@ -22,12 +22,12 @@
   border-left: 1px solid var(--fog-line);
 }
 
-/* Beside a conversation the list keeps its width and the conversation takes a column, until a
-   file opens beside the conversation and needs the room. */
+/* Beside a conversation the list takes what the conversation's column leaves, until a file
+   opens beside the conversation and needs the room. */
 @media (min-width: 1101px) {
   .todo-screen
     > .todo-screen__conversation:not(:has(.action-task--split, .suggestion-task--split)) {
-    flex: 0 0 400px;
+    flex: 0 0 clamp(420px, 40%, 560px);
   }
 
   .todo-screen--with-pane:has(.action-task--split, .suggestion-task--split) .todo-screen__list {
@@ -135,7 +135,7 @@
   background: var(--fog-text-2);
 }
 
-/* With no summary, the close button still goes to the row's end. */
+/* With no summary, the progress day's close button still goes to the row's end. */
 .todo-screen__header > .action-task__icon-button {
   margin-left: auto;
 }
@@ -166,7 +166,6 @@
 /* The week's groups; a plain block, with the fieldset's own frame taken off. */
 .todo-screen__week {
   min-width: 0;
-  max-width: 920px;
   margin: 0;
   padding: 0;
   border: 0;
@@ -213,7 +212,7 @@
   font-size: 13px;
 }
 
-/* Too narrow for both: the conversation takes the list's place under its header, whose close
+/* Too narrow for both: the pane takes the list's place under the list's header, and its close
    button returns to the list. */
 @media (max-width: 1100px) {
   .todo-screen--with-pane {

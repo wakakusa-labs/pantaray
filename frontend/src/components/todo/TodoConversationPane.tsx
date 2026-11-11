@@ -11,7 +11,8 @@ import type { TodoView } from '../../../electron/src/todos/todoContracts';
  * A TODO's conversation beside the list: its Action, its suggestion while no Action answers it
  * yet, or a short note while it has neither. Under it, like a suggestion's 承認, Pantaray's pending
  * request to delete the TODO, which only the user's 「消す」 carries out. A TODO's suggestion is let go by deleting the
- * TODO, so its pane does not offer 見送る. The conversation itself is the task panes' to hold.
+ * TODO, so its pane does not offer 見送る. The conversation itself is the task panes' to hold; the
+ * list's close button sits at the end of whichever header it has.
  */
 export function TodoConversationPane({
   todo,
@@ -19,6 +20,7 @@ export function TodoConversationPane({
   deletionFailure,
   onAnswerDeletion,
   onAddProject,
+  closeButton,
 }: {
   todo: TodoView;
   /** A write on the TODO is waiting for its answer; the request's buttons wait with it. */
@@ -27,11 +29,12 @@ export function TodoConversationPane({
   deletionFailure: ReactNode;
   onAnswerDeletion: (requestId: string, answer: 'approve' | 'keep') => void;
   onAddProject: () => void;
+  closeButton: ReactNode;
 }) {
   const request = todo.deletion_request;
   return (
     <>
-      <Conversation todo={todo} onAddProject={onAddProject} />
+      <Conversation todo={todo} onAddProject={onAddProject} closeButton={closeButton} />
       {request ? (
         <DeletionRequest
           reason={request.reason}
@@ -83,7 +86,15 @@ function DeletionRequest({
   );
 }
 
-function Conversation({ todo, onAddProject }: { todo: TodoView; onAddProject: () => void }) {
+function Conversation({
+  todo,
+  onAddProject,
+  closeButton,
+}: {
+  todo: TodoView;
+  onAddProject: () => void;
+  closeButton: ReactNode;
+}) {
   const { t } = useI18n();
   const titleId = useId();
   // An accepted suggestion's Action shows at once; the week names it once it is read again.
@@ -101,6 +112,7 @@ function Conversation({ todo, onAddProject }: { todo: TodoView; onAddProject: ()
         title={todo.text}
         initialPreview={started?.actionId === actionId ? started.preview : null}
         onAddProject={onAddProject}
+        closeButton={closeButton}
       />
     );
   if (conversation.kind === 'suggestion')
@@ -113,12 +125,14 @@ function Conversation({ todo, onAddProject }: { todo: TodoView; onAddProject: ()
         canDismiss={false}
         onStarted={(id, preview) => setStarted({ actionId: id, preview })}
         onAddProject={onAddProject}
+        closeButton={closeButton}
       />
     );
   return (
     <section className="todo-conversation-none" aria-labelledby={titleId}>
-      <header className="history-pane-header">
+      <header className="action-task__header">
         <h1 id={titleId}>{todo.text}</h1>
+        <div className="action-task__header-actions">{closeButton}</div>
       </header>
       <p className="todo-conversation-none__text">{t('todo.conversation.none')}</p>
     </section>

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 
 import { OpenFileLinkContext } from '@/components/agent-overlay/openFileLinkContext';
 
@@ -20,6 +20,7 @@ type TaskWorkspaceProps = {
   /** The file the suggestion this Action started from had open, which stays open. */
   initialPreview?: TaskPreview | null;
   onAddProject: () => void;
+  closeButton?: ReactNode;
 };
 
 /**
@@ -32,6 +33,7 @@ export function TaskWorkspace({
   title,
   initialPreview = null,
   onAddProject,
+  closeButton,
 }: TaskWorkspaceProps) {
   const [preview, setPreview] = useState<TaskPreview | null>(initialPreview);
   const open = (file: TaskFile) => setPreview({ target: { kind: 'action', id: actionId }, file });
@@ -40,6 +42,7 @@ export function TaskWorkspace({
       actionId={actionId}
       title={title}
       onAddProject={onAddProject}
+      closeButton={closeButton}
       renderPreview={(view) =>
         preview ? (
           <FilePreviewPane

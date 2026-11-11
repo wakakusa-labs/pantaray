@@ -1,13 +1,5 @@
-import {
-  ChartNoAxesColumn,
-  FileText,
-  ListTodo,
-  MessageCircle,
-  PictureInPicture2,
-  SquarePen,
-  Trash2,
-} from 'lucide-react';
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { FileText, MessageCircle, PictureInPicture2, SquarePen, Trash2 } from 'lucide-react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import type { ConversationHistoryListItem } from '../../../electron/src/history/historyContracts';
 import { useChatUnreadCount } from '@/components/chat/chatUnread';
@@ -28,6 +20,12 @@ import { HistoryDeleteDialog } from './HistoryDeleteDialog';
 import { HistoryProjects, type WorkspaceProjects } from './HistoryProjects';
 import HistorySearchField from './HistorySearchField';
 import { useLiveStageText } from './liveStageText';
+import {
+  DeletedTodosLink,
+  TodoScopeTitle,
+  TodoSidebarEntries,
+  type TodoSidebarNav,
+} from './TodoSidebarNav';
 
 const openButtonId = (identity: string) => `history-open:${identity}`;
 const deleteButtonId = (identity: string) => `history-delete:${identity}`;
@@ -127,50 +125,6 @@ async function deleteHistoryItem(item: ConversationHistoryListItem): Promise<Mes
   return result.ok ? null : deleteFailureMessageKey(result.errorCode);
 }
 
-/** Which TODO list the main area shows. Progress is of the one project in view, or of none. */
-export type TodoListPlace =
-  | { kind: 'all' }
-  | { kind: 'project'; projectId: string }
-  | { kind: 'progress'; projectId: string | null }
-  | { kind: 'deleted' };
-
-/** The sidebar's entries into the TODO list. */
-export type TodoSidebarNav = {
-  /** Null while the main area shows the chat or a conversation instead. */
-  current: TodoListPlace | null;
-  /** Open TODOs by project id, for the week in view. */
-  openCounts: ReadonlyMap<string, number>;
-  onShowAll: () => void;
-  onShowProgress: () => void;
-  onShowDeleted: () => void;
-  onSelectProject: (projectId: string) => void;
-};
-
-/** One of the sidebar's plain entries: an icon and a label, current while it is shown. */
-function SidebarEntry({
-  icon,
-  label,
-  current,
-  onShow,
-}: {
-  icon: ReactNode;
-  label: string;
-  current: boolean;
-  onShow: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      className="history-chat-row"
-      aria-current={current ? 'true' : undefined}
-      onClick={onShow}
-    >
-      {icon}
-      <span className="history-chat-row__label">{label}</span>
-    </button>
-  );
-}
-
 /** The chat's row, with Pantaray's unread messages counted. */
 function ChatRow({
   t,
@@ -209,12 +163,12 @@ function ChatRow({
 }
 
 /**
- * The home page's sidebar. With the TODO list (`TODO_UX_ENABLED`): all TODOs, the projects (each
- * selects its TODOs), the progress and the deleted TODOs. Without it, as before the TODO list:
- * search, the projects, the chat and the conversations by day under their heading. The heading
- * starts a new task in two places: ✎ in the detail pane, and the small window's icon in the small
- * window, as the global shortcut does. A conversation row selects what the main area shows; the
- * selected entry is marked current.
+ * The home page's sidebar. With the TODO list (`TODO_UX_ENABLED`): the scope's name, all TODOs and
+ * their progress, the projects (each selects its TODOs), and the deleted TODOs at its foot.
+ * Without it, as before the TODO list: search, the projects, the chat and the conversations by day
+ * under their heading. The heading starts a new task in two places: ✎ in the detail pane, and the
+ * small window's icon in the small window, as the global shortcut does. A conversation row
+ * selects what the main area shows; the selected entry is marked current.
  */
 export function HistorySidebar({
   history,
@@ -488,7 +442,9 @@ export function HistorySidebar({
     >
       <div className="history-sidebar__head">
         {/* The search filters the conversations only. */}
-        {TODO_UX_ENABLED ? null : (
+        {TODO_UX_ENABLED ? (
+          <TodoScopeTitle name={todoNav.scopeName} />
+        ) : (
           <HistorySearchField searchText={searchText} onSearch={setSearchText} />
         )}
         {notice ? (
@@ -497,16 +453,7 @@ export function HistorySidebar({
           </div>
         ) : null}
       </div>
-      {TODO_UX_ENABLED ? (
-        <div className="history-sidebar__chat">
-          <SidebarEntry
-            icon={<ListTodo size={16} strokeWidth={1.8} aria-hidden="true" />}
-            label={t('todo.nav.all')}
-            current={place?.kind === 'all'}
-            onShow={todoNav.onShowAll}
-          />
-        </div>
-      ) : null}
+      {TODO_UX_ENABLED ? <TodoSidebarEntries nav={todoNav} /> : null}
       <HistoryProjects
         projects={projects}
         creating={creatingProject}
@@ -524,20 +471,7 @@ export function HistorySidebar({
         t={t}
       />
       {TODO_UX_ENABLED ? (
-        <div className="history-sidebar__chat history-sidebar__deleted">
-          <SidebarEntry
-            icon={<ChartNoAxesColumn size={16} strokeWidth={1.8} aria-hidden="true" />}
-            label={t('todo.nav.progress')}
-            current={place?.kind === 'progress'}
-            onShow={todoNav.onShowProgress}
-          />
-          <SidebarEntry
-            icon={<Trash2 size={16} strokeWidth={1.8} aria-hidden="true" />}
-            label={t('todo.nav.deleted')}
-            current={place?.kind === 'deleted'}
-            onShow={todoNav.onShowDeleted}
-          />
-        </div>
+        <DeletedTodosLink nav={todoNav} />
       ) : (
         <>
           <ChatRow t={t} current={selected === 'chat'} onShow={() => onSelect('chat')} />

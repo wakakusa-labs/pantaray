@@ -36,6 +36,8 @@ type ActionTaskPaneProps = {
   onAddProject: () => void;
   /** Content under the latest answer, such as the files it produced. */
   renderFileChips?: (view: ActionConversationViewModel) => ReactNode;
+  /** Closes the pane, last in its header; for the page that opened the pane beside a list. */
+  closeButton?: ReactNode;
   /** Where the composer waits while the pane is not shown. */
 };
 
@@ -49,6 +51,7 @@ export function ActionTaskPane({
   renderPreview,
   onAddProject,
   renderFileChips,
+  closeButton,
 }: ActionTaskPaneProps) {
   const { t } = useI18n();
   const titleId = useId();
@@ -194,6 +197,7 @@ export function ActionTaskPane({
               {t('history.openSmallFailed')}
             </p>
           ) : null}
+          {closeButton}
         </div>
       </header>
       {preview}

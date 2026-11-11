@@ -188,6 +188,8 @@ const removeTodo = vi.fn(async () => ({ kind: 'refused', code: 'TODO_BUSY' }) as
 const createTodo = vi.fn(async () => ({ kind: 'ok', result: {} }) as const);
 const deleteItem = vi.fn(async () => ({ ok: true }) as const);
 const selectFolder = vi.fn(async () => ({ canceled: true, path: null }));
+const openFolder = vi.fn(async () => undefined);
+const deleteFolder = vi.fn(async () => undefined);
 
 const stored = new Map<string, string>();
 
@@ -232,9 +234,20 @@ beforeEach(() => {
           { project_id: 'P1', display_name: '見積もり', sort_order: 0, organization_ids: ['O1'] },
           { project_id: 'P2', display_name: '採用', sort_order: 1, organization_ids: [] },
         ],
-        folders: [],
+        folders: [
+          {
+            folder_id: 'F1',
+            display_name: 'estimates',
+            real_path: '/Users/me/work/estimates',
+            canonical_real_path: '/Users/me/work/estimates',
+            organization_ids: [],
+            project_ids: ['P1'],
+          },
+        ],
       })),
       selectFolder,
+      openFolder,
+      deleteFolder,
     },
   } as unknown as Window['electron'];
   const originalShowModal = HTMLDialogElement.prototype.showModal;
@@ -723,4 +736,21 @@ it('says a list may be out of date when it fails to load again after a read', as
   act(() => todosChanged());
   await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(STALE));
   expect(screen.getByRole('checkbox', { name: '完了: TODO T1' })).toBeVisible();
+});
+
+it('the project in view shows its folders under the header, to open in Finder or remove', async () => {
+  renderPage(['/history']);
+  const sidebar = screen.getByRole('complementary', SIDEBAR);
+  expect(screen.queryByRole('list', { name: 'フォルダ' })).toBeNull();
+  await userEvent.click(await within(sidebar).findByRole('button', { name: '見積もり' }));
+
+  const folders = screen.getByRole('list', { name: 'フォルダ' });
+  expect(within(folders).getByRole('button', { name: '/Users/me/work/estimates' })).toBeVisible();
+  await userEvent.click(within(folders).getByRole('button', { name: 'Finder で開く' }));
+  expect(openFolder).toHaveBeenCalledWith('F1');
+  await userEvent.click(within(folders).getByRole('button', { name: 'estimates を外す' }));
+  // Only this project holds it, so it leaves the workspace.
+  expect(deleteFolder).toHaveBeenCalledWith('F1');
+  await waitFor(() => expect(within(folders).queryByRole('listitem')).toBeNull());
+  expect(screen.getByRole('button', { name: 'フォルダを追加' })).toHaveFocus();
 });

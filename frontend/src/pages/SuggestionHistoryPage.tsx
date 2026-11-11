@@ -235,6 +235,7 @@ const SuggestionHistoryPage = () => {
   }
   const todoNav: TodoSidebarNav = {
     current: selection === null ? listPlace(todoSelection) : null,
+    scope,
     scopeName:
       scope.scope === 'all'
         ? t('todo.rail.all')
@@ -367,6 +368,7 @@ const SuggestionHistoryPage = () => {
           weekShowsSelection={weekShowsSelection}
           settings={settings}
           settingsFailed={settings === null && workspace.errorMessage !== null}
+          folderActions={workspace}
           onSelect={selectTodos}
           onOpenWork={select}
           onAddProject={addProject}

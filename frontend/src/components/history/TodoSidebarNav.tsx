@@ -3,6 +3,8 @@ import type { ReactNode } from 'react';
 
 import { useI18n } from '@/context/useI18n';
 
+import type { TodoScopeQuery } from '../../../electron/src/todos/todoContracts';
+
 /** Which TODO list the main area shows. Progress is of the one project in view, or of none. */
 export type TodoListPlace =
   | { kind: 'all' }
@@ -14,6 +16,8 @@ export type TodoListPlace =
 export type TodoSidebarNav = {
   /** Null while the main area shows the chat or a conversation instead. */
   current: TodoListPlace | null;
+  /** The rail's scope in view. */
+  scope: TodoScopeQuery;
   /** The rail's scope in view, by name; null while its organization is not read yet. */
   scopeName: string | null;
   /** Open TODOs by project id, for the week in view. */

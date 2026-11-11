@@ -15,6 +15,7 @@ import {
   type WorkspaceProject,
 } from '@/pages/settings/components/workspaceSettingsModel';
 
+import type { TodoScopeQuery } from '../../../electron/src/todos/todoContracts';
 import { HistoryDeleteDialog } from './HistoryDeleteDialog';
 import { HistoryProjectOrganizationDialog } from './HistoryProjectOrganizationDialog';
 import { HistoryProjectRow, ProjectNameField } from './HistoryProjectRow';
@@ -46,13 +47,16 @@ export type ProjectTodos = {
   /** Open TODOs by project id, for the week in view. */
   openCounts: ReadonlyMap<string, number>;
   onSelectProject: (projectId: string) => void;
+  /** The rail's scope: ＋ creates the project in its organization, or in none. */
+  scope: TodoScopeQuery;
 };
 
 const menuButtonId = (projectId: string) => `history-project-menu:${projectId}`;
 
 /**
- * The sidebar's projects, managed in place: ＋ names a new project, which then takes its folders,
- * each row's menu renames it, adds folders, sets its organization (and, with the TODO list, its
+ * The sidebar's projects, managed in place: ＋ names a new project, which then takes its folders;
+ * with the TODO list it is made in the rail's organization in view, so ＋ is hidden while all of
+ * them are. Each row's menu renames it, adds folders, sets its organization (and, with the TODO list, its
  * goal), or deletes it, and rows are dragged into order. With the TODO list a row's name shows
  * that project's TODOs; without it the name opens its folders, as before the TODO list. The
  * conversations below are not filtered by it.
@@ -77,8 +81,13 @@ export function HistoryProjects({
   const [dialog, setDialog] = useState<OpenDialog | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [createdId, setCreatedId] = useState<string | null>(null);
+  // Without the TODO list, and from the composers on all organizations, a project has none.
+  const scope = todos?.scope;
   const create = async (name: string) => {
-    const project = await projects.createProject(name);
+    const project = await projects.createProject(
+      name,
+      scope?.scope === 'organization' ? (scope.organization_id ?? null) : null
+    );
     if (!project) return;
     setCreatedId(project.project_id);
     onCreatingChange(false);
@@ -140,18 +149,20 @@ export function HistoryProjects({
     <section className="history-projects" aria-labelledby="history-projects-title">
       <div className="history-projects__head">
         <h2 id="history-projects-title">{t('history.projects.title')}</h2>
-        <button
-          type="button"
-          ref={addButtonRef}
-          className="history-projects__add"
-          aria-label={t('history.projects.add')}
-          data-tooltip={t('history.projects.add')}
-          aria-busy={pending.has(workspacePendingKey.projectCreate)}
-          disabled={settings === null}
-          onClick={() => onCreatingChange(true)}
-        >
-          <Plus size={15} aria-hidden="true" />
-        </button>
+        {scope?.scope === 'all' ? null : (
+          <button
+            type="button"
+            ref={addButtonRef}
+            className="history-projects__add"
+            aria-label={t('history.projects.add')}
+            data-tooltip={t('history.projects.add')}
+            aria-busy={pending.has(workspacePendingKey.projectCreate)}
+            disabled={settings === null}
+            onClick={() => onCreatingChange(true)}
+          >
+            <Plus size={15} aria-hidden="true" />
+          </button>
+        )}
       </div>
       {errorMessage ? (
         <div className="history-error" role="alert">
@@ -209,7 +220,7 @@ export function HistoryProjects({
                   isFolderPending={(folderId) => pending.has(workspacePendingKey.folder(folderId))}
                   onAddFolder={() => void projects.addFolderToProject(project.project_id)}
                   onOpenFolder={(folderId) => void projects.openFolder(folderId)}
-                  initiallyExpanded={createdId === project.project_id}
+                  justCreated={createdId === project.project_id}
                 />
               ))}
             </ul>

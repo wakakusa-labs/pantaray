@@ -6,8 +6,13 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { LocalOwnerContext } from '@/context/localOwnerContext';
 import { clearWorkspaceSettingsCache } from '@/pages/settings/components/workspaceSettingsCache';
 import type { WorkspaceSettings } from '@/pages/settings/components/workspaceSettingsModel';
-import { useWorkspaceSettingsController } from '@/pages/settings/useWorkspaceSettingsController';
+import {
+  useWorkspaceSettingsController,
+  workspacePendingKey,
+} from '@/pages/settings/useWorkspaceSettingsController';
+import type { TodoScopeQuery } from '../../../electron/src/todos/todoContracts';
 import { HistoryProjects } from './HistoryProjects';
+import { ProjectFolders } from './ProjectFolders';
 import { expectIconButtonTooltips, expectTooltipIsName } from '@/tests/iconTooltip';
 
 const t = (key: string, vars?: Record<string, string | number>) =>
@@ -99,36 +104,59 @@ function installApi() {
   });
 }
 
-const toggle = (name: string) =>
-  screen.getByRole('button', { name: `history.projects.toggleFolders {"name":"${name}"}` });
+/** A project's name: with the TODO list it selects the project, whose page shows its folders. */
+const projectButton = (name: string) => screen.getByRole('button', { name });
 
 function Projects({
   openCounts = new Map(),
   withTodos = true,
+  scope = { scope: 'no_organization' },
 }: {
   openCounts?: ReadonlyMap<string, number>;
   /** False: the projects as they were before the TODO list. */
   withTodos?: boolean;
+  scope?: TodoScopeQuery;
 }) {
   const [creating, setCreating] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
+  const workspace = useWorkspaceSettingsController(t);
   return (
-    <HistoryProjects
-      projects={useWorkspaceSettingsController(t)}
-      creating={creating}
-      onCreatingChange={setCreating}
-      todos={
-        withTodos ? { selectedProjectId: selected, openCounts, onSelectProject: setSelected } : null
-      }
-      t={t}
-    />
+    <>
+      <HistoryProjects
+        projects={workspace}
+        creating={creating}
+        onCreatingChange={setCreating}
+        todos={
+          withTodos
+            ? { selectedProjectId: selected, openCounts, onSelectProject: setSelected, scope }
+            : null
+        }
+        t={t}
+      />
+      {/* The selected project's folders, as its page shows them. */}
+      {withTodos && selected && workspace.settings ? (
+        <ProjectFolders
+          projectId={selected}
+          folders={workspace.settings.folders.filter((folder) =>
+            folder.project_ids.includes(selected)
+          )}
+          isFolderPending={(folderId) =>
+            workspace.pending.has(workspacePendingKey.folder(folderId))
+          }
+          onOpenFolder={(folderId) => void workspace.openFolder(folderId)}
+          onRemoveFolder={(folderId) => workspace.removeFolderFromProject(folderId, selected)}
+          onAddFolder={() => void workspace.addFolderToProject(selected)}
+          t={t}
+        />
+      ) : null}
+    </>
   );
 }
 
-async function renderProjects() {
+async function renderProjects(scope?: TodoScopeQuery) {
   render(
     <LocalOwnerContext.Provider value={{ kind: 'account', id: 'user-1' }}>
-      <Projects />
+      <Projects scope={scope} />
     </LocalOwnerContext.Provider>
   );
   await screen.findByRole('button', { name: 'a' });
@@ -260,7 +288,7 @@ it('フォルダの追加は選んだフォルダをこのプロジェクトに�
     organizationIds: [],
     projectIds: ['a', 'b'],
   });
-  await userEvent.click(toggle('b'));
+  await userEvent.click(projectButton('b'));
   const folders = within(screen.getByRole('list', { name: 'history.projects.folders' }));
   expect(folders.getAllByRole('listitem').map((row) => row.textContent)).toEqual([
     '/Users/me/own',
@@ -303,7 +331,7 @@ it('組織はなしを含めて一つを選んで保存し、新しい組織も�
 
 it('フォルダを外すと、ほかのプロジェクトにもあるものはリンクだけ、このプロジェクトだけのものは登録ごと外す', async () => {
   await renderProjects();
-  await userEvent.click(toggle('a'));
+  await userEvent.click(projectButton('a'));
 
   await userEvent.click(
     screen.getByRole('button', { name: 'history.projects.removeFolder {"name":"shared"}' })
@@ -318,7 +346,9 @@ it('フォルダを外すと、ほかのプロジェクトにもあるものは�
     screen.getByRole('button', { name: 'history.projects.removeFolder {"name":"own"}' })
   );
   expect(api.deleteFolder).toHaveBeenCalledWith('own');
-  await waitFor(() => expect(toggle('a')).toHaveFocus());
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'history.projects.addFolder' })).toHaveFocus()
+  );
 });
 
 it('フォルダの追加を待っている間は、そのフォルダを外せず、終わった後の内容で外す', async () => {
@@ -335,7 +365,7 @@ it('フォルダの追加を待っている間は、そのフォルダを外せ�
   );
   api.selectFolder.mockResolvedValue({ canceled: false, path: '/Users/me/own' });
   await renderProjects();
-  await userEvent.click(toggle('a'));
+  await userEvent.click(projectButton('a'));
 
   await chooseFromMenu('b', 'history.projects.addFolder');
   const remove = screen.getByRole('button', {
@@ -369,7 +399,7 @@ it('フォルダ選択の間はほかの変更を受け付けず、選んだ後�
   await renderProjects();
 
   await chooseFromMenu('b', 'history.projects.addFolder');
-  await userEvent.click(toggle('a'));
+  await userEvent.click(projectButton('a'));
   await userEvent.click(
     screen.getByRole('button', { name: 'history.projects.removeFolder {"name":"shared"}' })
   );
@@ -386,7 +416,7 @@ it('フォルダ選択の間はほかの変更を受け付けず、選んだ後�
   expect(api.updateFolderLinks).toHaveBeenCalledOnce();
 });
 
-it('＋ はフォルダを選ばずに名前を聞き、Enter で作ったプロジェクトを開いてフォルダの追加へ進む', async () => {
+it('＋ はフォルダを選ばずに名前を聞き、Enter で作ったプロジェクトへ移り、そのフォルダを足せる', async () => {
   api.selectFolder.mockResolvedValue({ canceled: false, path: '/Users/me/delta' });
   await renderProjects();
 
@@ -401,10 +431,9 @@ it('＋ はフォルダを選ばずに名前を聞き、Enter で作ったプロ
 
   expect(api.createProject).toHaveBeenCalledWith({ displayName: 'delta', organizationIds: [] });
   expect(api.selectFolder).not.toHaveBeenCalled();
-  expect(toggle('delta')).toHaveAttribute('aria-expanded', 'true');
-  const addFolder = screen.getByRole('button', { name: 'history.projects.addFolder' });
-  expect(addFolder).toHaveFocus();
-  await userEvent.click(addFolder);
+  expect(projectButton('delta')).toHaveFocus();
+  await userEvent.click(projectButton('delta'));
+  await userEvent.click(screen.getByRole('button', { name: 'history.projects.addFolder' }));
   await waitFor(() =>
     expect(api.createFolder).toHaveBeenCalledWith(
       expect.objectContaining({ realPath: '/Users/me/delta', projectIds: ['p-delta'] })
@@ -423,7 +452,7 @@ it('新しい名前は Esc や空のまま離れると取りやめて ＋ へ戻
   expect(add).toHaveFocus();
 
   await userEvent.click(add);
-  await userEvent.click(toggle('a'));
+  await userEvent.click(projectButton('a'));
   expect(screen.queryByRole('textbox')).toBeNull();
 
   await userEvent.click(add);
@@ -442,7 +471,7 @@ it('Finder で開くはメニューに無く、フォルダの行ごとにその
   );
   await userEvent.keyboard('{Escape}');
 
-  await userEvent.click(toggle('a'));
+  await userEvent.click(projectButton('a'));
   const folders = within(screen.getByRole('list', { name: 'history.projects.folders' }));
   const shared = folders.getAllByRole('listitem')[1];
   await userEvent.click(
@@ -457,7 +486,7 @@ it('フォルダの行は横に流れず、パス・Finder・外すを並べ、�
   store.folders[0].real_path = '/Users/me/Developer/clients/acme/very-long-folder-name/own';
   installApi();
   await renderProjects();
-  await userEvent.click(toggle('a'));
+  await userEvent.click(projectButton('a'));
 
   const line = within(screen.getByRole('list', { name: 'history.projects.folders' })).getByRole(
     'listitem'
@@ -468,7 +497,6 @@ it('フォルダの行は横に流れず、パス・Finder・外すを並べ、�
     'history-project__folder-action',
     'history-project__folder-action',
   ]);
-  expect(line.closest('ul.history-projects__list')).not.toBeNull();
   // Finder and × name themselves in the app's tooltip, not a late native one.
   expect(expectIconButtonTooltips(line)).toHaveLength(2);
   expectTooltipIsName(within(line).getByRole('button', { name: 'history.projects.openInFinder' }));
@@ -507,7 +535,7 @@ it('プロジェクトは確認してから削除し、キャンセルならメ�
   );
 });
 
-it('名前でそのプロジェクトを選び、山形でフォルダを開閉し、未完了の数を名前の説明にする', async () => {
+it('名前でそのプロジェクトを選び、未完了の数を名前の説明にし、行は開閉しない', async () => {
   render(
     <LocalOwnerContext.Provider value={{ kind: 'account', id: 'user-1' }}>
       <Projects openCounts={new Map([['a', 3]])} />
@@ -518,12 +546,10 @@ it('名前でそのプロジェクトを選び、山形でフォルダを開閉�
   expect(name).toHaveAccessibleDescription('history.projects.openCount {"count":3}');
   expect(screen.getByRole('button', { name: 'b' })).not.toHaveAccessibleDescription();
 
+  // The folders are on the project's page: the row has no chevron and opens nothing.
+  expect(name).not.toHaveAttribute('aria-expanded');
+  expect(document.querySelector('.history-project__details')).toBeNull();
   await userEvent.click(name);
-  expect(name).toHaveAttribute('aria-current', 'true');
-  // Selecting leaves the folders as they were; only the chevron opens them.
-  expect(toggle('a')).toHaveAttribute('aria-expanded', 'false');
-  await userEvent.click(toggle('a'));
-  expect(toggle('a')).toHaveAttribute('aria-expanded', 'true');
   expect(name).toHaveAttribute('aria-current', 'true');
   await userEvent.click(screen.getByRole('button', { name: 'b' }));
   expect(name).not.toHaveAttribute('aria-current');
@@ -591,3 +617,17 @@ function rectAt(top: number): DOMRect {
     toJSON: () => ({}),
   };
 }
+
+it('＋ は見ている組織の中に作り、組織なしならどこにも属さず、すべての組織では出さない', async () => {
+  await renderProjects({ scope: 'organization', organization_id: 'org-x' });
+  await userEvent.click(screen.getByRole('button', { name: 'history.projects.add' }));
+  await userEvent.keyboard('delta{Enter}');
+  expect(api.createProject).toHaveBeenCalledWith({
+    displayName: 'delta',
+    organizationIds: ['org-x'],
+  });
+  cleanup();
+
+  await renderProjects({ scope: 'all' });
+  expect(screen.queryByRole('button', { name: 'history.projects.add' })).toBeNull();
+});

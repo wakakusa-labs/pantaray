@@ -465,6 +465,7 @@ export function HistorySidebar({
                   place?.kind === 'project' || place?.kind === 'progress' ? place.projectId : null,
                 openCounts: todoNav.openCounts,
                 onSelectProject: todoNav.onSelectProject,
+                scope: todoNav.scope,
               }
             : null
         }

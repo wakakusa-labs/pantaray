@@ -23,6 +23,7 @@ it('round-trips every part of a selection, ids with reserved characters included
       progressOn: '2025-03-01',
       progressDay: '2025-03-04',
       todoId: 'todo #1',
+      importId: 'import 1',
     },
     {
       scope: { scope: 'no_organization' },
@@ -33,13 +34,14 @@ it('round-trips every part of a selection, ids with reserved characters included
       progressOn: null,
       progressDay: null,
       todoId: null,
+      importId: null,
     },
   ];
   for (const selection of selections) {
     expect(parseTodoSelection(todoSelectionSearch(selection))).toEqual(selection);
   }
   expect(todoSelectionSearch(selections[0])).toBe(
-    '?scope=organization:org%201%26x%3Dy&project=project:p%3A1%2F2&sort=due&view=progress&span=year&on=2025-03-01&day=2025-03-04&todo=todo%20%231'
+    '?scope=organization:org%201%26x%3Dy&project=project:p%3A1%2F2&sort=due&view=progress&span=year&on=2025-03-01&day=2025-03-04&todo=todo%20%231&import=import%201'
   );
 });
 
@@ -59,6 +61,7 @@ it('falls back to the default for each malformed value', () => {
     '?day=2026-11-31',
     '?todo=',
     '?todo=%20t1',
+    '?import=',
   ]) {
     expect(parseTodoSelection(search), search).toEqual(DEFAULT_TODO_SELECTION);
   }

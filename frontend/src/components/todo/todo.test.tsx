@@ -202,10 +202,21 @@ const PROJECTS = [
   { projectId: null, projectName: null, organization: null },
 ];
 const addField = () => screen.getByRole('textbox', { name: 'TODO を追加' });
+const onImport = vi.fn(async () => true);
 
 it('adds to the first project from today with no due, and an IME’s Enter sends nothing', async () => {
   const onSubmit = vi.fn(async () => true);
-  render(ja(<TodoAddBar today={TODAY} projects={PROJECTS} disabled={false} onSubmit={onSubmit} />));
+  render(
+    ja(
+      <TodoAddBar
+        today={TODAY}
+        projects={PROJECTS}
+        disabled={false}
+        onSubmit={onSubmit}
+        onImport={onImport}
+      />
+    )
+  );
   expect(screen.getByRole('button', { name: '追加' })).toBeDisabled();
   await userEvent.type(addField(), '見積書を送る');
   // The Enter that ends a composition belongs to the IME.
@@ -215,12 +226,90 @@ it('adds to the first project from today with no due, and an IME’s Enter sends
   await userEvent.type(addField(), '{Enter}');
   expect(onSubmit).toHaveBeenLastCalledWith('p1', TODAY, '見積書を送る', null);
   expect(addField()).toHaveValue('');
+  expect(onImport).not.toHaveBeenCalled();
+});
+
+it('imports text of several lines instead of adding it as one TODO', async () => {
+  onImport.mockClear();
+  const onSubmit = vi.fn(async () => true);
+  render(
+    ja(
+      <TodoAddBar
+        today={TODAY}
+        projects={PROJECTS}
+        disabled={false}
+        onSubmit={onSubmit}
+        onImport={onImport}
+      />
+    )
+  );
+  // Shift+Enter starts a new line; the project and dates, one TODO's, step aside.
+  await userEvent.type(addField(), '見積書を送る{Shift>}{Enter}{/Shift}請求書を作る');
+  expect(screen.queryByRole('combobox', { name: 'プロジェクト' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '期限なし' })).toBeNull();
+  await userEvent.type(addField(), '{Enter}');
+  expect(onSubmit).not.toHaveBeenCalled();
+  expect(onImport).toHaveBeenLastCalledWith('見積書を送る\n請求書を作る', []);
+  expect(addField()).toHaveValue('');
+});
+
+it('imports attached files, staged as the composers stage them, and refuses an image', async () => {
+  onImport.mockClear();
+  const attachFile = vi.fn(async ({ name }: { name: string }) => ({
+    attachmentId: '6f1c7a64-5d1e-4c4b-9b5b-3d0d7c3f2a10',
+    name,
+    byteSize: 12,
+  }));
+  const attachImage = vi.fn();
+  window.electron = {
+    actions: { attachFile, attachImage, discardAttachment: vi.fn(async () => undefined) },
+  } as unknown as Window['electron'];
+  const onSubmit = vi.fn(async () => true);
+  const { container } = render(
+    ja(
+      <TodoAddBar
+        today={TODAY}
+        projects={PROJECTS}
+        disabled={false}
+        onSubmit={onSubmit}
+        onImport={onImport}
+      />
+    )
+  );
+  const bar = container.querySelector('fieldset')!;
+  fireEvent.drop(bar, {
+    dataTransfer: { files: [new File(['x'], 'board.png', { type: 'image/png' })] },
+  });
+  expect(await screen.findByRole('alert')).toHaveTextContent(/PDF/);
+  expect(attachImage).not.toHaveBeenCalled();
+
+  await userEvent.click(screen.getByRole('button', { name: '添付' }));
+  await userEvent.upload(
+    container.querySelector<HTMLInputElement>('input[type="file"]')!,
+    new File(['# 議事録'], 'notes.md', { type: 'text/markdown' })
+  );
+  expect(await screen.findByText('notes.md')).toBeVisible();
+  await userEvent.click(screen.getByRole('button', { name: '下書きを作る' }));
+  expect(onSubmit).not.toHaveBeenCalled();
+  expect(onImport).toHaveBeenLastCalledWith('', [
+    { attachment_id: '6f1c7a64-5d1e-4c4b-9b5b-3d0d7c3f2a10', name: 'notes.md', byte_size: 12 },
+  ]);
+  expect(screen.queryByText('notes.md')).toBeNull();
+  window.electron = undefined;
 });
 
 it('adds to the project, due and start chosen, and offers no project with one in view', async () => {
   const onSubmit = vi.fn(async () => true);
   const bar = (projects: typeof PROJECTS) =>
-    ja(<TodoAddBar today={TODAY} projects={projects} disabled={false} onSubmit={onSubmit} />);
+    ja(
+      <TodoAddBar
+        today={TODAY}
+        projects={projects}
+        disabled={false}
+        onSubmit={onSubmit}
+        onImport={onImport}
+      />
+    );
   const { rerender } = render(bar(PROJECTS));
   await userEvent.selectOptions(screen.getByRole('combobox', { name: 'プロジェクト' }), '');
   await userEvent.click(screen.getByRole('button', { name: '期限なし' }));
@@ -245,7 +334,17 @@ it('adds to the project, due and start chosen, and offers no project with one in
 
 it('adds a TODO with no start, which a date chosen later replaces', async () => {
   const onSubmit = vi.fn(async () => true);
-  render(ja(<TodoAddBar today={TODAY} projects={PROJECTS} disabled={false} onSubmit={onSubmit} />));
+  render(
+    ja(
+      <TodoAddBar
+        today={TODAY}
+        projects={PROJECTS}
+        disabled={false}
+        onSubmit={onSubmit}
+        onImport={onImport}
+      />
+    )
+  );
   const startPicker = () => within(screen.getByRole('dialog', { name: '開始日' }));
   fireEvent.click(startPicker().getByRole('button', { name: '未定にする' }));
   expect(screen.getByRole('button', { name: '開始 未定' })).toBeVisible();

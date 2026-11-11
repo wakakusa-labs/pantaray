@@ -113,7 +113,7 @@ export function TodoRow({
           ) : null}
         </span>
       </button>
-      {/* The start matters until Pantaray starts. Dates stay open while a write waits. */}
+      {/* The start matters until Pantaray starts. */}
       {notStarted ? (
         <TodoDatePicker
           label={t('todo.date.start')}
@@ -121,6 +121,7 @@ export function TodoRow({
           triggerClassName={`todo-row__date ${stateClass}`}
           value={todo.starts_on}
           today={today}
+          disabled={pending}
           onChoose={(date) => {
             if (date) onSetStart(date);
           }}
@@ -148,6 +149,7 @@ export function TodoRow({
         value={todo.due?.date ?? null}
         today={today}
         clearLabel={t('todo.date.clearDue')}
+        disabled={pending}
         onChoose={(date) =>
           onSetDue(date === null ? null : { date, repeat: todo.due?.repeat ?? 'none' })
         }

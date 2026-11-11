@@ -106,6 +106,27 @@ async def test_read_reports_cp932_on_every_page_of_a_file_ascii_at_the_top(
 
 
 @pytest.mark.asyncio
+async def test_read_returns_an_attached_shift_jis_csv_as_text(tmp_path: Path) -> None:
+    db_path, context = bootstrap_read_runtime_db(tmp_path)
+    attached = context.workspace_path / "attachments" / "todo-export"
+    attached.mkdir(parents=True)
+    (attached / "todos.csv").write_bytes(
+        "件名,期限\r\n見積書を送る,2026-11-20\r\n".encode("shift_jis")
+    )
+
+    outcome = await execute_read_tool(
+        db_path=db_path,
+        context=context,
+        args={"path": "attachments/todo-export/todos.csv"},
+    )
+
+    ReadToolOutput.model_validate(outcome.output)
+    assert outcome.output["kind"] == "file"
+    assert outcome.output["encoding"] == "cp932"
+    assert outcome.output["content"] == "件名,期限\n見積書を送る,2026-11-20\n"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("payload", "message"),
     [

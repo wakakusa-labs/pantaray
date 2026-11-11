@@ -42,10 +42,10 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.composer.quotes': 'Quotes, {count}',
     'overlay.composer.quote.remove': 'Remove quote {index} of {count}',
     'overlay.composer.attachFailed.unsupported_media_type':
-      'You can attach PNG, JPEG, GIF, and WebP images, and PDF, Word, Excel, PowerPoint, and notebook files.',
+      'You can attach PNG, JPEG, GIF, and WebP images, and PDF, Word, Excel, PowerPoint, notebook, text, Markdown, and CSV files.',
     'overlay.composer.attachFailed.too_large': 'Each image must be 8 MB or smaller.',
     'overlay.composer.attachFailed.file_too_large':
-      'Each PDF, Word, Excel, PowerPoint, or notebook file must be 20 MB or smaller.',
+      'Each file other than an image must be 20 MB or smaller.',
     'overlay.composer.attachFailed.decode_failed': 'That image could not be read.',
     'overlay.composer.attachFailed.too_many': 'Up to {limit} images can be sent in one message.',
     'overlay.composer.attachFailed.too_many_files':
@@ -187,10 +187,10 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.composer.quotes': '引用 {count} 件',
     'overlay.composer.quote.remove': '引用 {index} / {count} を削除',
     'overlay.composer.attachFailed.unsupported_media_type':
-      '添付できるのは PNG / JPEG / GIF / WebP の画像と、PDF / Word / Excel / PowerPoint / ノートブックのファイルです。',
+      '添付できるのは PNG / JPEG / GIF / WebP の画像と、PDF / Word / Excel / PowerPoint / ノートブック / テキスト / Markdown / CSV のファイルです。',
     'overlay.composer.attachFailed.too_large': '画像 1 枚あたり 8 MB までです。',
     'overlay.composer.attachFailed.file_too_large':
-      'PDF / Word / Excel / PowerPoint / ノートブックのファイルは 1 つあたり 20 MB までです。',
+      '画像以外のファイルは 1 つあたり 20 MB までです。',
     'overlay.composer.attachFailed.decode_failed': 'この画像は読み取れませんでした。',
     'overlay.composer.attachFailed.too_many': '1 通で送れる画像は {limit} 枚までです。',
     'overlay.composer.attachFailed.too_many_files': '1 通で送れるファイルは {limit} 個までです。',

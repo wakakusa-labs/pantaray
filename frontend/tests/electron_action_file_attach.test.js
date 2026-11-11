@@ -72,7 +72,7 @@ test('attaching stages the bytes under the user namespace, named only by a fresh
 
 test('attaching accepts every readable document format, whatever the case', async () => {
   const app = harness();
-  for (const name of ['a.pdf', 'b.DOCX', 'c.xlsx', 'd.PpTx', 'e.ipynb']) {
+  for (const name of ['a.pdf', 'b.DOCX', 'c.xlsx', 'd.PpTx', 'e.ipynb', 'f.txt', 'g.MD', 'h.csv']) {
     const { attachmentId } = await attach(app, name);
     const extension = path.extname(name).toLowerCase();
     assert.ok(app.staged().includes(`${attachmentId}${extension}`), name);
@@ -81,7 +81,7 @@ test('attaching accepts every readable document format, whatever the case', asyn
 
 test('attaching refuses a file the read tool cannot open, without writing anything', async () => {
   const app = harness();
-  for (const name of ['notes.txt', 'archive.pdf.zip', 'pdf', '.pdf', '', '.', '..', 'x.pdf/']) {
+  for (const name of ['notes.rtf', 'archive.pdf.zip', 'pdf', '.pdf', '', '.', '..', 'x.pdf/']) {
     await assert.rejects(
       attach(app, name),
       (error) => error instanceof IpcValidationError,
@@ -170,7 +170,7 @@ test('the main window chat composer stages and discards files under the same rul
   );
   assert.deepEqual(app.staged(), [`${attachmentId}.pdf`]);
   await assert.rejects(
-    app.invoke('action:attachFile', { bytes, name: 'chat.txt' }, mainWindow.webContents),
+    app.invoke('action:attachFile', { bytes, name: 'chat.rtf' }, mainWindow.webContents),
     (error) => error instanceof IpcValidationError
   );
   // Another WebContents is not the main window just because no Overlay claims it.

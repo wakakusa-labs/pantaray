@@ -399,7 +399,7 @@ def test_attached_files_add_a_note_the_visible_text_does_not_carry() -> None:
 @pytest.mark.parametrize(
     "name",
     [
-        "notes.txt",
+        "notes.rtf",
         "legacy.doc",
         ".pdf",
         ".hidden.pdf",
@@ -417,6 +417,22 @@ def test_attached_file_name_must_be_one_safe_component_of_a_readable_type(
 ) -> None:
     with pytest.raises(ValidationError, match="attached file name is not allowed"):
         FileAttachmentInput(attachment_id=ATTACHMENT_ID, name=name, byte_size=1)
+
+
+@pytest.mark.parametrize(
+    ("name", "label"),
+    [("notes.txt", "Text file"), ("README.md", "Markdown file"), ("t.csv", "CSV file")],
+)
+def test_text_exports_attach_with_their_type_label(name: str, label: str) -> None:
+    message = ActionUserMessageInput(
+        message_id="message-1",
+        content="Import these",
+        files=(
+            FileAttachmentInput(attachment_id=ATTACHMENT_ID, name=name, byte_size=1),
+        ),
+    )
+
+    assert f"- {name} ({label}, 1 B): " in render_action_user_request_text(message)
 
 
 @pytest.mark.parametrize(

@@ -587,7 +587,7 @@ def test_attached_files_reach_the_canonical_command(
     ("files", "expected"),
     [
         ([_file(attachment_id="../escape")], ("message.files.0.attachment_id", None)),
-        ([_file(name="notes.txt")], ("message.files.0.name", None)),
+        ([_file(name="notes.rtf")], ("message.files.0.name", None)),
         ([_file(name="a/b.pdf")], ("message.files.0.name", None)),
         ([_file(byte_size=0)], ("message.files.0.byte_size", None)),
         (

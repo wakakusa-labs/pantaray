@@ -1,0 +1,193 @@
+/* An import's draft under its conversation: organization, project and TODO lines in one framed
+   tree, then why it waits and its two buttons. Greys only, as the list. */
+
+.todo-import {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.todo-import__tree {
+  min-width: 0;
+  margin: 0;
+  padding: 4px 0;
+  border: 1px solid var(--todo-line-strong);
+  border-radius: 10px;
+}
+
+.todo-import__tree:disabled .todo-import__todo {
+  opacity: 0.6;
+}
+
+.todo-import__name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 8px 12px 6px;
+  color: var(--fog-text);
+  font-size: 13px;
+  font-weight: var(--weight-semibold);
+}
+
+.todo-import__name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.todo-import__organization + .todo-import__organization {
+  border-top: 1px solid var(--fog-line);
+}
+
+/* Under organizations, each level is set in a step. */
+.todo-import__tree--organizations .todo-import__name--project {
+  padding-left: 24px;
+}
+
+.todo-import__tree--organizations .todo-import__todo {
+  padding-left: 36px;
+}
+
+/* 新規 and 「すでにある」: a small framed word. */
+.todo-import__mark {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid var(--todo-line-strong);
+  border-radius: 4px;
+  color: var(--fog-text-2);
+  font-size: 11.5px;
+  font-weight: var(--weight-regular, 400);
+  line-height: 18px;
+}
+
+.todo-import__todos {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.todo-import__todo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  min-height: 36px;
+  padding: 2px 8px 2px 24px;
+  border-top: 1px solid var(--fog-line);
+}
+
+.todo-import__text {
+  /* Shrinks before the line wraps, down to a few words. */
+  flex: 1 1 0;
+  min-width: 96px;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fog-text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.todo-import__text:hover:not(:disabled),
+.todo-import__text:focus {
+  border-color: var(--todo-line-strong);
+  outline: none;
+}
+
+.todo-import__text:focus-visible {
+  border-color: var(--fog-text-3);
+}
+
+/* A duplicate the user did not keep: shown, but drawn as left out. */
+.todo-import__todo--left-out .todo-import__text {
+  color: var(--fog-text-3);
+  text-decoration: line-through;
+}
+
+/* Under the TODO's own line, so its dates stay in their column. */
+.todo-import__duplicate {
+  display: inline-flex;
+  flex: 1 0 100%;
+  order: 1;
+  padding: 0 0 6px 7px;
+  align-items: center;
+  gap: 6px;
+  color: var(--fog-text-2);
+  font-size: var(--todo-state-size);
+}
+
+.todo-import__duplicate label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.todo-import__date,
+.todo-import__remove {
+  flex: none;
+  height: 26px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fog-text-2);
+  font: inherit;
+  font-size: var(--todo-state-size);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.todo-import__date {
+  padding: 0 7px;
+}
+
+.todo-import__remove {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  padding: 0;
+  color: var(--fog-text-3);
+}
+
+.todo-import__date:hover:not(:disabled),
+.todo-import__remove:hover:not(:disabled) {
+  border-color: var(--todo-line-strong);
+  color: var(--fog-text);
+}
+
+.todo-import__note,
+.todo-import__alert {
+  margin: 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.todo-import__note {
+  color: var(--fog-text-3);
+}
+
+.todo-import__alert {
+  color: var(--danger-color);
+}
+
+.todo-import__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* 登録 is the one to press: drawn filled, in the text's grey. */
+.todo-import__register:not(:disabled) {
+  border-color: transparent;
+  background: var(--fog-text);
+  color: var(--app-background);
+}
+
+.todo-import__register:hover:not(:disabled) {
+  background: var(--fog-light);
+}

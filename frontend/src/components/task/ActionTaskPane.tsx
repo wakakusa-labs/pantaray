@@ -36,6 +36,11 @@ type ActionTaskPaneProps = {
   onAddProject: () => void;
   /** Content under the latest answer, such as the files it produced. */
   renderFileChips?: (view: ActionConversationViewModel) => ReactNode;
+  /**
+   * Content under the conversation whatever its state, such as what the Action drafts for the
+   * user to confirm; it is told whether a run is going (or waits on an approval).
+   */
+  renderUnderConversation?: (running: boolean) => ReactNode;
   /** Closes the pane, last in its header; for the page that opened the pane beside a list. */
   closeButton?: ReactNode;
   /** Where the composer waits while the pane is not shown. */
@@ -51,6 +56,7 @@ export function ActionTaskPane({
   renderPreview,
   onAddProject,
   renderFileChips,
+  renderUnderConversation,
   closeButton,
 }: ActionTaskPaneProps) {
   const { t } = useI18n();
@@ -259,6 +265,9 @@ export function ActionTaskPane({
                 {view && renderFileChips ? renderFileChips(view) : null}
               </>
             ) : null}
+            {renderUnderConversation?.(
+              status.kind === 'running' || status.kind === 'approval_pending'
+            )}
             {completionReadFailed ? (
               <p className="action-task__alert" role="alert">
                 {t('history.failedToMarkCompletionViewed')}

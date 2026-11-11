@@ -72,6 +72,8 @@ export function useWorkspaceSettingsController(t: Translate) {
   const [projectGeneration, setProjectGeneration] = useState(0);
   const [pending, setPending] = useState<ReadonlySet<WorkspacePendingKey>>(new Set());
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // Bumped when the workspace changed outside these edits, such as a TODO import's registration.
+  const [readGeneration, setReadGeneration] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -94,7 +96,7 @@ export function useWorkspaceSettingsController(t: Translate) {
     return () => {
       cancelled = true;
     };
-  }, [t]);
+  }, [t, readGeneration]);
 
   useEffect(() => {
     if (settings) setCachedWorkspaceSettings(ownerId, settings);
@@ -406,6 +408,8 @@ export function useWorkspaceSettingsController(t: Translate) {
     errorMessage,
     openFolder,
     pending,
+    /** Reads the workspace again, after something else changed it. */
+    reload: () => setReadGeneration((current) => current + 1),
     removeFolderFromProject,
     removeProject,
     renameProject,

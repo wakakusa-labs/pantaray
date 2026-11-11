@@ -335,3 +335,15 @@
     display: none;
   }
 }
+
+/* An import's pane takes focus when it opens, as a whole: no ring around the pane. */
+.todo-screen__import:focus {
+  outline: none;
+}
+
+/* What the last import added, over the list once its pane closed. */
+.todo-screen__notice {
+  margin: 12px 0 0;
+  color: var(--fog-text-2);
+  font-size: 13px;
+}

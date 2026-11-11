@@ -175,7 +175,9 @@ const SuggestionHistoryPage = () => {
   const paneOpen =
     selection === null &&
     (todoSelection.view === 'list'
-      ? (todoList.page?.items.some((todo) => todo.todo_id === todoSelection.todoId) ?? false)
+      ? todoList.page !== null &&
+        (todoSelection.importId !== null ||
+          todoList.page.items.some((todo) => todo.todo_id === todoSelection.todoId))
       : todoSelection.view === 'progress' &&
         todoSelection.progressSpan === 'month' &&
         todoSelection.progressDay !== null);
@@ -411,6 +413,7 @@ const SuggestionHistoryPage = () => {
           onSelect={selectTodos}
           onOpenWork={select}
           onAddProject={addProject}
+          onWorkspaceChanged={workspace.reload}
         />
       ) : (
         <div className="history-detail">

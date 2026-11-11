@@ -104,7 +104,7 @@ it('resends an unanswered add with the same id, so the same line is added once',
     client_todo_id: first,
     project_id: 'p1',
     text: '見積書を送る',
-    week_start: '2026-11-02',
+    starts_on: '2026-11-02',
     due,
   });
 });

@@ -28,7 +28,7 @@ class SuggestionOpenTodo:
 
 @dataclass(frozen=True, slots=True)
 class SuggestionOpenTodos:
-    """The current week's open TODOs, oldest first, bounded by the snapshot."""
+    """The open TODOs, oldest first, bounded by the snapshot."""
 
     items: tuple[SuggestionOpenTodo, ...] = ()
     # Older open TODOs left out by the bound.

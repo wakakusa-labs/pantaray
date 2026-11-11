@@ -39,10 +39,13 @@ def test_week_turns_at_local_monday_midnight(
 
 
 @pytest.mark.parametrize(
-    ("week_start", "checked_at", "expected"),
+    ("starts_on", "checked_at", "expected"),
     [
         (PREVIOUS_WEEK, None, (WEEK, True)),
         (NEXT_WEEK, None, (NEXT_WEEK, False)),
+        # Its own week is the one holding its start date.
+        ("2026-11-12", None, (NEXT_WEEK, False)),
+        ("2026-10-29", None, (WEEK, True)),
         ("2026-10-19", "2026-10-28T03:00:00.000Z", (PREVIOUS_WEEK, True)),
         (PREVIOUS_WEEK, "2026-10-30T03:00:00.000Z", (PREVIOUS_WEEK, False)),
         (NEXT_WEEK, "2026-11-03T03:00:00.000Z", (NEXT_WEEK, False)),
@@ -50,16 +53,18 @@ def test_week_turns_at_local_monday_midnight(
     ids=[
         "open-past-is-carried",
         "open-future-stays",
+        "open-starting-mid-week",
+        "open-from-mid-past-week-is-carried",
         "checked-later-stays-in-check-week",
         "checked-in-own-past-week-stays",
         "checked-early-stays-in-own-week",
     ],
 )
 def test_effective_week(
-    week_start: str, checked_at: str | None, expected: tuple[str, bool]
+    starts_on: str, checked_at: str | None, expected: tuple[str, bool]
 ) -> None:
     check = None if checked_at is None else TodoCheck(by="user", at=checked_at)
-    todo = make_todo(week_start=week_start, check=check)
+    todo = make_todo(starts_on=starts_on, check=check)
 
     assert effective_week(todo, WEEK, TOKYO) == WeekPlacement(*expected)
 
@@ -74,6 +79,6 @@ def test_check_week_is_read_in_the_users_zone() -> None:
 
 def test_deleted_todo_is_in_no_week() -> None:
     deletion = TodoDeletion(by="user", at="2026-11-03T00:00:00.000Z")
-    todo = make_todo(week_start=PREVIOUS_WEEK, deletion=deletion)
+    todo = make_todo(starts_on=PREVIOUS_WEEK, deletion=deletion)
 
     assert effective_week(todo, WEEK, TOKYO) is None

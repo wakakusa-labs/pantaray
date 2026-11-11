@@ -269,7 +269,7 @@ def _todo(todo_id: str, *, suggestion_id: str | None = None) -> str:
     suggestion = f"'{suggestion_id}'" if suggestion_id else "NULL"
     return f"""
       INSERT INTO todo_items(todo_id,user_id,text,author,origin_kind,suggestion_id,
-        week_start,created_at) VALUES ('{todo_id}','{USER}','Send the quote','user',
+        starts_on,created_at) VALUES ('{todo_id}','{USER}','Send the quote','user',
         {origin},{suggestion},'2026-08-31','{T}');"""
 
 

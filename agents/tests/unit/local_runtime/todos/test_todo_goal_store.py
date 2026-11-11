@@ -49,7 +49,7 @@ def _todo(client_todo_id: str = "c-1") -> Todo:
         client_todo_id=client_todo_id,
         project_id="project-1",
         text="Close the Acme deal",
-        week_of="2026-11-04",
+        starts_on="2026-11-04",
         due=None,
         clock=NOW,
     )

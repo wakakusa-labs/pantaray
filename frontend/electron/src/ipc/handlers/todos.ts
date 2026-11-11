@@ -15,15 +15,20 @@ import {
   TodoDeletionAnswerRequestSchema,
   TodoDueRequestSchema,
   TodoGoalRequestSchema,
+  TodoListQuerySchema,
   TodoProgressQuerySchema,
   TodoProjectRefRequestSchema,
   TodoRefRequestSchema,
   TodoScopeQuerySchema,
+  TodoStartRequestSchema,
   TodoWeekQuerySchema,
 } from '../../todos/todoContracts';
 import { parseInput } from '../schemas/error';
 
 export function registerTodoHandlers(ctx: MainContext, registrar: IpcRegistrar): void {
+  registrar.handle('todos:list', async (_event, query) =>
+    ctx.todos.list(parseInput(TodoListQuerySchema, 'todos:list', query))
+  );
   registrar.handle('todos:listWeek', async (_event, query) =>
     ctx.todos.listWeek(parseInput(TodoWeekQuerySchema, 'todos:listWeek', query))
   );
@@ -35,6 +40,9 @@ export function registerTodoHandlers(ctx: MainContext, registrar: IpcRegistrar):
   );
   registrar.handle('todos:setDue', async (_event, request) =>
     ctx.todos.setDue(parseInput(TodoDueRequestSchema, 'todos:setDue', request))
+  );
+  registrar.handle('todos:setStart', async (_event, request) =>
+    ctx.todos.setStart(parseInput(TodoStartRequestSchema, 'todos:setStart', request))
   );
   registrar.handle('todos:delete', async (_event, request) =>
     ctx.todos.delete(parseInput(TodoRefRequestSchema, 'todos:delete', request))

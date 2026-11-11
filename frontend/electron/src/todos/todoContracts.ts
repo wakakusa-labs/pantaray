@@ -66,6 +66,17 @@ export const TodoScopeQuerySchema = z
   .refine(scopeMatches, SCOPE_MISMATCH);
 
 /**
+ * Every TODO not deleted: open ones first, by date added (`added`, no `sort`) or by due date with
+ * no due date last (`due`); then checked ones, last checked first. `project_id` is given exactly
+ * when `project` is `project`.
+ */
+export const TodoListQuerySchema = z
+  .object({ ...scopeShape, ...projectShape, sort: z.enum(['added', 'due']).optional() })
+  .strict()
+  .refine(scopeMatches, SCOPE_MISMATCH)
+  .refine(projectMatches, PROJECT_MISMATCH);
+
+/**
  * `project_id` is given exactly when `project` is `project`; no `week_start` is the current
  * week, and any day of a week names that week.
  */
@@ -92,8 +103,8 @@ export const TodoProgressQuerySchema = z
   .refine(projectMatches, PROJECT_MISMATCH);
 
 /**
- * The body of `POST /todos`. `client_todo_id` is the idempotency key; `week_start` may be any
- * day of the week. Whether the text is one non-blank line is the backend's to decide.
+ * The body of `POST /todos`. `client_todo_id` is the idempotency key; no `starts_on` starts it
+ * today. Whether the text is one non-blank line is the backend's to decide.
  */
 export const TodoCreateRequestSchema = z
   .object({
@@ -105,7 +116,7 @@ export const TodoCreateRequestSchema = z
         (value) => Array.from(value).length <= TODO_TEXT_MAX_CODEPOINTS,
         'text exceeds the Unicode code-point limit'
       ),
-    week_start: LocalDateSchema,
+    starts_on: LocalDateSchema.optional(),
     due: TodoDueSchema.nullable(),
   })
   .strict();
@@ -116,6 +127,11 @@ export const TodoCheckRequestSchema = z
 
 export const TodoDueRequestSchema = z
   .object({ todo_id: TodoIdSchema, due: TodoDueSchema.nullable() })
+  .strict();
+
+/** The AI picks the TODO up from `starts_on`. */
+export const TodoStartRequestSchema = z
+  .object({ todo_id: TodoIdSchema, starts_on: LocalDateSchema })
   .strict();
 
 /** Names one TODO: delete and restore carry nothing else. */
@@ -174,7 +190,8 @@ const TodoStateSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('partial'), note: z.string().nullable() }).strict(),
   z.object({ kind: z.literal('stopped'), outcome: z.enum(['failed', 'canceled']) }).strict(),
   z
-    .object({ kind: z.literal('not_started'), reason: z.enum(['week_not_started', 'starting']) })
+    // `scheduled`: its `starts_on` has not come yet.
+    .object({ kind: z.literal('not_started'), reason: z.enum(['scheduled', 'starting']) })
     .strict(),
 ]);
 
@@ -191,8 +208,8 @@ const TodoViewSchema = z
     text: z.string(),
     author: TodoAuthorSchema,
     origin: z.enum(['written', 'suggestion', 'recurrence']),
-    // The week it was written for.
-    week_start: LocalDateSchema,
+    // The AI picks it up from this date.
+    starts_on: LocalDateSchema,
     // An open TODO from an earlier week, shown in the current one.
     carried: z.boolean(),
     due: TodoDueSchema.nullable(),
@@ -206,9 +223,13 @@ const TodoViewSchema = z
 const TodoCheckResultSchema = z
   .object({
     todo: TodoViewSchema,
-    // The next week's instance of a checked weekly TODO.
+    // The next instance of a checked weekly TODO.
     next_todo: TodoViewSchema.nullable(),
   })
+  .strict();
+
+const TodoListPageSchema = z
+  .object({ today: LocalDateSchema, items: z.array(TodoViewSchema) })
   .strict();
 
 const TodoWeekPageSchema = z
@@ -362,16 +383,19 @@ export const TODO_REFUSAL_CODES = [
 
 export type TodoDue = z.infer<typeof TodoDueSchema>;
 export type TodoScopeQuery = z.infer<typeof TodoScopeQuerySchema>;
+export type TodoListQuery = z.infer<typeof TodoListQuerySchema>;
 export type TodoWeekQuery = z.infer<typeof TodoWeekQuerySchema>;
 export type TodoCreateRequest = z.infer<typeof TodoCreateRequestSchema>;
 export type TodoCheckRequest = z.infer<typeof TodoCheckRequestSchema>;
 export type TodoDueRequest = z.infer<typeof TodoDueRequestSchema>;
+export type TodoStartRequest = z.infer<typeof TodoStartRequestSchema>;
 export type TodoRefRequest = z.infer<typeof TodoRefRequestSchema>;
 export type TodoDeletionAnswerRequest = z.infer<typeof TodoDeletionAnswerRequestSchema>;
 export type TodoState = z.infer<typeof TodoStateSchema>;
 export type TodoConversationRef = z.infer<typeof TodoConversationRefSchema>;
 export type TodoView = z.infer<typeof TodoViewSchema>;
 export type TodoCheckResult = z.infer<typeof TodoCheckResultSchema>;
+export type TodoListPage = z.infer<typeof TodoListPageSchema>;
 export type TodoWeekPage = z.infer<typeof TodoWeekPageSchema>;
 export type DeletedTodoView = z.infer<typeof DeletedTodoViewSchema>;
 export type TodoChanged = z.infer<typeof TodoChangedSchema>;
@@ -403,6 +427,8 @@ export const parseTodoView = (payload: unknown): TodoView =>
   parseWith(TodoViewSchema, 'TODO', payload);
 export const parseTodoCheckResult = (payload: unknown): TodoCheckResult =>
   parseWith(TodoCheckResultSchema, 'TODO check', payload);
+export const parseTodoListPage = (payload: unknown): TodoListPage =>
+  parseWith(TodoListPageSchema, 'TODO list', payload);
 export const parseTodoWeekPage = (payload: unknown): TodoWeekPage =>
   parseWith(TodoWeekPageSchema, 'TODO week', payload);
 export const parseDeletedTodos = (payload: unknown): DeletedTodoView[] =>

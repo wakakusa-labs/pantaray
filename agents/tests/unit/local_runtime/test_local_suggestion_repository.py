@@ -958,7 +958,7 @@ async def test_an_offer_is_saved_with_exactly_one_ai_todo_in_its_state(
         row["origin_kind"],
         row["suggestion_id"],
         row["project_id"],
-        row["week_start"],
+        row["starts_on"],
         row["due_date"],
     ) == (
         suggestion_todo_id(SUGGESTION_ID),
@@ -967,7 +967,7 @@ async def test_an_offer_is_saved_with_exactly_one_ai_todo_in_its_state(
         "suggestion",
         SUGGESTION_ID,
         "project-p",
-        "2026-11-02",
+        "2026-11-04",
         None,
     )
     entry = read_todo(user_id=USER_ID, todo_id=str(row["todo_id"]))

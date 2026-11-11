@@ -30,7 +30,7 @@ from pantaray_agents.local_runtime.todos.model import (
 
 TODO_COLUMNS: Final = tuple(
     """todo_id project_id text author origin_kind suggestion_id previous_todo_id
-    week_start due_date due_repeat checked_by checked_at report_kind report_note
+    starts_on due_date due_repeat checked_by checked_at report_kind report_note
     report_run_id report_at deletion_request_id deletion_request_reason
     deletion_requested_at deletion_request_state deleted_by deleted_at
     created_at""".split()
@@ -183,7 +183,7 @@ def todo_params(todo: Todo) -> dict[str, str | None]:
         "previous_todo_id": (
             origin.previous_todo_id if isinstance(origin, RecurrenceOrigin) else None
         ),
-        "week_start": todo.week_start,
+        "starts_on": todo.starts_on,
         "due_date": None if todo.due is None else todo.due.date,
         "due_repeat": None if todo.due is None else todo.due.repeat,
         "checked_by": None if todo.check is None else todo.check.by,
@@ -209,7 +209,7 @@ def todo_from_row(row: sqlite3.Row) -> Todo:
         text=row["text"],
         author=row["author"],
         origin=_origin(row),
-        week_start=row["week_start"],
+        starts_on=row["starts_on"],
         due=(
             None
             if row["due_date"] is None

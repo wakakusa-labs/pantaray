@@ -55,7 +55,8 @@ class Stopped:
 
 @dataclass(frozen=True, slots=True)
 class NotStarted:
-    reason: Literal["week_not_started", "starting"]
+    # `scheduled`: its start date, which the view carries, has not come yet.
+    reason: Literal["scheduled", "starting"]
     kind: Literal["not_started"] = "not_started"
 
 
@@ -78,7 +79,7 @@ type PickupTarget = StartWritten | ContinueAiTodo
 
 
 def display_state(
-    todo: Todo, conversation: TodoConversation, current_week_start: LocalDate
+    todo: Todo, conversation: TodoConversation, today: LocalDate
 ) -> TodoDisplayState:
     if todo.check is not None:
         return Done(by=todo.check.by, at=todo.check.at)
@@ -88,7 +89,7 @@ def display_state(
         case SuggestionConversation(answered=answered):
             return _suggestion_state(todo, answered)
         case NoConversation():
-            return _not_started(todo, current_week_start)
+            return _not_started(todo, today)
         case _:
             assert_never(conversation)
 
@@ -137,19 +138,19 @@ def _reported_state(report: AiReport) -> TodoDisplayState:
     return Partial(note=report.note)
 
 
-def _not_started(todo: Todo, current_week_start: LocalDate) -> NotStarted:
-    if todo.week_start > current_week_start:
-        return NotStarted(reason="week_not_started")
+def _not_started(todo: Todo, today: LocalDate) -> NotStarted:
+    if todo.starts_on > today:
+        return NotStarted(reason="scheduled")
     return NotStarted(reason="starting")
 
 
 def pickup_target(
-    todo: Todo, conversation: TodoConversation, current_week_start: LocalDate
+    todo: Todo, conversation: TodoConversation, today: LocalDate
 ) -> PickupTarget | None:
     if (
         todo.check is not None
         or todo.deletion is not None
-        or todo.week_start > current_week_start
+        or todo.starts_on > today
         or conversation.kind == "action"
     ):
         return None

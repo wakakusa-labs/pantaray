@@ -33,11 +33,13 @@ from pantaray_agents.local_runtime.todos.model import (
     TodoDeletion,
 )
 
-from .support import NEXT_WEEK, PREVIOUS_WEEK, WEEK, make_todo
+from .support import PREVIOUS_WEEK, make_todo
 
 type ReportKind = Literal["continue", "partial", "needs_user"]
 
 AT = "2026-11-04T09:00:00.000Z"
+TODAY = "2026-11-04"
+TOMORROW = "2026-11-05"
 SUGGESTION = SuggestionConversation(suggestion_id="sug-1", answered=False)
 DISMISSED = SuggestionConversation(suggestion_id="sug-1", answered=True)
 RUNNING = ActionConversation("action-1", ActiveRun("run-2"))
@@ -86,25 +88,22 @@ def _reported(kind: ReportKind, run_id: str | None = "run-2") -> Todo:
         (_reported("continue", None), DISMISSED, Partial("continue note")),
         # A done Suggestion TODO the user unchecked.
         (SUGGESTED_TODO, SUGGESTION, Waiting("reply", None)),
-        (
-            make_todo(week_start=NEXT_WEEK),
-            NONE,
-            NotStarted("week_not_started"),
-        ),
-        (make_todo(week_start=PREVIOUS_WEEK), NONE, NotStarted("starting")),
+        (make_todo(starts_on=TOMORROW), NONE, NotStarted("scheduled")),
+        (make_todo(starts_on=TODAY), NONE, NotStarted("starting")),
     ],
 )
 def test_display_state(
     todo: Todo, conversation: TodoConversation, expected: object
 ) -> None:
-    assert display_state(todo, conversation, WEEK) == expected
+    assert display_state(todo, conversation, TODAY) == expected
 
 
 @pytest.mark.parametrize(
     ("todo", "conversation", "expected"),
     [
         (make_todo(), NONE, START),
-        (make_todo(week_start=PREVIOUS_WEEK), NONE, START),
+        (make_todo(starts_on=PREVIOUS_WEEK), NONE, START),
+        (make_todo(starts_on=TODAY), NONE, START),
         (make_todo(origin=RecurrenceOrigin("todo-0")), NONE, START),
         (make_todo(author="ai", origin=RecurrenceOrigin("todo-0")), NONE, CONTINUE),
         # Only the user's approval or reply opens a Suggestion's work, however
@@ -115,7 +114,8 @@ def test_display_state(
         (_reported("continue", None), SUCCEEDED, None),
         (_reported("partial", None), SUGGESTION, None),
         (SUGGESTED_TODO, SUGGESTION, None),
-        (make_todo(week_start=NEXT_WEEK), NONE, None),
+        # Tomorrow, though in the week that holds today.
+        (make_todo(starts_on=TOMORROW), NONE, None),
         (make_todo(check=TodoCheck(by="user", at=AT)), NONE, None),
         (make_todo(deletion=TodoDeletion(by="user", at=AT)), NONE, None),
         (make_todo(), SUCCEEDED, None),
@@ -124,4 +124,4 @@ def test_display_state(
 def test_pickup_target(
     todo: Todo, conversation: TodoConversation, expected: object
 ) -> None:
-    assert pickup_target(todo, conversation, WEEK) == expected
+    assert pickup_target(todo, conversation, TODAY) == expected

@@ -63,7 +63,7 @@ def _write(text: str, *, due: TodoDue | None = None) -> Todo:
         client_todo_id=text,
         project_id=None,
         text=text,
-        week_of="2026-11-04",
+        starts_on="2026-11-04",
         due=due,
         clock=NOW,
     )
@@ -117,7 +117,7 @@ def test_an_action_finds_the_todo_it_was_started_or_accepted_for(db: Path) -> No
         execute(
             db,
             f"""INSERT INTO todo_items(todo_id, user_id, text, author, origin_kind,
-              suggestion_id, week_start, created_at) VALUES ('{todo_id}', '{USER}',
+              suggestion_id, starts_on, created_at) VALUES ('{todo_id}', '{USER}',
               'Offer', 'ai', 'suggestion', '{suggestion_id}', '2026-11-02',
               '{NOW.now}')""",
         )
@@ -187,10 +187,10 @@ def test_done_checks_by_ai_and_adds_the_next_weekly_instance(db: Path) -> None:
     assert _stored(todo.todo_id).check == TodoCheck(by="ai", at=NOW.now)
     with closing(sqlite3.connect(db)) as connection:
         assert connection.execute(
-            "SELECT author, week_start, due_date, checked_at FROM todo_items "
+            "SELECT author, starts_on, due_date, checked_at FROM todo_items "
             "WHERE previous_todo_id = ?",
             (todo.todo_id,),
-        ).fetchall() == [("user", "2026-11-09", "2026-11-15", None)]
+        ).fetchall() == [("user", "2026-11-11", "2026-11-15", None)]
 
 
 def test_a_report_carries_the_running_process_as_its_run(db: Path) -> None:

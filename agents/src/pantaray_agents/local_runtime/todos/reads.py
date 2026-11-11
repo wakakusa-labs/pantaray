@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Final, Literal
 
 from pantaray_agents.local_runtime.todos import core
 from pantaray_agents.local_runtime.todos.clock import TodoClock
@@ -31,11 +32,26 @@ from pantaray_agents.local_runtime.todos.week import (
     week_start_of,
 )
 
+type TodoListSort = Literal["added", "due"]
+
+# Open TODOs come first, in the order asked for; checked ones follow, the last
+# checked first. A NULL `checked_at` ties every open TODO on the second key.
+_LIST_ORDER: Final[dict[TodoListSort, str]] = {
+    "added": "",
+    "due": "todo.due_date IS NULL, todo.due_date, ",
+}
+
 
 @dataclass(frozen=True, slots=True)
 class TodoEntry:
     todo: Todo
     conversation: TodoConversation
+
+
+@dataclass(frozen=True, slots=True)
+class TodoList:
+    today: LocalDate
+    items: tuple[TodoEntry, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +80,43 @@ def read_todo(*, user_id: str, todo_id: TodoId) -> TodoEntry | None:
     return TodoEntry(todo=todo, conversation=conversations[todo.todo_id])
 
 
+def read_todo_list(
+    *,
+    user_id: str,
+    scope: TodoScope,
+    project: TodoProjectFilter,
+    sort: TodoListSort,
+    clock: TodoClock,
+) -> TodoList:
+    """Every TODO not deleted; `sort` orders the open ones, by date added or
+    by due date with no due date last."""
+
+    scope_sql, scope_params = todo_scope_sql(scope)
+    project_sql, project_params = todo_project_sql(project)
+    # Design limit: every checked TODO is read too; page the list when a
+    # project holds more than 1,000 TODOs.
+    sql = (
+        f"SELECT {TODO_SELECT} FROM todo_items AS todo "
+        "WHERE todo.user_id = :user_id AND todo.deleted_at IS NULL "
+        f"AND {scope_sql} AND {project_sql} "
+        "ORDER BY todo.checked_at IS NOT NULL, todo.checked_at DESC, "
+        f"{_LIST_ORDER[sort]}todo.created_at, todo.todo_id"
+    )
+    params = {"user_id": user_id, **scope_params, **project_params}
+    with todo_db_connection() as connection:
+        todos = [todo_from_row(row) for row in connection.execute(sql, params)]
+        conversations = resolve_todo_conversations(
+            connection, user_id=user_id, todos=todos
+        )
+    return TodoList(
+        today=clock.today,
+        items=tuple(
+            TodoEntry(todo=todo, conversation=conversations[todo.todo_id])
+            for todo in todos
+        ),
+    )
+
+
 def read_todo_week(
     *,
     user_id: str,
@@ -83,17 +136,18 @@ def read_todo_week(
     sql = (
         f"SELECT {TODO_SELECT} FROM todo_items AS todo "
         "WHERE todo.user_id = :user_id AND todo.deleted_at IS NULL "
-        "AND todo.week_start <= :week AND (todo.checked_at IS NULL "
+        "AND todo.starts_on <= :week_end AND (todo.checked_at IS NULL "
         # A check on a local date in the week is no earlier in UTC than the day
         # before it, and one checked before its own week began stays there; the
         # exact week comes from effective_week below.
-        "OR todo.checked_at >= :checked_from OR todo.week_start = :week) "
+        "OR todo.checked_at >= :checked_from OR todo.starts_on >= :week) "
         f"AND {scope_sql} AND {project_sql} "
-        "ORDER BY todo.week_start, todo.created_at, todo.todo_id"
+        "ORDER BY todo.starts_on, todo.created_at, todo.todo_id"
     )
     params = {
         "user_id": user_id,
         "week": week,
+        "week_end": shift_days(week, 6),
         "checked_from": shift_days(week, -1),
         **scope_params,
         **project_params,
@@ -161,24 +215,22 @@ def read_purge_due_todos(*, user_id: str, now: str) -> tuple[TodoEntry, ...]:
     )
 
 
-def read_pickup_candidates(
-    *, user_id: str, current_week_start: LocalDate
-) -> tuple[TodoEntry, ...]:
-    """Open TODOs whose week has begun, with their conversations.
+def read_pickup_candidates(*, user_id: str, today: LocalDate) -> tuple[TodoEntry, ...]:
+    """Open TODOs whose start date has come, with their conversations.
 
     A superset of what the pickup starts: `pickup_target` decides.
     """
 
     # Design limit: every open TODO is read on each pass, those whose Action
-    # already runs too, and the scan walks the user's TODOs up to this week; add
-    # a partial index on open TODOs when a pass exceeds 50 ms.
+    # already runs too, and the scan walks the user's TODOs started by today;
+    # add a partial index on open TODOs when a pass exceeds 50 ms.
     with todo_db_connection() as connection:
         rows = connection.execute(
             f"SELECT {TODO_SELECT} FROM todo_items AS todo "
-            "WHERE todo.user_id = ? AND todo.week_start <= ? "
+            "WHERE todo.user_id = ? AND todo.starts_on <= ? "
             "AND todo.checked_at IS NULL AND todo.deleted_at IS NULL "
             "ORDER BY todo.created_at, todo.todo_id",
-            (user_id, current_week_start),
+            (user_id, today),
         ).fetchall()
         todos = [todo_from_row(row) for row in rows]
         conversations = resolve_todo_conversations(

@@ -17,12 +17,15 @@ import {
   type TodoDeletionAnswerRequest,
   type TodoDueRequest,
   type TodoGoalRequest,
+  type TodoListPage,
+  type TodoListQuery,
   type TodoProgressPage,
   type TodoProgressQuery,
   type TodoProjectRefRequest,
   type TodoRefRequest,
   type TodoRefusalCode,
   type TodoScopeQuery,
+  type TodoStartRequest,
   type TodoView,
   type TodoWeekPage,
   type TodoWeekQuery,
@@ -31,6 +34,7 @@ import {
   parseGoalView,
   parseProgressRecordView,
   parseTodoCheckResult,
+  parseTodoListPage,
   parseTodoProgressPage,
   parseTodoView,
   parseTodoWeekPage,
@@ -50,10 +54,12 @@ export function createTodoFetcher(params: {
   requestJson: RequestJson;
   getUserId: () => string | null;
 }): {
+  list: (query: TodoListQuery) => Promise<TodoListPage>;
   listWeek: (query: TodoWeekQuery) => Promise<TodoWeekPage>;
   create: (request: TodoCreateRequest) => Promise<TodoWriteResult<TodoView>>;
   setCheck: (request: TodoCheckRequest) => Promise<TodoWriteResult<TodoCheckResult>>;
   setDue: (request: TodoDueRequest) => Promise<TodoWriteResult<TodoView>>;
+  setStart: (request: TodoStartRequest) => Promise<TodoWriteResult<TodoView>>;
   delete: (request: TodoRefRequest) => Promise<TodoWriteResult<TodoView>>;
   answerDeletion: (request: TodoDeletionAnswerRequest) => Promise<TodoWriteResult<TodoView>>;
   restore: (request: TodoRefRequest) => Promise<TodoWriteResult<TodoView>>;
@@ -94,6 +100,8 @@ export function createTodoFetcher(params: {
   };
 
   return {
+    list: async (query) =>
+      parseTodoListPage(await read({ path: todosPath(), method: 'GET', query })),
     listWeek: async (query) =>
       parseTodoWeekPage(await read({ path: `${todosPath()}/weeks`, method: 'GET', query })),
     create: (request) => write({ path: todosPath(), method: 'POST', body: request }, parseTodoView),
@@ -104,6 +112,11 @@ export function createTodoFetcher(params: {
       ),
     setDue: ({ todo_id, due }) =>
       write({ path: `${todoPath(todo_id)}/due`, method: 'PUT', body: { due } }, parseTodoView),
+    setStart: ({ todo_id, starts_on }) =>
+      write(
+        { path: `${todoPath(todo_id)}/start`, method: 'PUT', body: { starts_on } },
+        parseTodoView
+      ),
     delete: ({ todo_id }) => write({ path: todoPath(todo_id), method: 'DELETE' }, parseTodoView),
     answerDeletion: ({ todo_id, request_id, answer }) =>
       write(

@@ -101,7 +101,6 @@ def _create(
         "client_todo_id": client_todo_id,
         "project_id": "project-1",
         "text": "Send the quote",
-        "week_start": "2026-11-04",
         "due": None,
         **fields,
     }
@@ -145,7 +144,8 @@ def test_a_replayed_create_returns_the_same_todo_and_a_changed_one_conflicts(
     assert first.status_code == replayed.status_code == 200
     assert replayed.json() == first.json()
     assert first.json()["author"] == "user"
-    assert first.json()["week_start"] == "2026-11-02"
+    # No start date given: it starts today.
+    assert first.json()["starts_on"] == "2026-11-04"
     assert conflicting.status_code == 409
     assert _error_code(conflicting) == "TODO_CLIENT_ID_CONFLICT"
     assert len(_week(client)["items"]) == 1
@@ -200,8 +200,34 @@ def test_the_user_removes_the_ais_check_and_checking_a_weekly_todo_adds_the_next
     assert rechecked.json()["todo"]["state"]["by"] == "user"
     next_todo = rechecked.json()["next_todo"]
     assert next_todo["origin"] == "recurrence"
-    assert next_todo["week_start"] == "2026-11-09"
+    assert next_todo["starts_on"] == "2026-11-11"
     assert next_todo["due"] == {"date": "2026-11-13", "repeat": "weekly"}
+
+
+def test_the_list_sorts_by_due_and_a_todo_moved_to_tomorrow_waits_for_it(
+    client: TestClient, clock: _Clock
+) -> None:
+    later = _created_id(client, "c-1", due={"date": "2026-11-20", "repeat": "none"})
+    clock.current = replace(NOW, now="2026-11-04T03:00:01.000Z")
+    sooner = _created_id(client, "c-2", due={"date": "2026-11-06", "repeat": "none"})
+
+    moved = client.put(f"{TODOS}/{later}/start", json={"starts_on": "2026-11-05"})
+
+    assert moved.status_code == 200, moved.text
+    assert moved.json()["starts_on"] == "2026-11-05"
+    assert moved.json()["state"] == {"kind": "not_started", "reason": "scheduled"}
+
+    def listed(**params: str) -> list[str]:
+        query = {"scope": "all", "project": "project", "project_id": "project-1"}
+        response = client.get(TODOS, params={**query, **params})
+        assert response.status_code == 200, response.text
+        assert response.json()["today"] == "2026-11-04"
+        return [item["todo_id"] for item in response.json()["items"]]
+
+    assert listed() == [later, sooner]
+    assert listed(sort="due") == [sooner, later]
+    unknown = {"scope": "all", "project": "any", "sort": "name"}
+    assert client.get(TODOS, params=unknown).status_code == 422
 
 
 def test_a_deleted_todo_refuses_check_and_due_but_deleting_again_is_fine(
@@ -213,11 +239,13 @@ def test_a_deleted_todo_refuses_check_and_due_but_deleting_again_is_fine(
     again = client.delete(f"{TODOS}/{todo_id}")
     check = client.put(f"{TODOS}/{todo_id}/check", json={"checked": True})
     due = client.put(f"{TODOS}/{todo_id}/due", json={"due": None})
+    start = client.put(f"{TODOS}/{todo_id}/start", json={"starts_on": "2026-11-05"})
 
     assert first.status_code == again.status_code == 200
     assert again.json() == first.json()
     assert (check.status_code, _error_code(check)) == (409, "TODO_DELETED")
     assert (due.status_code, _error_code(due)) == (409, "TODO_DELETED")
+    assert (start.status_code, _error_code(start)) == (409, "TODO_DELETED")
     missing = client.delete(f"{TODOS}/no-such-todo")
     assert (missing.status_code, _error_code(missing)) == (404, "TODO_NOT_FOUND")
 
@@ -306,7 +334,7 @@ def test_the_week_page_shows_carried_todos_with_their_state_and_conversation(
     client: TestClient, db: Path, clock: _Clock
 ) -> None:
     clock.current = PREVIOUS_WEEK
-    carried_id = _created_id(client, "c-old", week_start="2026-10-28")
+    carried_id = _created_id(client, "c-old", starts_on="2026-10-28")
     clock.current = NOW
     working_id = _created_id(client, "c-now")
     seed_action(
@@ -340,5 +368,5 @@ def test_the_week_page_shows_carried_todos_with_their_state_and_conversation(
             {"kind": "action", "action_id": "a"},
         ),
     ]
-    assert page["items"][0]["week_start"] == "2026-10-26"
+    assert page["items"][0]["starts_on"] == "2026-10-28"
     assert previous["items"] == []

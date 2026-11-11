@@ -232,7 +232,7 @@ def _create_todo(
     *,
     at: str,
     project_id: str | None = None,
-    week_of: str = "2026-11-04",
+    starts_on: str = "2026-11-04",
     due: TodoDue | None = None,
 ) -> Todo:
     created = create_todo_item(
@@ -240,7 +240,7 @@ def _create_todo(
         client_todo_id=text,
         project_id=project_id,
         text=text,
-        week_of=week_of,
+        starts_on=starts_on,
         due=due,
         clock=dataclasses.replace(TODO_CLOCK, now=at),
     )
@@ -361,7 +361,9 @@ def test_snapshot_lists_open_todos_of_the_week_with_project_due_and_state(
         now=TIMESTAMP,
     )
     weekly = TodoDue(date="2026-11-06", repeat="weekly")
-    _create_todo("Book the venue", at="2026-10-28T03:00:00.000Z", week_of="2026-10-28")
+    _create_todo(
+        "Book the venue", at="2026-10-28T03:00:00.000Z", starts_on="2026-10-28"
+    )
     _create_todo(
         "Send the quote",
         at="2026-11-02T01:00:00.000Z",

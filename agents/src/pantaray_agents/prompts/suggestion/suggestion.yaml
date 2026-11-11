@@ -232,6 +232,6 @@ role_rules:
     - Do not propose work that an open TODO already covers.
   open_todos_section: |
     ## Open TODOs
-    The user's TODO list: what is still open this week, including TODOs carried
-    over from earlier weeks, with each one's project, due date and state.
+    The user's TODO list: every TODO still open, with each one's project, due
+    date and state.
     {open_todos_context}

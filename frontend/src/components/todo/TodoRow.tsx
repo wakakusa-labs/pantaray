@@ -14,8 +14,11 @@ import './todo.css';
  */
 type StateTone = 'turn' | 'ask' | 'working' | 'quiet' | 'done';
 
-/** Where the TODO stands, in a word; the conversation beside the list tells the rest. */
-function stateWord(todo: TodoView): { key: MessageKey; tone: StateTone } {
+/**
+ * Where the TODO stands, in a word; the conversation beside the list tells the rest. `startsOn`
+ * names the day a TODO not started yet starts.
+ */
+function stateWord(todo: TodoView): { key: MessageKey; tone: StateTone; startsOn?: string } {
   // Pantaray's request to delete waits for the user, whatever the work's own state.
   if (todo.deletion_request) return { key: 'todo.state.deletionRequested', tone: 'ask' };
   const { state } = todo;
@@ -34,10 +37,9 @@ function stateWord(todo: TodoView): { key: MessageKey; tone: StateTone } {
         tone: 'quiet',
       };
     case 'not_started':
-      return {
-        key: state.reason === 'starting' ? 'todo.state.starting' : 'todo.state.weekNotStarted',
-        tone: 'quiet',
-      };
+      return state.reason === 'starting'
+        ? { key: 'todo.state.starting', tone: 'quiet' }
+        : { key: 'todo.state.startsOn', tone: 'quiet', startsOn: todo.starts_on };
   }
 }
 
@@ -97,7 +99,11 @@ export function TodoRow({
             />
           ) : null}
         </span>
-        <span className={`todo-row__state todo-row__state--${state.tone}`}>{t(state.key)}</span>
+        <span className={`todo-row__state todo-row__state--${state.tone}`}>
+          {state.startsOn === undefined
+            ? t(state.key)
+            : t(state.key, { date: dueDay(language, state.startsOn) })}
+        </span>
         <span className={late ? 'todo-row__due todo-row__due--late' : 'todo-row__due'}>
           {todo.due ? dueDay(language, todo.due.date) : null}
         </span>

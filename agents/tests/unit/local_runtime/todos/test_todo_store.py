@@ -19,7 +19,9 @@ from pantaray_agents.local_runtime.todos.db import (
 )
 from pantaray_agents.local_runtime.todos.model import Todo, TodoDue
 from pantaray_agents.local_runtime.todos.reads import (
+    TodoListSort,
     read_deleted_todos,
+    read_todo_list,
     read_todo_revision,
     read_todo_week,
 )
@@ -44,7 +46,7 @@ def _create(
     *,
     text: str = "Send the quote",
     project_id: str | None = "project-1",
-    week_of: str = "2026-11-04",
+    starts_on: str = "2026-11-04",
     due: TodoDue | None = None,
     clock: TodoClock = NOW,
 ) -> Todo:
@@ -53,7 +55,7 @@ def _create(
         client_todo_id=client_todo_id,
         project_id=project_id,
         text=text,
-        week_of=week_of,
+        starts_on=starts_on,
         due=due,
         clock=clock,
     )
@@ -86,7 +88,7 @@ def test_a_replayed_create_returns_the_same_todo_and_other_content_conflicts(
         client_todo_id="client-1",
         project_id="project-1",
         text="Send the invoice",
-        week_of="2026-11-04",
+        starts_on="2026-11-04",
         due=None,
         clock=NOW,
     )
@@ -95,7 +97,7 @@ def test_a_replayed_create_returns_the_same_todo_and_other_content_conflicts(
         client_todo_id="client-2",
         project_id="someone-elses-project",
         text="Send the quote",
-        week_of="2026-11-04",
+        starts_on="2026-11-04",
         due=None,
         clock=NOW,
     )
@@ -104,7 +106,7 @@ def test_a_replayed_create_returns_the_same_todo_and_other_content_conflicts(
     assert conflicting == Rejected("client_todo_conflict")
     assert elsewhere == Rejected("project_not_found")
     assert count(db, "SELECT COUNT(*) FROM todo_items") == 1
-    assert first.author == "user" and first.week_start == "2026-11-02"
+    assert first.author == "user" and first.starts_on == "2026-11-04"
     # Nothing changed, so the live session has nothing to reload.
     assert read_todo_revision(user_id=USER) == revision == 1
 
@@ -166,9 +168,9 @@ def test_an_organization_shows_the_todos_of_the_projects_it_has_now(
 def test_an_open_todo_from_an_earlier_week_is_carried_into_the_current_week(
     db: Path,
 ) -> None:
-    _create("client-1", text="Open", week_of="2026-10-28", clock=PREVIOUS_WEEK_CLOCK)
+    _create("client-1", text="Open", starts_on="2026-10-28", clock=PREVIOUS_WEEK_CLOCK)
     done = _create(
-        "client-2", text="Done", week_of="2026-10-26", clock=PREVIOUS_MONDAY_CLOCK
+        "client-2", text="Done", starts_on="2026-10-26", clock=PREVIOUS_MONDAY_CLOCK
     )
     set_todo_check(
         user_id=USER,
@@ -177,7 +179,7 @@ def test_an_open_todo_from_an_earlier_week_is_carried_into_the_current_week(
         checked=True,
         clock=PREVIOUS_MONDAY_CLOCK,
     )
-    _create("client-3", text="Next week", week_of="2026-11-10")
+    _create("client-3", text="Next week", starts_on="2026-11-10")
 
     assert _week_ids() == [("Open", True)]
     assert _week_ids(week_of="2026-10-26") == [("Done", False)]
@@ -185,13 +187,61 @@ def test_an_open_todo_from_an_earlier_week_is_carried_into_the_current_week(
 
 
 def test_a_todo_checked_before_its_week_began_stays_in_its_week(db: Path) -> None:
-    early = _create("client-1", text="Book the room", week_of="2026-11-10")
+    early = _create("client-1", text="Book the room", starts_on="2026-11-10")
     set_todo_check(
         user_id=USER, todo_id=early.todo_id, by="user", checked=True, clock=NOW
     )
 
     assert _week_ids() == []
     assert _week_ids(week_of="2026-11-09") == [("Book the room", False)]
+
+
+def _at(second: int) -> TodoClock:
+    return replace(NOW, now=f"2026-11-04T03:00:{second:02d}.000Z")
+
+
+def _list_texts(sort: TodoListSort) -> list[str]:
+    page = read_todo_list(
+        user_id=USER, scope=AllScope(), project=AnyProject(), sort=sort, clock=NOW
+    )
+    return [entry.todo.text for entry in page.items]
+
+
+def test_the_list_shows_open_todos_in_the_asked_order_then_the_last_checked_first(
+    db: Path,
+) -> None:
+    _create("c-1", text="No due", clock=_at(1))
+    _create("c-2", text="Due late", due=TodoDue("2026-11-20", "none"), clock=_at(2))
+    _create("c-3", text="Due soon", due=TodoDue("2026-11-06", "none"), clock=_at(3))
+    _create("c-4", text="Starts later", starts_on="2026-11-30", clock=_at(4))
+    first_checked = _create("c-5", text="Checked first", clock=_at(5))
+    last_checked = _create("c-0", text="Checked last", clock=_at(0))
+    deleted = _create("c-6", text="Deleted", clock=_at(6))
+    for todo, at in ((first_checked, 7), (last_checked, 8)):
+        set_todo_check(
+            user_id=USER, todo_id=todo.todo_id, by="user", checked=True, clock=_at(at)
+        )
+    update_todo(
+        user_id=USER,
+        todo_id=deleted.todo_id,
+        step=lambda todo: core.delete_by_user(todo, now=NOW.now),
+    )
+
+    checked = ["Checked last", "Checked first"]
+    assert _list_texts("added") == [
+        "No due",
+        "Due late",
+        "Due soon",
+        "Starts later",
+        *checked,
+    ]
+    assert _list_texts("due") == [
+        "Due soon",
+        "Due late",
+        "No due",
+        "Starts later",
+        *checked,
+    ]
 
 
 def test_a_deleted_todo_is_listed_and_restorable_for_30_days_only(db: Path) -> None:

@@ -35,7 +35,7 @@ function todo(todoId: string, projectId: string | null, done = false): TodoView 
     text: todoId,
     author: 'user',
     origin: 'written',
-    week_start: '2026-11-02',
+    starts_on: '2026-11-02',
     carried: false,
     due: null,
     state: done

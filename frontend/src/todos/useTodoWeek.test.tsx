@@ -139,7 +139,7 @@ const todo = (done: boolean): TodoView => ({
   text: 't1',
   author: 'user',
   origin: 'written',
-  week_start: '2026-11-02',
+  starts_on: '2026-11-02',
   carried: false,
   due: null,
   state: done

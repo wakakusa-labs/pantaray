@@ -59,14 +59,14 @@ def _fixed_clock(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _write(
-    text: str, *, week_of: str = "2026-11-04", project_id: str | None = "project-1"
+    text: str, *, starts_on: str = "2026-11-04", project_id: str | None = "project-1"
 ) -> Todo:
     created = create_todo_item(
         user_id=USER,
         client_todo_id=text,
         project_id=project_id,
         text=text,
-        week_of=week_of,
+        starts_on=starts_on,
         due=None,
         clock=NOW,
     )
@@ -92,7 +92,7 @@ def _insert_ai_todo(
     execute(
         db,
         f"""INSERT INTO todo_items(todo_id, user_id, project_id, text, author,
-          origin_kind, suggestion_id, previous_todo_id, week_start, due_date,
+          origin_kind, suggestion_id, previous_todo_id, starts_on, due_date,
           due_repeat, report_kind, report_note, report_at, created_at) VALUES
           ('{todo_id}', '{USER}', NULL, 'Renew the domain', 'ai', '{origin}',
            {suggestion}, {previous}, '2026-11-02', {due}, {report}, '{T}')""",
@@ -187,8 +187,9 @@ def test_an_ai_todo_continues_as_pantaray_and_asks_before_every_step(
     )
 
 
-def test_only_open_todos_whose_week_began_are_picked(db: Path) -> None:
-    _write("Next week", week_of="2026-11-10")
+def test_only_open_todos_whose_start_date_came_are_picked(db: Path) -> None:
+    # Tomorrow, though in the week that holds today.
+    _write("Tomorrow", starts_on="2026-11-05")
     checked = _write("Checked")
     set_todo_check(
         user_id=USER, todo_id=checked.todo_id, by="user", checked=True, clock=NOW
@@ -199,13 +200,15 @@ def test_only_open_todos_whose_week_began_are_picked(db: Path) -> None:
         todo_id=deleted.todo_id,
         step=lambda todo: core.delete_by_user(todo, now=NOW.now),
     )
-    carried = _write("From last week", week_of="2026-10-28")
+    carried = _write("From last week", starts_on="2026-10-28")
+    today = _write("Today")
 
     pickup.pick_up_todos(user_id=USER)
 
-    assert [row["initial_user_message_id"] for row in _actions(db)] == [
-        todo_message_id(carried.todo_id)
-    ]
+    assert {row["initial_user_message_id"] for row in _actions(db)} == {
+        todo_message_id(carried.todo_id),
+        todo_message_id(today.todo_id),
+    }
 
 
 def test_passes_one_after_another_or_at_once_start_one_action_per_todo(
@@ -322,9 +325,9 @@ async def test_a_suggestion_left_to_continue_starts_only_when_the_user_approves_
     waiting = read_todo(user_id=USER, todo_id=todo_id)
     assert waiting is not None
     # Not "about to start": only the user's answer starts it.
-    assert display_state(
-        waiting.todo, waiting.conversation, NOW.current_week_start
-    ) == (Waiting(reason="approval", note="Not sent."))
+    assert display_state(waiting.todo, waiting.conversation, NOW.today) == (
+        Waiting(reason="approval", note="Not sent.")
+    )
 
     accepted = await _approve("s-go")
 
@@ -384,7 +387,7 @@ async def test_a_dismissed_suggestion_is_not_picked_up_and_stays_where_it_stoppe
     assert "TODO pickup" not in caplog.text
     entry = read_todo(user_id=USER, todo_id=suggestion_todo_id("s-go"))
     assert entry is not None
-    assert display_state(entry.todo, entry.conversation, NOW.current_week_start) == (
+    assert display_state(entry.todo, entry.conversation, NOW.today) == (
         Partial(note="Not sent.")
     )
 

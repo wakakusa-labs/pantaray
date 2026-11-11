@@ -24,11 +24,7 @@ from pantaray_agents.local_runtime.todos.model import (
     TodoId,
     TodoOrigin,
 )
-from pantaray_agents.local_runtime.todos.week import (
-    local_date_at,
-    shift_days,
-    week_start_of,
-)
+from pantaray_agents.local_runtime.todos.week import local_date_at, shift_days
 from pantaray_agents.utils.timestamps import parse_iso8601_utc
 
 DELETED_TODO_RETENTION: Final = timedelta(days=30)
@@ -46,7 +42,7 @@ class Rejected[R: str]:
 @dataclass(frozen=True, slots=True)
 class CheckSet:
     todo: Todo
-    # The following week's instance of a checked weekly TODO. Its id derives
+    # The next instance of a checked weekly TODO. Its id derives
     # from the checked TODO's id, so storing it again is a no-op.
     next_todo: Todo | None
 
@@ -55,6 +51,7 @@ type CreateRejection = Literal["invalid_text"]
 type CheckRejection = Literal["deleted", "ai_cannot_uncheck"]
 type ReportRejection = Literal["deleted"]
 type DueRejection = Literal["deleted"]
+type StartRejection = Literal["deleted"]
 type DeletionRequestRejection = Literal["already_pending", "declined_before", "deleted"]
 type DeletionAnswerRejection = Literal["stale_request"]
 type UserDeletionRejection = Literal["already_deleted"]
@@ -68,11 +65,11 @@ def create_todo(
     author: TodoAuthor,
     origin: TodoOrigin,
     project_id: str | None,
-    week_of: LocalDate,
+    starts_on: LocalDate,
     due: TodoDue | None,
     now: str,
 ) -> Todo | Rejected[CreateRejection]:
-    """A new open TODO in the week containing `week_of`."""
+    """A new open TODO the AI may pick up from `starts_on`."""
 
     line = text.strip()
     if line.splitlines() != [line]:
@@ -83,7 +80,7 @@ def create_todo(
         text=line,
         author=author,
         origin=origin,
-        week_start=week_start_of(week_of),
+        starts_on=starts_on,
         due=due,
         check=None,
         ai_report=None,
@@ -112,7 +109,8 @@ def set_check(
 def _next_recurrence(
     todo: Todo, *, checked_at: str, now: str, zone: ZoneInfo
 ) -> Todo | None:
-    """The first weekly occurrence due after the local date of the check."""
+    """The first weekly occurrence due after the local date of the check; it
+    starts as many days after this one's start as it is due after this one."""
 
     if todo.due is None or todo.due.repeat != "weekly":
         return None
@@ -123,7 +121,7 @@ def _next_recurrence(
         todo,
         todo_id=str(uuid.uuid5(_NAMESPACE_TODO_RECURRENCE, todo.todo_id)),
         origin=RecurrenceOrigin(previous_todo_id=todo.todo_id),
-        week_start=shift_days(todo.week_start, shift),
+        starts_on=shift_days(todo.starts_on, shift),
         due=TodoDue(date=shift_days(todo.due.date, shift), repeat="weekly"),
         check=None,
         ai_report=None,
@@ -137,6 +135,12 @@ def set_due(todo: Todo, due: TodoDue | None) -> Todo | Rejected[DueRejection]:
     if todo.deletion is not None:
         return Rejected("deleted")
     return replace(todo, due=due)
+
+
+def set_start(todo: Todo, starts_on: LocalDate) -> Todo | Rejected[StartRejection]:
+    if todo.deletion is not None:
+        return Rejected("deleted")
+    return replace(todo, starts_on=starts_on)
 
 
 def report_progress(todo: Todo, report: AiReport) -> Todo | Rejected[ReportRejection]:
@@ -200,7 +204,7 @@ def delete_by_user(todo: Todo, *, now: str) -> Todo | Rejected[UserDeletionRejec
 
 
 def restore(todo: Todo, *, now: str) -> Todo | Rejected[RestoreRejection]:
-    """Back to its own project and week; `effective_week` decides carrying."""
+    """Back to its own project and start date."""
 
     if todo.deletion is None:
         return Rejected("not_deleted")

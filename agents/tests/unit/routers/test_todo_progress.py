@@ -70,7 +70,7 @@ def _todo_id(client: TestClient) -> str:
             "client_todo_id": "c-1",
             "project_id": "project-1",
             "text": "Close the Acme deal",
-            "week_start": "2026-11-04",
+            "starts_on": "2026-11-04",
             "due": None,
         },
     )

@@ -158,7 +158,7 @@ function todo(todoId: string, projectId: string | null, extra: Partial<TodoView>
     text: `TODO ${todoId}`,
     author: 'user',
     origin: 'written',
-    week_start: '2026-11-02',
+    starts_on: '2026-11-02',
     carried: false,
     due: null,
     state: { kind: 'working', note: null },
@@ -639,7 +639,7 @@ it('adds to the project chosen in the add row, and tells a refused write under i
   expect(createTodo).toHaveBeenCalledWith(
     expect.objectContaining({
       project_id: 'P2',
-      week_start: '2026-11-02',
+      starts_on: '2026-11-02',
       text: '請求書を送る',
       due: null,
     })

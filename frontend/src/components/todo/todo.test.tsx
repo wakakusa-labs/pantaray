@@ -25,7 +25,7 @@ const makeTodo = (overrides: Partial<TodoView> = {}): TodoView => ({
   text: '見積書を送る',
   author: 'user',
   origin: 'written',
-  week_start: '2026-11-02',
+  starts_on: '2026-11-02',
   carried: false,
   due: null,
   state: { kind: 'not_started', reason: 'starting' },

@@ -48,7 +48,7 @@ def _create(text: str) -> object:
         author="user",
         origin=WrittenOrigin(),
         project_id=None,
-        week_of="2026-11-05",
+        starts_on="2026-11-05",
         due=None,
         now=NOW,
     )
@@ -59,11 +59,11 @@ def test_create_rejects_text_that_is_not_one_line(text: str) -> None:
     assert _create(text) == Rejected("invalid_text")
 
 
-def test_create_files_the_todo_under_the_monday_of_its_week() -> None:
+def test_create_trims_the_text_and_keeps_the_start_date() -> None:
     created = _create("  Send the quote \n")
 
     assert isinstance(created, Todo)
-    assert (created.text, created.week_start) == ("Send the quote", WEEK)
+    assert (created.text, created.starts_on) == ("Send the quote", "2026-11-05")
 
 
 def _set(todo: Todo, *, by: TodoAuthor, checked: bool, now: str = NOW) -> CheckSet:
@@ -104,20 +104,27 @@ def test_deleted_todo_cannot_be_checked_or_unchecked(
 
 
 @pytest.mark.parametrize(
-    ("week_start", "checked_at", "expected"),
+    ("starts_on", "checked_at", "expected"),
     [
         (WEEK, NOW, (NEXT_WEEK, "2026-11-15")),
         (WEEK, "2026-11-08T05:00:00.000Z", (NEXT_WEEK, "2026-11-15")),
         # Sunday 11-29 in Tokyo, still 11-28 in UTC: 11-29 itself is not later.
         (WEEK, "2026-11-28T15:30:00.000Z", ("2026-11-30", "2026-12-06")),
         (PREVIOUS_WEEK, "2026-11-20T03:00:00.000Z", (NEXT_WEEK, "2026-11-22")),
+        ("2026-11-04", NOW, ("2026-11-11", "2026-11-15")),
     ],
-    ids=["before-due", "on-due-date", "three-weeks-late", "keeps-week-offset"],
+    ids=[
+        "before-due",
+        "on-due-date",
+        "three-weeks-late",
+        "keeps-start-offset",
+        "mid-week-start",
+    ],
 )
 def test_next_instance_is_the_first_occurrence_due_after_the_check(
-    week_start: str, checked_at: str, expected: tuple[str, str]
+    starts_on: str, checked_at: str, expected: tuple[str, str]
 ) -> None:
-    todo = make_todo(author="ai", week_start=week_start, due=WEEKLY_DUE)
+    todo = make_todo(author="ai", starts_on=starts_on, due=WEEKLY_DUE)
 
     next_todo = _set(todo, by="user", checked=True, now=checked_at).next_todo
 
@@ -126,7 +133,7 @@ def test_next_instance_is_the_first_occurrence_due_after_the_check(
         todo_id=next_todo.todo_id,
         author="ai",
         origin=RecurrenceOrigin(previous_todo_id="todo-1"),
-        week_start=expected[0],
+        starts_on=expected[0],
         due=TodoDue(date=expected[1], repeat="weekly"),
         created_at=checked_at,
     )

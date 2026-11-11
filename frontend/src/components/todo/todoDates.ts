@@ -10,6 +10,14 @@ const utcDay = (date: string) => new Date(`${date}T00:00:00Z`);
 export const daysFrom = (from: string, to: string) =>
   Math.round((utcDay(to).getTime() - utcDay(from).getTime()) / DAY_MS);
 
+/** The YYYY-MM-DD `days` calendar days after `date`; negative goes back. */
+export const shiftDays = (date: string, days: number) =>
+  new Date(utcDay(date).getTime() + days * DAY_MS).toISOString().slice(0, 10);
+
+/** The Monday after `date`, the day 「来週」 names. */
+export const nextMonday = (date: string) =>
+  shiftDays(date, 7 - ((utcDay(date).getUTCDay() + 6) % 7));
+
 /** "11/10": the month and day of a YYYY-MM-DD, as both languages write them. */
 export const monthDay = (date: string) => {
   const [, month, day] = date.split('-');

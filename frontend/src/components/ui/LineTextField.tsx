@@ -1,7 +1,6 @@
 import { useRef, useState } from 'react';
 
-/** The keyCode of a key the IME processed, sent for the Enter that ends a composition. */
-const IME_PROCESS_KEY_CODE = 229;
+import { isImeKey } from './imeKey';
 
 /**
  * A one-line text field. Enter submits the text and Escape cancels when the field can be canceled;
@@ -57,7 +56,7 @@ export function LineTextField({
         else if (!text.trim() && !settledRef.current) onCancel?.();
       }}
       onKeyDown={(event) => {
-        if (event.nativeEvent.isComposing || event.keyCode === IME_PROCESS_KEY_CODE) return;
+        if (isImeKey(event)) return;
         if (event.key === 'Enter') {
           event.preventDefault();
           void submit();

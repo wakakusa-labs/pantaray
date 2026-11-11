@@ -1,7 +1,8 @@
 /* The TODO list is greyscale: weight and grey levels carry its distinctions, hairlines its
    structure. The one colour is the muted ochre of a due day gone by. */
 
-.todo-add,
+.todo-add-bar,
+.todo-date-picker,
 .todo-group,
 .todo-deleted {
   --todo-faint: #687183;
@@ -18,59 +19,61 @@
   background: var(--fog-text-3);
 }
 
-/* The add row: one line above the groups. */
-.todo-add {
+/* The add bar: under the list, as the chat's composer sits under the chat. */
+.todo-add-bar {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 10px 10px 8px 14px;
+  border: 1px solid var(--todo-line-strong);
+  border-radius: 14px;
+  background: var(--fog-mist);
+}
+
+.todo-add-bar:focus-within {
+  border-color: var(--fog-text-3);
+}
+
+.todo-add-bar__field {
+  min-width: 0;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fog-text);
+  font: inherit;
+  font-size: 13.5px;
+  outline: none;
+}
+
+.todo-add-bar__choices {
   display: flex;
   align-items: center;
-  box-sizing: border-box;
-  gap: 10px;
-  height: 44px;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--todo-line-strong);
-}
-
-.todo-add:focus-within {
-  border-bottom-color: var(--fog-text-3);
-}
-
-.todo-add__plus {
-  flex: none;
-  color: var(--fog-text-3);
-}
-
-.todo-add .todo-add__field {
-  flex: 1;
+  gap: 6px;
   min-width: 0;
-  height: 32px;
-  padding: 0 4px;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  font-size: 13.5px;
 }
 
-.todo-add .todo-add__field:focus {
-  background: transparent;
-}
-
-.todo-add__choice {
+.todo-add-bar__project {
   display: inline-flex;
-  flex: none;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+  padding-left: 8px;
+  border: 1px solid var(--todo-line-strong);
+  border-radius: 6px;
 }
 
 /* A quiet text button: the native select with its frame taken off, as wide as its choice. */
-.todo-add__choice select {
+.todo-add-bar__project select {
   max-width: 180px;
   field-sizing: content;
-  height: 26px;
-  padding: 0 18px 0 6px;
+  height: 24px;
+  padding: 0 18px 0 0;
   border: 0;
-  border-radius: 6px;
   background: transparent
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath fill='%23828da1' d='M1 2.5h6L4 6z'/%3E%3C/svg%3E")
-    right 5px center / 8px no-repeat;
+    right 6px center / 8px no-repeat;
   color: var(--fog-text-2);
   font: inherit;
   font-size: var(--todo-state-size);
@@ -79,8 +82,102 @@
   appearance: none;
 }
 
-.todo-add__choice select:hover:not(:disabled) {
-  background-color: var(--fog-mist);
+/* The bar's and the picker's small framed text buttons. */
+.todo-add-bar__chip,
+.todo-date-picker button {
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--todo-line-strong);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fog-text-2);
+  font: inherit;
+  font-size: var(--todo-state-size);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.todo-add-bar__chip:hover:not(:disabled),
+.todo-add-bar__project:hover:has(select:not(:disabled)),
+.todo-date-picker button:hover {
+  background: var(--fog-mist-strong);
+  color: var(--fog-text);
+}
+
+.todo-add-bar__send {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--fog-text-2);
+  color: var(--app-background);
+  cursor: pointer;
+}
+
+.todo-add-bar__send:disabled {
+  background: var(--fog-mist-strong);
+  color: var(--fog-text-3);
+  cursor: default;
+}
+
+.todo-add-bar:disabled {
+  opacity: 0.5;
+}
+
+/* The date picker: a native popover under the button that opened it, above it when there is
+   no room below. */
+.todo-date-picker {
+  position-area: block-end span-inline-start;
+  position-try-fallbacks:
+    flip-block,
+    flip-inline,
+    flip-block flip-inline;
+  box-sizing: border-box;
+  width: 232px;
+  margin: 6px 0;
+  padding: 10px;
+  border: 1px solid var(--control-border);
+  border-radius: 10px;
+  background: var(--fog-popover);
+  box-shadow: var(--shadow-popover);
+  color: var(--fog-text);
+}
+
+.todo-date-picker:popover-open {
+  display: grid;
+  gap: 8px;
+}
+
+.todo-date-picker__quick {
+  display: flex;
+  gap: 6px;
+}
+
+.todo-date-picker__quick button[aria-pressed='true'] {
+  border-color: var(--fog-text-3);
+  color: var(--fog-text);
+}
+
+.todo-date-picker__field {
+  box-sizing: border-box;
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--todo-line-strong);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fog-text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.todo-date-picker .todo-date-picker__clear {
+  justify-self: start;
+  border-color: transparent;
 }
 
 /* A group: its heading over a hairline, no box around it. */
@@ -125,10 +222,10 @@
   list-style: none;
 }
 
-/* A row: one 40px line. The check, then the body (title, state, due), then delete. */
+/* A row: one 40px line. The check, the body (its title), its state, its due day, then delete. */
 .todo-row {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) 24px;
+  grid-template-columns: 16px minmax(0, 1fr) 96px 84px 24px;
   box-sizing: border-box;
   column-gap: 10px;
   align-items: center;
@@ -169,9 +266,7 @@
 }
 
 .todo-row__body {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 96px 84px;
-  column-gap: 14px;
+  display: flex;
   align-items: center;
   height: 100%;
   min-width: 0;
@@ -266,6 +361,33 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* A state or due day that opens the date picker: a quiet button, framed on hover. */
+.todo-row__date {
+  height: 26px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.todo-row__date:hover:not(:disabled) {
+  background: var(--fog-mist-strong);
+}
+
+/* No due day: named, but drawn only on the row's hover or focus, so the line stays calm. */
+.todo-row__due--none {
+  color: var(--fog-text-3);
+  opacity: 0;
+}
+
+.todo-row:hover .todo-row__due--none,
+.todo-row__due--none:focus-visible,
+.todo-row__due--none:has(+ .todo-date-picker:popover-open) {
+  opacity: 1;
+}
+
 .todo-row__due--late {
   color: var(--todo-late);
 }
@@ -317,8 +439,13 @@
 
 .todo-check:focus-visible,
 .todo-row__body:focus-visible,
+.todo-row__date:focus-visible,
 .todo-row__delete:focus-visible,
-.todo-add__choice select:focus-visible {
+.todo-add-bar__chip:focus-visible,
+.todo-add-bar__project select:focus-visible,
+.todo-add-bar__send:focus-visible,
+.todo-date-picker button:focus-visible,
+.todo-date-picker__field:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
 }

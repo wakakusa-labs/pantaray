@@ -1,4 +1,4 @@
-import { test, expect, type Page, type TestInfo } from '@playwright/test';
+import { test, expect, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { createServer, type ViteDevServer } from 'vite';
 import type { OverlaySnapshot } from '../../src/components/agent-overlay/model/overlayTypes';
 import type {
@@ -12,6 +12,9 @@ import type {
   TodoProgressQuery,
   TodoProjectRefRequest,
   TodoScopeQuery,
+  TodoCreateRequest,
+  TodoDueRequest,
+  TodoStartRequest,
   TodoView,
   TodoWeekPage,
   TodoWeekQuery,
@@ -240,6 +243,10 @@ async function openHome(page: Page, search = '') {
           : ids.includes(query.organization_id!);
       };
       const TODAY = '2026-11-04';
+      const notStarted = (startsOn: string): TodoView['state'] => ({
+        kind: 'not_started',
+        reason: startsOn > TODAY ? 'scheduled' : 'starting',
+      });
       // Goals the form writes stay for the page's later reads, as the backend's do.
       const goals = new Map(initialGoals.map((goal) => [goal.project_id, goal]));
       const inFilter = (projectId: string | null, query: TodoProgressQuery) =>
@@ -424,6 +431,36 @@ async function openHome(page: Page, search = '') {
                 items: shown.filter((item) => inScope(item.project_id, query)),
               };
             },
+            // Writes change the TODOs the next read returns, as the backend's do.
+            create: async (request: TodoCreateRequest) => {
+              const added: TodoView = {
+                todo_id: `t-added-${items.length}`,
+                project_id: request.project_id,
+                text: request.text,
+                author: 'user',
+                origin: 'written',
+                starts_on: request.starts_on ?? TODAY,
+                carried: false,
+                due: request.due,
+                state: { kind: 'not_started', reason: 'starting' },
+                deletion_request: null,
+                conversation: { kind: 'none' },
+              };
+              added.state = notStarted(added.starts_on);
+              items.push(added);
+              return { kind: 'ok', result: added };
+            },
+            setDue: async ({ todo_id, due }: TodoDueRequest) => {
+              const item = items.find((candidate) => candidate.todo_id === todo_id)!;
+              item.due = due;
+              return { kind: 'ok', result: item };
+            },
+            setStart: async ({ todo_id, starts_on }: TodoStartRequest) => {
+              const item = items.find((candidate) => candidate.todo_id === todo_id)!;
+              item.starts_on = starts_on;
+              item.state = notStarted(starts_on);
+              return { kind: 'ok', result: item };
+            },
             listDeleted: async (query: TodoScopeQuery) =>
               deleted.filter((item) => inScope(item.project_id, query)),
             progress: async (query: TodoProgressQuery) => progressPage(query),
@@ -489,6 +526,8 @@ async function capture(page: Page, info: TestInfo, name: string) {
 const sidebarOf = (page: Page) => page.getByRole('complementary', { name: 'TODO', exact: true });
 const railOf = (page: Page) => page.getByRole('group', { name: '組織' });
 const groups = (page: Page) => page.locator('section.todo-group');
+const rowOf = (scope: Page | Locator, text: string) =>
+  scope.getByRole('listitem').filter({ hasText: text });
 const hasNoSideScroll = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
 
@@ -524,16 +563,19 @@ test('the home lists every organization’s week by project, with the rail and t
     estimate.getByRole('checkbox', { name: '完了: 名刺 40 枚を入れておく' })
   ).toBeChecked();
   // Each row says where it stands in a word, and its due day.
-  await expect(estimate.getByRole('button', { name: /^見積書を再提出する/ })).toHaveText(
-    '見積書を再提出する途中まで金 11/6'
+  const resubmit = rowOf(estimate, '見積書を再提出する');
+  await expect(resubmit.locator('.todo-row__state')).toHaveText('途中まで');
+  await expect(
+    resubmit.getByRole('button', { name: '期限 金 11/6: 見積書を再提出する' })
+  ).toHaveText('金 11/6');
+  await expect(rowOf(page, '古いブランチを消す').locator('.todo-row__state')).toHaveText(
+    '消してよい？'
   );
-  await expect(page.getByRole('button', { name: /^古いブランチを消す/ })).toHaveText(
-    '古いブランチを消す消してよい？'
-  );
-  // One add row above the groups, into the first project in view until another is chosen.
-  await expect(page.getByRole('textbox', { name: 'TODO を書く' })).toHaveCount(1);
+  // One add bar under the list, into the first project in view until another is chosen.
+  await expect(page.getByRole('textbox', { name: 'TODO を追加' })).toHaveCount(1);
   await expect(page.getByRole('combobox', { name: 'プロジェクト' })).toHaveValue('estimate');
-  await expect(page.getByRole('combobox', { name: '期限' })).toHaveValue('');
+  await expect(page.getByRole('button', { name: '期限なし', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '開始 今日' })).toBeVisible();
   // Every row is one line.
   const heights = await page
     .locator('.todo-row')
@@ -629,7 +671,7 @@ test('the rail scopes the week to one organization, a project filters it, and �
   // An ended week shows what was done in it, takes no new TODOs, and offers 今週へ.
   await page.getByRole('button', { name: '前の週' }).click();
   await expect(page.getByRole('heading', { level: 1, name: '10月26日 – 11月1日' })).toBeVisible();
-  await expect(page.getByRole('textbox', { name: /TODO を書く/ })).toHaveCount(0);
+  await expect(page.getByRole('textbox', { name: 'TODO を追加' })).toHaveCount(0);
   const thisWeek = page.getByRole('button', { name: '今週へ' });
   await capture(page, info, 'week-past');
   await thisWeek.focus();
@@ -637,6 +679,72 @@ test('the rail scopes the week to one organization, a project filters it, and �
   await expect(thisWeek).toHaveCount(0);
   await expect(page.getByRole('heading', { level: 1, name: '今週' })).toBeFocused();
   await expect(page.locator('.todo-screen__header')).toContainText('11月2日 – 8日');
+});
+
+test('a project’s TODO opens beside its list, with the add bar under it offering no project', async ({
+  page,
+}, info) => {
+  await openHome(page, '?project=project:hiring&todo=t-questions');
+  const pane = page.getByRole('region', { name: '来週の面接の質問リストを作る' });
+  await expect(pane.getByRole('button', { name: '承認' })).toBeEnabled();
+  await expect(page.getByRole('textbox', { name: 'TODO を追加' })).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'プロジェクト' })).toHaveCount(0);
+  expect(await hasNoSideScroll(page)).toBe(true);
+  await capture(page, info, 'project-conversation');
+});
+
+test('a row’s due day and start change from a small picker, and the bar under the list adds', async ({
+  page,
+}, info) => {
+  await openHome(page);
+  const estimate = page.getByRole('region', { name: '見積もり Xer' });
+  const due = estimate.getByRole('button', { name: '期限 金 11/6: 見積書を再提出する' });
+  await due.click();
+  const picker = page.getByRole('dialog', { name: '期限' });
+  await expect(picker.getByRole('button', { name: '今日' })).toBeFocused();
+  const [trigger, panel] = await Promise.all([due.boundingBox(), picker.boundingBox()]);
+  expect(panel!.y).toBeGreaterThan(trigger!.y + trigger!.height);
+  expect(panel!.x + panel!.width).toBeLessThanOrEqual(trigger!.x + trigger!.width + 1);
+  await capture(page, info, 'due-picker');
+  await page.keyboard.press('Escape');
+  await expect(picker).toBeHidden();
+  await expect(due).toBeFocused();
+
+  // 明日 is Thursday 11/5; focus returns to the row's due day, and 期限をなくす takes it away.
+  await due.click();
+  await picker.getByRole('button', { name: '明日' }).click();
+  const moved = estimate.getByRole('button', { name: '期限 木 11/5: 見積書を再提出する' });
+  await expect(moved).toBeFocused();
+  await moved.click();
+  await picker.getByRole('button', { name: '期限をなくす' }).click();
+  await expect(
+    estimate.getByRole('button', { name: '期限なし: 見積書を再提出する' })
+  ).toBeFocused();
+
+  // The bar adds to the project, due and start chosen; a start ahead shows on the row.
+  await page.getByRole('combobox', { name: 'プロジェクト' }).selectOption({ label: '採用' });
+  await page.getByRole('button', { name: '開始 今日' }).click();
+  await page.getByRole('dialog', { name: '開始日' }).getByLabel('日付').fill('2026-11-18');
+  await page.getByRole('button', { name: '期限なし', exact: true }).click();
+  await page.getByRole('dialog', { name: '期限' }).getByRole('button', { name: '来週' }).click();
+  const field = page.getByRole('textbox', { name: 'TODO を追加' });
+  await field.fill('面接官の日程を押さえる');
+  await expect(page.getByRole('button', { name: '開始 水 11/18' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '期限 月 11/9' })).toBeVisible();
+  await capture(page, info, 'add-bar');
+  await field.press('Enter');
+  await expect(field).toHaveValue('');
+  const added = rowOf(page.getByRole('region', { name: '採用 Xer' }), '面接官の日程を押さえる');
+  await expect(
+    added.getByRole('button', { name: '期限 月 11/9: 面接官の日程を押さえる' })
+  ).toBeVisible();
+
+  // The start of a TODO not started yet changes from its row.
+  await added.getByRole('button', { name: '開始日 水 11/18から: 面接官の日程を押さえる' }).click();
+  await page.getByRole('dialog', { name: '開始日' }).getByRole('button', { name: '今日' }).click();
+  await expect(
+    added.getByRole('button', { name: '開始日 まもなく: 面接官の日程を押さえる' })
+  ).toBeFocused();
 });
 
 test('the deleted TODOs list what can still be restored', async ({ page }, info) => {

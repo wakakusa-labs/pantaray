@@ -23,6 +23,7 @@ import { createHtmlPreviewPdfs } from '../render/htmlPreview';
 import { createActionFetcher } from '../actions/actionFetch';
 import { createChatFetcher } from '../chat/chatFetch';
 import { createTodoFetcher } from '../todos/todoFetch';
+import { createTodoImportFetcher } from '../todos/todoImportFetch';
 import { createActionLatestPageReader } from '../actions/actionLatestPageReader';
 import { createActionApprovalDecisionFetcher } from '../actions/actionApprovalDecisionFetch';
 import { createActionApprovalModeFetcher } from '../actions/actionApprovalModeFetch';
@@ -433,6 +434,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
           getTurnState: orchestration.getChatTurnState,
         },
         todos: createTodoFetcher({ requestJson, getUserId }),
+        todoImports: createTodoImportFetcher({ requestJson, getUserId }),
         integrations: createIntegrationSettingsFetcher({ requestJson, getUserId }),
         actionImages: {
           localArtifactRoot: params.localArtifactRoot,

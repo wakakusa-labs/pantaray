@@ -150,6 +150,12 @@ export const validInvokeChannels = [
   'todos:clearGoal',
   'todos:addProgressRecord',
   'todos:deleteProgressRecord',
+  // A TODO import's draft (main window only)
+  'todoImports:start',
+  'todoImports:read',
+  'todoImports:write',
+  'todoImports:register',
+  'todoImports:cancel',
   // Main window: read a suggestion into main's record without opening a panel
   'suggestion:read',
   // Suggestion history (main SSOT)

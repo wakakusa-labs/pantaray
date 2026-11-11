@@ -63,6 +63,7 @@ export function buildMainContext(params: {
   actions: MainContext['actions'];
   chat: MainContext['chat'];
   todos: MainContext['todos'];
+  todoImports: MainContext['todoImports'];
   integrations: MainContext['integrations'];
   actionImages: MainContext['actionImages'];
 
@@ -291,6 +292,7 @@ export function buildMainContext(params: {
     actions: params.actions,
     chat: params.chat,
     todos: params.todos,
+    todoImports: params.todoImports,
     integrations: params.integrations,
 
     actionImages: params.actionImages,

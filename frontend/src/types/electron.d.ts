@@ -80,6 +80,13 @@ import type {
   TodoView,
   TodoWriteResult,
 } from '../../electron/src/todos/todoContracts';
+import type {
+  TodoImportRefRequest,
+  TodoImportRegisterRequest,
+  TodoImportResult,
+  TodoImportStartRequest,
+  TodoImportWriteRequest,
+} from '../../electron/src/todos/todoImportContracts';
 import type { ActionImageAttachResult } from '../../electron/src/ipc/schemas/actionImages';
 import type { ActionAttachFileResult } from '../../electron/src/ipc/schemas/actionAttachments';
 import type { OverlayOpenTaskRequest } from '../../electron/src/ipc/schemas/overlay';
@@ -302,6 +309,18 @@ declare global {
         deleteProgressRecord: (request: ProgressRecordRefRequest) => Promise<void>;
         /** The TODOs or their progress changed: read them again. */
         onChanged: (callback: (change: TodoChanged) => void) => () => void;
+      };
+      /** A TODO import's draft; main accepts these from the main window only. */
+      todoImports?: {
+        /** Opens the import and starts the Action that drafts it; resending `import_id` returns it. */
+        start: (request: TodoImportStartRequest) => Promise<TodoImportResult>;
+        read: (request: TodoImportRefRequest) => Promise<TodoImportResult>;
+        /** Replaces the whole draft; refused as `stale_revision` once it changed since. */
+        write: (request: TodoImportWriteRequest) => Promise<TodoImportResult>;
+        /** Creates what the draft names; registering again returns the same import. */
+        register: (request: TodoImportRegisterRequest) => Promise<TodoImportResult>;
+        /** Closes it without registering; canceling again returns it. */
+        cancel: (request: TodoImportRefRequest) => Promise<TodoImportResult>;
       };
       /** Suggestions read into main's record; main accepts these from the main window only. */
       suggestions?: {

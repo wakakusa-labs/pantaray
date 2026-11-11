@@ -6,7 +6,6 @@ so the screen reads the draft again.
 from __future__ import annotations
 
 import sqlite3
-import uuid
 from typing import cast
 
 from pantaray_agents.local_runtime.runtime.identity import verify_current_owner
@@ -41,14 +40,17 @@ from pantaray_agents.local_runtime.tooling.repository.workspace_settings import 
 
 
 def open_todo_import(
-    *, user_id: str, scope: TodoScope, clock: TodoClock
+    *, user_id: str, import_id: str, scope: TodoScope, clock: TodoClock
 ) -> TodoImportView | DraftIssue:
-    """A new import with an empty draft, at revision 1."""
+    """A new import with an empty draft, at revision 1; opening it again
+    answers the import as it is now."""
 
     verify_current_owner(user_id)
-    import_id = str(uuid.uuid4())
     with todo_db_connection() as connection, immediate_transaction(connection):
         workspace = load_workspace(connection, user_id=user_id)
+        row = import_row(connection, user_id=user_id, import_id=import_id)
+        if row is not None:
+            return import_view(row, workspace)
         _, issue = resolve_draft(TodoImportDraft(), scope=scope, workspace=workspace)
         if issue is not None:
             return issue

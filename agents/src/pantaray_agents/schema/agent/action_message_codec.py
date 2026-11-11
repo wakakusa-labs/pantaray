@@ -12,6 +12,7 @@ from .action_message import (
     FileAttachmentInput,
     SuggestionApprovalInput,
     TodoHandoffInput,
+    TodoImportHandoffInput,
 )
 
 _ACTION_USER_MESSAGE_ADAPTER = TypeAdapter(ActionUserMessageInput)
@@ -114,6 +115,8 @@ def render_action_user_request_text(message: ActionUserMessageInput) -> str:
         )
     if message.todo_handoff is not None:
         sections.append(_render_todo_handoff(message.todo_handoff))
+    if message.todo_import_handoff is not None:
+        sections.append(_render_todo_import_handoff(message.todo_import_handoff))
     project_refs = (*message.project_refs, *message.supplement_project_refs)
     if project_refs:
         sections.append(render_project_refs(project_refs))
@@ -145,6 +148,22 @@ def _render_todo_handoff(handoff: TodoHandoffInput) -> str:
             _render_project_line(handoff.project.display_name, handoff.project.paths),
         ]
     return "\n".join(lines)
+
+
+def _render_todo_import_handoff(handoff: TodoImportHandoffInput) -> str:
+    match handoff.scope:
+        case "all":
+            scope = "any organization, and new organizations may be drafted"
+        case "organization":
+            scope = f"only inside the organization {handoff.organization_name}"
+        case "no_organization":
+            scope = "only projects in no organization"
+    return "\n".join(
+        [
+            f"TODO import this task drafts: {handoff.import_id}",
+            f"Its scope: {scope}. Write the draft with `write_todo_draft`.",
+        ]
+    )
 
 
 def render_project_refs(refs: tuple[ActionProjectRef, ...]) -> str:

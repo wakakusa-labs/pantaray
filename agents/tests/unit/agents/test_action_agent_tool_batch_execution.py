@@ -34,7 +34,7 @@ from pantaray_agents.agents.action_agent.runtime.state import (
 )
 from pantaray_agents.agents.action_agent.tools import (
     STEP_NOTE_ARG,
-    select_supervisor_act_tool_registry,
+    TOOL_REGISTRY,
 )
 from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import ActionTurnReply
 from pantaray_agents.local_runtime.tooling.tool_result_finalization import (
@@ -345,9 +345,7 @@ async def test_batch_consumes_one_tool_step_per_call(
 def test_call_timeout_comes_from_the_declared_tool_policy() -> None:
     """per-call timeout は既存の ``default_timeout_ms`` をそのまま使う。"""
 
-    tool_def = select_supervisor_act_tool_registry(integrations=False, todo=False)[
-        SQL_TOOL
-    ]
+    tool_def = TOOL_REGISTRY[SQL_TOOL]
     slot = MagicMock()
     slot.tool_def = tool_def
     assert act.call_timeout_seconds(slot) == (

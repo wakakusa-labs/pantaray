@@ -288,6 +288,7 @@ async def execution_think_step(  # noqa: C901
         select_supervisor_act_tool_ids(
             integrations=context.get("integration_tools_exposed", False),
             todo=context.get("served_todo_id") is not None,
+            todo_import=context.get("served_todo_import_id") is not None,
         )
     )
     native_tools = build_native_action_tools(

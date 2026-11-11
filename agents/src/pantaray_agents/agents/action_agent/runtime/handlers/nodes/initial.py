@@ -45,6 +45,7 @@ from pantaray_agents.local_runtime.runtime.bootstrap import (
 )
 from pantaray_agents.local_runtime.todos.action_link import (
     read_todo_for_action,
+    read_todo_import_for_action,
 )
 from pantaray_agents.local_runtime.tooling.repository.manifests import (
     pin_action_memory_roots,
@@ -134,6 +135,10 @@ async def initialize_context(
         context["integration_tools_exposed"] = await integration_tools_available()
     if "served_todo_id" not in context:
         context["served_todo_id"] = read_todo_for_action(
+            user_id=str(request.user_id), action_id=request.action_id
+        )
+    if "served_todo_import_id" not in context:
+        context["served_todo_import_id"] = read_todo_import_for_action(
             user_id=str(request.user_id), action_id=request.action_id
         )
 

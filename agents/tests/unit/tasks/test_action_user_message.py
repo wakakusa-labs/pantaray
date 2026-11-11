@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from typing import Literal
 
 import pytest
 from pydantic import ValidationError
@@ -20,6 +21,7 @@ from pantaray_agents.schema.agent.action_message import (
     FileAttachmentInput,
     TodoHandoffInput,
     TodoHandoffProject,
+    TodoImportHandoffInput,
 )
 from pantaray_agents.schema.agent.action_message_codec import (
     parse_action_user_message as parse_action_user_message_codec,
@@ -237,6 +239,66 @@ def test_todo_handoff_rejects_an_invalid_shape(todo_handoff: dict[str, object]) 
         "message_id": "message-1",
         "content": "Do it",
         "todo_handoff": todo_handoff,
+    }
+
+    with pytest.raises(ValueError):
+        parse_action_user_message_codec(json.dumps(message))
+
+
+@pytest.mark.parametrize(
+    ("scope", "organization_name", "scope_line"),
+    [
+        ("all", None, "any organization, and new organizations may be drafted"),
+        ("organization", "Acme", "only inside the organization Acme"),
+        ("no_organization", None, "only projects in no organization"),
+    ],
+)
+def test_todo_import_handoff_names_the_import_and_its_scope_and_round_trips(
+    scope: Literal["all", "organization", "no_organization"],
+    organization_name: str | None,
+    scope_line: str,
+) -> None:
+    message = ActionUserMessageInput(
+        message_id="message-1",
+        content="Call the bank\nRenew the passport",
+        todo_import_handoff=TodoImportHandoffInput(
+            import_id="import-1", scope=scope, organization_name=organization_name
+        ),
+    )
+
+    request_text = render_action_user_request_text(message)
+
+    assert request_text == (
+        "Call the bank\nRenew the passport\n\n"
+        "TODO import this task drafts: import-1\n"
+        f"Its scope: {scope_line}. Write the draft with `write_todo_draft`."
+    )
+    assert (
+        parse_stored_action_user_message(
+            message_id="message-1",
+            message_json=serialize_action_user_message(message),
+            user_request_text=request_text,
+        )
+        == message
+    )
+
+
+@pytest.mark.parametrize(
+    "handoff",
+    [
+        {"import_id": "import-1", "scope": "organization", "organization_name": None},
+        {"import_id": "import-1", "scope": "all", "organization_name": "Acme"},
+        {"import_id": " ", "scope": "all", "organization_name": None},
+    ],
+)
+def test_todo_import_handoff_rejects_an_invalid_shape(
+    handoff: dict[str, object],
+) -> None:
+    message = {
+        "version": 1,
+        "message_id": "message-1",
+        "content": "Do it",
+        "todo_import_handoff": handoff,
     }
 
     with pytest.raises(ValueError):

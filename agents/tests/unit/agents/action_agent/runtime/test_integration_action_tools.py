@@ -347,10 +347,12 @@ async def test_tools_are_offered_only_with_a_connected_account() -> None:
     set_integration_gateway(None)
 
     # AC-C6: without integrations the Action's tool set is exactly today's.
-    assert select_supervisor_act_tool_ids(integrations=False, todo=False) == (
-        SUPERVISOR_SINGLE_REACT_TOOL_IDS
-    )
-    assert set(select_supervisor_act_tool_ids(integrations=True, todo=False)) == {
+    assert select_supervisor_act_tool_ids(
+        integrations=False, todo=False, todo_import=False
+    ) == (SUPERVISOR_SINGLE_REACT_TOOL_IDS)
+    assert set(
+        select_supervisor_act_tool_ids(integrations=True, todo=False, todo_import=False)
+    ) == {
         *SUPERVISOR_SINGLE_REACT_TOOL_IDS,
         *INTEGRATION_TOOL_IDS,
     }

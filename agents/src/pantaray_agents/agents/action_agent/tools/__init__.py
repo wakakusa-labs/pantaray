@@ -65,6 +65,7 @@ from .submit_final_answer_tool import (
     SUBMIT_FINAL_ANSWER_TOOL_ID,
 )
 from .thinking_tool import THINKING_TOOL
+from .todo_import_tool import WRITE_TODO_DRAFT_TOOL, WRITE_TODO_DRAFT_TOOL_ID
 from .todo_tools import (
     RECORD_PROGRESS_TOOL,
     RECORD_PROGRESS_TOOL_ID,
@@ -141,6 +142,8 @@ __all__ = [
     "TODO_TOOL_IDS",
     "UPDATE_TODO_TOOL",
     "UPDATE_TODO_TOOL_ID",
+    "WRITE_TODO_DRAFT_TOOL",
+    "WRITE_TODO_DRAFT_TOOL_ID",
     "SUPERVISOR_SINGLE_REACT_TOOL_IDS",
     "SUPERVISOR_SINGLE_REACT_ACT_TOOL_IDS",
     "TOOL_REGISTRY",
@@ -152,7 +155,6 @@ __all__ = [
     "STEP_NOTE_DESCRIPTION",
     "STEP_NOTE_MAX_LENGTH",
     "select_supervisor_act_tool_ids",
-    "select_supervisor_act_tool_registry",
 ]
 
 TOOL_REGISTRY: dict[str, ToolDefinition] = {
@@ -194,6 +196,7 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
         UPDATE_TODO_TOOL,
         REQUEST_TODO_DELETION_TOOL,
         RECORD_PROGRESS_TOOL,
+        WRITE_TODO_DRAFT_TOOL,
     )
 }
 
@@ -250,22 +253,16 @@ def select_tool_registry(tool_ids: tuple[str, ...]) -> dict[str, ToolDefinition]
 
 
 def select_supervisor_act_tool_ids(
-    *, integrations: bool, todo: bool
+    *, integrations: bool, todo: bool, todo_import: bool
 ) -> tuple[str, ...]:
     """``todo``: the Action is a TODO's conversation, so its TODO tools are offered
-    while the TODO list is on."""
+    while the TODO list is on. ``todo_import``: the Action drafts a TODO import,
+    so its draft tool is offered."""
 
     todo_tools = todo and todo_ux_feature.TODO_UX_ENABLED
     return (
         *SUPERVISOR_SINGLE_REACT_ACT_TOOL_IDS,
         *(INTEGRATION_TOOL_IDS if integrations else ()),
         *(TODO_TOOL_IDS if todo_tools else ()),
-    )
-
-
-def select_supervisor_act_tool_registry(
-    *, integrations: bool, todo: bool
-) -> dict[str, ToolDefinition]:
-    return select_tool_registry(
-        select_supervisor_act_tool_ids(integrations=integrations, todo=todo)
+        *((WRITE_TODO_DRAFT_TOOL_ID,) if todo_import else ()),
     )

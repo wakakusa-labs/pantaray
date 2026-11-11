@@ -20,9 +20,6 @@ from pantaray_agents.local_runtime.todos.clock import read_todo_clock
 from pantaray_agents.local_runtime.todos.imports.model import (
     DraftIssue,
     ImportClosed,
-    NewOrganization,
-    NewProject,
-    ResolvedGroup,
     StaleRevision,
     TodoImportDraft,
     TodoImportView,
@@ -31,6 +28,7 @@ from pantaray_agents.local_runtime.todos.imports.store import (
     write_todo_import_draft,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.schema.todo_imports import draft_group_views
 
 from .shared import UnprojectedToolExecutionResult
 
@@ -102,34 +100,11 @@ def _write(
 
 
 def _view(view: TodoImportView) -> dict[str, JSONValue]:
+    # The same view of the draft the user's screen reads.
     return {
         "revision": view.revision,
-        "groups": [_group(group) for group in view.groups],
-    }
-
-
-def _group(group: ResolvedGroup) -> JSONValue:
-    return {
-        "organization": None
-        if group.organization is None
-        else {
-            "name": group.organization.name,
-            "new": isinstance(group.organization, NewOrganization),
-        },
-        "project": None
-        if group.project is None
-        else {"name": group.project.name, "new": isinstance(group.project, NewProject)},
-        "todos": [
-            {
-                "text": line.todo.text,
-                "due": None if line.todo.due is None else line.todo.due.isoformat(),
-                "starts_on": None
-                if line.todo.starts_on is None
-                else line.todo.starts_on.isoformat(),
-                "duplicate": line.duplicate,
-                "keep_duplicate": line.todo.keep_duplicate,
-            }
-            for line in group.todos
+        "groups": [
+            group.model_dump(mode="json") for group in draft_group_views(view.groups)
         ],
     }
 

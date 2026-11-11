@@ -24,7 +24,11 @@ from pantaray_agents.local_runtime.runtime.runtime_env import (
     read_local_runtime_db_config,
 )
 from pantaray_agents.local_runtime.todos.clock import TodoClock
-from pantaray_agents.local_runtime.todos.db import OrganizationScope, TodoScope
+from pantaray_agents.local_runtime.todos.db import (
+    OrganizationScope,
+    TodoScope,
+    todo_db_connection,
+)
 from pantaray_agents.local_runtime.todos.imports.model import (
     DraftIssue,
     TodoImportView,
@@ -104,6 +108,18 @@ def start_todo_import(
     return TodoImportStarted(view=opened, action_id=submitted.action_id)
 
 
+def read_todo_import_action_id(*, user_id: str, import_id: str) -> str | None:
+    """The Action that drafts ``import_id``; None until its start went through."""
+
+    with todo_db_connection() as connection:
+        row = connection.execute(
+            "SELECT action_id FROM agent_actions "
+            "WHERE user_id = ? AND initial_user_message_id = ?",
+            (user_id, todo_import_message_id(import_id)),
+        ).fetchone()
+    return None if row is None else str(row[0])
+
+
 def _organization_name(user_id: str, organization_id: str) -> str | None:
     db_path, busy_timeout_ms = read_local_runtime_db_config()
     settings = list_workspace_settings(
@@ -119,4 +135,9 @@ def _organization_name(user_id: str, organization_id: str) -> str | None:
     )
 
 
-__all__ = ["TodoImportStarted", "start_todo_import", "todo_import_message_id"]
+__all__ = [
+    "TodoImportStarted",
+    "read_todo_import_action_id",
+    "start_todo_import",
+    "todo_import_message_id",
+]

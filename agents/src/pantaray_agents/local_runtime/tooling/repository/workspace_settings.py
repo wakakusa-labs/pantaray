@@ -37,30 +37,44 @@ def create_workspace_organization(
     icon_data_url: str | None,
     now: str,
 ) -> WorkspaceOrganization:
-    normalized_name = _normalize_display_name(display_name)
-    organization_id = str(uuid.uuid4())
     with sqlite3.connect(db_path) as connection:
         _configure_connection(connection=connection, busy_timeout_ms=busy_timeout_ms)
         with connection:
             ensure_user_row(connection, user_id=user_id)
-            # A taken name answers with that organization as it is, its icon included.
-            connection.execute(
-                """
-                INSERT INTO workspace_organizations(
-                    organization_id, user_id, display_name, icon_data_url, status,
-                    created_at, updated_at
-                ) VALUES (?, ?, ?, ?, 'active', ?, ?)
-                ON CONFLICT(user_id, display_name) DO UPDATE SET
-                    status = 'active',
-                    updated_at = excluded.updated_at
-                """,
-                (organization_id, user_id, normalized_name, icon_data_url, now, now),
-            )
-            row = _fetch_organization_by_name(
-                connection=connection,
+            return insert_workspace_organization(
+                connection,
                 user_id=user_id,
-                display_name=normalized_name,
+                display_name=display_name,
+                icon_data_url=icon_data_url,
+                now=now,
             )
+
+
+def insert_workspace_organization(
+    connection: sqlite3.Connection,
+    *,
+    user_id: str,
+    display_name: str,
+    icon_data_url: str | None,
+    now: str,
+) -> WorkspaceOrganization:
+    """`create_workspace_organization` in the caller's transaction."""
+
+    normalized_name = _normalize_display_name(display_name)
+    # A taken name answers with that organization as it is, its icon included.
+    row = connection.execute(
+        """
+        INSERT INTO workspace_organizations(
+            organization_id, user_id, display_name, icon_data_url, status,
+            created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 'active', ?, ?)
+        ON CONFLICT(user_id, display_name) DO UPDATE SET
+            status = 'active',
+            updated_at = excluded.updated_at
+        RETURNING organization_id, display_name
+        """,
+        (str(uuid.uuid4()), user_id, normalized_name, icon_data_url, now, now),
+    ).fetchone()
     return WorkspaceOrganization(
         organization_id=str(row["organization_id"]),
         display_name=str(row["display_name"]),
@@ -76,44 +90,63 @@ def create_workspace_project(
     organization_ids: tuple[str, ...],
     now: str,
 ) -> WorkspaceProject:
-    normalized_name = _normalize_display_name(display_name)
-    project_id = str(uuid.uuid4())
     with sqlite3.connect(db_path) as connection:
         _configure_connection(connection=connection, busy_timeout_ms=busy_timeout_ms)
         with connection:
             ensure_user_row(connection, user_id=user_id)
-            # A taken name is refused rather than answered with that project: a caller that
-            # rolls back what it created must never be handed a project it did not create.
-            try:
-                row = connection.execute(
-                    """
-                    INSERT INTO workspace_projects(
-                        project_id, user_id, display_name, sort_order, status,
-                        created_at, updated_at
-                    ) VALUES (
-                        ?, ?, ?,
-                        COALESCE((
-                            SELECT MAX(existing.sort_order) + 1
-                            FROM workspace_projects AS existing
-                            WHERE existing.user_id = ?
-                        ), 0),
-                        'active', ?, ?
-                    )
-                    RETURNING display_name, sort_order
-                    """,
-                    (project_id, user_id, normalized_name, user_id, now, now),
-                ).fetchone()
-            except sqlite3.IntegrityError as exc:
-                raise WorkspaceProjectNameTakenError(
-                    f"workspace project name is taken: {normalized_name}"
-                ) from exc
-            _replace_project_organization_links(
-                connection=connection,
+            return insert_workspace_project(
+                connection,
                 user_id=user_id,
-                project_id=project_id,
+                display_name=display_name,
                 organization_ids=organization_ids,
                 now=now,
             )
+
+
+def insert_workspace_project(
+    connection: sqlite3.Connection,
+    *,
+    user_id: str,
+    display_name: str,
+    organization_ids: tuple[str, ...],
+    now: str,
+) -> WorkspaceProject:
+    """`create_workspace_project` in the caller's transaction."""
+
+    normalized_name = _normalize_display_name(display_name)
+    project_id = str(uuid.uuid4())
+    # A taken name is refused rather than answered with that project: a caller that
+    # rolls back what it created must never be handed a project it did not create.
+    try:
+        row = connection.execute(
+            """
+            INSERT INTO workspace_projects(
+                project_id, user_id, display_name, sort_order, status,
+                created_at, updated_at
+            ) VALUES (
+                ?, ?, ?,
+                COALESCE((
+                    SELECT MAX(existing.sort_order) + 1
+                    FROM workspace_projects AS existing
+                    WHERE existing.user_id = ?
+                ), 0),
+                'active', ?, ?
+            )
+            RETURNING display_name, sort_order
+            """,
+            (project_id, user_id, normalized_name, user_id, now, now),
+        ).fetchone()
+    except sqlite3.IntegrityError as exc:
+        raise WorkspaceProjectNameTakenError(
+            f"workspace project name is taken: {normalized_name}"
+        ) from exc
+    _replace_project_organization_links(
+        connection=connection,
+        user_id=user_id,
+        project_id=project_id,
+        organization_ids=organization_ids,
+        now=now,
+    )
     return WorkspaceProject(
         project_id=project_id,
         display_name=str(row["display_name"]),
@@ -427,25 +460,6 @@ def _folder_organization_ids(
     if project_ids:
         return ()
     return _unique_sorted(organization_ids)
-
-
-def _fetch_organization_by_name(
-    *,
-    connection: sqlite3.Connection,
-    user_id: str,
-    display_name: str,
-) -> sqlite3.Row:
-    row = connection.execute(
-        """
-        SELECT organization_id, display_name
-        FROM workspace_organizations
-        WHERE user_id = ? AND display_name = ?
-        """,
-        (user_id, display_name),
-    ).fetchone()
-    if row is None:
-        raise MigrationError("workspace organization upsert did not return a row")
-    return cast(sqlite3.Row, row)
 
 
 def _fetch_project_by_id(

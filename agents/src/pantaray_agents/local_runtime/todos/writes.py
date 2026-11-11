@@ -101,15 +101,25 @@ def create_todo_item(
         ):
             return Rejected("project_not_found")
         ensure_user_row(connection, user_id=user_id, timestamp=clock.now)
-        connection.execute(
-            _INSERT_SQL,
-            {
-                **todo_params(created),
-                "user_id": user_id,
-                "client_todo_id": client_todo_id,
-            },
+        insert_todo(
+            connection, user_id=user_id, todo=created, client_todo_id=client_todo_id
         )
     return created
+
+
+def insert_todo(
+    connection: sqlite3.Connection,
+    *,
+    user_id: str,
+    todo: Todo,
+    client_todo_id: str | None,
+) -> None:
+    """Store a new TODO in the caller's transaction, whose project is the user's."""
+
+    connection.execute(
+        _INSERT_SQL,
+        {**todo_params(todo), "user_id": user_id, "client_todo_id": client_todo_id},
+    )
 
 
 def suggestion_todo_id(suggestion_id: str) -> TodoId:
@@ -170,13 +180,11 @@ def insert_suggestion_todo(
         if project_name is None
         else project_id_named(connection, user_id=user_id, display_name=project_name)
     )
-    connection.execute(
-        _INSERT_SQL,
-        {
-            **todo_params(replace(todo, project_id=project_id)),
-            "user_id": user_id,
-            "client_todo_id": None,
-        },
+    insert_todo(
+        connection,
+        user_id=user_id,
+        todo=replace(todo, project_id=project_id),
+        client_todo_id=None,
     )
 
 

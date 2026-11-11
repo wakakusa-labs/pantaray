@@ -449,6 +449,7 @@ class SuggestionAgent(BaseAgent[SuggestionAgentResponse]):
             send_turn=self._send_research_turn,
             generate_tool_call=generate_tool_call,
             record_step=self._record_react_step,
+            project_names=self.stable_memory.project_names,
         )
         extracted = decision.extraction
         decided = extracted["decided"]

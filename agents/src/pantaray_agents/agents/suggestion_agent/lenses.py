@@ -160,6 +160,7 @@ async def decide_with_lenses(
     send_turn: SuggestionTurnSender,
     generate_tool_call: SuggestionToolCallGenerator,
     record_step: SuggestionStepRecorder,
+    project_names: tuple[str, ...],
 ) -> LensDecision:
     """Run one decision run per lens in parallel and select among their candidates.
 
@@ -185,6 +186,7 @@ async def decide_with_lenses(
             parse_output=parse_suggestion_output,
             record_step=record,
             past=past,
+            project_names=project_names,
         )
 
     tasks = [

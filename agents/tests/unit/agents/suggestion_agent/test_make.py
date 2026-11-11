@@ -144,6 +144,7 @@ async def _decide(model: _Model, folder: Path, steps: list[ReactLoopStep]):
         send_turn=model.send,
         generate_tool_call=_select_first,
         record_step=record,
+        project_names=(),
     )
 
 

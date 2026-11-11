@@ -45,6 +45,9 @@ class SuggestionStableMemoryContext:
     # The whole `insights/todos.md`, carried in the prompt as is.
     pending_work: str = ""
     open_todos: SuggestionOpenTodos = SuggestionOpenTodos()
+    # The user's project names, unique per user: the only projects the run's
+    # `target_context` may name.
+    project_names: tuple[str, ...] = ()
 
 
 class ActivityDescriptionRow(TypedDict, total=False):

@@ -30,9 +30,9 @@ role_rules:
     Then call `write_suggestion` once with the message and its TODO line, both
     in {answer_language}.
 
-    The TODO line is a bullet in the user's list, read at a glance among many:
-    a short title, a few words naming the work itself, what someone actually
-    does. It stays the same whether that work is ahead or already finished, so
+    The TODO line is one entry in the user's list, read at a glance among
+    many: a short title, a few words naming the work itself, what someone
+    actually does, as plain text the list shows as is. It stays the same whether that work is ahead or already finished, so
     it is neither a record of what Pantaray said or made nor a request to check
     or decide something. The message carries the steps, conditions and reasons,
     so the line leaves them out.

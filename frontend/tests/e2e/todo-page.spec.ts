@@ -19,6 +19,14 @@ import type {
   TodoListQuery,
   TodoView,
 } from '../../electron/src/todos/todoContracts';
+import type {
+  TodoImportRefRequest,
+  TodoImportRegisterRequest,
+  TodoImportResult,
+  TodoImportStartRequest,
+  TodoImportView,
+  TodoImportWriteRequest,
+} from '../../electron/src/todos/todoImportContracts';
 import { waitForAnimationsToSettle } from './animations';
 import { installTaskDrafts } from './taskDrafts';
 
@@ -245,6 +253,52 @@ async function openHome(page: Page, search = '') {
         kind: 'not_started',
         reason: startsOn === null ? 'unscheduled' : startsOn > TODAY ? 'scheduled' : 'starting',
       });
+      // The imports, drafted as the import's Action would: a new organization and project, and an
+      // existing project whose open TODO the draft repeats. The backend's marks are recomputed on
+      // every write, and registering creates what the draft names.
+      const imports = new Map<string, TodoImportView>();
+      const importStarts: TodoImportStartRequest[] = [];
+      Object.assign(window, { importStarts });
+      type DraftGroups = {
+        organization: string | null;
+        project: string | null;
+        todos: TodoImportView['groups'][number]['todos'];
+      }[];
+      const projectNamed = (name: string | null) =>
+        projects.find((project) => project.display_name === name);
+      const resolve = (groups: DraftGroups): TodoImportView['groups'] =>
+        groups.map((group) => {
+          const existing = projectNamed(group.project);
+          return {
+            organization:
+              group.organization === null
+                ? null
+                : {
+                    name: group.organization,
+                    new: !organizations.some((o) => o.display_name === group.organization),
+                  },
+            project: group.project === null ? null : { name: group.project, new: !existing },
+            todos: group.todos.map((line) => ({
+              ...line,
+              duplicate: items.some(
+                (item) =>
+                  item.state.kind !== 'done' &&
+                  existing !== undefined &&
+                  item.project_id === existing.project_id &&
+                  item.text === line.text
+              ),
+            })),
+          };
+        });
+      const answer = (importId: string): TodoImportResult => {
+        const found = imports.get(importId);
+        return found
+          ? { kind: 'ok', result: found }
+          : {
+              kind: 'refused',
+              refusal: { reason: 'not_found', group_index: null, todo_index: null },
+            };
+      };
       // Goals the form writes stay for the page's later reads, as the backend's do.
       const goals = new Map(initialGoals.map((goal) => [goal.project_id, goal]));
       const inFilter = (projectId: string | null, query: TodoProgressQuery) =>
@@ -503,6 +557,133 @@ async function openHome(page: Page, search = '') {
             answerDeletion: async () => ({ kind: 'refused', code: 'TODO_BUSY' }),
             onChanged: () => noop,
           },
+          todoImports: {
+            start: async (request: TodoImportStartRequest) => {
+              importStarts.push(request);
+              const line = (text: string, due: string | null = null) => ({
+                text,
+                due,
+                starts_on: null,
+                duplicate: false,
+                keep_duplicate: false,
+              });
+              const organizationScope = request.scope === 'organization';
+              imports.set(request.import_id, {
+                import_id: request.import_id,
+                scope: request.scope,
+                organization_id: request.organization_id ?? null,
+                revision: 1,
+                state: 'open',
+                action_id: 'action-import',
+                groups: resolve([
+                  ...(organizationScope
+                    ? []
+                    : [
+                        {
+                          organization: '取引先 B',
+                          project: 'サイト改修',
+                          todos: [
+                            line('トップページの文言を直す', '2026-11-30'),
+                            line('問い合わせフォームを直す'),
+                          ],
+                        },
+                      ]),
+                  {
+                    organization: 'Xer',
+                    project: '見積もり',
+                    todos: [line('見積書を再提出する'), line('値引きの条件をまとめる')],
+                  },
+                ]),
+                issue: null,
+                result: null,
+              });
+              return answer(request.import_id);
+            },
+            read: async ({ import_id }: TodoImportRefRequest) => answer(import_id),
+            write: async ({ import_id, expected_revision, draft }: TodoImportWriteRequest) => {
+              const current = imports.get(import_id)!;
+              if (current.revision !== expected_revision)
+                return {
+                  kind: 'refused',
+                  refusal: { reason: 'stale_revision', group_index: null, todo_index: null },
+                };
+              imports.set(import_id, {
+                ...current,
+                revision: current.revision + 1,
+                groups: resolve(
+                  draft.groups.map((group) => ({
+                    ...group,
+                    todos: group.todos.map((todo) => ({
+                      text: todo.text,
+                      due: todo.due ?? null,
+                      starts_on: todo.starts_on ?? null,
+                      duplicate: false,
+                      keep_duplicate: todo.keep_duplicate ?? false,
+                    })),
+                  }))
+                ),
+              });
+              return answer(import_id);
+            },
+            register: async ({ import_id }: TodoImportRegisterRequest) => {
+              const current = imports.get(import_id)!;
+              const todoIds: string[] = [];
+              for (const group of current.groups) {
+                let organizationId = organizations.find(
+                  (o) => o.display_name === group.organization?.name
+                )?.organization_id;
+                if (group.organization && organizationId === undefined) {
+                  organizationId = `org-${organizations.length}`;
+                  organizations.push({
+                    organization_id: organizationId,
+                    display_name: group.organization.name,
+                  });
+                }
+                let project = projectNamed(group.project?.name ?? null);
+                if (group.project && project === undefined) {
+                  project = {
+                    project_id: `project-${projects.length}`,
+                    display_name: group.project.name,
+                    sort_order: projects.length,
+                    organization_ids: organizationId === undefined ? [] : [organizationId],
+                  };
+                  projects.push(project);
+                }
+                for (const line of group.todos) {
+                  if (line.duplicate && !line.keep_duplicate) continue;
+                  const todoId = `t-imported-${items.length}`;
+                  todoIds.push(todoId);
+                  items.push({
+                    todo_id: todoId,
+                    project_id: project?.project_id ?? null,
+                    text: line.text,
+                    author: 'user',
+                    origin: 'written',
+                    starts_on: null,
+                    due: line.due === null ? null : { date: line.due, repeat: 'none' },
+                    state: notStarted(null),
+                    deletion_request: null,
+                    conversation: { kind: 'none' },
+                  });
+                }
+              }
+              imports.set(import_id, {
+                ...current,
+                state: 'registered',
+                result: {
+                  organization_ids: [],
+                  project_ids: [],
+                  todo_ids: todoIds,
+                  skipped_duplicates: 0,
+                },
+              });
+              return answer(import_id);
+            },
+            cancel: async ({ import_id }: TodoImportRefRequest) => {
+              imports.set(import_id, { ...imports.get(import_id)!, state: 'canceled' });
+              return answer(import_id);
+            },
+          },
           suggestions: {
             read: async ({ suggestionId }: { suggestionId: string }) =>
               suggestionId === suggestion.suggestionId ? suggestion : new Promise(() => {}),
@@ -515,7 +696,11 @@ async function openHome(page: Page, search = '') {
             // The Action panes' reads stay pending: these tests look at what opens them.
             openConversation: () => new Promise(() => {}),
             onConversationUpdated: () => noop,
-            attachFile: async () => ({ kind: 'rejected' }),
+            attachFile: async ({ bytes, name }: { bytes: ArrayBuffer; name: string }) => ({
+              attachmentId: '6f1c7a64-5d1e-4c4b-9b5b-3d0d7c3f2a10',
+              name,
+              byteSize: bytes.byteLength,
+            }),
             attachImage: async () => ({ kind: 'rejected', reason: 'failed' }),
             discardAttachment: async () => undefined,
           },
@@ -1103,4 +1288,136 @@ test('the rail’s ＋ adds an organization with its image shrunk to a small ico
   await sidebarOf(page).getByRole('button', { name: '見積もり', exact: true }).click();
   await expect(page.locator('.history-project__details')).toHaveCount(0);
   await capture(page, info, 'organization-project');
+});
+
+const importStarts = (page: Page) =>
+  page.evaluate(
+    () => (window as unknown as { importStarts: TodoImportStartRequest[] }).importStarts
+  );
+
+test('lines pasted into the bar open a draft beside the list, which registers what it names', async ({
+  page,
+}, info) => {
+  await openHome(page);
+  const field = page.getByRole('textbox', { name: 'TODO を追加' });
+  await field.fill('見積書を再提出する\n値引きの条件をまとめる');
+  // Several lines draft TODOs, so one TODO's project and dates step aside.
+  await expect(page.getByRole('combobox', { name: 'プロジェクト' })).toHaveCount(0);
+  await field.press('Enter');
+
+  const pane = page.locator('.todo-screen__import');
+  await expect(pane.getByRole('heading', { level: 1, name: 'TODO の取り込み' })).toBeVisible();
+  await expect(pane).toBeFocused();
+  await expect(page).toHaveURL(/[?&]import=[0-9a-f-]{36}/);
+  expect(await importStarts(page)).toEqual([
+    {
+      import_id: expect.any(String),
+      scope: 'all',
+      text: '見積書を再提出する\n値引きの条件をまとめる',
+    },
+  ]);
+  await expect(field).toHaveValue('');
+
+  // A new organization and project are marked; the open TODO the draft repeats is left out.
+  await expect(pane.getByRole('heading', { name: '取引先 B 新規' })).toBeVisible();
+  await expect(pane.getByRole('heading', { name: 'サイト改修 新規' })).toBeVisible();
+  await expect(pane.getByRole('heading', { name: 'Xer', exact: true })).toBeVisible();
+  await expect(pane.getByText('すでにある')).toBeVisible();
+  await expect(pane.getByText('開始 未定').first()).toBeVisible();
+  await expect(pane.getByRole('button', { name: '3 件を登録' })).toBeEnabled();
+  await capture(page, info, 'import-draft');
+
+  // Edits write the whole draft and show what the backend made of it.
+  await pane.getByRole('checkbox', { name: 'それでも登録' }).check();
+  await expect(pane.getByRole('button', { name: '4 件を登録' })).toBeEnabled();
+  await pane.getByRole('button', { name: '下書きから外す: 問い合わせフォームを直す' }).click();
+  await expect(pane.getByRole('button', { name: '3 件を登録' })).toBeEnabled();
+  const text = pane.getByRole('textbox', { name: 'TODO' }).first();
+  await text.fill('トップページの見出しを直す');
+  await text.press('Enter');
+  await expect(pane.getByRole('textbox', { name: 'TODO' }).first()).toHaveValue(
+    'トップページの見出しを直す'
+  );
+
+  // A narrow window gives the draft the list's place.
+  await page.setViewportSize({ width: 900, height: 820 });
+  await expect(page.getByRole('checkbox', { name: '完了: 名刺 40 枚を入れておく' })).toBeHidden();
+  expect(await hasNoSideScroll(page)).toBe(true);
+  await capture(page, info, 'import-narrow');
+  await page.setViewportSize({ width: 1360, height: 900 });
+
+  await pane.getByRole('button', { name: '3 件を登録' }).click();
+  await expect(pane).toHaveCount(0);
+  await expect(page).not.toHaveURL(/import=/);
+  await expect(page.getByText('3 件の TODO を登録しました。')).toHaveRole('status');
+  await expect(page.getByRole('heading', { level: 1, name: 'すべての TODO' })).toBeFocused();
+  // The new organization's project is read with the workspace, and lists its TODO.
+  await expect(
+    rowOf(page.getByRole('region', { name: 'サイト改修 取引先 B' }), 'トップページの見出しを直す')
+  ).toBeVisible();
+  await expect(
+    page.getByRole('region', { name: '見積もり Xer' }).getByRole('listitem').filter({
+      hasText: '見積書を再提出する',
+    })
+  ).toHaveCount(2);
+});
+
+test('a file attached in an organization drafts inside it, and やめる closes the draft', async ({
+  page,
+}, info) => {
+  await openHome(page, '?scope=organization:xer');
+  await page.locator('.todo-add-bar input[type="file"]').setInputFiles({
+    name: 'notes.md',
+    mimeType: 'text/markdown',
+    buffer: Buffer.from('# 議事録'),
+  });
+  await expect(page.locator('.todo-add-bar').getByText('notes.md')).toBeVisible();
+  await expect(page.getByRole('button', { name: '期限なし', exact: true })).toHaveCount(0);
+  await capture(page, info, 'add-bar-attached');
+
+  await page.getByRole('button', { name: '下書きを作る' }).click();
+  const pane = page.locator('.todo-screen__import');
+  await expect(pane.getByRole('heading', { name: '見積もり', exact: true })).toBeVisible();
+  // Inside one organization the draft names no organization.
+  await expect(pane.getByRole('heading', { name: 'Xer' })).toHaveCount(0);
+  expect((await importStarts(page)).at(-1)).toEqual({
+    import_id: expect.any(String),
+    scope: 'organization',
+    organization_id: 'xer',
+    files: [
+      { attachment_id: '6f1c7a64-5d1e-4c4b-9b5b-3d0d7c3f2a10', name: 'notes.md', byte_size: 11 },
+    ],
+  });
+  await expect(page.locator('.todo-add-bar').getByText('notes.md')).toHaveCount(0);
+
+  await pane.getByRole('button', { name: 'やめる' }).click();
+  await expect(pane).toHaveCount(0);
+  await expect(page.getByRole('heading', { level: 1, name: 'すべての TODO' })).toBeFocused();
+});
+
+test('an organization with no project yet takes an import, though not a single TODO', async ({
+  page,
+}) => {
+  await openHome(page);
+  await page.getByRole('button', { name: '組織を追加' }).click();
+  const dialog = page.getByRole('dialog', { name: '組織を追加' });
+  await dialog.getByRole('textbox', { name: '組織の名前' }).fill('Labs');
+  await dialog.getByRole('button', { name: '追加' }).click();
+  await expect(page).toHaveURL(/scope=organization:labs/);
+
+  const field = page.getByRole('textbox', { name: 'TODO を追加' });
+  await field.fill('見積書を送る');
+  await field.press('Enter');
+  await expect(page.locator('.todo-add-bar').getByRole('alert')).toContainText(
+    'TODO を入れるプロジェクトがありません'
+  );
+  await field.fill('見積書を送る\n請求書を作る');
+  await field.press('Enter');
+  await expect(page.locator('.todo-screen__import')).toBeVisible();
+  expect((await importStarts(page)).at(-1)).toEqual({
+    import_id: expect.any(String),
+    scope: 'organization',
+    organization_id: 'labs',
+    text: '見積書を送る\n請求書を作る',
+  });
 });

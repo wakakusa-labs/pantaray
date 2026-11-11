@@ -1,5 +1,5 @@
 import { X } from 'lucide-react';
-import { useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { AiConnectionNotice } from '@/components/AiConnectionNotice';
 import { OpenWorkContext } from '@/components/action-conversation/sentMessageRefs';
@@ -9,6 +9,7 @@ import { DeletedTodoRow } from '@/components/todo/DeletedTodoRow';
 import { ProgressScreen } from '@/components/todo/progress/ProgressScreen';
 import { TodoAddBar } from '@/components/todo/TodoAddBar';
 import { TodoConversationPane } from '@/components/todo/TodoConversationPane';
+import { TodoImportPane } from '@/components/todo/TodoImportPane';
 import { TodoProjectGroup } from '@/components/todo/TodoProjectGroup';
 import { TodoRow } from '@/components/todo/TodoRow';
 import { useI18n } from '@/context/useI18n';
@@ -18,11 +19,14 @@ import { workspacePendingKey } from '@/pages/settings/useWorkspaceSettingsContro
 import { groupTodosByProject, todoProjectSlots } from '@/todos/groupTodosByProject';
 import type { TodoListSort, TodoSelection } from '@/todos/todoSelection';
 import { useDeletedTodos } from '@/todos/useDeletedTodos';
-import { useTodoImportStart, type TodoImportProblem } from '@/todos/useTodoImport';
+import {
+  useTodoImportStart,
+  type TodoImportAttachments,
+  type TodoImportProblem,
+} from '@/todos/useTodoImport';
 import type { TodoListRead } from '@/todos/useTodoList';
 import { useTodoMutations, type TodoMutationFailure } from '@/todos/useTodoMutations';
 
-import type { ActionFileAttachment } from '../../electron/src/actions/actionContracts';
 import type { TodoView } from '../../electron/src/todos/todoContracts';
 import './todoScreen.css';
 
@@ -37,9 +41,26 @@ function FailureLine({ failure }: { failure: TodoMutationFailure }) {
   );
 }
 
+/** The pane's close, last in its header. */
+function CloseButton({ label, onClose }: { label: string; onClose: () => void }) {
+  return (
+    <button
+      type="button"
+      className="action-task__icon-button action-task__close"
+      aria-label={label}
+      data-tooltip={label}
+      onClick={onClose}
+    >
+      <X size={17} strokeWidth={1.8} aria-hidden="true" />
+    </button>
+  );
+}
+
 /** Why an import did not start, told under the add bar. */
 const startProblemMessage = (problem: TodoImportProblem) =>
-  problem === 'files_unavailable' ? 'todo.import.filesUnavailable' : 'todo.import.startFailed';
+  problem === 'files_unavailable' || problem === 'images_invalid'
+    ? 'todo.import.filesUnavailable'
+    : 'todo.import.startFailed';
 
 /** What the header's folders of the project in view are changed with. */
 type ProjectFolderActions = Pick<
@@ -51,8 +72,8 @@ type ProjectFolderActions = Pick<
  * The home page's TODO list: every TODO in view, by project while several projects are in view
  * and as one list for one project (or their progress, or the deleted TODOs), with the folders of
  * the one project in view under its header, and beside the list the conversation of the TODO
- * selected. What is shown is the page's URL; this reads and writes the TODOs through the TODO
- * hooks and draws them with the TODO parts.
+ * selected, or the draft of an import started from the add bar. What is shown is the page's URL;
+ * this reads and writes the TODOs through the TODO hooks and draws them with the TODO parts.
  */
 export function TodoScreen({
   selection,
@@ -64,6 +85,7 @@ export function TodoScreen({
   onSelect,
   onOpenWork,
   onAddProject,
+  onWorkspaceChanged,
 }: {
   selection: TodoSelection;
   /** Every project's TODOs in the scope, read by the page, whose sidebar counts them too. */
@@ -81,10 +103,15 @@ export function TodoScreen({
   /** A work named in a conversation opens in the page's main area. */
   onOpenWork: (work: HistorySelection) => void;
   onAddProject: () => void;
+  /** An import created organizations or projects: the workspace is read again. */
+  onWorkspaceChanged: () => void;
 }) {
   const { t } = useI18n();
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const importPaneRef = useRef<HTMLDivElement>(null);
   const importStart = useTodoImportStart();
+  // How many TODOs the last import added, told over the list once its pane closed.
+  const [registered, setRegistered] = useState<number | null>(null);
   const deleted = useDeletedTodos(selection.scope);
   const mutations = useTodoMutations({
     reloadList: todoList.reload,
@@ -98,11 +125,17 @@ export function TodoScreen({
     settings?.projects.find((project) => project.project_id === projectId)?.display_name ?? null;
 
   const showingDeleted = selection.view === 'deleted';
+  const showingList = selection.view === 'list';
+  // An open import takes the pane in place of a TODO's conversation.
+  const importId = showingList && page ? selection.importId : null;
   const selectedTodo =
-    selection.view === 'list' && selection.todoId !== null
+    showingList && importId === null && selection.todoId !== null
       ? (page?.items.find((todo) => todo.todo_id === selection.todoId) ?? null)
       : null;
-  const showingList = selection.view === 'list';
+  const paneOpen = selectedTodo !== null || importId !== null;
+  useEffect(() => {
+    if (importId !== null) importPaneRef.current?.focus();
+  }, [importId]);
   const selectedProjectId =
     selection.project.project === 'project' ? (selection.project.project_id ?? null) : null;
   // One project in view is one list under its name; with several, the groups name them.
@@ -229,16 +262,22 @@ export function TodoScreen({
   };
 
   /** Starts drafting from the add bar's text and files, in the scope in view, and opens it. */
-  const startImport = async (text: string, files: readonly ActionFileAttachment[]) => {
-    const started = await importStart.start(selection.scope, text, files);
+  const startImport = async (text: string, attachments: TodoImportAttachments) => {
+    setRegistered(null);
+    const started = await importStart.start(selection.scope, text, attachments);
     if (started === null) return false;
     onSelect({ ...selection, todoId: null, importId: started });
     return true;
   };
+  const closeImport = () => {
+    onSelect({ ...selection, importId: null });
+    focusHeading();
+  };
 
   /** The bar under the list that adds a TODO. */
   const renderAddBar = (): ReactNode => {
-    if (!page || !settings || projects.length === 0) return null;
+    // A scope with no project yet still imports, which can create its projects.
+    if (!page || !settings) return null;
     return (
       <div className="todo-screen__add">
         {failureFor((target) => target.kind === 'add')}
@@ -314,7 +353,7 @@ export function TodoScreen({
     );
 
   return (
-    <div className={selectedTodo ? 'todo-screen todo-screen--with-pane' : 'todo-screen'}>
+    <div className={paneOpen ? 'todo-screen todo-screen--with-pane' : 'todo-screen'}>
       <section className="todo-screen__list" aria-labelledby="todo-screen-title">
         <header className="history-pane-header todo-screen__header">
           <h1 id="todo-screen-title" ref={headingRef} tabIndex={-1}>
@@ -364,11 +403,41 @@ export function TodoScreen({
         ) : null}
         <div className="todo-screen__scroll">
           <AiConnectionNotice />
+          {showingList && registered !== null ? (
+            <p className="todo-screen__notice" role="status">
+              {t('todo.import.registered', { count: registered })}
+            </p>
+          ) : null}
           {showingDeleted ? renderDeleted() : renderList()}
         </div>
         {showingList ? renderAddBar() : null}
       </section>
-      {selectedTodo ? (
+      {importId !== null && page ? (
+        <div
+          ref={importPaneRef}
+          className="history-detail todo-screen__conversation todo-screen__import"
+          tabIndex={-1}
+        >
+          <OpenWorkContext.Provider value={onOpenWork}>
+            <TodoImportPane
+              key={importId}
+              importId={importId}
+              today={page.today}
+              showOrganizations={selection.scope.scope === 'all'}
+              onAddProject={onAddProject}
+              onRegistered={(count) => {
+                closeImport();
+                setRegistered(count);
+                // The import may have created organizations and projects the TODOs sit in.
+                onWorkspaceChanged();
+                void todoList.reload();
+              }}
+              onCanceled={closeImport}
+              closeButton={<CloseButton label={t('todo.import.close')} onClose={closeImport} />}
+            />
+          </OpenWorkContext.Provider>
+        </div>
+      ) : selectedTodo ? (
         <div className="history-detail todo-screen__conversation">
           <OpenWorkContext.Provider value={onOpenWork}>
             <TodoConversationPane
@@ -383,18 +452,13 @@ export function TodoScreen({
               }
               onAddProject={onAddProject}
               closeButton={
-                <button
-                  type="button"
-                  className="action-task__icon-button action-task__close"
-                  aria-label={t('todo.conversation.close')}
-                  data-tooltip={t('todo.conversation.close')}
-                  onClick={() => {
+                <CloseButton
+                  label={t('todo.conversation.close')}
+                  onClose={() => {
                     onSelect({ ...selection, todoId: null });
                     focusHeading();
                   }}
-                >
-                  <X size={17} strokeWidth={1.8} aria-hidden="true" />
-                </button>
+                />
               }
             />
           </OpenWorkContext.Provider>

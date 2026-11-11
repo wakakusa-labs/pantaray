@@ -21,7 +21,7 @@ import { dueDay } from './todoDates';
 export function TodoImportDraftTree({
   groups,
   showOrganizations,
-  revision,
+  fieldsKey,
   today,
   disabled,
   onEdit,
@@ -29,8 +29,8 @@ export function TodoImportDraftTree({
 }: {
   groups: readonly DraftGroupView[];
   showOrganizations: boolean;
-  /** The draft's revision: a new one resets the text fields to what it holds. */
-  revision: number;
+  /** A new key resets the text fields to the draft they show: a new revision, or an edit let go. */
+  fieldsKey: string;
   today: string;
   disabled: boolean;
   onEdit: (at: DraftTodoAt, patch: DraftTodoPatch) => void;
@@ -76,10 +76,11 @@ export function TodoImportDraftTree({
                 <ul className="todo-import__todos">
                   {group.todos.map((todo, todoIndex) => (
                     <DraftRow
-                      key={`${revision}:${todoIndex}`}
+                      key={`${fieldsKey}:${todoIndex}`}
                       todo={todo}
                       at={{ group: index, todo: todoIndex }}
                       today={today}
+                      disabled={disabled}
                       onEdit={onEdit}
                       onRemove={onRemove}
                     />
@@ -117,18 +118,23 @@ function DraftRow({
   todo,
   at,
   today,
+  disabled,
   onEdit,
   onRemove,
 }: {
   todo: DraftTodoView;
   at: DraftTodoAt;
   today: string;
+  /** The tree is closed to edits; the native fieldset closes the controls. */
+  disabled: boolean;
   onEdit: (at: DraftTodoAt, patch: DraftTodoPatch) => void;
   onRemove: (at: DraftTodoAt) => void;
 }) {
   const { t, language } = useI18n();
   // A blank text is no TODO: the field goes back to the draft's text instead.
   const commit = (field: HTMLInputElement) => {
+    // A field closed while it kept focus blurs later; its edit is the unsaved one, not a new one.
+    if (disabled) return;
     const text = field.value.trim();
     if (text === '') field.value = todo.text;
     else if (text !== todo.text) onEdit(at, { text });

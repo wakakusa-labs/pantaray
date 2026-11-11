@@ -143,6 +143,7 @@ test('a refusal keeps its reason and indexes; other failures and off-contract vi
     refused(422, 'invalid_text', 0, 3),
     refused(404, 'not_found'),
     refused(409, 'start_conflict'),
+    refused(422, 'images_invalid'),
     // FastAPI's own validation error is no refusal.
     jsonResponse(422, { detail: [{ loc: ['body', 'import_id'], msg: 'bad' }] }),
     jsonResponse(200, { ...OPEN_IMPORT, state: 'drafting' }),
@@ -163,6 +164,14 @@ test('a refusal keeps its reason and indexes; other failures and off-contract vi
       assert.deepEqual(
         await imports.start({ import_id: IMPORT, scope: 'all', text: 'x' }),
         refusal('start_conflict')
+      );
+      assert.deepEqual(
+        await imports.start({
+          import_id: IMPORT,
+          scope: 'all',
+          images: [{ kind: 'image', storage_path: 'images/a.png' }],
+        }),
+        refusal('images_invalid')
       );
       await assert.rejects(imports.write(write), (error) => error.status === 422);
       await assert.rejects(imports.read({ import_id: IMPORT }), /TODO import response is invalid/);
@@ -203,6 +212,7 @@ test('TODO import IPC validates the renderer payload before anything reaches the
     name: 'minutes.pdf',
     byte_size: 10,
   };
+  const image = { kind: 'image', storage_path: 'images/board.png' };
   const valid = [
     ['todoImports:start', { import_id: IMPORT, scope: 'all', text: 'Call\nRenew' }],
     ['todoImports:start', { import_id: IMPORT, scope: 'no_organization', files: [file] }],
@@ -216,6 +226,9 @@ test('TODO import IPC validates the renderer payload before anything reaches the
         files: [file],
       },
     ],
+    // Images alone start an import, and with a document.
+    ['todoImports:start', { import_id: IMPORT, scope: 'all', images: [image] }],
+    ['todoImports:start', { import_id: IMPORT, scope: 'all', files: [file], images: [image] }],
     ['todoImports:read', { import_id: IMPORT }],
     ['todoImports:write', { import_id: IMPORT, expected_revision: 1, draft: DRAFT }],
     ['todoImports:write', { import_id: IMPORT, expected_revision: 3, draft: { groups: [] } }],
@@ -238,6 +251,10 @@ test('TODO import IPC validates the renderer payload before anything reaches the
       { ...start, organization_id: 'org-1' },
       { ...start, text: 'x'.repeat(32_001) },
       { ...start, files: [{ ...file, attachment_id: 'x' }] },
+      { import_id: IMPORT, scope: 'all', files: [], images: [] },
+      { ...start, images: [{ kind: 'image', storage_path: '' }] },
+      { ...start, images: [{ storage_path: 'images/board.png' }] },
+      { ...start, images: Array.from({ length: 33 }, () => image) },
       { ...start, user_id: 'someone-else' },
     ],
     'todoImports:read': [{}, { import_id: IMPORT, extra: 1 }],

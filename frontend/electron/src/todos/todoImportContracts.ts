@@ -9,7 +9,12 @@
 
 import { z } from 'zod';
 
-import { ActionFileAttachmentsSchema, ActionWireContractError } from '../actions/actionContracts';
+import {
+  ACTION_MESSAGE_MAX_IMAGES,
+  ActionFileAttachmentsSchema,
+  ActionWireContractError,
+  ImageReferenceSchema,
+} from '../actions/actionContracts';
 
 /** `ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS`: the import's Action takes the text as its first message. */
 const IMPORT_TEXT_MAX_CODEPOINTS = 32_000;
@@ -48,9 +53,9 @@ const DraftGroupSchema = z
 const TodoImportDraftSchema = z.object({ groups: z.array(DraftGroupSchema) }).strict();
 
 /**
- * The body of `POST /todo-imports`: the pasted text, the files `action:attachFile` staged, or
- * both. `import_id` is the idempotency key; `organization_id` is given exactly when `scope` is
- * `organization`.
+ * The body of `POST /todo-imports`: the pasted text, the files `action:attachFile` staged, the
+ * images `action:attachImage` wrote, or any of them together. `import_id` is the idempotency
+ * key; `organization_id` is given exactly when `scope` is `organization`.
  */
 export const TodoImportStartRequestSchema = z
   .object({
@@ -67,6 +72,7 @@ export const TodoImportStartRequestSchema = z
       .nullable()
       .optional(),
     files: ActionFileAttachmentsSchema.optional(),
+    images: z.array(ImageReferenceSchema).max(ACTION_MESSAGE_MAX_IMAGES).optional(),
   })
   .strict()
   .refine(
@@ -74,8 +80,11 @@ export const TodoImportStartRequestSchema = z
     'organization_id is required exactly for scope=organization'
   )
   .refine(
-    (request) => (request.text ?? '').trim() !== '' || (request.files ?? []).length > 0,
-    'text or files are required'
+    (request) =>
+      (request.text ?? '').trim() !== '' ||
+      (request.files ?? []).length > 0 ||
+      (request.images ?? []).length > 0,
+    'text, files or images are required'
   );
 
 /** Names one import: reading and canceling carry nothing else. */
@@ -167,8 +176,10 @@ export const TodoImportRefusedSchema = z
         'stale_revision',
         'registered',
         'canceled',
-        // A staged file is gone, or another start already used this import id.
+        // A staged file is gone, an image is not one the app wrote, or another start already
+        // used this import id.
         'files_unavailable',
+        'images_invalid',
         'start_conflict',
       ]),
     ]),

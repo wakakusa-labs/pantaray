@@ -10,17 +10,10 @@ import {
   type ComposerAttachment,
 } from '@/components/agent-overlay/attachmentStaging';
 
-import {
-  ACTION_DOCUMENT_EXTENSIONS,
-  actionDocumentExtension,
-} from '../../../electron/src/ipc/schemas/actionAttachments';
-
-/** An import reads documents only: its start takes staged files, not images. */
-export const IMPORT_FILE_ACCEPT = ACTION_DOCUMENT_EXTENSIONS.join(',');
-
 /**
- * The files staged in the add bar for an import, through the composers' staging. They are
- * discarded when the bar goes away unsent, including those whose write lands after it went.
+ * The documents and images staged in the add bar for an import, through the composers'
+ * staging. Documents are discarded when the bar goes away unsent, including those whose write
+ * lands after it went.
  */
 export function useAddBarFiles() {
   const actions = window.electron?.actions;
@@ -44,18 +37,14 @@ export function useAddBarFiles() {
 
   const attach = async (picked: readonly File[]) => {
     if (!actions || picked.length === 0) return;
-    // The first file the import cannot read stops the batch, as any refusal does in staging.
-    const refused = picked.findIndex((file) => actionDocumentExtension(file.name) === null);
-    const documents = refused === -1 ? picked : picked.slice(0, refused);
     setInFlight((count) => count + 1);
-    const staged = await stageFiles(actions, documents, attachments);
+    const staged = await stageFiles(actions, picked, attachments);
     if (closedRef.current) {
       discardDocuments(actions, staged.accepted);
       return;
     }
-    const stagedFailure = staged.failure ?? (refused === -1 ? null : 'unsupported_media_type');
     setStaged((current) =>
-      addStagedAttachments(actions, current.attachments, staged.accepted, stagedFailure)
+      addStagedAttachments(actions, current.attachments, staged.accepted, staged.failure)
     );
     setInFlight((count) => count - 1);
   };
@@ -75,8 +64,8 @@ export function useAddBarFiles() {
         failure: null,
       }));
     },
-    /** The files as an import's start takes them. */
-    files: attachmentPayload(attachments).files,
+    /** The documents and images as an import's start takes them. */
+    payload: attachmentPayload(attachments),
     /** The import took the files, so they are no longer the bar's to discard. */
     clearSent: () => {
       unsentRef.current = [];

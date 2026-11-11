@@ -103,9 +103,10 @@ export function TodoImportPane({
           <TodoImportDraftTree
             groups={view.groups}
             showOrganizations={showOrganizations}
-            revision={view.revision}
+            fieldsKey={`${view.revision}:${draft.discards}`}
             today={today}
-            disabled={running || draft.pending || closed}
+            // An edit that did not land is saved again or let go before the next one.
+            disabled={running || draft.pending || closed || draft.unsaved}
             onEdit={(at, patch) => void draft.write(editDraftTodo(view.groups, at, patch))}
             onRemove={(at) => void draft.write(removeDraftTodo(view.groups, at))}
           />
@@ -132,7 +133,32 @@ export function TodoImportPane({
                 {t(ISSUE_MESSAGES[issue])}
               </p>
             ) : null}
-            {problem ? (
+            {draft.unsaved ? (
+              <div className="todo-import__unsaved">
+                <p className="todo-import__alert" role="alert">
+                  {t('todo.import.unsaved')}
+                  {draft.problem && isIssueReason(draft.problem)
+                    ? ` ${t(ISSUE_MESSAGES[draft.problem])}`
+                    : null}
+                </p>
+                <button
+                  type="button"
+                  className="history-filter-button"
+                  disabled={draft.pending}
+                  onClick={() => void draft.saveAgain()}
+                >
+                  {t('todo.import.saveAgain')}
+                </button>
+                <button
+                  type="button"
+                  className="history-filter-button"
+                  disabled={draft.pending}
+                  onClick={draft.discardUnsaved}
+                >
+                  {t('todo.import.discard')}
+                </button>
+              </div>
+            ) : problem ? (
               <p className="todo-import__alert" role="alert">
                 {t(problem)}
               </p>
@@ -151,7 +177,9 @@ export function TodoImportPane({
               <button
                 type="button"
                 className="history-filter-button todo-import__register"
-                disabled={running || draft.pending || issue !== null || count === 0}
+                disabled={
+                  running || draft.pending || draft.unsaved || issue !== null || count === 0
+                }
                 onClick={async () => {
                   const registered = await draft.register();
                   if (registered) onRegistered(registered.result?.todo_ids.length ?? count);

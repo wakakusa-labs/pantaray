@@ -287,6 +287,7 @@ it('presses the organization in view and selects another', async () => {
         ]}
         selected={{ scope: 'organization', organization_id: 'org-1' }}
         onSelect={onSelect}
+        onAdd={vi.fn()}
       />
     )
   );

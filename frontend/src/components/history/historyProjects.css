@@ -337,17 +337,6 @@
   box-shadow: var(--focus-ring);
 }
 
-.history-project-organizations__new {
-  display: flex;
-  gap: var(--space-sm);
-  margin-top: 14px;
-}
-
-.history-project-organizations__new input {
-  flex: 1;
-  min-width: 0;
-}
-
 .history-project--new {
   padding-left: 16px;
 }

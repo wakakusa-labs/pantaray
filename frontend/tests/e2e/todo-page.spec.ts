@@ -373,6 +373,18 @@ async function openHome(page: Page, search = '') {
                 })
               ),
             }),
+            createOrganization: async (input: {
+              displayName: string;
+              iconDataUrl: string | null;
+            }) => {
+              const created = {
+                organization_id: 'labs',
+                display_name: input.displayName,
+                icon_data_url: input.iconDataUrl,
+              };
+              organizations.push(created);
+              return created;
+            },
           },
           auth: {
             getState: async () => ({
@@ -988,4 +1000,62 @@ test('beside a conversation the sidebar folds away and the rows keep their one l
 
   await page.getByRole('button', { name: '会話を閉じる' }).click();
   await expect(sidebarOf(page)).toBeVisible();
+});
+
+test('the rail’s ＋ adds an organization with its image shrunk to a small icon, and shows it', async ({
+  page,
+}, info) => {
+  await openHome(page);
+  const rail = railOf(page);
+  await page.getByRole('button', { name: '組織を追加' }).click();
+  const dialog = page.getByRole('dialog', { name: '組織を追加' });
+  await expect(dialog.getByRole('textbox', { name: '組織の名前' })).toBeFocused();
+  await dialog.getByRole('textbox', { name: '組織の名前' }).fill('Labs');
+  // A 400×300 photo-like PNG, drawn by the browser.
+  const picked = await page.evaluate(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 400;
+    canvas.height = 300;
+    const context = canvas.getContext('2d')!;
+    for (let x = 0; x < 400; x += 4)
+      for (let y = 0; y < 300; y += 4) {
+        context.fillStyle = `rgb(${(x * 7) % 256}, ${(y * 5) % 256}, ${(x * y) % 256})`;
+        context.fillRect(x, y, 4, 4);
+      }
+    return canvas.toDataURL('image/png').split(',')[1];
+  });
+  await dialog.locator('input[type="file"]').setInputFiles({
+    name: 'logo.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from(picked, 'base64'),
+  });
+  await expect(dialog.getByRole('button', { name: '画像を選ぶ' }).locator('img')).toBeVisible();
+  await capture(page, info, 'organization-add');
+
+  await dialog.getByRole('button', { name: '追加' }).click();
+  await expect(page).toHaveURL(/#\/history\?scope=organization:labs$/);
+  await expect(page.getByRole('button', { name: '組織を追加' })).toBeFocused();
+  const labs = rail.getByRole('button', { name: 'Labs' });
+  await expect(labs).toHaveAttribute('aria-pressed', 'true');
+  // What was sent: a 128px square WebP within the backend's 64 KiB.
+  const icon = await labs.locator('img').evaluate(async (image: HTMLImageElement) => {
+    await image.decode();
+    const base64 = image.src.split(',')[1];
+    return {
+      type: image.src.slice(0, image.src.indexOf(';')),
+      width: image.naturalWidth,
+      height: image.naturalHeight,
+      bytes: atob(base64).length,
+    };
+  });
+  expect(icon).toMatchObject({ type: 'data:image/webp', width: 128, height: 128 });
+  expect(icon.bytes).toBeLessThanOrEqual(64 * 1024);
+  await expect(sidebarOf(page).getByRole('heading', { level: 2, name: 'Labs' })).toBeVisible();
+  await capture(page, info, 'organization-rail');
+
+  // A project in view; its row has no folders under it.
+  await rail.getByRole('button', { name: 'Xer' }).click();
+  await sidebarOf(page).getByRole('button', { name: '見積もり', exact: true }).click();
+  await expect(page.locator('.history-project__details')).toHaveCount(0);
+  await capture(page, info, 'organization-project');
 });

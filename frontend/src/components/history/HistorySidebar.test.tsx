@@ -111,6 +111,7 @@ function Sidebar() {
         current: mocks.todoPlace,
         scope: { scope: 'all' },
         scopeName: mocks.scopeName,
+        onEditOrganization: null,
         openCounts: mocks.openCounts,
         onShowAll: mocks.showAll,
         onShowProgress: mocks.showProgress,

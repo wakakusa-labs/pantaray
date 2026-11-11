@@ -108,6 +108,15 @@
   padding: 0 8px;
 }
 
+/* The title, and an organization's edit button at its end. */
+.history-sidebar__scope-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+}
+
 /* The rail's scope in view, as the sidebar's title. */
 .history-sidebar__scope {
   margin: 0;

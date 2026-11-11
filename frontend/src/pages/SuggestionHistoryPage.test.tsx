@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { forwardRef, useImperativeHandle } from 'react';
+import { forwardRef, useImperativeHandle, useState } from 'react';
 import { MemoryRouter, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
@@ -19,6 +19,7 @@ import { LocalOwnerContext } from '@/context/localOwnerContext';
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
 import { historySelectionSearch, parseHistorySelection } from '@/history/historySelection';
 import type { LayoutOutletContext } from '@/components/Layout';
+import { ORGANIZATION_ADD_BUTTON_ID } from '@/components/todo/OrganizationRail';
 import SuggestionHistoryPage from './SuggestionHistoryPage';
 
 const mocks = vi.hoisted(() => ({
@@ -190,6 +191,20 @@ const deleteItem = vi.fn(async () => ({ ok: true }) as const);
 const selectFolder = vi.fn(async () => ({ canceled: true, path: null }));
 const openFolder = vi.fn(async () => undefined);
 const deleteFolder = vi.fn(async () => undefined);
+const createOrganization = vi.fn(
+  async ({ displayName, iconDataUrl }: { displayName: string; iconDataUrl: string | null }) => ({
+    organization_id: 'O2',
+    display_name: displayName,
+    icon_data_url: iconDataUrl,
+  })
+);
+const updateOrganization = vi.fn(
+  async (organizationId: string, input: { displayName: string; iconDataUrl: string | null }) => ({
+    organization_id: organizationId,
+    display_name: input.displayName,
+    icon_data_url: input.iconDataUrl,
+  })
+);
 
 const stored = new Map<string, string>();
 
@@ -248,6 +263,8 @@ beforeEach(() => {
       selectFolder,
       openFolder,
       deleteFolder,
+      createOrganization,
+      updateOrganization,
     },
   } as unknown as Window['electron'];
   const originalShowModal = HTMLDialogElement.prototype.showModal;
@@ -281,9 +298,27 @@ function LocationProbe() {
   );
 }
 
-const OUTLET_CONTEXT: LayoutOutletContext = {
-  publishOrganizations: mocks.publishOrganizations,
-};
+/** The shell's part: the rail's ＋ asks the page to add an organization. */
+function Shell() {
+  const [creatingOrganization, setCreatingOrganization] = useState(false);
+  const context: LayoutOutletContext = {
+    publishOrganizations: mocks.publishOrganizations,
+    creatingOrganization,
+    onCreatingOrganizationChange: setCreatingOrganization,
+  };
+  return (
+    <>
+      <button
+        type="button"
+        id={ORGANIZATION_ADD_BUTTON_ID}
+        onClick={() => setCreatingOrganization(true)}
+      >
+        rail add
+      </button>
+      <Outlet context={context} />
+    </>
+  );
+}
 
 const renderPage = (entries: string[]) =>
   render(
@@ -292,7 +327,7 @@ const renderPage = (entries: string[]) =>
         <LocalOwnerContext.Provider value={{ id: 'user-1', kind: 'account' }}>
           <ChatSessionContext.Provider value={{} as ChatSession}>
             <Routes>
-              <Route element={<Outlet context={OUTLET_CONTEXT} />}>
+              <Route element={<Shell />}>
                 <Route path="/history" element={<SuggestionHistoryPage />} />
               </Route>
             </Routes>
@@ -595,7 +630,7 @@ it("opens a TODO's conversation beside the list: its Action, its suggestion with
   expect(screen.getByRole('complementary', SIDEBAR)).toBeVisible();
 });
 
-it('a project selects its TODOs, keeping the scope that holds it and otherwise showing all', async () => {
+it('the sidebar lists the scope’s projects, and one selects its TODOs within the scope', async () => {
   renderPage(['/history?scope=none']);
   const sidebar = screen.getByRole('complementary', SIDEBAR);
   await userEvent.click(await within(sidebar).findByRole('button', { name: '採用' }));
@@ -608,11 +643,10 @@ it('a project selects its TODOs, keeping the scope that holds it and otherwise s
   );
 
   // 見積もり is Xer's, outside 組織なし.
-  await userEvent.click(within(sidebar).getByRole('button', { name: '見積もり' }));
-  expect(location()).toHaveTextContent(/^\/history\?project=project:P1$/);
+  expect(within(sidebar).queryByRole('button', { name: '見積もり' })).toBeNull();
 
   await userEvent.click(within(sidebar).getByRole('button', { name: '削除した TODO' }));
-  expect(location()).toHaveTextContent(/^\/history\?view=deleted$/);
+  expect(location()).toHaveTextContent(/^\/history\?scope=none&view=deleted$/);
   expect(await screen.findByText('削除した TODO はありません。')).toBeVisible();
 });
 
@@ -753,4 +787,61 @@ it('the project in view shows its folders under the header, to open in Finder or
   expect(deleteFolder).toHaveBeenCalledWith('F1');
   await waitFor(() => expect(within(folders).queryByRole('listitem')).toBeNull());
   expect(screen.getByRole('button', { name: 'フォルダを追加' })).toHaveFocus();
+});
+
+it('the rail’s ＋ adds an organization, shows it, and returns focus to ＋', async () => {
+  renderPage(['/history']);
+  await screen.findByRole('button', { name: '見積もり' });
+  const add = screen.getByRole('button', { name: 'rail add' });
+  await userEvent.click(add);
+  const dialog = screen.getByRole('dialog', { name: '組織を追加' });
+  const name = within(dialog).getByRole('textbox', { name: '組織の名前' });
+  expect(name).toHaveFocus();
+
+  // A name another organization has is refused in place, before anything is sent.
+  await userEvent.type(name, 'Xer{Enter}');
+  expect(createOrganization).not.toHaveBeenCalled();
+  expect(within(dialog).getByRole('alert')).toHaveTextContent(
+    'Xer という名前の組織がすでにあります。'
+  );
+  expect(name).toHaveAttribute('aria-invalid', 'true');
+
+  await userEvent.clear(name);
+  await userEvent.type(name, 'Wakakusa{Enter}');
+  expect(createOrganization).toHaveBeenCalledWith({ displayName: 'Wakakusa', iconDataUrl: null });
+  await waitFor(() => expect(location()).toHaveTextContent('/history?scope=organization:O2'));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(add).toHaveFocus();
+  // The project ＋ now makes projects inside it.
+  expect(screen.getByRole('heading', { level: 2, name: 'Wakakusa' })).toBeVisible();
+
+  // Escape is the dialog's cancel, which the test environment does not send from the key.
+  await userEvent.click(add);
+  fireEvent(screen.getByRole('dialog'), new Event('cancel', { cancelable: true }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(add).toHaveFocus();
+});
+
+it('the sidebar’s title renames the organization in view, and all organizations hide the project ＋', async () => {
+  renderPage(['/history']);
+  const sidebar = await screen.findByRole('complementary', SIDEBAR);
+  await within(sidebar).findByRole('button', { name: '見積もり' });
+  expect(within(sidebar).queryByRole('button', { name: 'プロジェクトを追加' })).toBeNull();
+  expect(within(sidebar).queryByRole('button', { name: /を編集$/u })).toBeNull();
+  cleanup();
+
+  renderPage(['/history?scope=organization:O1']);
+  const edit = await screen.findByRole('button', { name: 'Xer を編集' });
+  expect(screen.getByRole('button', { name: 'プロジェクトを追加' })).toBeVisible();
+  await userEvent.click(edit);
+  const dialog = screen.getByRole('dialog', { name: 'Xer を編集' });
+  const name = within(dialog).getByRole('textbox', { name: '組織の名前' });
+  await userEvent.clear(name);
+  await userEvent.type(name, 'Xer Inc{Enter}');
+  expect(updateOrganization).toHaveBeenCalledWith('O1', {
+    displayName: 'Xer Inc',
+    iconDataUrl: null,
+  });
+  expect(await screen.findByRole('heading', { level: 2, name: 'Xer Inc' })).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Xer Inc を編集' })).toHaveFocus();
 });

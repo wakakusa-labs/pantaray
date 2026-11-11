@@ -1,26 +1,23 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { ChevronDown, ChevronRight, FolderOpen, GripVertical, X } from 'lucide-react';
+import { ChevronDown, ChevronRight, GripVertical } from 'lucide-react';
 import { useState } from 'react';
 
 import { LineTextField } from '@/components/ui/LineTextField';
 import type { useI18n } from '@/context/useI18n';
-import {
-  splitPathForMiddleEllipsis,
-  type WorkspaceFolder,
-  type WorkspaceOrganization,
-  type WorkspaceProject,
+import type {
+  WorkspaceFolder,
+  WorkspaceOrganization,
+  WorkspaceProject,
 } from '@/pages/settings/components/workspaceSettingsModel';
 
 import { HistoryProjectMenu, type HistoryProjectMenuItem } from './HistoryProjectMenu';
+import { ProjectFolders } from './ProjectFolders';
 
 const projectNameId = (projectId: string) => `history-project:${projectId}`;
-const projectToggleId = (projectId: string) => `history-project-toggle:${projectId}`;
 const openCountId = (projectId: string) => `history-project-open:${projectId}`;
 /** Past this the badge shows "99+"; the description still says the number. */
 const MAX_SHOWN_OPEN = 99;
-const folderRemoveId = (projectId: string, folderId: string) =>
-  `history-project-folder-remove:${projectId}:${folderId}`;
 
 const focusById = (id: string) => document.getElementById(id)?.focus();
 
@@ -35,9 +32,9 @@ export type ProjectRowTodo = {
 
 /**
  * One project in the sidebar. With the TODO list its name selects its TODOs, with how many are
- * open beside it, and the chevron before it toggles its folders and organization; without it the
- * name, chevron and all, toggles them, as before the TODO list. Its 「…」 menu holds the actions,
- * and it is dragged by the row (or moved from the keyboard by its handle).
+ * open beside it, and its folders are on the project's page; without it the name, chevron and
+ * all, toggles its folders and organization, as before the TODO list. Its 「…」 menu holds the
+ * actions, and it is dragged by the row (or moved from the keyboard by its handle).
  */
 export function HistoryProjectRow({
   project,
@@ -55,7 +52,7 @@ export function HistoryProjectRow({
   isFolderPending,
   onAddFolder,
   onOpenFolder,
-  initiallyExpanded,
+  justCreated,
 }: {
   project: WorkspaceProject;
   folders: WorkspaceFolder[];
@@ -75,34 +72,20 @@ export function HistoryProjectRow({
   isFolderPending: (folderId: string) => boolean;
   onOpenFolder: (folderId: string) => void;
   onAddFolder: () => void;
-  /** A project just created opens on its empty folder list, with its add button focused. */
-  initiallyExpanded: boolean;
+  /**
+   * A project just created takes focus from the name field: its name with the TODO list, or
+   * without it its open folder list's ＋.
+   */
+  justCreated: boolean;
 }) {
-  const [expanded, setExpanded] = useState(initiallyExpanded);
-  // The folder whose whole path is shown, wrapped, instead of cut to the line.
-  const [fullPathId, setFullPathId] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(justCreated);
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition } =
     useSortable({ id: project.project_id, disabled: dragDisabled });
   const detailsId = `history-project-details:${project.project_id}`;
-  const projectFolderIds = folders.map((folder) => folder.folder_id);
-  // What opens and closes the folders: the chevron, or without the TODO list the name.
-  const toggleId = todo ? projectToggleId(project.project_id) : projectNameId(project.project_id);
-  const toggleIcon = expanded ? (
-    <ChevronDown size={13} aria-hidden="true" />
-  ) : (
-    <ChevronRight size={13} aria-hidden="true" />
-  );
-  const toggle = () => setExpanded((open) => !open);
   const openCount = todo?.openCount ?? 0;
 
   const endRename = () => {
     if (onRenameEnd()) focusById(projectNameId(project.project_id));
-  };
-  const removeFolder = async (folderId: string) => {
-    if (!(await onRemoveFolder(folderId))) return;
-    const remaining = projectFolderIds.filter((id) => id !== folderId);
-    const next = remaining[Math.min(projectFolderIds.indexOf(folderId), remaining.length - 1)];
-    focusById(next ? folderRemoveId(project.project_id, next) : toggleId);
   };
 
   return (
@@ -127,19 +110,6 @@ export function HistoryProjectRow({
       >
         <GripVertical size={13} aria-hidden="true" />
       </button>
-      {todo ? (
-        <button
-          type="button"
-          id={toggleId}
-          className="history-project__toggle"
-          aria-label={t('history.projects.toggleFolders', { name: project.display_name })}
-          aria-expanded={expanded}
-          aria-controls={detailsId}
-          onClick={toggle}
-        >
-          {toggleIcon}
-        </button>
-      ) : null}
       {renaming ? (
         <ProjectNameField
           initialName={project.display_name}
@@ -157,6 +127,8 @@ export function HistoryProjectRow({
           className="history-project__select"
           aria-current={todo.selected ? 'true' : undefined}
           aria-describedby={openCount > 0 ? openCountId(project.project_id) : undefined}
+          // Focus follows a new project from the name field.
+          autoFocus={justCreated}
           onClick={todo.onSelect}
         >
           <span className="history-project__name">{project.display_name}</span>
@@ -169,13 +141,17 @@ export function HistoryProjectRow({
       ) : (
         <button
           type="button"
-          id={toggleId}
+          id={projectNameId(project.project_id)}
           className="history-project__name-toggle"
           aria-expanded={expanded}
           aria-controls={detailsId}
-          onClick={toggle}
+          onClick={() => setExpanded((open) => !open)}
         >
-          {toggleIcon}
+          {expanded ? (
+            <ChevronDown size={13} aria-hidden="true" />
+          ) : (
+            <ChevronRight size={13} aria-hidden="true" />
+          )}
           <span className="history-project__name">{project.display_name}</span>
         </button>
       )}
@@ -189,69 +165,26 @@ export function HistoryProjectRow({
         buttonId={menuButtonId}
         items={menuItems}
       />
-      <div id={detailsId} className="history-project__details" hidden={!expanded}>
-        <ul aria-label={t('history.projects.folders')}>
-          {folders.map((folder) => {
-            const [pathStart, pathEnd] = splitPathForMiddleEllipsis(folder.real_path);
-            return (
-              <li key={folder.folder_id} className="history-project__folder">
-                <button
-                  type="button"
-                  className="history-project__path"
-                  // The two halves are drawn apart; the whole path is what the button is.
-                  aria-label={folder.real_path}
-                  title={folder.real_path}
-                  aria-expanded={fullPathId === folder.folder_id}
-                  onClick={() =>
-                    setFullPathId((shown) => (shown === folder.folder_id ? null : folder.folder_id))
-                  }
-                >
-                  <span className="history-project__path-start">{pathStart}</span>
-                  <span className="history-project__path-end">{pathEnd}</span>
-                </button>
-                <button
-                  type="button"
-                  className="history-project__folder-action"
-                  aria-label={t('history.projects.openInFinder')}
-                  data-tooltip={t('history.projects.openInFinder')}
-                  onClick={() => onOpenFolder(folder.folder_id)}
-                >
-                  <FolderOpen size={13} aria-hidden="true" />
-                </button>
-                <button
-                  type="button"
-                  id={folderRemoveId(project.project_id, folder.folder_id)}
-                  className="history-project__folder-action"
-                  aria-label={t('history.projects.removeFolder', { name: folder.display_name })}
-                  data-tooltip={t('history.projects.removeFolder', { name: folder.display_name })}
-                  aria-busy={isFolderPending(folder.folder_id)}
-                  disabled={isFolderPending(folder.folder_id)}
-                  onClick={() => void removeFolder(folder.folder_id)}
-                >
-                  <X size={13} aria-hidden="true" />
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-        {folders.length === 0 ? (
-          <button
-            type="button"
-            className="history-filter-button history-project__add-folder"
-            // Only a project just created opens here; focus follows it from the name field.
-            autoFocus={initiallyExpanded}
-            onClick={onAddFolder}
-          >
-            {t('history.projects.addFolder')}
-          </button>
-        ) : null}
-        {organizations.length > 0 ? (
-          <p className="history-project__organization">
-            {t('history.projects.organization')}:{' '}
-            {organizations.map((organization) => organization.display_name).join(', ')}
-          </p>
-        ) : null}
-      </div>
+      {todo ? null : (
+        <div id={detailsId} className="history-project__details" hidden={!expanded}>
+          <ProjectFolders
+            projectId={project.project_id}
+            folders={folders}
+            isFolderPending={isFolderPending}
+            onOpenFolder={onOpenFolder}
+            onRemoveFolder={onRemoveFolder}
+            onAddFolder={onAddFolder}
+            autoFocusAdd={justCreated}
+            t={t}
+          />
+          {organizations.length > 0 ? (
+            <p className="history-project__organization">
+              {t('history.projects.organization')}:{' '}
+              {organizations.map((organization) => organization.display_name).join(', ')}
+            </p>
+          ) : null}
+        </div>
+      )}
     </li>
   );
 }

@@ -109,6 +109,7 @@ function Sidebar() {
       onCreatingProjectChange={mocks.startCreatingProject}
       todoNav={{
         current: mocks.todoPlace,
+        scope: { scope: 'all' },
         scopeName: mocks.scopeName,
         openCounts: mocks.openCounts,
         onShowAll: mocks.showAll,

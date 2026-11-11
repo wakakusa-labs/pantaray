@@ -592,10 +592,6 @@ test('the home lists every organization’s week by project, with the rail and t
   await expect(
     sidebar.getByRole('button', { name: 'プロダクト', exact: true })
   ).toHaveAccessibleDescription('未完了 2 件');
-  await expect(sidebar.getByRole('button', { name: 'プロダクト のフォルダ' })).toHaveAttribute(
-    'aria-expanded',
-    'false'
-  );
   await expect(sidebar.getByRole('button', { name: '削除した TODO' })).toBeVisible();
   await expect(sidebar.getByRole('searchbox')).toHaveCount(0);
   await expect(sidebar.getByRole('button', { name: 'チャット', exact: true })).toHaveCount(0);

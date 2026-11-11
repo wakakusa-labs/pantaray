@@ -235,6 +235,7 @@ const SuggestionHistoryPage = () => {
   }
   const todoNav: TodoSidebarNav = {
     current: selection === null ? listPlace(todoSelection) : null,
+    scope,
     scopeName:
       scope.scope === 'all'
         ? t('todo.rail.all')

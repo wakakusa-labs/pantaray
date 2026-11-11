@@ -45,14 +45,18 @@ ACTION_WORK_REF_TITLE_MAX_CODEPOINTS = 200
 ACTION_MESSAGE_MAX_FILES = 10
 # The user's chat messages one hand-off relays as their words.
 ACTION_MESSAGE_MAX_RELAYED_ITEMS = 32
-# The document formats the read tool extracts, with the name the model sees for
-# each. The Electron attach IPC admits the same extensions.
+# The formats the read tool opens, documents it extracts and text it decodes,
+# with the name the model sees for each. The Electron attach IPC admits the
+# same extensions.
 ACTION_FILE_TYPE_LABEL_BY_EXTENSION: Mapping[str, str] = MappingProxyType(
     {
+        ".csv": "CSV file",
         ".docx": "Word document",
         ".ipynb": "Jupyter notebook",
+        ".md": "Markdown file",
         ".pdf": "PDF",
         ".pptx": "PowerPoint presentation",
+        ".txt": "Text file",
         ".xlsx": "Excel workbook",
     }
 )

@@ -8,8 +8,20 @@
 
 import { z } from 'zod';
 
-/** Formats the Action's `read` tool opens (`local_runtime/tooling/documents`). */
-export const ACTION_DOCUMENT_EXTENSIONS = ['.pdf', '.docx', '.xlsx', '.pptx', '.ipynb'] as const;
+/**
+ * Formats the Action's `read` tool opens: documents it extracts (`local_runtime/tooling/documents`)
+ * and text it decodes. `ACTION_FILE_TYPE_LABEL_BY_EXTENSION` admits the same at submit.
+ */
+export const ACTION_DOCUMENT_EXTENSIONS = [
+  '.pdf',
+  '.docx',
+  '.xlsx',
+  '.pptx',
+  '.ipynb',
+  '.txt',
+  '.md',
+  '.csv',
+] as const;
 export type ActionDocumentExtension = (typeof ACTION_DOCUMENT_EXTENSIONS)[number];
 
 /** `MAX_DOCUMENT_BYTES` (`local_runtime/tooling/documents/document_model.py`). */

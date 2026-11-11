@@ -2463,11 +2463,11 @@ describe('AgentOverlay broader E2E', () => {
 
     await act(async () => {
       fireEvent.paste(composer, {
-        clipboardData: fileClipboard([new File(['x'], 'notes.txt', { type: 'text/plain' })]),
+        clipboardData: fileClipboard([new File(['x'], 'notes.rtf', { type: 'text/rtf' })]),
       });
     });
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'You can attach PNG, JPEG, GIF, and WebP images, and PDF, Word, Excel, PowerPoint, and notebook files.'
+      'You can attach PNG, JPEG, GIF, and WebP images, and PDF, Word, Excel, PowerPoint, notebook, text, Markdown, and CSV files.'
     );
     expect(attachImage).not.toHaveBeenCalled();
     expect(attachFile).not.toHaveBeenCalled();
@@ -2570,7 +2570,7 @@ describe('AgentOverlay broader E2E', () => {
       fireEvent.paste(composer, { clipboardData: fileClipboard([oversized]) });
     });
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Each PDF, Word, Excel, PowerPoint, or notebook file must be 20 MB or smaller.'
+      'Each file other than an image must be 20 MB or smaller.'
     );
     expect(attachFile).not.toHaveBeenCalled();
 

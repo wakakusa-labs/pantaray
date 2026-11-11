@@ -1,5 +1,5 @@
 import { Check, CircleAlert, Clipboard, PictureInPicture2 } from 'lucide-react';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 
 import { ApprovalDecisionButton } from '@/components/agent-overlay/ApprovalDecisionButton';
 import { DismissalReason } from '@/components/agent-overlay/DismissalReason';
@@ -63,6 +63,8 @@ type SuggestionTaskPaneProps = {
   canDismiss: boolean;
   /** The composer's @-mention "Add project" option. */
   onAddProject: () => void;
+  /** Closes the pane, last in its header; for the page that opened the pane beside a list. */
+  closeButton?: ReactNode;
 };
 
 /**
@@ -78,6 +80,7 @@ export function SuggestionTaskPane({
   onStarted,
   canDismiss,
   onAddProject,
+  closeButton,
 }: SuggestionTaskPaneProps) {
   const { language, t } = useI18n();
   const copy = COPY[language];
@@ -193,6 +196,7 @@ export function SuggestionTaskPane({
               {copy.openSmallFailed}
             </p>
           ) : null}
+          {closeButton}
         </div>
       </header>
       {previewFile ? (

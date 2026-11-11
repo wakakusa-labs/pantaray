@@ -98,7 +98,7 @@ export function TodoScreen({
       : weekRange
     : t('todo.nav.deleted');
 
-  // Focus stays in the list: 「今週へ」 and the close button go away once they are used.
+  // Focus returns to the list: 「今週へ」 and the conversation's close button go away once used.
   const focusHeading = () => headingRef.current?.focus();
   // Weeks step from the one selected, not the one on screen, which may still be the last read.
   const showWeek = (weeks: number | null) => {
@@ -322,20 +322,6 @@ export function TodoScreen({
             {title}
           </h1>
           {showingWeek ? renderWeekControls() : null}
-          {selectedTodo ? (
-            <button
-              type="button"
-              className="action-task__icon-button"
-              aria-label={t('todo.conversation.close')}
-              data-tooltip={t('todo.conversation.close')}
-              onClick={() => {
-                onSelect({ ...selection, todoId: null });
-                focusHeading();
-              }}
-            >
-              <X size={17} strokeWidth={1.8} aria-hidden="true" />
-            </button>
-          ) : null}
         </header>
         <div className="todo-screen__scroll">
           <AiConnectionNotice />
@@ -356,6 +342,20 @@ export function TodoScreen({
                 void mutations.answerDeletion(selectedTodo.todo_id, requestId, answer)
               }
               onAddProject={onAddProject}
+              closeButton={
+                <button
+                  type="button"
+                  className="action-task__icon-button action-task__close"
+                  aria-label={t('todo.conversation.close')}
+                  data-tooltip={t('todo.conversation.close')}
+                  onClick={() => {
+                    onSelect({ ...selection, todoId: null });
+                    focusHeading();
+                  }}
+                >
+                  <X size={17} strokeWidth={1.8} aria-hidden="true" />
+                </button>
+              }
             />
           </OpenWorkContext.Provider>
         </div>

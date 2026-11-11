@@ -96,6 +96,23 @@
   box-shadow: var(--focus-ring);
 }
 
+/* A close button, set apart from the actions before it by a short line. The line is drawn
+   outside the button so its hover face stays the same as its neighbours'. */
+.action-task__close:not(:first-child) {
+  position: relative;
+  margin-left: 13px;
+}
+
+.action-task__close:not(:first-child)::before {
+  content: '';
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: -8px;
+  width: 1px;
+  background: var(--border-color-hover);
+}
+
 .action-task__sr-only {
   position: absolute;
   width: 1px;

@@ -6,12 +6,8 @@ import { AiConnectionNotice } from '@/components/AiConnectionNotice';
 import { OpenWorkContext } from '@/components/action-conversation/sentMessageRefs';
 import { ChatView, type ChatViewHandle } from '@/components/chat/ChatView';
 import { useChatSession } from '@/components/chat/chatSession';
-import {
-  HISTORY_SIDEBAR_ID,
-  HistorySidebar,
-  type TodoListPlace,
-  type TodoSidebarNav,
-} from '@/components/history/HistorySidebar';
+import { HISTORY_SIDEBAR_ID, HistorySidebar } from '@/components/history/HistorySidebar';
+import type { TodoListPlace, TodoSidebarNav } from '@/components/history/TodoSidebarNav';
 import type { LayoutOutletContext } from '@/components/Layout';
 import { NewTaskPane } from '@/components/task/NewTaskPane';
 import { SuggestionTaskPane } from '@/components/task/SuggestionTaskPane';
@@ -239,6 +235,14 @@ const SuggestionHistoryPage = () => {
   }
   const todoNav: TodoSidebarNav = {
     current: selection === null ? listPlace(todoSelection) : null,
+    scopeName:
+      scope.scope === 'all'
+        ? t('todo.rail.all')
+        : scope.scope === 'no_organization'
+          ? t('todo.rail.none')
+          : (organizations?.find(
+              (organization) => organization.organization_id === scope.organization_id
+            )?.display_name ?? null),
     openCounts,
     onShowAll: () =>
       selectTodos({ ...DEFAULT_TODO_SELECTION, scope, weekStart: todoSelection.weekStart }),

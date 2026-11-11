@@ -366,6 +366,25 @@
   font-weight: var(--weight-semibold);
 }
 
+/* The scope in view: a filled tile, and a short bar on the rail's left edge beside it. */
+.todo-rail__entry[aria-pressed='true'],
+.todo-rail__entry[aria-pressed='true']:hover {
+  background: var(--fog-text);
+  color: var(--app-background);
+}
+
+/* The rail is 64px wide and centres its 40px tiles, so its edge is 12px left of a tile. */
+.todo-rail__entry[aria-pressed='true']::before {
+  content: '';
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  left: -12px;
+  width: 4px;
+  border-radius: 0 2px 2px 0;
+  background: var(--fog-text);
+}
+
 .todo-rail__none {
   font-size: var(--text-meta-size);
   font-weight: var(--weight-medium);

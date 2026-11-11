@@ -53,11 +53,7 @@ export function OrganizationRail({
           <button
             key={key}
             type="button"
-            className={
-              pressed
-                ? 'app-rail-item todo-rail__entry app-rail-item--active'
-                : 'app-rail-item todo-rail__entry'
-            }
+            className="app-rail-item todo-rail__entry"
             aria-pressed={pressed}
             aria-label={label}
             data-tooltip={label}

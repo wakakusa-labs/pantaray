@@ -185,6 +185,9 @@ class ActionAgentContext(TypedDict, total=False):
     # The TODO whose conversation this Action is, read on its first turn; the
     # TODO tools are offered exactly when it is not None.
     served_todo_id: str | None
+    # The TODO import this Action drafts, read on its first turn; its draft tool
+    # is offered exactly when it is not None.
+    served_todo_import_id: str | None
     # The Executing head's field values from the Action's first conversation
     # turn. Every later turn renders the head from them, byte for byte.
     executing_head_fields: dict[str, str]

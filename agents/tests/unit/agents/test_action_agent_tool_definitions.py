@@ -16,7 +16,8 @@ from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.validatio
 from pantaray_agents.agents.action_agent.tools import (
     TOOL_REGISTRY,
     build_native_action_tools,
-    select_supervisor_act_tool_registry,
+    select_supervisor_act_tool_ids,
+    select_tool_registry,
 )
 from pantaray_agents.local_runtime.runtime.action_subagent_broker_authority import (
     ActionSubagentBrokerAuthority,
@@ -37,7 +38,11 @@ def _model_facing_parameters() -> dict[str, dict[str, JSONValue]]:
     action = {
         f"action/{tool.name}": tool.parameters
         for tool in build_native_action_tools(
-            select_supervisor_act_tool_registry(integrations=True, todo=True)
+            select_tool_registry(
+                select_supervisor_act_tool_ids(
+                    integrations=True, todo=True, todo_import=True
+                )
+            )
         )
     }
     # Building the child tool set binds these into closures only; nothing runs.

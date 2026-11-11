@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import sqlite3
+import uuid
 from contextlib import closing
 from pathlib import Path
 
@@ -69,7 +70,9 @@ def _write(import_id: str, revision: int, *groups: DraftGroup) -> object:
 
 
 def _drafted(scope: TodoScope, *groups: DraftGroup) -> TodoImportView:
-    opened = open_todo_import(user_id=USER, scope=scope, clock=NOW)
+    opened = open_todo_import(
+        user_id=USER, import_id=str(uuid.uuid4()), scope=scope, clock=NOW
+    )
     assert isinstance(opened, TodoImportView)
     written = _write(opened.import_id, opened.revision, *groups)
     assert isinstance(written, TodoImportView), written
@@ -308,9 +311,9 @@ def test_a_canceled_import_takes_no_writes_and_registers_nothing(db: Path) -> No
     assert registered == ImportClosed("canceled")
     assert count(db, "SELECT COUNT(*) FROM todo_items") == 0
     missing = OrganizationScope("org-gone")
-    assert open_todo_import(user_id=USER, scope=missing, clock=NOW) == DraftIssue(
-        "organization_not_found"
-    )
+    assert open_todo_import(
+        user_id=USER, import_id="import-gone", scope=missing, clock=NOW
+    ) == DraftIssue("organization_not_found")
 
 
 def test_a_line_repeating_an_earlier_one_for_the_same_project_is_a_duplicate(

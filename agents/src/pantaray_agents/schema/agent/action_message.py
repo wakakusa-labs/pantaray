@@ -383,6 +383,32 @@ class TodoHandoffInput(BaseModel):
     _validate_todo_id = field_validator("todo_id")(_bounded_id)
 
 
+class TodoImportHandoffInput(BaseModel):
+    """The TODO import this Action drafts, set only by the system that starts it.
+
+    ``scope`` is where the import may put what it drafts, as the TODO list it
+    was started from: ``organization`` keeps it inside ``organization_name``,
+    the name that organization had at hand-off time.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    import_id: str
+    scope: Literal["all", "organization", "no_organization"]
+    organization_name: str | None
+
+    _validate_import_id = field_validator("import_id")(_bounded_id)
+
+    @model_validator(mode="after")
+    def _organization_name_matches_scope(self) -> Self:
+        if (self.scope == "organization") != (self.organization_name is not None):
+            raise PydanticCustomError(
+                "action_message_invalid",
+                "organization_name is given exactly for the organization scope",
+            )
+        return self
+
+
 class ActionUserMessageInput(BaseModel):
     """Canonical durable USER envelope used by internal Action callers."""
 
@@ -407,6 +433,7 @@ class ActionUserMessageInput(BaseModel):
     work_refs: tuple[ActionWorkRef, ...] = ()
     supplement_work_refs: tuple[ActionWorkRef, ...] = ()
     todo_handoff: TodoHandoffInput | None = None
+    todo_import_handoff: TodoImportHandoffInput | None = None
 
     _validate_message_id = field_validator("message_id")(_non_blank_text)
     _validate_content = field_validator("content")(_non_blank_text)
@@ -528,6 +555,7 @@ __all__ = [
     "SuggestionApprovalInput",
     "TodoHandoffInput",
     "TodoHandoffProject",
+    "TodoImportHandoffInput",
     "bounded_content",
     "bounded_files",
     "bounded_images",

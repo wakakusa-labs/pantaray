@@ -28,7 +28,8 @@ from pantaray_agents.agents.action_agent.tools import (
     STEP_NOTE_ARG,
     STEP_NOTE_MAX_LENGTH,
     build_native_action_tools,
-    select_supervisor_act_tool_registry,
+    select_supervisor_act_tool_ids,
+    select_tool_registry,
 )
 from pantaray_agents.mock.mock_agent_repository import MockActionAgentRepository
 from pantaray_agents.mock.mock_llm_client import MockLLMClient
@@ -136,7 +137,11 @@ async def _build_supervisor_fixture(
 
 def test_every_supervisor_tool_requires_a_step_note() -> None:
     native_tools = build_native_action_tools(
-        select_supervisor_act_tool_registry(integrations=True, todo=True)
+        select_tool_registry(
+            select_supervisor_act_tool_ids(
+                integrations=True, todo=True, todo_import=True
+            )
+        )
     )
 
     assert native_tools

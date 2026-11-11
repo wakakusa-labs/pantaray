@@ -1,4 +1,5 @@
-"""Find the TODO an Action or a conversation serves, from the Action's own rows."""
+"""Find the TODO or the TODO import an Action or a conversation serves, from the
+Action's own rows."""
 
 from __future__ import annotations
 
@@ -36,6 +37,20 @@ SELECT COALESCE(
    WHERE step.user_id = :user_id AND step.action_id = :action_id)
 )
 """
+# The import's start opens its Action with a first message whose hand-off names
+# the import, which only the start writes.
+_SERVED_TODO_IMPORT_SQL: Final = """
+SELECT draft.import_id
+FROM agent_actions AS action
+JOIN agent_action_steps AS step
+  ON step.user_id = action.user_id AND step.action_id = action.action_id
+ AND step.user_message_id = action.initial_user_message_id
+JOIN todo_import_drafts AS draft
+  ON draft.user_id = action.user_id
+ AND draft.import_id = json_extract(step.user_message_json,
+                                    '$.todo_import_handoff.import_id')
+WHERE action.user_id = :user_id AND action.action_id = :action_id
+"""
 # The same links seen from a conversation being deleted, which already knows
 # every Suggestion it holds.
 _OPEN_TODO_OF_CONVERSATION_SQL: Final = f"""
@@ -56,6 +71,16 @@ def read_todo_for_action(*, user_id: str, action_id: str) -> TodoId | None:
             _SERVED_TODO_SQL, {"user_id": user_id, "action_id": action_id}
         ).fetchone()
     return None if row[0] is None else str(row[0])
+
+
+def read_todo_import_for_action(*, user_id: str, action_id: str) -> str | None:
+    """The import this Action drafts, or None for any other Action."""
+
+    with todo_db_connection() as connection:
+        row = connection.execute(
+            _SERVED_TODO_IMPORT_SQL, {"user_id": user_id, "action_id": action_id}
+        ).fetchone()
+    return None if row is None else str(row[0])
 
 
 def conversation_has_open_todo(

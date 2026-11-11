@@ -27,7 +27,7 @@ from pantaray_agents.agents.action_agent.runtime.steps.counters import (
 from pantaray_agents.agents.action_agent.tools import (
     ToolDefinition,
     select_supervisor_act_tool_ids,
-    select_supervisor_act_tool_registry,
+    select_tool_registry,
 )
 from pantaray_agents.schema.agent.action import StepType
 from pantaray_agents.schema.agent.base import AgentError, JSONValue
@@ -54,13 +54,12 @@ def _resolve_act_tool_contract(
     phase = state.get("phase")
     if phase == "executing":
         context = _ensure_context(state)
-        integrations = context.get("integration_tools_exposed", False)
-        todo = context.get("served_todo_id") is not None
-        return (
-            select_supervisor_act_tool_registry(integrations=integrations, todo=todo),
-            select_supervisor_act_tool_ids(integrations=integrations, todo=todo),
-            "supervisor",
+        tool_ids = select_supervisor_act_tool_ids(
+            integrations=context.get("integration_tools_exposed", False),
+            todo=context.get("served_todo_id") is not None,
+            todo_import=context.get("served_todo_import_id") is not None,
         )
+        return select_tool_registry(tool_ids), tool_ids, "supervisor"
     raise ValueError(
         f"Action execution is available only while executing; got phase={phase!r}."
     )

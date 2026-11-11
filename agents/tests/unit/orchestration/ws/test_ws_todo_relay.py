@@ -55,7 +55,7 @@ def _create(client_todo_id: str) -> Todo:
         client_todo_id=client_todo_id,
         project_id=None,
         text="Send the quote",
-        week_of="2026-11-04",
+        starts_on="2026-11-04",
         due=None,
         clock=NOW,
     )

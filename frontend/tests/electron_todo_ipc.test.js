@@ -14,7 +14,7 @@ const OPEN_TODO = {
   text: 'Send the estimate',
   author: 'user',
   origin: 'written',
-  week_start: '2026-11-02',
+  starts_on: '2026-11-02',
   carried: false,
   due: { date: '2026-11-06', repeat: 'weekly' },
   state: { kind: 'not_started', reason: 'starting' },
@@ -35,7 +35,7 @@ const STATE_VARIANTS = [
   { state: { kind: 'partial', note: 'Drafted half' } },
   { state: { kind: 'stopped', outcome: 'failed' } },
   { state: { kind: 'stopped', outcome: 'canceled' } },
-  { state: { kind: 'not_started', reason: 'week_not_started' }, due: null },
+  { state: { kind: 'not_started', reason: 'scheduled' }, due: null },
   { deletion_request: { request_id: 'req-1', reason: 'Duplicate' }, author: 'ai', carried: true },
 ].map((overrides, index) => ({ ...OPEN_TODO, todo_id: `todo-${index + 2}`, ...overrides }));
 
@@ -97,7 +97,7 @@ test('every route reaches its backend path with the token, and each response var
     ...OPEN_TODO,
     todo_id: 'todo-next',
     origin: 'recurrence',
-    week_start: '2026-11-09',
+    starts_on: '2026-11-09',
   };
   const responses = [
     jsonResponse(200, page),
@@ -109,6 +109,8 @@ test('every route reaches its backend path with the token, and each response var
     jsonResponse(200, OPEN_TODO),
     jsonResponse(200, OPEN_TODO),
     jsonResponse(200, [DELETED_TODO]),
+    jsonResponse(200, { today: '2026-11-04', items: [OPEN_TODO, next] }),
+    jsonResponse(200, { ...OPEN_TODO, starts_on: '2026-11-09' }),
   ];
   await withTodoBackend(
     (count) => responses[count - 1],
@@ -117,7 +119,7 @@ test('every route reaches its backend path with the token, and each response var
         client_todo_id: 'c-1',
         project_id: null,
         text: 'Send the estimate',
-        week_start: '2026-11-04',
+        starts_on: '2026-11-04',
         due: null,
       };
       assert.deepEqual(
@@ -143,6 +145,11 @@ test('every route reaches its backend path with the token, and each response var
       await todos.answerDeletion({ todo_id: 'todo 1', request_id: 'req/1', answer: 'keep' });
       await todos.restore({ todo_id: 'todo 1' });
       assert.deepEqual(await todos.listDeleted({ scope: 'all' }), [DELETED_TODO]);
+      assert.deepEqual(await todos.list({ scope: 'all', project: 'no_project', sort: 'due' }), {
+        today: '2026-11-04',
+        items: [OPEN_TODO, next],
+      });
+      await todos.setStart({ todo_id: 'todo 1', starts_on: '2026-11-09' });
 
       assert.deepEqual(
         requests.map(({ url, options }) => [
@@ -164,6 +171,8 @@ test('every route reaches its backend path with the token, and each response var
           ['POST', '/todo%201/deletion-requests/req%2F1/answer', { answer: 'keep' }],
           ['POST', '/todo%201/restore', undefined],
           ['GET', '/deleted?scope=all', undefined],
+          ['GET', '?scope=all&project=no_project&sort=due', undefined],
+          ['PUT', '/todo%201/start', { starts_on: '2026-11-09' }],
         ]
       );
       for (const { options } of requests) {
@@ -195,7 +204,7 @@ test('a refusal keeps its error code; other failures and off-contract responses 
     client_todo_id: 'c',
     project_id: 'p',
     text: 't',
-    week_start: '2026-11-02',
+    starts_on: '2026-11-02',
     due: null,
   };
   await withTodoBackend(
@@ -450,10 +459,12 @@ function todoHandlers() {
   registerTodoHandlers(
     {
       todos: {
+        list: record('list'),
         listWeek: record('listWeek'),
         create: record('create'),
         setCheck: record('setCheck'),
         setDue: record('setDue'),
+        setStart: record('setStart'),
         delete: record('delete'),
         answerDeletion: record('answerDeletion'),
         restore: record('restore'),
@@ -476,16 +487,18 @@ function todoHandlers() {
 test('TODO IPC validates the renderer payload before anything reaches the backend', async () => {
   const ipc = todoHandlers();
   const valid = {
+    'todos:list': { scope: 'all', project: 'any', sort: 'due' },
     'todos:listWeek': { scope: 'all', project: 'project', project_id: 'p-1' },
     'todos:create': {
       client_todo_id: 'c-1',
       project_id: null,
       text: ' two\nlines ',
-      week_start: '2026-11-04',
+      starts_on: '2026-11-04',
       due: { date: '2026-11-06', repeat: 'none' },
     },
     'todos:setCheck': { todo_id: 't-1', checked: false },
     'todos:setDue': { todo_id: 't-1', due: null },
+    'todos:setStart': { todo_id: 't-1', starts_on: '2026-11-09' },
     'todos:delete': { todo_id: 't-1' },
     'todos:answerDeletion': { todo_id: 't-1', request_id: 'r-1', answer: 'approve' },
     'todos:restore': { todo_id: 't-1' },
@@ -512,6 +525,11 @@ test('TODO IPC validates the renderer payload before anything reaches the backen
   );
 
   const invalid = {
+    'todos:list': [
+      { scope: 'all', project: 'project' },
+      { scope: 'all', project: 'any', sort: 'name' },
+      { scope: 'all', project: 'any', week_start: '2026-11-02' },
+    ],
     'todos:listWeek': [
       { scope: 'organization', project: 'any' },
       { scope: 'all', organization_id: 'org-1', project: 'any' },
@@ -529,6 +547,7 @@ test('TODO IPC validates the renderer payload before anything reaches the backen
     ],
     'todos:setCheck': [{ todo_id: 't-1', checked: 'true' }, { checked: true }],
     'todos:setDue': [{ todo_id: 't-1' }, { todo_id: 't-1', due: { date: '2026-11-06' } }],
+    'todos:setStart': [{ todo_id: 't-1' }, { todo_id: 't-1', starts_on: '11/09/2026' }],
     'todos:delete': [{}, { todo_id: '' }],
     'todos:answerDeletion': [{ todo_id: 't-1', request_id: 'r-1', answer: 'delete' }],
     'todos:restore': [{ todo_id: 't-1', extra: 1 }],

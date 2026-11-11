@@ -214,7 +214,7 @@ async def test_the_action_serving_a_todo_is_offered_the_todo_tools(
     with sqlite3.connect(db_path) as connection:
         connection.execute(
             """INSERT INTO todo_items(todo_id, user_id, text, author, origin_kind,
-              suggestion_id, week_start, created_at) VALUES ('todo-1', 'user-1',
+              suggestion_id, starts_on, created_at) VALUES ('todo-1', 'user-1',
               'Offer', 'ai', 'suggestion', 'suggestion-1', '2026-03-16',
               '2026-03-22T00:00:00Z')"""
         )

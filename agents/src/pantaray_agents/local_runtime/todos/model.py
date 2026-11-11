@@ -76,7 +76,7 @@ class Todo:
     text: str
     author: TodoAuthor
     origin: TodoOrigin
-    week_start: LocalDate  # Monday of the week it was written for; never rewritten.
+    starts_on: LocalDate  # The AI picks it up from this date; the user may move it.
     due: TodoDue | None
     check: TodoCheck | None
     ai_report: AiReport | None

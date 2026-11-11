@@ -130,8 +130,8 @@ def test_the_judge_reads_the_open_todos_only_while_the_todo_list_is_on(
 
     section = (
         "## Open TODOs\n"
-        "The user's TODO list: what is still open this week, including TODOs carried\n"
-        "over from earlier weeks, with each one's project, due date and state.\n"
+        "The user's TODO list: every TODO still open, with each one's project, due\n"
+        "date and state.\n"
         "- open-todo-evidence (no project; partly done)\n\n"
     )
     rule = "- Do not propose work that an open TODO already covers.\n"

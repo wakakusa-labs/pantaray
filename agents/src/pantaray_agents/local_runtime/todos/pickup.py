@@ -58,14 +58,11 @@ logger = logging.getLogger(__name__)
 def pick_up_todos(*, user_id: str) -> None:
     """Start an Action for each TODO `pickup_target` names."""
 
-    current_week_start = read_todo_clock().current_week_start
+    today = read_todo_clock().today
     targets = [
         (entry.todo, target)
-        for entry in read_pickup_candidates(
-            user_id=user_id, current_week_start=current_week_start
-        )
-        if (target := pickup_target(entry.todo, entry.conversation, current_week_start))
-        is not None
+        for entry in read_pickup_candidates(user_id=user_id, today=today)
+        if (target := pickup_target(entry.todo, entry.conversation, today)) is not None
     ]
     if not targets:
         return

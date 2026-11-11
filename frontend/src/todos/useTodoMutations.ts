@@ -37,7 +37,7 @@ export const todoRefusalMessage = (code: TodoRefusalCode): MessageKey =>
 
 type Outcome = 'ok' | 'refused' | 'unknown';
 
-const addKey = (projectId: string | null, weekStart: string) => `${weekStart}\n${projectId ?? ''}`;
+const addKey = (projectId: string | null, startsOn: string) => `${startsOn}\n${projectId ?? ''}`;
 
 /** The reads that show a write's result: `useTodoWeek`'s and `useDeletedTodos`'s `reload`. */
 export type TodoReloads = {
@@ -108,13 +108,13 @@ export function useTodoMutations({ reloadWeek, reloadDeleted }: TodoReloads) {
   /** Resolves true once the added TODO has been read into the week, which empties the add field. */
   const create = async (
     projectId: string | null,
-    weekStart: string,
+    startsOn: string,
     text: string,
     due: TodoDue | null
   ): Promise<boolean> => {
     // Enter on an empty field adds nothing and tells nothing.
     if (!text.trim()) return false;
-    const key = addKey(projectId, weekStart);
+    const key = addKey(projectId, startsOn);
     const unanswered = unansweredAddsRef.current.get(key);
     const dueKey = due ? `${due.date}:${due.repeat}` : null;
     const clientTodoId =
@@ -127,7 +127,7 @@ export function useTodoMutations({ reloadWeek, reloadDeleted }: TodoReloads) {
         client_todo_id: clientTodoId,
         project_id: projectId,
         text,
-        week_start: weekStart,
+        starts_on: startsOn,
         due,
       })
     );
@@ -146,6 +146,12 @@ export function useTodoMutations({ reloadWeek, reloadDeleted }: TodoReloads) {
       writeRow(todoId, (todos) => todos.setCheck({ todo_id: todoId, checked }), reloadWeek),
     setDue: (todoId: string, due: TodoDue | null) =>
       writeRow(todoId, (todos) => todos.setDue({ todo_id: todoId, due }), reloadWeek),
+    setStart: (todoId: string, startsOn: string) =>
+      writeRow(
+        todoId,
+        (todos) => todos.setStart({ todo_id: todoId, starts_on: startsOn }),
+        reloadWeek
+      ),
     // Deleting and restoring move the TODO between the week and the deleted list.
     deleteTodo: (todoId: string) =>
       writeRow(todoId, (todos) => todos.delete({ todo_id: todoId }), reloadBoth),

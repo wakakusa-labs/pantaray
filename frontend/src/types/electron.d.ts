@@ -69,11 +69,14 @@ import type {
   TodoDeletionAnswerRequest,
   TodoDueRequest,
   TodoGoalRequest,
+  TodoListPage,
+  TodoListQuery,
   TodoProgressPage,
   TodoProgressQuery,
   TodoProjectRefRequest,
   TodoRefRequest,
   TodoScopeQuery,
+  TodoStartRequest,
   TodoView,
   TodoWeekPage,
   TodoWeekQuery,
@@ -275,11 +278,14 @@ declare global {
       };
       /** The TODO list and its progress; main accepts these from the main window only. */
       todos?: {
+        /** Open TODOs first in the order asked for, then checked ones, last checked first. */
+        list: (query: TodoListQuery) => Promise<TodoListPage>;
         listWeek: (query: TodoWeekQuery) => Promise<TodoWeekPage>;
         /** Resending the same `client_todo_id` returns the same TODO. */
         create: (request: TodoCreateRequest) => Promise<TodoWriteResult<TodoView>>;
         setCheck: (request: TodoCheckRequest) => Promise<TodoWriteResult<TodoCheckResult>>;
         setDue: (request: TodoDueRequest) => Promise<TodoWriteResult<TodoView>>;
+        setStart: (request: TodoStartRequest) => Promise<TodoWriteResult<TodoView>>;
         delete: (request: TodoRefRequest) => Promise<TodoWriteResult<TodoView>>;
         answerDeletion: (request: TodoDeletionAnswerRequest) => Promise<TodoWriteResult<TodoView>>;
         restore: (request: TodoRefRequest) => Promise<TodoWriteResult<TodoView>>;

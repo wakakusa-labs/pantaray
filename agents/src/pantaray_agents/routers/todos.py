@@ -31,6 +31,7 @@ from pantaray_agents.local_runtime.todos.reads import (
     TodoEntry,
     read_deleted_todos,
     read_todo,
+    read_todo_list,
     read_todo_week,
 )
 from pantaray_agents.local_runtime.todos.week import effective_week
@@ -47,7 +48,10 @@ from pantaray_agents.schema.todos import (
     TodoCreateRequest,
     TodoDeletionAnswerRequest,
     TodoDueRequest,
+    TodoListPage,
+    TodoListQuery,
     TodoScopeQuery,
+    TodoStartRequest,
     TodoView,
     TodoWeekPage,
     TodoWeekQuery,
@@ -132,13 +136,12 @@ def _entry(user_id: str, todo_id: TodoId) -> TodoEntry:
 
 
 def _view(entry: TodoEntry, clock: TodoClock) -> TodoView:
-    current = clock.current_week_start
-    placement = effective_week(entry.todo, current, clock.zone)
+    placement = effective_week(entry.todo, clock.current_week_start, clock.zone)
     return todo_view(
         entry.todo,
         entry.conversation,
         carried=placement is not None and placement.carried,
-        current_week_start=current,
+        today=clock.today,
     )
 
 
@@ -161,6 +164,27 @@ def _conversation_running(entry: TodoEntry) -> bool:
     conversation = entry.conversation
     return isinstance(conversation, ActionConversation) and isinstance(
         conversation.latest_run, ActiveRun | ApprovalPendingRun
+    )
+
+
+@router.get("/{user_id}/todos", response_model=TodoListPage)
+def get_todo_list(
+    user_id: str,
+    query: Annotated[TodoListQuery, Query()],
+    resolved_user_id: str = Depends(get_current_user_id_from_token),
+) -> TodoListPage:
+    _require_path_user(user_id, resolved_user_id)
+    clock = read_todo_clock()
+    todo_list = read_todo_list(
+        user_id=user_id,
+        scope=query.todo_scope(),
+        project=query.project_filter(),
+        sort=query.sort,
+        clock=clock,
+    )
+    return TodoListPage(
+        today=todo_list.today,
+        items=tuple(_view(entry, clock) for entry in todo_list.items),
     )
 
 
@@ -201,7 +225,7 @@ def post_todo(
         client_todo_id=body.client_todo_id,
         project_id=body.project_id,
         text=body.text,
-        week_of=body.week_start.isoformat(),
+        starts_on=clock.today if body.starts_on is None else body.starts_on.isoformat(),
         due=None if body.due is None else body.due.due(),
         clock=clock,
     )
@@ -248,6 +272,19 @@ def put_todo_due(
     _require_path_user(user_id, resolved_user_id)
     due = None if body.due is None else body.due.due()
     _apply(user_id, todo_id, lambda todo: core.set_due(todo, due))
+    return _read_view(user_id, todo_id, read_todo_clock())
+
+
+@router.put("/{user_id}/todos/{todo_id}/start", response_model=TodoView)
+def put_todo_start(
+    user_id: str,
+    todo_id: str,
+    body: TodoStartRequest,
+    resolved_user_id: str = Depends(get_current_user_id_from_token),
+) -> TodoView:
+    _require_path_user(user_id, resolved_user_id)
+    starts_on = body.starts_on.isoformat()
+    _apply(user_id, todo_id, lambda todo: core.set_start(todo, starts_on))
     return _read_view(user_id, todo_id, read_todo_clock())
 
 

@@ -64,7 +64,7 @@ def create_todo_item(
     client_todo_id: str,
     project_id: str | None,
     text: str,
-    week_of: LocalDate,
+    starts_on: LocalDate,
     due: TodoDue | None,
     clock: TodoClock,
 ) -> Todo | Rejected[core.CreateRejection | CreateItemRejection]:
@@ -76,7 +76,7 @@ def create_todo_item(
         author="user",
         origin=WrittenOrigin(),
         project_id=project_id,
-        week_of=week_of,
+        starts_on=starts_on,
         due=due,
         now=clock.now,
     )
@@ -92,7 +92,7 @@ def create_todo_item(
         if row is not None:
             existing = todo_from_row(row)
             # Compared as stored now: a replay that arrives after the TODO's
-            # project or due changed is refused rather than undoing the change.
+            # project, start or due changed is refused rather than undoing it.
             if _request(existing) != _request(created):
                 return Rejected("client_todo_conflict")
             return existing
@@ -121,8 +121,8 @@ def build_suggestion_todo(
 ) -> Todo | Rejected[core.CreateRejection]:
     """The AI-written TODO a Suggestion becomes, before its project is known.
 
-    It opens in the current week without a due date: checked when its work is
-    done, otherwise with the Suggestion's report on it.
+    It starts today without a due date: checked when its work is done,
+    otherwise with the Suggestion's report on it.
     """
 
     created = core.create_todo(
@@ -131,7 +131,7 @@ def build_suggestion_todo(
         author="ai",
         origin=SuggestionOrigin(suggestion_id=suggestion_id),
         project_id=None,
-        week_of=clock.today,
+        starts_on=clock.today,
         due=None,
         now=clock.now,
     )
@@ -246,7 +246,7 @@ def delete_purged_todo(*, user_id: str, todo: Todo) -> None:
 
 
 def _request(todo: Todo) -> tuple[str, str, str | None, TodoDue | None]:
-    return (todo.text, todo.week_start, todo.project_id, todo.due)
+    return (todo.text, todo.starts_on, todo.project_id, todo.due)
 
 
 def _update(connection: sqlite3.Connection, *, user_id: str, todo: Todo) -> None:

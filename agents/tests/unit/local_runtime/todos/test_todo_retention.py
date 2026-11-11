@@ -29,7 +29,7 @@ def test_retention_erases_the_todo_with_its_conversation_unless_a_run_is_active(
             client_todo_id=client_id,
             project_id=None,
             text=client_id,
-            week_of="2026-11-04",
+            starts_on="2026-11-04",
             due=None,
             clock=NOW,
         )
@@ -53,7 +53,7 @@ def test_retention_erases_the_todo_with_its_conversation_unless_a_run_is_active(
     execute(
         db,
         f"""INSERT INTO todo_items(todo_id, user_id, text, author, origin_kind,
-          suggestion_id, week_start, deleted_by, deleted_at, created_at) VALUES
+          suggestion_id, starts_on, deleted_by, deleted_at, created_at) VALUES
           ('todo-s', '{USER}', 'From a suggestion', 'ai', 'suggestion', 's-1',
            '2026-11-02', 'user', '{NOW.now}', '{NOW.now}')""",
     )

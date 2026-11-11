@@ -29,7 +29,7 @@ from pantaray_agents.local_runtime.todos.db import (
 )
 from pantaray_agents.local_runtime.todos.display import Done, display_state
 from pantaray_agents.local_runtime.todos.reads import (
-    read_todo_week,
+    read_todo_list,
 )
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings_models import (
     WorkspaceSettings,
@@ -137,13 +137,13 @@ def build_suggestion_research_snapshot(
 def _open_todos(
     *, user_id: str, workspace_settings: WorkspaceSettings
 ) -> SuggestionOpenTodos:
-    """The current week's unchecked TODOs, including those carried into it."""
+    """Every unchecked TODO, those not started yet too, oldest first."""
 
-    week = read_todo_week(
+    todo_list = read_todo_list(
         user_id=user_id,
         scope=AllScope(),
         project=AnyProject(),
-        week_of=None,
+        sort="added",
         clock=read_todo_clock(),
     )
     project_names = {
@@ -151,8 +151,8 @@ def _open_todos(
         for project in workspace_settings.projects
     }
     open_todos: list[SuggestionOpenTodo] = []
-    for item in week.items:
-        state = display_state(item.todo, item.conversation, week.current_week_start)
+    for item in todo_list.items:
+        state = display_state(item.todo, item.conversation, todo_list.today)
         if isinstance(state, Done):
             continue
         text = item.todo.text

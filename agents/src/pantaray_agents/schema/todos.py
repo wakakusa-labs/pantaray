@@ -38,6 +38,7 @@ from pantaray_agents.local_runtime.todos.model import (
     TodoDue,
 )
 from pantaray_agents.local_runtime.todos.reads import (
+    TodoListSort,
     TodoWeek,
 )
 from pantaray_agents.local_runtime.todos.week import shift_days
@@ -85,13 +86,11 @@ class TodoScopeQuery(_Request):
         return NoOrganizationScope() if self.scope == "no_organization" else AllScope()
 
 
-class TodoWeekQuery(TodoScopeQuery):
-    """`project_id` is given exactly when `project` is ``project``; no
-    `week_start` is the current week, and any day of a week names that week."""
+class TodoProjectQuery(TodoScopeQuery):
+    """`project_id` is given exactly when `project` is ``project``."""
 
     project: Literal["any", "project", "no_project"]
     project_id: _Id | None = None
-    week_start: dt.date | None = None
 
     @model_validator(mode="after")
     def _project_id_matches_filter(self) -> Self:
@@ -105,15 +104,25 @@ class TodoWeekQuery(TodoScopeQuery):
         return NoProject() if self.project == "no_project" else AnyProject()
 
 
+class TodoListQuery(TodoProjectQuery):
+    sort: TodoListSort = "added"
+
+
+class TodoWeekQuery(TodoProjectQuery):
+    """No `week_start` is the current week; any day of a week names that week."""
+
+    week_start: dt.date | None = None
+
+
 class TodoCreateRequest(_Request):
-    """`client_todo_id` is the idempotency key; `week_start` may be any day of
-    the week. The text is one line, as the core decides."""
+    """`client_todo_id` is the idempotency key; no `starts_on` starts it
+    today. The text is one line, as the core decides."""
 
     client_todo_id: _Id
     project_id: _Id | None
     # The pickup hands the text to an Action as its first message.
     text: Annotated[str, Field(max_length=ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS)]
-    week_start: dt.date
+    starts_on: dt.date | None = None
     due: TodoDueBody | None
 
 
@@ -123,6 +132,10 @@ class TodoCheckRequest(_Request):
 
 class TodoDueRequest(_Request):
     due: TodoDueBody | None
+
+
+class TodoStartRequest(_Request):
+    starts_on: dt.date
 
 
 class TodoDeletionAnswerRequest(_Request):
@@ -160,7 +173,7 @@ class TodoView(_View):
     text: str
     author: TodoAuthor
     origin: Literal["written", "suggestion", "recurrence"]
-    week_start: LocalDate  # the week it was written for
+    starts_on: LocalDate  # the AI picks it up from this date
     carried: bool  # an open TODO from an earlier week, shown in the current one
     due: TodoDue | None
     state: Annotated[TodoDisplayState, Field(discriminator="kind")]
@@ -170,8 +183,14 @@ class TodoView(_View):
 
 class TodoCheckResult(_View):
     todo: TodoView
-    # The next week's instance of a checked weekly TODO.
+    # The next instance of a checked weekly TODO.
     next_todo: TodoView | None
+
+
+class TodoListPage(_View):
+    today: LocalDate  # the backend owns the clock
+    # Open TODOs first in the order asked for, then checked ones, last checked first.
+    items: tuple[TodoView, ...]
 
 
 class TodoWeekRange(_View):
@@ -206,7 +225,7 @@ def todo_view(
     conversation: TodoConversation,
     *,
     carried: bool,
-    current_week_start: LocalDate,
+    today: LocalDate,
 ) -> TodoView:
     request = todo.deletion_request
     return TodoView(
@@ -215,10 +234,10 @@ def todo_view(
         text=todo.text,
         author=todo.author,
         origin=todo.origin.kind,
-        week_start=todo.week_start,
+        starts_on=todo.starts_on,
         carried=carried,
         due=todo.due,
-        state=display_state(todo, conversation, current_week_start),
+        state=display_state(todo, conversation, today),
         deletion_request=(
             PendingDeletionRequestView(
                 request_id=request.request_id, reason=request.reason
@@ -240,7 +259,7 @@ def todo_week_page(week: TodoWeek) -> TodoWeekPage:
                 item.todo,
                 item.conversation,
                 carried=item.carried,
-                current_week_start=week.current_week_start,
+                today=week.today,
             )
             for item in week.items
         ),

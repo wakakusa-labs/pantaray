@@ -353,7 +353,7 @@ def _insert_todo(
 ) -> None:
     connection.execute(
         """INSERT INTO todo_items(
-               todo_id,user_id,text,author,origin_kind,suggestion_id,week_start,
+               todo_id,user_id,text,author,origin_kind,suggestion_id,starts_on,
                deleted_by,deleted_at,created_at)
            VALUES (?,'user-1','A TODO','ai',?,?,'2026-08-24',?,?,?)""",
         (

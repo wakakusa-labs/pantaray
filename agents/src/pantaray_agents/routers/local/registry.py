@@ -18,6 +18,7 @@ from pantaray_agents.routers import (
     history,
     integrations,
     suggestion,
+    todo_imports,
     todo_progress,
     todos,
     workspace_organizations,
@@ -45,5 +46,6 @@ def register_local_routers(app: FastAPI) -> None:
     app.include_router(chat.router)
     app.include_router(todos.router)
     app.include_router(todo_progress.router)
+    app.include_router(todo_imports.router)
     app.include_router(history_overlay_router)
     app.include_router(orchestration_ws_router)

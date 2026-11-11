@@ -95,7 +95,9 @@ export function useTodoImport(importId: string) {
   // A text field's Enter and the blur after it would both write; the second waits for nothing.
   const pendingRef = useRef(false);
   const [problem, setProblem] = useState<TodoImportProblem | null>(null);
-  const [unsaved, setUnsaved] = useState<TodoImportDraft | null>(null);
+  // The edit that did not land, with the revision it was made on: saving it again over a newer
+  // draft would erase what the Action wrote since.
+  const [unsaved, setUnsaved] = useState<{ draft: TodoImportDraft; revision: number } | null>(null);
   // Bumped when an edit is let go, so fields still showing it go back to the draft as read.
   const [discards, setDiscards] = useState(0);
   const view = data?.kind === 'ok' ? data.result : null;
@@ -124,9 +126,9 @@ export function useTodoImport(importId: string) {
 
   const landed = (outcome: TodoImportView | TodoImportProblem | null) =>
     typeof outcome === 'object' ? outcome : null;
-  const write = async (draft: TodoImportDraft) => {
-    const outcome = await send((imports, current) =>
-      imports.write({ import_id: importId, expected_revision: current.revision, draft })
+  const writeOver = async (draft: TodoImportDraft, revision: number) => {
+    const outcome = await send((imports) =>
+      imports.write({ import_id: importId, expected_revision: revision, draft })
     );
     if (outcome === null) return;
     if (typeof outcome === 'object') {
@@ -136,7 +138,7 @@ export function useTodoImport(importId: string) {
       setUnsaved(null);
       setDiscards((count) => count + 1);
     } else {
-      setUnsaved(draft);
+      setUnsaved({ draft, revision });
     }
   };
 
@@ -152,8 +154,11 @@ export function useTodoImport(importId: string) {
     unsaved: unsaved !== null,
     /** Changes each time an edit is let go: fields keyed by it show the draft as read. */
     discards,
-    write,
-    saveAgain: () => (unsaved === null ? Promise.resolve() : write(unsaved)),
+    /** Writes the draft over the revision on screen, which the edit was made on. */
+    write: (draft: TodoImportDraft) =>
+      view === null ? Promise.resolve() : writeOver(draft, view.revision),
+    saveAgain: () =>
+      unsaved === null ? Promise.resolve() : writeOver(unsaved.draft, unsaved.revision),
     discardUnsaved: () => {
       setUnsaved(null);
       setProblem(null);

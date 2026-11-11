@@ -84,6 +84,8 @@ export const TODO_MESSAGES = defineMessages({
     'todo.add.placeholder': 'Add a TODO (attach a file to draft TODOs from it)',
     'todo.add.attach': 'Attach',
     'todo.add.import': 'Draft TODOs',
+    'todo.add.needsProject':
+      'There is no project here to add a TODO to. Add a project, or paste several lines or attach a file to draft them.',
     'todo.import.title': 'TODO import',
     'todo.import.close': 'Close the import',
     'todo.import.startFailed': "Couldn't start drafting. Please try again.",
@@ -104,7 +106,8 @@ export const TODO_MESSAGES = defineMessages({
     'todo.import.register': 'Add {count}',
     'todo.import.cancel': 'Cancel',
     'todo.import.registered': 'Added {count} TODOs.',
-    'todo.import.stale': 'Pantaray changed the draft meanwhile. This is the draft now.',
+    'todo.import.stale':
+      "Pantaray changed the draft meanwhile, so your edit wasn't saved. This is the draft now.",
     'todo.import.failed': "That didn't work. Please try again.",
     'todo.import.unsaved': "Your last edit wasn't saved.",
     'todo.import.saveAgain': 'Save again',
@@ -202,6 +205,8 @@ export const TODO_MESSAGES = defineMessages({
     'todo.add.placeholder': 'TODO を追加（ファイルを添付すると、中身から下書きを作ります）',
     'todo.add.attach': '添付',
     'todo.add.import': '下書きを作る',
+    'todo.add.needsProject':
+      'ここには TODO を入れるプロジェクトがありません。プロジェクトを作るか、複数行の貼り付けや添付で下書きを作ってください。',
     'todo.import.title': 'TODO の取り込み',
     'todo.import.close': '取り込みを閉じる',
     'todo.import.startFailed': '下書きを始められませんでした。もう一度お試しください。',
@@ -222,7 +227,8 @@ export const TODO_MESSAGES = defineMessages({
     'todo.import.register': '{count} 件を登録',
     'todo.import.cancel': 'やめる',
     'todo.import.registered': '{count} 件の TODO を登録しました。',
-    'todo.import.stale': 'そのあいだに Pantaray が下書きを書き換えました。いまの下書きです。',
+    'todo.import.stale':
+      'そのあいだに Pantaray が下書きを書き換えたので、この編集は保存していません。いまの下書きです。',
     'todo.import.failed': 'うまくいきませんでした。もう一度お試しください。',
     'todo.import.unsaved': '直前の編集を保存できませんでした。',
     'todo.import.saveAgain': 'もう一度保存',

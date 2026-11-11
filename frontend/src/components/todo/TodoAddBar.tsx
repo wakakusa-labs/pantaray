@@ -1,7 +1,7 @@
 import { ArrowUp, Paperclip } from 'lucide-react';
 import { useRef, useState } from 'react';
 
-import { ComposerAttachments } from '@/components/agent-overlay/ComposerAttachments';
+import { ComposerAlert, ComposerAttachments } from '@/components/agent-overlay/ComposerAttachments';
 import { ATTACHMENT_ACCEPT } from '@/components/agent-overlay/attachmentStaging';
 import { isImeKey } from '@/components/ui/imeKey';
 import { useI18n } from '@/context/useI18n';
@@ -33,7 +33,7 @@ export function TodoAddBar({
 }: {
   /** The backend's today. */
   today: string;
-  /** Not empty: a scope with no project takes no TODO. */
+  /** Empty in a scope with no project yet, which takes imports but no single TODO. */
   projects: readonly TodoProjectSlot[];
   /** The list on screen is not the one selected yet, so nothing is added to it. */
   disabled: boolean;
@@ -52,12 +52,15 @@ export function TodoAddBar({
   const files = useAddBarFiles();
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
-  const [chosenProject, setChosenProject] = useState(projects[0].projectId ?? '');
+  const [chosenProject, setChosenProject] = useState(projects[0]?.projectId ?? '');
+  // A single line was sent where no project can take it.
+  const [needsProject, setNeedsProject] = useState(false);
   const [due, setDue] = useState<string | null>(null);
   // 'today' is whichever day that is when the TODO is sent; a null date is no start.
   const [start, setStart] = useState<'today' | { date: string | null }>('today');
   // A project gone from view falls back to the first one.
-  const project = projects.find((slot) => (slot.projectId ?? '') === chosenProject) ?? projects[0];
+  const project: TodoProjectSlot | undefined =
+    projects.find((slot) => (slot.projectId ?? '') === chosenProject) ?? projects[0];
   const startsOn = start === 'today' ? today : start.date;
   const importing = files.attachments.length > 0 || text.trim().includes('\n');
   const canSend = !sending && !files.busy && (text.trim() !== '' || files.attachments.length > 0);
@@ -69,13 +72,17 @@ export function TodoAddBar({
 
   const send = async () => {
     if (!canSend) return;
+    if (!importing && project === undefined) {
+      setNeedsProject(true);
+      return;
+    }
     setSending(true);
     const sent = text;
     const taken = importing
       ? await onImport(sent, files.payload)
       : // A line ended with Shift+Enter is still one line.
         await onSubmit(
-          project.projectId,
+          project?.projectId ?? null,
           startsOn,
           sent.trim(),
           due === null ? null : { date: due, repeat: 'none' }
@@ -96,7 +103,7 @@ export function TodoAddBar({
           <span className="todo-group__dot" aria-hidden="true" />
           <select
             aria-label={t('todo.add.project')}
-            value={project.projectId ?? ''}
+            value={project?.projectId ?? ''}
             onChange={(event) => setChosenProject(event.target.value)}
           >
             {projects.map((slot) => (
@@ -151,6 +158,9 @@ export function TodoAddBar({
         focusAfterLastRemoved={fieldRef}
         onRemove={files.remove}
       />
+      {needsProject ? (
+        <ComposerAlert role="alert">{t('todo.add.needsProject')}</ComposerAlert>
+      ) : null}
       <textarea
         ref={fieldRef}
         rows={1}
@@ -158,7 +168,10 @@ export function TodoAddBar({
         aria-label={t('todo.add')}
         placeholder={t('todo.add.placeholder')}
         value={text}
-        onChange={(event) => setText(event.target.value)}
+        onChange={(event) => {
+          setText(event.target.value);
+          setNeedsProject(false);
+        }}
         onKeyDown={(event) => {
           if (event.key !== 'Enter' || event.shiftKey || isImeKey(event)) return;
           event.preventDefault();

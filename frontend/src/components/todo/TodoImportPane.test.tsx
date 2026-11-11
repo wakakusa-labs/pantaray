@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -89,14 +89,23 @@ const register = vi.fn<(request: TodoImportRegisterRequest) => Promise<TodoImpor
 const cancel = vi.fn<(request: TodoImportRefRequest) => Promise<TodoImportResult>>();
 const ok = (result: TodoImportView): TodoImportResult => ({ kind: 'ok', result });
 
+// The TODO change the Action's writes send, which reads the draft again.
+let todosChanged = () => {};
+
 beforeEach(() => {
   running = false;
+  todosChanged = () => {};
   read.mockReset().mockResolvedValue(ok(view()));
   write.mockReset().mockImplementation(async () => ok(view({ revision: 4 })));
   register.mockReset();
   cancel.mockReset();
   window.electron = {
-    todos: { onChanged: () => () => undefined },
+    todos: {
+      onChanged: (callback: () => void) => {
+        todosChanged = callback;
+        return () => undefined;
+      },
+    },
     todoImports: { read, write, register, cancel },
   } as unknown as Window['electron'];
 });
@@ -197,7 +206,7 @@ it('writes an edited text with the whole draft, and shows the draft as it is aft
   expect(sent.draft.groups[0].todos).toHaveLength(2);
 
   expect(await screen.findByRole('alert')).toHaveTextContent(
-    'そのあいだに Pantaray が下書きを書き換えました。'
+    'そのあいだに Pantaray が下書きを書き換えたので、この編集は保存していません。'
   );
   expect(await screen.findByDisplayValue('求人票を書く')).toBeVisible();
   expect(screen.getAllByRole('textbox', { name: 'TODO' })).toHaveLength(1);
@@ -291,4 +300,63 @@ it('holds 登録 after an edit that did not save until it saves again, or is let
   await userEvent.click(screen.getByRole('button', { name: '編集を取り消す' }));
   expect(screen.getAllByRole('textbox', { name: 'TODO' })[0]).toHaveValue('求人票を出す');
   expect(registerButton()).toBeEnabled();
+});
+
+it('saves a failed edit again over the revision it was made on, never over a newer draft', async () => {
+  renderPane();
+  const field = (await screen.findAllByRole('textbox', { name: 'TODO' }))[0];
+  // The Action writes revision 4 while the edit made on revision 3 fails.
+  const newer = view({
+    revision: 4,
+    groups: [
+      {
+        organization: { name: 'Wakakusa', new: false },
+        project: { name: '採用', new: true },
+        todos: [
+          {
+            text: '求人票を出す',
+            due: null,
+            starts_on: null,
+            duplicate: false,
+            keep_duplicate: false,
+          },
+          {
+            text: '面接官を決める',
+            due: null,
+            starts_on: null,
+            duplicate: false,
+            keep_duplicate: false,
+          },
+        ],
+      },
+    ],
+  });
+  read.mockResolvedValue(ok(newer));
+  write.mockRejectedValueOnce(new Error('timeout'));
+  await userEvent.clear(field);
+  await userEvent.type(field, '求人票を直す{Enter}');
+  expect(await screen.findByRole('alert')).toHaveTextContent('直前の編集を保存できませんでした。');
+  act(() => todosChanged());
+  expect(await screen.findByDisplayValue('面接官を決める')).toBeVisible();
+  // The edit is still the one held, made on revision 3.
+  expect(registerButton()).toBeDisabled();
+
+  // The backend refuses a write over a revision that is no longer the draft's.
+  write.mockImplementation(async (request) =>
+    request.expected_revision === 4
+      ? ok(newer)
+      : {
+          kind: 'refused',
+          refusal: { reason: 'stale_revision', group_index: null, todo_index: null },
+        }
+  );
+  await userEvent.click(screen.getByRole('button', { name: 'もう一度保存' }));
+  expect(write.mock.lastCall![0].expected_revision).toBe(3);
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'そのあいだに Pantaray が下書きを書き換えたので、この編集は保存していません。'
+  );
+  expect(await screen.findByDisplayValue('面接官を決める')).toBeVisible();
+  expect(screen.getAllByRole('textbox', { name: 'TODO' })[0]).toHaveValue('求人票を出す');
+  expect(write).toHaveBeenCalledTimes(2);
+  await waitFor(() => expect(registerButton()).toBeEnabled());
 });

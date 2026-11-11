@@ -825,15 +825,18 @@ it('the rail’s ＋ adds an organization, shows it, and returns focus to ＋', 
   await userEvent.type(name, 'Wakakusa{Enter}');
   expect(createOrganization).toHaveBeenCalledWith({ displayName: 'Wakakusa', iconDataUrl: null });
   await waitFor(() => expect(location()).toHaveTextContent('/history?scope=organization:O2'));
-  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.queryByRole('dialog', { name: '組織を追加' })).toBeNull();
   expect(add).toHaveFocus();
   // The project ＋ now makes projects inside it.
   expect(screen.getByRole('heading', { level: 2, name: 'Wakakusa' })).toBeVisible();
 
   // Escape is the dialog's cancel, which the test environment does not send from the key.
   await userEvent.click(add);
-  fireEvent(screen.getByRole('dialog'), new Event('cancel', { cancelable: true }));
-  expect(screen.queryByRole('dialog')).toBeNull();
+  fireEvent(
+    screen.getByRole('dialog', { name: '組織を追加' }),
+    new Event('cancel', { cancelable: true })
+  );
+  expect(screen.queryByRole('dialog', { name: '組織を追加' })).toBeNull();
   expect(add).toHaveFocus();
 });
 

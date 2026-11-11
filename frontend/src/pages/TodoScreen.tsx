@@ -276,7 +276,8 @@ export function TodoScreen({
 
   /** The bar under the list that adds a TODO. */
   const renderAddBar = (): ReactNode => {
-    if (!page || !settings || projects.length === 0) return null;
+    // A scope with no project yet still imports, which can create its projects.
+    if (!page || !settings) return null;
     return (
       <div className="todo-screen__add">
         {failureFor((target) => target.kind === 'add')}

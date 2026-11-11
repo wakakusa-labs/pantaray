@@ -313,6 +313,34 @@ it('imports attached documents and images, staged as the composers stage them', 
   window.electron = undefined;
 });
 
+it('in a scope with no project, imports lines but says a single TODO needs a project', async () => {
+  onImport.mockClear();
+  const onSubmit = vi.fn(async () => true);
+  render(
+    ja(
+      <TodoAddBar
+        today={TODAY}
+        projects={[]}
+        disabled={false}
+        onSubmit={onSubmit}
+        onImport={onImport}
+      />
+    )
+  );
+  await userEvent.type(addField(), '見積書を送る{Enter}');
+  expect(onSubmit).not.toHaveBeenCalled();
+  expect(screen.getByRole('alert')).toHaveTextContent('TODO を入れるプロジェクトがありません');
+  expect(addField()).toHaveValue('見積書を送る');
+
+  await userEvent.type(addField(), '{Shift>}{Enter}{/Shift}請求書を作る');
+  expect(screen.queryByRole('alert')).toBeNull();
+  await userEvent.type(addField(), '{Enter}');
+  expect(onImport).toHaveBeenLastCalledWith('見積書を送る\n請求書を作る', {
+    files: [],
+    images: [],
+  });
+});
+
 it('adds no file while an import is starting', async () => {
   let answer: (started: boolean) => void = () => undefined;
   const pendingImport = vi.fn(() => new Promise<boolean>((resolve) => (answer = resolve)));

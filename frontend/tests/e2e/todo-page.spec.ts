@@ -1394,3 +1394,30 @@ test('a file attached in an organization drafts inside it, and やめる closes 
   await expect(pane).toHaveCount(0);
   await expect(page.getByRole('heading', { level: 1, name: 'すべての TODO' })).toBeFocused();
 });
+
+test('an organization with no project yet takes an import, though not a single TODO', async ({
+  page,
+}) => {
+  await openHome(page);
+  await page.getByRole('button', { name: '組織を追加' }).click();
+  const dialog = page.getByRole('dialog', { name: '組織を追加' });
+  await dialog.getByRole('textbox', { name: '組織の名前' }).fill('Labs');
+  await dialog.getByRole('button', { name: '追加' }).click();
+  await expect(page).toHaveURL(/scope=organization:labs/);
+
+  const field = page.getByRole('textbox', { name: 'TODO を追加' });
+  await field.fill('見積書を送る');
+  await field.press('Enter');
+  await expect(page.locator('.todo-add-bar').getByRole('alert')).toContainText(
+    'TODO を入れるプロジェクトがありません'
+  );
+  await field.fill('見積書を送る\n請求書を作る');
+  await field.press('Enter');
+  await expect(page.locator('.todo-screen__import')).toBeVisible();
+  expect((await importStarts(page)).at(-1)).toEqual({
+    import_id: expect.any(String),
+    scope: 'organization',
+    organization_id: 'labs',
+    text: '見積書を送る\n請求書を作る',
+  });
+});

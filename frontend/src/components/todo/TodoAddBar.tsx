@@ -61,6 +61,11 @@ export function TodoAddBar({
   const importing = files.attachments.length > 0 || text.trim().includes('\n');
   const canSend = !sending && !files.busy && (text.trim() !== '' || files.attachments.length > 0);
 
+  // Files added while a send is answering would miss it and then be cleared with the sent ones.
+  const attach = (picked: readonly File[]) => {
+    if (!disabled && !sending) void files.attach(picked);
+  };
+
   const send = async () => {
     if (!canSend) return;
     setSending(true);
@@ -135,7 +140,7 @@ export function TodoAddBar({
       onDragOver={(event) => event.preventDefault()}
       onDrop={(event) => {
         event.preventDefault();
-        if (!disabled) void files.attach(Array.from(event.dataTransfer.files));
+        attach(Array.from(event.dataTransfer.files));
       }}
     >
       <ComposerAttachments
@@ -166,7 +171,7 @@ export function TodoAddBar({
           const pasted = Array.from(event.clipboardData.files);
           if (pasted.length === 0) return;
           event.preventDefault();
-          void files.attach(pasted);
+          attach(pasted);
         }}
       />
       <div className="todo-add-bar__choices">
@@ -180,12 +185,13 @@ export function TodoAddBar({
             const picked = Array.from(event.target.files ?? []);
             // Reset so picking the same file again still fires a change event.
             event.target.value = '';
-            void files.attach(picked);
+            attach(picked);
           }}
         />
         <button
           type="button"
           className="todo-add-bar__chip todo-add-bar__attach"
+          disabled={sending}
           onClick={() => fileInputRef.current?.click()}
         >
           <Paperclip size={13} strokeWidth={1.8} aria-hidden="true" />

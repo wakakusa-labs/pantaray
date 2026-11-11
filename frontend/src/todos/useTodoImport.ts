@@ -69,7 +69,9 @@ export function useTodoImportStart() {
  * One import's draft, read again whenever the TODOs change, since each of its Action's writes
  * moves the same counter. The user's writes are not anticipated: while one is answering the
  * draft stays as read and `pending` is set, and after it the draft is read again, so a write
- * the backend refused as stale shows the draft as it is now.
+ * the backend refused as stale shows the draft as it is now. Any other write that did not land
+ * is held as `unsaved` until it is saved again or discarded, so the screen never registers a
+ * draft other than the one the user sees edited.
  */
 export function useTodoImport(importId: string) {
   const read = useCallback(() => importsBridge().read({ import_id: importId }), [importId]);
@@ -78,12 +80,15 @@ export function useTodoImport(importId: string) {
   // A text field's Enter and the blur after it would both write; the second waits for nothing.
   const pendingRef = useRef(false);
   const [problem, setProblem] = useState<TodoImportProblem | null>(null);
+  const [unsaved, setUnsaved] = useState<TodoImportDraft | null>(null);
+  // Bumped when an edit is let go, so fields still showing it go back to the draft as read.
+  const [discards, setDiscards] = useState(0);
   const view = data?.kind === 'ok' ? data.result : null;
 
-  /** Resolves the import as the request left it, or null when it was refused or unanswered. */
+  /** Resolves the import as the request left it, or why it did not change it. */
   const send = async (
     request: (imports: TodoImportsBridge, view: TodoImportView) => Promise<TodoImportResult>
-  ): Promise<TodoImportView | null> => {
+  ): Promise<TodoImportView | TodoImportProblem | null> => {
     if (view === null || pendingRef.current) return null;
     pendingRef.current = true;
     setPending(true);
@@ -92,13 +97,31 @@ export function useTodoImport(importId: string) {
       const result = await request(importsBridge(), view);
       if (result.kind === 'refused') setProblem(result.refusal.reason);
       await reload();
-      return result.kind === 'ok' ? result.result : null;
+      return result.kind === 'ok' ? result.result : result.refusal.reason;
     } catch {
       setProblem('failed');
-      return null;
+      return 'failed';
     } finally {
       pendingRef.current = false;
       setPending(false);
+    }
+  };
+
+  const landed = (outcome: TodoImportView | TodoImportProblem | null) =>
+    typeof outcome === 'object' ? outcome : null;
+  const write = async (draft: TodoImportDraft) => {
+    const outcome = await send((imports, current) =>
+      imports.write({ import_id: importId, expected_revision: current.revision, draft })
+    );
+    if (outcome === null) return;
+    if (typeof outcome === 'object') {
+      setUnsaved(null);
+    } else if (outcome === 'stale_revision') {
+      // The draft read since replaces the edit, which was made on an older one.
+      setUnsaved(null);
+      setDiscards((count) => count + 1);
+    } else {
+      setUnsaved(draft);
     }
   };
 
@@ -110,14 +133,23 @@ export function useTodoImport(importId: string) {
     error,
     pending,
     problem,
-    write: (draft: TodoImportDraft) =>
-      send((imports, current) =>
-        imports.write({ import_id: importId, expected_revision: current.revision, draft })
+    /** An edit whose write did not land; nothing registers until it is saved or discarded. */
+    unsaved: unsaved !== null,
+    /** Changes each time an edit is let go: fields keyed by it show the draft as read. */
+    discards,
+    write,
+    saveAgain: () => (unsaved === null ? Promise.resolve() : write(unsaved)),
+    discardUnsaved: () => {
+      setUnsaved(null);
+      setProblem(null);
+      setDiscards((count) => count + 1);
+    },
+    register: async () =>
+      landed(
+        await send((imports, current) =>
+          imports.register({ import_id: importId, expected_revision: current.revision })
+        )
       ),
-    register: () =>
-      send((imports, current) =>
-        imports.register({ import_id: importId, expected_revision: current.revision })
-      ),
-    cancel: () => send((imports) => imports.cancel({ import_id: importId })),
+    cancel: async () => landed(await send((imports) => imports.cancel({ import_id: importId }))),
   };
 }

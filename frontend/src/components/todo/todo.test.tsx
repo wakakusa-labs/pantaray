@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -295,6 +295,43 @@ it('imports attached files, staged as the composers stage them, and refuses an i
     { attachment_id: '6f1c7a64-5d1e-4c4b-9b5b-3d0d7c3f2a10', name: 'notes.md', byte_size: 12 },
   ]);
   expect(screen.queryByText('notes.md')).toBeNull();
+  window.electron = undefined;
+});
+
+it('adds no file while an import is starting', async () => {
+  let answer: (started: boolean) => void = () => undefined;
+  const pendingImport = vi.fn(() => new Promise<boolean>((resolve) => (answer = resolve)));
+  const attachFile = vi.fn(async ({ name }: { name: string }) => ({
+    attachmentId: '6f1c7a64-5d1e-4c4b-9b5b-3d0d7c3f2a10',
+    name,
+    byteSize: 12,
+  }));
+  window.electron = {
+    actions: { attachFile, attachImage: vi.fn(), discardAttachment: vi.fn(async () => undefined) },
+  } as unknown as Window['electron'];
+  const { container } = render(
+    ja(
+      <TodoAddBar
+        today={TODAY}
+        projects={PROJECTS}
+        disabled={false}
+        onSubmit={vi.fn(async () => true)}
+        onImport={pendingImport}
+      />
+    )
+  );
+  await userEvent.type(addField(), 'a{Shift>}{Enter}{/Shift}b{Enter}');
+  expect(pendingImport).toHaveBeenCalledOnce();
+  const notes = new File(['# 議事録'], 'notes.md', { type: 'text/markdown' });
+  expect(screen.getByRole('button', { name: '添付' })).toBeDisabled();
+  fireEvent.drop(container.querySelector('fieldset')!, { dataTransfer: { files: [notes] } });
+  fireEvent.paste(addField(), { clipboardData: { files: [notes] } });
+  await userEvent.upload(container.querySelector<HTMLInputElement>('input[type="file"]')!, notes);
+  expect(attachFile).not.toHaveBeenCalled();
+
+  await act(async () => answer(true));
+  expect(screen.queryByText('notes.md')).toBeNull();
+  expect(screen.getByRole('button', { name: '添付' })).toBeEnabled();
   window.electron = undefined;
 });
 

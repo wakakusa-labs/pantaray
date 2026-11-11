@@ -175,6 +175,17 @@
   color: var(--danger-color);
 }
 
+.todo-import__unsaved {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.todo-import__unsaved > .todo-import__alert {
+  flex: 1 1 200px;
+}
+
 .todo-import__actions {
   display: flex;
   flex-wrap: wrap;

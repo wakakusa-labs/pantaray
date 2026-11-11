@@ -259,3 +259,36 @@ it('keeps 登録 closed while the draft has an issue, and says why', async () =>
     within(screen.getByRole('group', { name: '下書き' })).getAllByRole('listitem')
   ).toHaveLength(3);
 });
+
+it('holds 登録 after an edit that did not save until it saves again, or is let go', async () => {
+  renderPane();
+  const field = (await screen.findAllByRole('textbox', { name: 'TODO' }))[0];
+  write.mockRejectedValueOnce(new Error('timeout'));
+  await userEvent.clear(field);
+  await userEvent.type(field, '求人票を直す{Enter}');
+  expect(await screen.findByRole('alert')).toHaveTextContent('直前の編集を保存できませんでした。');
+  // The field still shows the edit the backend does not have, so the old draft is not registered.
+  expect(field).toHaveValue('求人票を直す');
+  expect(registerButton()).toBeDisabled();
+  expect(field).toBeDisabled();
+
+  await userEvent.click(screen.getByRole('button', { name: 'もう一度保存' }));
+  expect(write).toHaveBeenCalledTimes(2);
+  expect(write.mock.lastCall![0].draft.groups[0].todos[0].text).toBe('求人票を直す');
+  await waitFor(() => expect(registerButton()).toBeEnabled());
+  expect(screen.queryByRole('alert')).toBeNull();
+
+  // A refusal holds it too; letting it go shows the draft as read.
+  write.mockResolvedValueOnce({
+    kind: 'refused',
+    refusal: { reason: 'invalid_text', group_index: 0, todo_index: 0 },
+  });
+  const again = screen.getAllByRole('textbox', { name: 'TODO' })[0];
+  await userEvent.clear(again);
+  await userEvent.type(again, '求人票{Enter}');
+  expect(await screen.findByRole('alert')).toHaveTextContent('TODO は 1 行ずつ書いてください。');
+  expect(registerButton()).toBeDisabled();
+  await userEvent.click(screen.getByRole('button', { name: '編集を取り消す' }));
+  expect(screen.getAllByRole('textbox', { name: 'TODO' })[0]).toHaveValue('求人票を出す');
+  expect(registerButton()).toBeEnabled();
+});

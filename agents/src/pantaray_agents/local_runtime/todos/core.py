@@ -65,11 +65,12 @@ def create_todo(
     author: TodoAuthor,
     origin: TodoOrigin,
     project_id: str | None,
-    starts_on: LocalDate,
+    starts_on: LocalDate | None,
     due: TodoDue | None,
     now: str,
 ) -> Todo | Rejected[CreateRejection]:
-    """A new open TODO the AI may pick up from `starts_on`."""
+    """A new open TODO the AI may pick up from `starts_on`, or not at all while
+    it has no start."""
 
     line = text.strip()
     if line.splitlines() != [line]:
@@ -110,7 +111,8 @@ def _next_recurrence(
     todo: Todo, *, checked_at: str, now: str, zone: ZoneInfo
 ) -> Todo | None:
     """The first weekly occurrence due after the local date of the check; it
-    starts as many days after this one's start as it is due after this one."""
+    starts as many days after this one's start as it is due after this one, and
+    has no start when this one has none."""
 
     if todo.due is None or todo.due.repeat != "weekly":
         return None
@@ -121,7 +123,7 @@ def _next_recurrence(
         todo,
         todo_id=str(uuid.uuid5(_NAMESPACE_TODO_RECURRENCE, todo.todo_id)),
         origin=RecurrenceOrigin(previous_todo_id=todo.todo_id),
-        starts_on=shift_days(todo.starts_on, shift),
+        starts_on=None if todo.starts_on is None else shift_days(todo.starts_on, shift),
         due=TodoDue(date=shift_days(todo.due.date, shift), repeat="weekly"),
         check=None,
         ai_report=None,
@@ -137,7 +139,9 @@ def set_due(todo: Todo, due: TodoDue | None) -> Todo | Rejected[DueRejection]:
     return replace(todo, due=due)
 
 
-def set_start(todo: Todo, starts_on: LocalDate) -> Todo | Rejected[StartRejection]:
+def set_start(
+    todo: Todo, starts_on: LocalDate | None
+) -> Todo | Rejected[StartRejection]:
     if todo.deletion is not None:
         return Rejected("deleted")
     return replace(todo, starts_on=starts_on)

@@ -24,6 +24,7 @@ from pantaray_agents.local_runtime.todos.model import (
     ActionConversation,
     ActiveRun,
     ApprovalPendingRun,
+    LocalDate,
     Todo,
     TodoId,
 )
@@ -192,12 +193,17 @@ def post_todo(
 ) -> TodoView:
     _require_path_user(user_id, resolved_user_id)
     clock = read_todo_clock()
+    # Omitted starts it today; an explicit null leaves it with no start.
+    if "starts_on" not in body.model_fields_set:
+        starts_on: LocalDate | None = clock.today
+    else:
+        starts_on = None if body.starts_on is None else body.starts_on.isoformat()
     created = create_todo_item(
         user_id=user_id,
         client_todo_id=body.client_todo_id,
         project_id=body.project_id,
         text=body.text,
-        starts_on=clock.today if body.starts_on is None else body.starts_on.isoformat(),
+        starts_on=starts_on,
         due=None if body.due is None else body.due.due(),
         clock=clock,
     )
@@ -255,7 +261,7 @@ def put_todo_start(
     resolved_user_id: str = Depends(get_current_user_id_from_token),
 ) -> TodoView:
     _require_path_user(user_id, resolved_user_id)
-    starts_on = body.starts_on.isoformat()
+    starts_on = None if body.starts_on is None else body.starts_on.isoformat()
     _apply(user_id, todo_id, lambda todo: core.set_start(todo, starts_on))
     return _read_view(user_id, todo_id, read_todo_clock())
 

@@ -37,7 +37,8 @@ export const todoRefusalMessage = (code: TodoRefusalCode): MessageKey =>
 
 type Outcome = 'ok' | 'refused' | 'unknown';
 
-const addKey = (projectId: string | null, startsOn: string) => `${startsOn}\n${projectId ?? ''}`;
+const addKey = (projectId: string | null, startsOn: string | null) =>
+  `${startsOn ?? ''}\n${projectId ?? ''}`;
 
 /** The reads that show a write's result: `useTodoList`'s and `useDeletedTodos`'s `reload`. */
 export type TodoReloads = {
@@ -108,7 +109,7 @@ export function useTodoMutations({ reloadList, reloadDeleted }: TodoReloads) {
   /** Resolves true once the added TODO has been read into the list, which empties the add field. */
   const create = async (
     projectId: string | null,
-    startsOn: string,
+    startsOn: string | null,
     text: string,
     due: TodoDue | null
   ): Promise<boolean> => {
@@ -146,7 +147,7 @@ export function useTodoMutations({ reloadList, reloadDeleted }: TodoReloads) {
       writeRow(todoId, (todos) => todos.setCheck({ todo_id: todoId, checked }), reloadList),
     setDue: (todoId: string, due: TodoDue | null) =>
       writeRow(todoId, (todos) => todos.setDue({ todo_id: todoId, due }), reloadList),
-    setStart: (todoId: string, startsOn: string) =>
+    setStart: (todoId: string, startsOn: string | null) =>
       writeRow(
         todoId,
         (todos) => todos.setStart({ todo_id: todoId, starts_on: startsOn }),

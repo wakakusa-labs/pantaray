@@ -90,6 +90,7 @@ def _reported(kind: ReportKind, run_id: str | None = "run-2") -> Todo:
         (SUGGESTED_TODO, SUGGESTION, Waiting("reply", None)),
         (make_todo(starts_on=TOMORROW), NONE, NotStarted("scheduled")),
         (make_todo(starts_on=TODAY), NONE, NotStarted("starting")),
+        (make_todo(starts_on=None), NONE, NotStarted("unscheduled")),
     ],
 )
 def test_display_state(
@@ -116,6 +117,7 @@ def test_display_state(
         (SUGGESTED_TODO, SUGGESTION, None),
         # Tomorrow, though in the week that holds today.
         (make_todo(starts_on=TOMORROW), NONE, None),
+        (make_todo(starts_on=None), NONE, None),
         (make_todo(check=TodoCheck(by="user", at=AT)), NONE, None),
         (make_todo(deletion=TodoDeletion(by="user", at=AT)), NONE, None),
         (make_todo(), SUCCEEDED, None),

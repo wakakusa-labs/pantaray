@@ -147,6 +147,21 @@ it('changes the start of a TODO Pantaray has not started, and only of one', () =
   expect(within(picker).queryByRole('button', { name: '期限をなくす' })).toBeNull();
   fireEvent.click(within(picker).getByRole('button', { name: '明日' }));
   expect(handlers.onSetStart).toHaveBeenLastCalledWith('2026-11-08');
+  fireEvent.click(within(picker).getByRole('button', { name: '未定にする' }));
+  expect(handlers.onSetStart).toHaveBeenLastCalledWith(null);
+
+  // With no start, Pantaray waits for the user to give it one from the same word.
+  const unset = renderRow({
+    starts_on: null,
+    state: { kind: 'not_started', reason: 'unscheduled' },
+  });
+  expect(screen.getByRole('button', { name: '開始日未定: 見積書を送る' })).toHaveTextContent(
+    /^開始日未定$/
+  );
+  fireEvent.click(
+    within(screen.getByRole('dialog', { name: '開始日' })).getByRole('button', { name: '今日' })
+  );
+  expect(unset.onSetStart).toHaveBeenLastCalledWith(TODAY);
 
   renderRow({ state: { kind: 'working', note: null } });
   expect(screen.queryByRole('button', { name: /^開始日/ })).toBeNull();
@@ -226,6 +241,19 @@ it('adds to the project, due and start chosen, and offers no project with one in
 
   rerender(bar(PROJECTS.slice(0, 1)));
   expect(screen.queryByRole('combobox', { name: 'プロジェクト' })).toBeNull();
+});
+
+it('adds a TODO with no start, which a date chosen later replaces', async () => {
+  const onSubmit = vi.fn(async () => true);
+  render(ja(<TodoAddBar today={TODAY} projects={PROJECTS} disabled={false} onSubmit={onSubmit} />));
+  const startPicker = () => within(screen.getByRole('dialog', { name: '開始日' }));
+  fireEvent.click(startPicker().getByRole('button', { name: '未定にする' }));
+  expect(screen.getByRole('button', { name: '開始 未定' })).toBeVisible();
+  await userEvent.type(addField(), '請求書{Enter}');
+  expect(onSubmit).toHaveBeenLastCalledWith('p1', null, '請求書', null);
+
+  fireEvent.click(startPicker().getByRole('button', { name: '今日' }));
+  expect(screen.getByRole('button', { name: '開始 今日' })).toBeVisible();
 });
 
 it('counts a group’s done TODOs and names its organization after it when one is given', () => {

@@ -64,7 +64,7 @@ def create_todo_item(
     client_todo_id: str,
     project_id: str | None,
     text: str,
-    starts_on: LocalDate,
+    starts_on: LocalDate | None,
     due: TodoDue | None,
     clock: TodoClock,
 ) -> Todo | Rejected[core.CreateRejection | CreateItemRejection]:
@@ -245,7 +245,7 @@ def delete_purged_todo(*, user_id: str, todo: Todo) -> None:
         )
 
 
-def _request(todo: Todo) -> tuple[str, str, str | None, TodoDue | None]:
+def _request(todo: Todo) -> tuple[str, str | None, str | None, TodoDue | None]:
     return (todo.text, todo.starts_on, todo.project_id, todo.due)
 
 

@@ -138,7 +138,8 @@ def read_purge_due_todos(*, user_id: str, now: str) -> tuple[TodoEntry, ...]:
 
 
 def read_pickup_candidates(*, user_id: str, today: LocalDate) -> tuple[TodoEntry, ...]:
-    """Open TODOs whose start date has come, with their conversations.
+    """Open TODOs whose start date has come, with their conversations; one
+    with no start date never matches `starts_on <= ?`.
 
     A superset of what the pickup starts: `pickup_target` decides.
     """

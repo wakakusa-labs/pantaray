@@ -241,9 +241,9 @@ async function openHome(page: Page, search = '') {
           : ids.includes(query.organization_id!);
       };
       const TODAY = '2026-11-04';
-      const notStarted = (startsOn: string): TodoView['state'] => ({
+      const notStarted = (startsOn: string | null): TodoView['state'] => ({
         kind: 'not_started',
-        reason: startsOn > TODAY ? 'scheduled' : 'starting',
+        reason: startsOn === null ? 'unscheduled' : startsOn > TODAY ? 'scheduled' : 'starting',
       });
       // Goals the form writes stay for the page's later reads, as the backend's do.
       const goals = new Map(initialGoals.map((goal) => [goal.project_id, goal]));
@@ -461,7 +461,7 @@ async function openHome(page: Page, search = '') {
                 text: request.text,
                 author: 'user',
                 origin: 'written',
-                starts_on: request.starts_on ?? TODAY,
+                starts_on: request.starts_on === undefined ? TODAY : request.starts_on,
                 due: request.due,
                 state: { kind: 'not_started', reason: 'starting' },
                 deletion_request: null,
@@ -800,6 +800,21 @@ test('a row’s due day and start change from a small picker, and the bar under 
   await page.getByRole('dialog', { name: '開始日' }).getByRole('button', { name: '今日' }).click();
   await expect(
     added.getByRole('button', { name: '開始日 まもなく: 面接官の日程を押さえる' })
+  ).toBeFocused();
+
+  // 未定にする leaves it with no start until a date is set again from the same word.
+  await added.getByRole('button', { name: '開始日 まもなく: 面接官の日程を押さえる' }).click();
+  await capture(page, info, 'start-picker');
+  await page
+    .getByRole('dialog', { name: '開始日' })
+    .getByRole('button', { name: '未定にする' })
+    .click();
+  const unset = added.getByRole('button', { name: '開始日未定: 面接官の日程を押さえる' });
+  await expect(unset).toBeFocused();
+  await unset.click();
+  await page.getByRole('dialog', { name: '開始日' }).getByRole('button', { name: '明日' }).click();
+  await expect(
+    added.getByRole('button', { name: '開始日 木 11/5から: 面接官の日程を押さえる' })
   ).toBeFocused();
 });
 

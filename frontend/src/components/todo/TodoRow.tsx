@@ -17,7 +17,7 @@ type StateTone = 'turn' | 'ask' | 'working' | 'quiet' | 'done';
 
 /**
  * Where the TODO stands, in a word; the conversation beside the list tells the rest. `startsOn`
- * names the day a TODO not started yet starts.
+ * names the day a TODO scheduled for later starts.
  */
 function stateWord(todo: TodoView): { key: MessageKey; tone: StateTone; startsOn?: string } {
   // Pantaray's request to delete waits for the user, whatever the work's own state.
@@ -38,8 +38,9 @@ function stateWord(todo: TodoView): { key: MessageKey; tone: StateTone; startsOn
         tone: 'quiet',
       };
     case 'not_started':
-      return state.reason === 'starting'
-        ? { key: 'todo.state.starting', tone: 'quiet' }
+      if (state.reason === 'starting') return { key: 'todo.state.starting', tone: 'quiet' };
+      return todo.starts_on === null
+        ? { key: 'todo.state.unscheduled', tone: 'quiet' }
         : { key: 'todo.state.startsOn', tone: 'quiet', startsOn: todo.starts_on };
   }
 }
@@ -71,7 +72,7 @@ export function TodoRow({
   onSelect: () => void;
   onDelete: () => void;
   onSetDue: (due: TodoDue | null) => void;
-  onSetStart: (startsOn: string) => void;
+  onSetStart: (startsOn: string | null) => void;
 }) {
   const { t, language } = useI18n();
   const done = todo.state.kind === 'done';
@@ -117,14 +118,17 @@ export function TodoRow({
       {notStarted ? (
         <TodoDatePicker
           label={t('todo.date.start')}
-          triggerLabel={t('todo.row.start', { state: stateText, text: todo.text })}
+          triggerLabel={
+            todo.starts_on === null
+              ? t('todo.row.noStart', { text: todo.text })
+              : t('todo.row.start', { state: stateText, text: todo.text })
+          }
           triggerClassName={`todo-row__date ${stateClass}`}
           value={todo.starts_on}
           today={today}
+          clearLabel={t('todo.date.unsetStart')}
           disabled={pending}
-          onChoose={(date) => {
-            if (date) onSetStart(date);
-          }}
+          onChoose={onSetStart}
         >
           {stateText}
         </TodoDatePicker>

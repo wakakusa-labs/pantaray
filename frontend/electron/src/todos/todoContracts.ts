@@ -93,8 +93,8 @@ export const TodoProgressQuerySchema = z
   .refine(projectMatches, PROJECT_MISMATCH);
 
 /**
- * The body of `POST /todos`. `client_todo_id` is the idempotency key; no `starts_on` starts it
- * today. Whether the text is one non-blank line is the backend's to decide.
+ * The body of `POST /todos`. `client_todo_id` is the idempotency key; an omitted `starts_on`
+ * starts it today and `null` leaves it with no start. Whether the text is one non-blank line is the backend's to decide.
  */
 export const TodoCreateRequestSchema = z
   .object({
@@ -106,7 +106,7 @@ export const TodoCreateRequestSchema = z
         (value) => Array.from(value).length <= TODO_TEXT_MAX_CODEPOINTS,
         'text exceeds the Unicode code-point limit'
       ),
-    starts_on: LocalDateSchema.optional(),
+    starts_on: LocalDateSchema.nullable().optional(),
     due: TodoDueSchema.nullable(),
   })
   .strict();
@@ -119,9 +119,9 @@ export const TodoDueRequestSchema = z
   .object({ todo_id: TodoIdSchema, due: TodoDueSchema.nullable() })
   .strict();
 
-/** The AI picks the TODO up from `starts_on`. */
+/** The AI picks the TODO up from `starts_on`, or not at all while it is null. */
 export const TodoStartRequestSchema = z
-  .object({ todo_id: TodoIdSchema, starts_on: LocalDateSchema })
+  .object({ todo_id: TodoIdSchema, starts_on: LocalDateSchema.nullable() })
   .strict();
 
 /** Names one TODO: delete and restore carry nothing else. */
@@ -180,8 +180,11 @@ const TodoStateSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('partial'), note: z.string().nullable() }).strict(),
   z.object({ kind: z.literal('stopped'), outcome: z.enum(['failed', 'canceled']) }).strict(),
   z
-    // `scheduled`: its `starts_on` has not come yet.
-    .object({ kind: z.literal('not_started'), reason: z.enum(['scheduled', 'starting']) })
+    // `scheduled`: its `starts_on` has not come yet. `unscheduled`: it has no `starts_on`.
+    .object({
+      kind: z.literal('not_started'),
+      reason: z.enum(['scheduled', 'unscheduled', 'starting']),
+    })
     .strict(),
 ]);
 
@@ -198,8 +201,8 @@ const TodoViewSchema = z
     text: z.string(),
     author: TodoAuthorSchema,
     origin: z.enum(['written', 'suggestion', 'recurrence']),
-    // The AI picks it up from this date.
-    starts_on: LocalDateSchema,
+    // The AI picks it up from this date; null: not until the user sets one.
+    starts_on: LocalDateSchema.nullable(),
     due: TodoDueSchema.nullable(),
     state: TodoStateSchema,
     // Only while the request is pending.

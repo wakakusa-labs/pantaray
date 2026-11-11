@@ -56,7 +56,8 @@ class Stopped:
 @dataclass(frozen=True, slots=True)
 class NotStarted:
     # `scheduled`: its start date, which the view carries, has not come yet.
-    reason: Literal["scheduled", "starting"]
+    # `unscheduled`: it has no start date, so the AI waits for the user to set one.
+    reason: Literal["scheduled", "unscheduled", "starting"]
     kind: Literal["not_started"] = "not_started"
 
 
@@ -139,6 +140,8 @@ def _reported_state(report: AiReport) -> TodoDisplayState:
 
 
 def _not_started(todo: Todo, today: LocalDate) -> NotStarted:
+    if todo.starts_on is None:
+        return NotStarted(reason="unscheduled")
     if todo.starts_on > today:
         return NotStarted(reason="scheduled")
     return NotStarted(reason="starting")
@@ -150,6 +153,7 @@ def pickup_target(
     if (
         todo.check is not None
         or todo.deletion is not None
+        or todo.starts_on is None
         or todo.starts_on > today
         or conversation.kind == "action"
     ):

@@ -13,7 +13,7 @@ import './todo.css';
 
 /**
  * The bar under the list that adds a TODO: its text, its project (while several are in view),
- * due day (none at first) and start (today at first), and send. An IME's Enter does not send.
+ * due day (none at first) and start (today at first, or none), and send. An IME's Enter does not send.
  * The text empties once the TODO was taken; the choices stay for the next one.
  */
 export function TodoAddBar({
@@ -30,7 +30,7 @@ export function TodoAddBar({
   disabled: boolean;
   onSubmit: (
     projectId: string | null,
-    startsOn: string,
+    startsOn: string | null,
     text: string,
     due: TodoDue | null
   ) => Promise<boolean>;
@@ -40,11 +40,11 @@ export function TodoAddBar({
   const [sending, setSending] = useState(false);
   const [chosenProject, setChosenProject] = useState(projects[0].projectId ?? '');
   const [due, setDue] = useState<string | null>(null);
-  // Null is today, whichever day that is when the TODO is sent.
-  const [start, setStart] = useState<string | null>(null);
+  // 'today' is whichever day that is when the TODO is sent; a null date is no start.
+  const [start, setStart] = useState<'today' | { date: string | null }>('today');
   // A project gone from view falls back to the first one.
   const project = projects.find((slot) => (slot.projectId ?? '') === chosenProject) ?? projects[0];
-  const startsOn = start ?? today;
+  const startsOn = start === 'today' ? today : start.date;
 
   const send = async () => {
     if (sending || !text.trim()) return;
@@ -108,11 +108,14 @@ export function TodoAddBar({
           triggerClassName="todo-add-bar__chip"
           value={startsOn}
           today={today}
-          onChoose={(date) => setStart(date === today ? null : date)}
+          clearLabel={t('todo.date.unsetStart')}
+          onChoose={(date) => setStart(date === today ? 'today' : { date })}
         >
-          {startsOn === today
-            ? t('todo.add.startsToday')
-            : t('todo.add.startsOn', { date: dueDay(language, startsOn) })}
+          {startsOn === null
+            ? t('todo.add.startsUnset')
+            : startsOn === today
+              ? t('todo.add.startsToday')
+              : t('todo.add.startsOn', { date: dueDay(language, startsOn) })}
         </TodoDatePicker>
         <button
           type="button"

@@ -97,6 +97,7 @@ function buildCtx(overrides = {}, openOverlay = asyncSpy(undefined)) {
       getCommandNetwork: async () => ({ command_network_enabled: true }),
       updateCommandNetwork: asyncSpy({ command_network_enabled: false }),
       createOrganization: asyncSpy({ organization_id: 'o1', display_name: 'Org' }),
+      updateOrganization: asyncSpy({ organization_id: 'o1', display_name: 'Org' }),
       createProject: asyncSpy({
         project_id: 'p1',
         display_name: 'Proj',
@@ -355,10 +356,33 @@ test('workspaceSettings:createOrganization rejects missing displayName', async (
 test('workspaceSettings:createOrganization accepts displayName and trims', async () => {
   const { ctx, ipcMain } = buildCtx();
   const invoke = getInvoke(ipcMain, 'workspaceSettings:createOrganization');
-  await invoke({ displayName: '  Acme Co  ' });
+  await invoke({ displayName: '  Acme Co  ', iconDataUrl: null });
   assert.deepEqual(ctx.workspaceSettings.createOrganization.calls[0][0], {
     displayName: 'Acme Co',
+    iconDataUrl: null,
   });
+});
+
+test('workspaceSettings:updateOrganization refuses an icon that is not a bounded string or null', async () => {
+  const { ctx, ipcMain } = buildCtx();
+  const invoke = getInvoke(ipcMain, 'workspaceSettings:updateOrganization');
+  for (const iconDataUrl of [undefined, 42, 'x'.repeat(2 * 64 * 1024 + 1)]) {
+    await assert.rejects(
+      invoke('org_1', { displayName: 'Acme', iconDataUrl }),
+      rejectsValidation('workspaceSettings:updateOrganization')
+    );
+  }
+  assert.equal(ctx.workspaceSettings.updateOrganization.calls.length, 0);
+});
+
+test('workspaceSettings:updateOrganization forwards the id, trimmed name and icon', async () => {
+  const { ctx, ipcMain } = buildCtx();
+  const invoke = getInvoke(ipcMain, 'workspaceSettings:updateOrganization');
+  await invoke('org_1', { displayName: ' Acme ', iconDataUrl: 'data:image/png;base64,AA==' });
+  assert.deepEqual(ctx.workspaceSettings.updateOrganization.calls[0], [
+    'org_1',
+    { displayName: 'Acme', iconDataUrl: 'data:image/png;base64,AA==' },
+  ]);
 });
 
 test('workspaceSettings:createProject rejects non-array organizationIds', async () => {

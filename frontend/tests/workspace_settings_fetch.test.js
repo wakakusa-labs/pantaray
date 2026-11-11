@@ -8,7 +8,13 @@ const {
 function validSettings() {
   return {
     read_access_scope: 'workspace',
-    organizations: [{ organization_id: 'org-1', display_name: 'Org' }],
+    organizations: [
+      {
+        organization_id: 'org-1',
+        display_name: 'Org',
+        icon_data_url: 'data:image/png;base64,AA==',
+      },
+    ],
     projects: [
       {
         project_id: 'project-1',
@@ -158,4 +164,46 @@ test('workspace settings fetcher answers a taken project name as data, not as th
     }
   );
   await assert.rejects(fetcher.createProject({ displayName: 'Core', organizationIds: [] }), /bad/);
+});
+
+test('workspace settings fetcher sends the organization name and icon and answers a taken name as data', async () => {
+  const { LocalBackendRequestError } = require('../electron/dist/localBackend/client.js');
+  const calls = [];
+  const organization = { organization_id: 'org/1', display_name: 'Acme', icon_data_url: null };
+  const answers = [organization, organization, new LocalBackendRequestError('taken', 409)];
+  const fetcher = createWorkspaceSettingsFetcher({
+    getUserId: () => 'user-1',
+    requestJson: async (request) => {
+      calls.push(request);
+      const answer = answers.shift();
+      if (answer instanceof Error) throw answer;
+      return answer;
+    },
+  });
+  const icon = 'data:image/png;base64,AA==';
+
+  assert.deepEqual(
+    await fetcher.createOrganization({ displayName: 'Acme', iconDataUrl: icon }),
+    organization
+  );
+  assert.deepEqual(
+    await fetcher.updateOrganization('org/1', { displayName: 'Acme', iconDataUrl: null }),
+    organization
+  );
+  assert.deepEqual(
+    await fetcher.updateOrganization('org/1', { displayName: 'Beta', iconDataUrl: null }),
+    { errorCode: 'ORGANIZATION_NAME_TAKEN' }
+  );
+  assert.deepEqual(calls.slice(0, 2), [
+    {
+      path: '/v1/agents/users/user-1/workspace-settings/organizations',
+      method: 'POST',
+      body: { display_name: 'Acme', icon_data_url: icon },
+    },
+    {
+      path: '/v1/agents/users/user-1/workspace-settings/organizations/org%2F1',
+      method: 'PUT',
+      body: { display_name: 'Acme', icon_data_url: null },
+    },
+  ]);
 });

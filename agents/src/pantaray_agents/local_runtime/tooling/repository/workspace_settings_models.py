@@ -11,6 +11,10 @@ class WorkspaceProjectNameTakenError(MigrationError):
     """Another project of this user already has the name."""
 
 
+class WorkspaceOrganizationNameTakenError(MigrationError):
+    """Another organization of this user already has the name."""
+
+
 @dataclass(frozen=True)
 class WorkspaceOrganization:
     organization_id: str
@@ -46,6 +50,7 @@ class WorkspaceSettings:
 __all__ = [
     "WorkspaceFolder",
     "WorkspaceOrganization",
+    "WorkspaceOrganizationNameTakenError",
     "WorkspaceProject",
     "WorkspaceProjectNameTakenError",
     "WorkspaceSettings",

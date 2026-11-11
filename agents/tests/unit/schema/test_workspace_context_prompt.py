@@ -78,6 +78,7 @@ def test_load_workspace_context_catalog_maps_ids_to_display_names(
         busy_timeout_ms=1_000,
         user_id="user-1",
         display_name="Wakakusa",
+        icon_data_url=None,
         now=TIMESTAMP,
     )
     project = create_workspace_project(
@@ -122,6 +123,7 @@ def test_unassigned_folder_keeps_direct_organization_context(tmp_path: Path) -> 
         busy_timeout_ms=1_000,
         user_id="user-1",
         display_name="Direct Organization",
+        icon_data_url=None,
         now=TIMESTAMP,
     )
     create_workspace_folder(

@@ -20,6 +20,7 @@ from pantaray_agents.routers import (
     suggestion,
     todo_progress,
     todos,
+    workspace_organizations,
     workspace_settings,
 )
 from pantaray_agents.routers.history_overlay import router as history_overlay_router
@@ -36,6 +37,7 @@ def register_local_routers(app: FastAPI) -> None:
     app.include_router(action_html_render.router)
     app.include_router(approval_preferences.router)
     app.include_router(workspace_settings.router)
+    app.include_router(workspace_organizations.router)
     app.include_router(integrations.router)
     app.include_router(context_source.router)
     app.include_router(activity.router)

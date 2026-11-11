@@ -80,6 +80,7 @@ export function buildMainContext(params: {
   workspaceSettingsGetCommandNetwork: MainContext['workspaceSettings']['getCommandNetwork'];
   workspaceSettingsUpdateCommandNetwork: MainContext['workspaceSettings']['updateCommandNetwork'];
   workspaceSettingsCreateOrganization: MainContext['workspaceSettings']['createOrganization'];
+  workspaceSettingsUpdateOrganization: MainContext['workspaceSettings']['updateOrganization'];
   workspaceSettingsCreateProject: MainContext['workspaceSettings']['createProject'];
   workspaceSettingsRenameProject: MainContext['workspaceSettings']['renameProject'];
   workspaceSettingsCreateFolder: MainContext['workspaceSettings']['createFolder'];
@@ -330,6 +331,8 @@ export function buildMainContext(params: {
       updateCommandNetwork: async (enabled) =>
         params.workspaceSettingsUpdateCommandNetwork(enabled),
       createOrganization: async (input) => params.workspaceSettingsCreateOrganization(input),
+      updateOrganization: async (organizationId, input) =>
+        params.workspaceSettingsUpdateOrganization(organizationId, input),
       createProject: async (input) => params.workspaceSettingsCreateProject(input),
       renameProject: async (projectId, input) =>
         params.workspaceSettingsRenameProject(projectId, input),

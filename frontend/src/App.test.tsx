@@ -12,7 +12,11 @@ vi.mock('../electron/src/auth/accountLoginFeature', () => ({
 }));
 
 const pageMocks = vi.hoisted(() => ({
-  organizations: [] as { organization_id: string; display_name: string }[],
+  organizations: [] as {
+    organization_id: string;
+    display_name: string;
+    icon_data_url: string | null;
+  }[],
   todoUx: true,
 }));
 vi.mock('./todos/todoUxFeature', () => ({
@@ -166,7 +170,7 @@ it('without the TODO list, the rail holds Home and Settings, and Home reopens wh
 
 it('shows the organizations the home page read in the rail, each opening its TODOs', async () => {
   const user = userEvent.setup();
-  pageMocks.organizations = [{ organization_id: 'O1', display_name: 'xer' }];
+  pageMocks.organizations = [{ organization_id: 'O1', display_name: 'xer', icon_data_url: null }];
   window.history.replaceState(null, '', '/#/history');
   render(subject());
   const entry = await screen.findByRole('button', { name: 'xer' });

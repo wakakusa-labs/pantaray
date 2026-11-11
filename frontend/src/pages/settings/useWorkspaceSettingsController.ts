@@ -21,6 +21,7 @@ type WorkspaceSettingsAction =
 
 export type WorkspacePendingKey =
   | 'organization:create'
+  | `organization:update:${string}`
   | 'project:create'
   | `project:delete:${string}`
   | `project:links:${string}`
@@ -30,6 +31,8 @@ export type WorkspacePendingKey =
 
 export const workspacePendingKey = {
   organizationCreate: 'organization:create' as WorkspacePendingKey,
+  organizationUpdate: (organizationId: string): WorkspacePendingKey =>
+    `organization:update:${organizationId}`,
   projectCreate: 'project:create' as WorkspacePendingKey,
   projectDelete: (projectId: string): WorkspacePendingKey => `project:delete:${projectId}`,
   projectLinks: (projectId: string): WorkspacePendingKey => `project:links:${projectId}`,
@@ -138,17 +141,60 @@ export function useWorkspaceSettingsController(t: Translate) {
     }
   };
 
-  const addOrganization = locked(null, async (displayName: string): Promise<string | null> => {
-    const trimmedName = displayName.trim();
-    if (!trimmedName) return null;
-    const organization = await commitMutation(
-      workspacePendingKey.organizationCreate,
-      async () =>
-        await requireWorkspaceSettingsApi().createOrganization({ displayName: trimmedName }),
-      (created) => ({ type: 'organizationCreated', organization: created })
-    );
-    return organization?.organization_id ?? null;
-  });
+  /** A taken name answers with that organization as it is; the icon is a small data URL. */
+  const addOrganization = locked(
+    null,
+    async (displayName: string, iconDataUrl: string | null = null): Promise<string | null> => {
+      const trimmedName = displayName.trim();
+      if (!trimmedName) return null;
+      const organization = await commitMutation(
+        workspacePendingKey.organizationCreate,
+        async () =>
+          await requireWorkspaceSettingsApi().createOrganization({
+            displayName: trimmedName,
+            iconDataUrl,
+          }),
+        (created) => ({ type: 'organizationCreated', organization: created })
+      );
+      return organization?.organization_id ?? null;
+    }
+  );
+
+  /** Replaces the name and icon; a null icon clears it. Another organization's name is refused. */
+  const updateOrganization = locked(
+    false,
+    async (
+      organizationId: string,
+      displayName: string,
+      iconDataUrl: string | null
+    ): Promise<boolean> => {
+      const name = displayName.trim();
+      if (!settings || !name) return false;
+      const taken = settings.organizations.some(
+        (organization) =>
+          organization.display_name === name && organization.organization_id !== organizationId
+      );
+      if (taken) {
+        setErrorMessage(t('history.organizations.nameTaken', { name }));
+        return false;
+      }
+      const updated = await commitMutation(
+        workspacePendingKey.organizationUpdate(organizationId),
+        async () =>
+          await requireWorkspaceSettingsApi().updateOrganization(organizationId, {
+            displayName: name,
+            iconDataUrl,
+          }),
+        (result) =>
+          'errorCode' in result ? null : { type: 'organizationUpdated', organization: result }
+      );
+      if (updated && 'errorCode' in updated) {
+        setErrorMessage(t('history.organizations.nameTaken', { name }));
+        return false;
+      }
+      return updated !== null;
+    }
+  );
 
   // The picker answers with the canonical path (featureRuntime.ts), the form the backend keys
   // folders by. Creating a registered folder again would replace all of its links.
@@ -186,10 +232,16 @@ export function useWorkspaceSettingsController(t: Translate) {
     return true;
   };
 
-  /** The sidebar's ＋: a project of this name with no folder yet; null when it was refused. */
+  /**
+   * The sidebar's ＋: a project of this name with no folder yet, inside the organization given
+   * (null for none); null when it was refused.
+   */
   const createProject = locked(
     null,
-    async (displayName: string): Promise<WorkspaceProject | null> => {
+    async (
+      displayName: string,
+      organizationId: string | null = null
+    ): Promise<WorkspaceProject | null> => {
       const name = displayName.trim();
       if (!settings || !name || refuseTakenName(name)) return null;
       const created = await commitMutation(
@@ -197,7 +249,7 @@ export function useWorkspaceSettingsController(t: Translate) {
         async () =>
           await requireWorkspaceSettingsApi().createProject({
             displayName: name,
-            organizationIds: [],
+            organizationIds: organizationId === null ? [] : [organizationId],
           }),
         (result) => ('errorCode' in result ? null : { type: 'projectCreated', project: result }),
         true
@@ -358,6 +410,7 @@ export function useWorkspaceSettingsController(t: Translate) {
     removeProject,
     renameProject,
     settings,
+    updateOrganization,
     updateProjectOrganizations,
   };
 }

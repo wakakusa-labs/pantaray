@@ -45,6 +45,8 @@ function createSettingsApi({ ipcRenderer }) {
         ipcRenderer.invoke('workspaceSettings:updateCommandNetwork', enabled),
       createOrganization: (input) =>
         ipcRenderer.invoke('workspaceSettings:createOrganization', input),
+      updateOrganization: (organizationId, input) =>
+        ipcRenderer.invoke('workspaceSettings:updateOrganization', organizationId, input),
       createProject: (input) => ipcRenderer.invoke('workspaceSettings:createProject', input),
       renameProject: (projectId, input) =>
         ipcRenderer.invoke('workspaceSettings:renameProject', projectId, input),

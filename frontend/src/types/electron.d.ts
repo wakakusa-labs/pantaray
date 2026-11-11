@@ -120,6 +120,8 @@ type ElectronInstalledApp = {
 type ElectronWorkspaceOrganization = {
   organization_id: string;
   display_name: string;
+  /** A data URL to show as is: a PNG, JPEG or WebP of at most 64 KiB. */
+  icon_data_url: string | null;
 };
 
 type ElectronWorkspaceProject = {
@@ -428,9 +430,20 @@ declare global {
         getReadAccessScope: () => Promise<{
           read_access_scope: 'workspace' | 'full_access';
         }>;
+        /**
+         * The icon is a data URL of a PNG, JPEG or WebP the renderer has already made small
+         * (at most 64 KiB); anything else is refused. A taken name answers with that
+         * organization as it is.
+         */
         createOrganization: (input: {
           displayName: string;
+          iconDataUrl: string | null;
         }) => Promise<ElectronWorkspaceOrganization>;
+        /** Replaces the name and icon; a null icon clears it. A taken name is refused. */
+        updateOrganization: (
+          organizationId: string,
+          input: { displayName: string; iconDataUrl: string | null }
+        ) => Promise<ElectronWorkspaceOrganization | { errorCode: 'ORGANIZATION_NAME_TAKEN' }>;
         /** A name another project has is refused with `PROJECT_NAME_TAKEN`. */
         createProject: (input: {
           displayName: string;

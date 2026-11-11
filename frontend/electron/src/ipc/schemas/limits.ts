@@ -12,6 +12,8 @@ export const MAX_DISPLAY_NAME_LENGTH = 200;
 export const MAX_PATH_LENGTH = 4096;
 export const MAX_HOST_LENGTH = 253;
 export const MAX_ARRAY_LENGTH = 1000;
+/** Twice the backend's 64 KiB icon cap: base64 is 4/3 of the bytes. */
+export const MAX_ICON_DATA_URL_LENGTH = 2 * 64 * 1024;
 export const MAX_REASON_LENGTH = 1024;
 export const MAX_LAST_CHUNK_INDEX = 1_000_000;
 export const MAX_ACCELERATOR_LENGTH = 128;

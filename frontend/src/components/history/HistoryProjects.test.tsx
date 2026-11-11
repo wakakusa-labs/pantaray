@@ -41,7 +41,11 @@ function createApi() {
   return {
     get: vi.fn(async () => structuredClone(store)),
     createOrganization: vi.fn(async ({ displayName }: { displayName: string }) => {
-      const created = { organization_id: `org-${displayName}`, display_name: displayName };
+      const created = {
+        organization_id: `org-${displayName}`,
+        display_name: displayName,
+        icon_data_url: null,
+      };
       store.organizations.push(created);
       return created;
     }),
@@ -148,7 +152,7 @@ beforeEach(() => {
   });
   store = {
     read_access_scope: 'workspace',
-    organizations: [{ organization_id: 'org-x', display_name: 'Xer' }],
+    organizations: [{ organization_id: 'org-x', display_name: 'Xer', icon_data_url: null }],
     projects: [project('a', 0, ['org-x']), project('b', 1)],
     folders: [folder('own', ['a']), folder('shared', ['a', 'b'])],
   };
@@ -286,7 +290,10 @@ it('組織はなしを含めて一つを選んで保存し、新しい組織も�
     within(second).getByRole('textbox', { name: 'history.projects.organizationNew' }),
     'Wakakusa{Enter}'
   );
-  expect(api.createOrganization).toHaveBeenCalledWith({ displayName: 'Wakakusa' });
+  expect(api.createOrganization).toHaveBeenCalledWith({
+    displayName: 'Wakakusa',
+    iconDataUrl: null,
+  });
   expect(await within(second).findByRole('radio', { name: 'Wakakusa' })).toBeChecked();
   await userEvent.click(within(second).getByRole('button', { name: 'common.save' }));
   expect(api.updateProjectLinks).toHaveBeenLastCalledWith('b', {

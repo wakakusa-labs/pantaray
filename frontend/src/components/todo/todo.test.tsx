@@ -218,8 +218,8 @@ it('presses the organization in view and selects another', async () => {
     ja(
       <OrganizationRail
         organizations={[
-          { organization_id: 'org-1', display_name: 'wakakusa' },
-          { organization_id: 'org-2', display_name: 'llm-jp' },
+          { organization_id: 'org-1', display_name: 'wakakusa', icon_data_url: null },
+          { organization_id: 'org-2', display_name: 'llm-jp', icon_data_url: null },
         ]}
         selected={{ scope: 'organization', organization_id: 'org-1' }}
         onSelect={onSelect}

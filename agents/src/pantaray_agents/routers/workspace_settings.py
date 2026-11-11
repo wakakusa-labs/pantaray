@@ -14,14 +14,11 @@ from pantaray_agents.local_runtime.storage.migrations import MigrationError
 from pantaray_agents.local_runtime.tooling.repository import (
     ReadAccessScope,
     WorkspaceFolder,
-    WorkspaceOrganization,
     WorkspaceProject,
     WorkspaceSettings,
     create_workspace_folder,
-    create_workspace_organization,
     create_workspace_project,
     delete_workspace_folder,
-    delete_workspace_organization,
     delete_workspace_project,
     list_workspace_settings,
     load_read_access_scope,
@@ -34,19 +31,21 @@ from pantaray_agents.local_runtime.tooling.repository.command_network_settings i
     load_command_network_enabled,
     update_command_network_enabled,
 )
+from pantaray_agents.local_runtime.tooling.repository.workspace_organization_icons import (
+    load_workspace_organization_icons,
+)
 from pantaray_agents.local_runtime.tooling.repository.workspace_project_rename import (
     rename_workspace_project,
 )
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings_models import (
     WorkspaceProjectNameTakenError,
 )
+from pantaray_agents.routers.workspace_organizations import (
+    WorkspaceOrganizationResponse,
+    organization_response,
+)
 
 router = APIRouter(prefix="/v1/agents/users", tags=["Workspace Settings"])
-
-
-class WorkspaceOrganizationResponse(BaseModel):
-    organization_id: str
-    display_name: str
 
 
 class WorkspaceProjectResponse(BaseModel):
@@ -70,10 +69,6 @@ class WorkspaceSettingsResponse(BaseModel):
     organizations: tuple[WorkspaceOrganizationResponse, ...]
     projects: tuple[WorkspaceProjectResponse, ...]
     folders: tuple[WorkspaceFolderResponse, ...]
-
-
-class WorkspaceOrganizationCreateRequest(BaseModel):
-    display_name: str = Field(min_length=1)
 
 
 WorkspaceProjectOrganizationIds = Annotated[tuple[str, ...], Field(max_length=1)]
@@ -150,23 +145,17 @@ def _assert_user_allowed(*, user_id: str, resolved_user_id: str) -> None:
         )
 
 
-def _settings_response(settings: WorkspaceSettings) -> WorkspaceSettingsResponse:
+def _settings_response(
+    settings: WorkspaceSettings, organization_icons: dict[str, str]
+) -> WorkspaceSettingsResponse:
     return WorkspaceSettingsResponse(
         read_access_scope=settings.read_access_scope,
         organizations=tuple(
-            _organization_response(item) for item in settings.organizations
+            organization_response(item, organization_icons.get(item.organization_id))
+            for item in settings.organizations
         ),
         projects=tuple(_project_response(item) for item in settings.projects),
         folders=tuple(_folder_response(item) for item in settings.folders),
-    )
-
-
-def _organization_response(
-    organization: WorkspaceOrganization,
-) -> WorkspaceOrganizationResponse:
-    return WorkspaceOrganizationResponse(
-        organization_id=organization.organization_id,
-        display_name=organization.display_name,
     )
 
 
@@ -206,7 +195,12 @@ async def get_workspace_settings(
                 db_path=db_path,
                 busy_timeout_ms=busy_timeout_ms,
                 user_id=user_id,
-            )
+            ),
+            load_workspace_organization_icons(
+                db_path=db_path,
+                busy_timeout_ms=busy_timeout_ms,
+                user_id=user_id,
+            ),
         )
     except MigrationError as exc:
         raise HTTPException(
@@ -308,34 +302,6 @@ async def put_command_network_settings(
 
 
 @router.post(
-    "/{user_id}/workspace-settings/organizations",
-    response_model=WorkspaceOrganizationResponse,
-)
-async def post_workspace_organization(
-    user_id: str,
-    body: WorkspaceOrganizationCreateRequest,
-    resolved_user_id: str = Depends(get_current_user_id_from_token),
-) -> WorkspaceOrganizationResponse:
-    _assert_user_allowed(user_id=user_id, resolved_user_id=resolved_user_id)
-    db_path, busy_timeout_ms = read_local_runtime_db_config()
-    try:
-        return _organization_response(
-            create_workspace_organization(
-                db_path=db_path,
-                busy_timeout_ms=busy_timeout_ms,
-                user_id=user_id,
-                display_name=body.display_name,
-                now=now_utc_iso(),
-            )
-        )
-    except MigrationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to create workspace organization: {exc}",
-        ) from exc
-
-
-@router.post(
     "/{user_id}/workspace-settings/projects",
     response_model=WorkspaceProjectResponse,
 )
@@ -394,31 +360,6 @@ async def put_workspace_project_order(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Failed to update workspace project order: {exc}",
-        ) from exc
-
-
-@router.delete(
-    "/{user_id}/workspace-settings/organizations/{organization_id}",
-)
-async def delete_workspace_organization_route(
-    user_id: str,
-    organization_id: str,
-    resolved_user_id: str = Depends(get_current_user_id_from_token),
-) -> dict[str, bool]:
-    _assert_user_allowed(user_id=user_id, resolved_user_id=resolved_user_id)
-    db_path, busy_timeout_ms = read_local_runtime_db_config()
-    try:
-        delete_workspace_organization(
-            db_path=db_path,
-            busy_timeout_ms=busy_timeout_ms,
-            user_id=user_id,
-            organization_id=organization_id,
-        )
-        return {"ok": True}
-    except MigrationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Failed to delete workspace organization: {exc}",
         ) from exc
 
 

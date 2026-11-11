@@ -155,6 +155,7 @@ def load_default_migrations() -> tuple[MigrationSpec, ...]:
         "0137_todo_starts_on.sql",
         "0138_workspace_organization_icons.sql",
         "0139_todo_start_unset.sql",
+        "0140_todo_import_drafts.sql",
     )
     return tuple(
         MigrationSpec(

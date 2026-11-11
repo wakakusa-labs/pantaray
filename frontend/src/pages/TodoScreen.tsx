@@ -19,11 +19,14 @@ import { workspacePendingKey } from '@/pages/settings/useWorkspaceSettingsContro
 import { groupTodosByProject, todoProjectSlots } from '@/todos/groupTodosByProject';
 import type { TodoListSort, TodoSelection } from '@/todos/todoSelection';
 import { useDeletedTodos } from '@/todos/useDeletedTodos';
-import { useTodoImportStart, type TodoImportProblem } from '@/todos/useTodoImport';
+import {
+  useTodoImportStart,
+  type TodoImportAttachments,
+  type TodoImportProblem,
+} from '@/todos/useTodoImport';
 import type { TodoListRead } from '@/todos/useTodoList';
 import { useTodoMutations, type TodoMutationFailure } from '@/todos/useTodoMutations';
 
-import type { ActionFileAttachment } from '../../electron/src/actions/actionContracts';
 import type { TodoView } from '../../electron/src/todos/todoContracts';
 import './todoScreen.css';
 
@@ -55,7 +58,9 @@ function CloseButton({ label, onClose }: { label: string; onClose: () => void })
 
 /** Why an import did not start, told under the add bar. */
 const startProblemMessage = (problem: TodoImportProblem) =>
-  problem === 'files_unavailable' ? 'todo.import.filesUnavailable' : 'todo.import.startFailed';
+  problem === 'files_unavailable' || problem === 'images_invalid'
+    ? 'todo.import.filesUnavailable'
+    : 'todo.import.startFailed';
 
 /** What the header's folders of the project in view are changed with. */
 type ProjectFolderActions = Pick<
@@ -257,9 +262,9 @@ export function TodoScreen({
   };
 
   /** Starts drafting from the add bar's text and files, in the scope in view, and opens it. */
-  const startImport = async (text: string, files: readonly ActionFileAttachment[]) => {
+  const startImport = async (text: string, attachments: TodoImportAttachments) => {
     setRegistered(null);
-    const started = await importStart.start(selection.scope, text, files);
+    const started = await importStart.start(selection.scope, text, attachments);
     if (started === null) return false;
     onSelect({ ...selection, todoId: null, importId: started });
     return true;

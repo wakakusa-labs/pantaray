@@ -1,6 +1,9 @@
 import { useCallback, useRef, useState } from 'react';
 
-import type { ActionFileAttachment } from '../../electron/src/actions/actionContracts';
+import type {
+  ActionFileAttachment,
+  ActionImageReference,
+} from '../../electron/src/actions/actionContracts';
 import type { TodoScopeQuery } from '../../electron/src/todos/todoContracts';
 import type {
   TodoImportDraft,
@@ -11,6 +14,12 @@ import type {
 import { useTodoRead } from './useTodoRead';
 
 type TodoImportsBridge = NonNullable<NonNullable<Window['electron']>['todoImports']>;
+
+/** What the add bar staged for an import: documents to read and images to look at. */
+export type TodoImportAttachments = Readonly<{
+  files: readonly ActionFileAttachment[];
+  images: readonly ActionImageReference[];
+}>;
 
 /** Why the last request about an import did nothing: the backend's reason, or no answer. */
 export type TodoImportProblem = TodoImportRefusal['reason'] | 'failed';
@@ -23,7 +32,7 @@ function importsBridge(): TodoImportsBridge {
 
 /**
  * Starts imports from the add bar. A start whose answer never came may have opened the import,
- * so sending the same text and files again reuses its `import_id`, and the backend returns that
+ * so sending the same text and attachments again reuses its `import_id`, and the backend returns that
  * import instead of opening a second one with a second Action.
  */
 export function useTodoImportStart() {
@@ -34,9 +43,14 @@ export function useTodoImportStart() {
   const start = async (
     scope: TodoScopeQuery,
     text: string,
-    files: readonly ActionFileAttachment[]
+    { files, images }: TodoImportAttachments
   ): Promise<string | null> => {
-    const key = JSON.stringify([scope, text, files.map((file) => file.attachment_id)]);
+    const key = JSON.stringify([
+      scope,
+      text,
+      files.map((file) => file.attachment_id),
+      images.map((image) => image.storage_path),
+    ]);
     const importId =
       unansweredRef.current?.key === key ? unansweredRef.current.importId : crypto.randomUUID();
     unansweredRef.current = { key, importId };
@@ -49,6 +63,7 @@ export function useTodoImportStart() {
         ...(scope.scope === 'organization' ? { organization_id: scope.organization_id } : {}),
         ...(text.trim() === '' ? {} : { text }),
         ...(files.length === 0 ? {} : { files: [...files] }),
+        ...(images.length === 0 ? {} : { images: [...images] }),
       });
     } catch {
       setProblem('failed');

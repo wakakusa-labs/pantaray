@@ -1,16 +1,17 @@
 import { ArrowUp, Paperclip } from 'lucide-react';
 import { useRef, useState } from 'react';
 
-import { ComposerAlert, ComposerAttachments } from '@/components/agent-overlay/ComposerAttachments';
+import { ComposerAttachments } from '@/components/agent-overlay/ComposerAttachments';
+import { ATTACHMENT_ACCEPT } from '@/components/agent-overlay/attachmentStaging';
 import { isImeKey } from '@/components/ui/imeKey';
 import { useI18n } from '@/context/useI18n';
 import type { TodoProjectSlot } from '@/todos/groupTodosByProject';
+import type { TodoImportAttachments } from '@/todos/useTodoImport';
 
-import type { ActionFileAttachment } from '../../../electron/src/actions/actionContracts';
 import type { TodoDue } from '../../../electron/src/todos/todoContracts';
 import { TodoDatePicker } from './TodoDatePicker';
 import { dueDay } from './todoDates';
-import { IMPORT_FILE_ACCEPT, useAddBarFiles } from './useAddBarFiles';
+import { useAddBarFiles } from './useAddBarFiles';
 
 import './todo.css';
 import './todoAddBar.css';
@@ -18,8 +19,8 @@ import './todoAddBar.css';
 /**
  * The bar under the list that adds a TODO: its text, its project (while several are in view),
  * due day (none at first) and start (today at first, or none), and send. An IME's Enter does not
- * send; Shift+Enter starts a new line. Text of several lines, or files attached with the
- * paperclip or dropped on the bar, are imported instead: Pantaray drafts TODOs from them, so the
+ * send; Shift+Enter starts a new line. Text of several lines, or documents and images attached
+ * with the paperclip, dropped or pasted on the bar, are imported instead: Pantaray drafts TODOs from them, so the
  * project and dates, which belong to one TODO, step aside. The text empties once it was taken;
  * the choices stay for the next one.
  */
@@ -43,7 +44,7 @@ export function TodoAddBar({
     due: TodoDue | null
   ) => Promise<boolean>;
   /** Resolves true once the import started, which empties the bar. */
-  onImport: (text: string, files: readonly ActionFileAttachment[]) => Promise<boolean>;
+  onImport: (text: string, attachments: TodoImportAttachments) => Promise<boolean>;
 }) {
   const { t, language } = useI18n();
   const fieldRef = useRef<HTMLTextAreaElement>(null);
@@ -71,7 +72,7 @@ export function TodoAddBar({
     setSending(true);
     const sent = text;
     const taken = importing
-      ? await onImport(sent, files.files)
+      ? await onImport(sent, files.payload)
       : // A line ended with Shift+Enter is still one line.
         await onSubmit(
           project.projectId,
@@ -145,15 +146,11 @@ export function TodoAddBar({
     >
       <ComposerAttachments
         attachments={files.attachments}
-        // The composers' refusal names images too, which an import does not read.
-        failure={files.failure === 'unsupported_media_type' ? null : files.failure}
+        failure={files.failure}
         readOnly={sending}
         focusAfterLastRemoved={fieldRef}
         onRemove={files.remove}
       />
-      {files.failure === 'unsupported_media_type' ? (
-        <ComposerAlert role="alert">{t('todo.add.fileUnsupported')}</ComposerAlert>
-      ) : null}
       <textarea
         ref={fieldRef}
         rows={1}
@@ -180,7 +177,7 @@ export function TodoAddBar({
           type="file"
           hidden
           multiple
-          accept={IMPORT_FILE_ACCEPT}
+          accept={ATTACHMENT_ACCEPT}
           onChange={(event) => {
             const picked = Array.from(event.target.files ?? []);
             // Reset so picking the same file again still fires a change event.

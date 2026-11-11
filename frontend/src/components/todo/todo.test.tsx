@@ -249,18 +249,21 @@ it('imports text of several lines instead of adding it as one TODO', async () =>
   expect(screen.queryByRole('button', { name: '期限なし' })).toBeNull();
   await userEvent.type(addField(), '{Enter}');
   expect(onSubmit).not.toHaveBeenCalled();
-  expect(onImport).toHaveBeenLastCalledWith('見積書を送る\n請求書を作る', []);
+  expect(onImport).toHaveBeenLastCalledWith('見積書を送る\n請求書を作る', {
+    files: [],
+    images: [],
+  });
   expect(addField()).toHaveValue('');
 });
 
-it('imports attached files, staged as the composers stage them, and refuses an image', async () => {
+it('imports attached documents and images, staged as the composers stage them', async () => {
   onImport.mockClear();
   const attachFile = vi.fn(async ({ name }: { name: string }) => ({
     attachmentId: '6f1c7a64-5d1e-4c4b-9b5b-3d0d7c3f2a10',
     name,
     byteSize: 12,
   }));
-  const attachImage = vi.fn();
+  const attachImage = vi.fn(async () => ({ kind: 'stored', storagePath: 'images/board.png' }));
   window.electron = {
     actions: { attachFile, attachImage, discardAttachment: vi.fn(async () => undefined) },
   } as unknown as Window['electron'];
@@ -280,9 +283,20 @@ it('imports attached files, staged as the composers stage them, and refuses an i
   fireEvent.drop(bar, {
     dataTransfer: { files: [new File(['x'], 'board.png', { type: 'image/png' })] },
   });
-  expect(await screen.findByRole('alert')).toHaveTextContent(/PDF/);
-  expect(attachImage).not.toHaveBeenCalled();
+  expect(await screen.findByRole('img')).toBeVisible();
+  // An image alone imports.
+  await userEvent.click(screen.getByRole('button', { name: '下書きを作る' }));
+  expect(onSubmit).not.toHaveBeenCalled();
+  expect(onImport).toHaveBeenLastCalledWith('', {
+    files: [],
+    images: [{ kind: 'image', storage_path: 'images/board.png' }],
+  });
+  expect(screen.queryByRole('img')).toBeNull();
 
+  fireEvent.drop(bar, {
+    dataTransfer: { files: [new File(['x'], 'board.png', { type: 'image/png' })] },
+  });
+  await screen.findByRole('img');
   await userEvent.click(screen.getByRole('button', { name: '添付' }));
   await userEvent.upload(
     container.querySelector<HTMLInputElement>('input[type="file"]')!,
@@ -290,11 +304,12 @@ it('imports attached files, staged as the composers stage them, and refuses an i
   );
   expect(await screen.findByText('notes.md')).toBeVisible();
   await userEvent.click(screen.getByRole('button', { name: '下書きを作る' }));
-  expect(onSubmit).not.toHaveBeenCalled();
-  expect(onImport).toHaveBeenLastCalledWith('', [
-    { attachment_id: '6f1c7a64-5d1e-4c4b-9b5b-3d0d7c3f2a10', name: 'notes.md', byte_size: 12 },
-  ]);
-  expect(screen.queryByText('notes.md')).toBeNull();
+  expect(onImport).toHaveBeenLastCalledWith('', {
+    files: [
+      { attachment_id: '6f1c7a64-5d1e-4c4b-9b5b-3d0d7c3f2a10', name: 'notes.md', byte_size: 12 },
+    ],
+    images: [{ kind: 'image', storage_path: 'images/board.png' }],
+  });
   window.electron = undefined;
 });
 

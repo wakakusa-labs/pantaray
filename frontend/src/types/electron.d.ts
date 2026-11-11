@@ -78,8 +78,6 @@ import type {
   TodoScopeQuery,
   TodoStartRequest,
   TodoView,
-  TodoWeekPage,
-  TodoWeekQuery,
   TodoWriteResult,
 } from '../../electron/src/todos/todoContracts';
 import type { ActionImageAttachResult } from '../../electron/src/ipc/schemas/actionImages';
@@ -282,7 +280,6 @@ declare global {
       todos?: {
         /** Open TODOs first in the order asked for, then checked ones, last checked first. */
         list: (query: TodoListQuery) => Promise<TodoListPage>;
-        listWeek: (query: TodoWeekQuery) => Promise<TodoWeekPage>;
         /** Resending the same `client_todo_id` returns the same TODO. */
         create: (request: TodoCreateRequest) => Promise<TodoWriteResult<TodoView>>;
         setCheck: (request: TodoCheckRequest) => Promise<TodoWriteResult<TodoCheckResult>>;

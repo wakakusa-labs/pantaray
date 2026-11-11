@@ -3,7 +3,6 @@ function createTodosApi({ ipcRenderer }) {
   return {
     todos: {
       list: (query) => ipcRenderer.invoke('todos:list', query),
-      listWeek: (query) => ipcRenderer.invoke('todos:listWeek', query),
       create: (request) => ipcRenderer.invoke('todos:create', request),
       setCheck: (request) => ipcRenderer.invoke('todos:setCheck', request),
       setDue: (request) => ipcRenderer.invoke('todos:setDue', request),

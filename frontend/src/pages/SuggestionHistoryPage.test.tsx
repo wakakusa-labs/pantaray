@@ -8,8 +8,9 @@ import type { ActionConversationUserItem } from '../../electron/src/actions/acti
 import type { ConversationHistoryListItem } from '../../electron/src/history/historyContracts';
 import type {
   DeletedTodoView,
+  TodoListPage,
+  TodoListQuery,
   TodoView,
-  TodoWeekPage,
 } from '../../electron/src/todos/todoContracts';
 import { UserItem } from '@/components/action-conversation/UserMessage';
 import type { ChatViewHandle } from '@/components/chat/ChatView';
@@ -160,7 +161,6 @@ function todo(todoId: string, projectId: string | null, extra: Partial<TodoView>
     author: 'user',
     origin: 'written',
     starts_on: '2026-11-02',
-    carried: false,
     due: null,
     state: { kind: 'working', note: null },
     deletion_request: null,
@@ -169,10 +169,8 @@ function todo(todoId: string, projectId: string | null, extra: Partial<TodoView>
   };
 }
 
-const WEEK: TodoWeekPage = {
+const PAGE: TodoListPage = {
   today: '2026-11-04',
-  current_week_start: '2026-11-02',
-  week: { start: '2026-11-02', end: '2026-11-08' },
   items: [
     todo('T1', 'P1', { conversation: { kind: 'action', action_id: 'A5' } }),
     todo('T2', 'P1', { state: { kind: 'done', by: 'user', at: '2026-11-03T01:00:00.000Z' } }),
@@ -180,7 +178,7 @@ const WEEK: TodoWeekPage = {
     todo('T4', null),
   ],
 };
-const listWeek = vi.fn(async (_query: { week_start?: string }) => WEEK);
+const list = vi.fn(async (_query: TodoListQuery) => PAGE);
 const listDeleted = vi.fn(async (): Promise<DeletedTodoView[]> => []);
 /** Every reader that listens for `todos:changed`; the test tells them all, as main does. */
 const changeListeners = new Set<() => void>();
@@ -211,7 +209,7 @@ const stored = new Map<string, string>();
 beforeEach(() => {
   mocks.todoUx = true;
   stored.clear();
-  listWeek.mockImplementation(async () => WEEK);
+  list.mockImplementation(async () => PAGE);
   listDeleted.mockImplementation(async () => []);
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => stored.get(key) ?? null,
@@ -232,7 +230,7 @@ beforeEach(() => {
     },
     agentOverlay: { showHistory: vi.fn() },
     todos: {
-      listWeek,
+      list,
       listDeleted,
       onChanged: (callback: () => void) => {
         changeListeners.add(callback);
@@ -364,7 +362,7 @@ it('shows what `?item=` names, the TODOs without one, and the chat for a malform
   cleanup();
 
   renderPage(['/history']);
-  expect(screen.getByRole('heading', { level: 1, name: '今週' })).toBeInTheDocument();
+  expect(screen.getByRole('heading', { level: 1, name: 'すべての TODO' })).toBeInTheDocument();
   expect(screen.queryByRole('region', { name: 'chat' })).toBeNull();
   cleanup();
 
@@ -384,7 +382,7 @@ it('without the TODO list, shows the chat where `?item=` names nothing, as Histo
   withoutTodoList();
   renderPage(['/history']);
   expect(screen.getByRole('region', { name: 'chat' })).toBeInTheDocument();
-  expect(screen.queryByRole('heading', { level: 1, name: '今週' })).toBeNull();
+  expect(screen.queryByRole('heading', { level: 1, name: 'すべての TODO' })).toBeNull();
   const sidebar = screen.getByRole('complementary', HISTORY_SIDEBAR);
   expect(within(sidebar).getByRole('button', { name: 'チャット' })).toHaveAttribute(
     'aria-current',
@@ -580,12 +578,13 @@ it('starts with the sidebar shown when storage is unavailable', () => {
 const projectGroups = () =>
   screen.getAllByRole('region').filter((region) => region.classList.contains('todo-group'));
 
-it('lists the week by project, counts open TODOs in the sidebar, and hands the rail its organizations', async () => {
+it('lists every TODO by project, counts open TODOs in the sidebar, and hands the rail its organizations', async () => {
   renderPage(['/history']);
   expect(await screen.findByRole('checkbox', { name: '完了: TODO T1' })).toBeInTheDocument();
-  expect(listWeek).toHaveBeenCalledWith({ scope: 'all', project: 'any' });
+  expect(list).toHaveBeenCalledWith({ scope: 'all', project: 'any', sort: 'added' });
   // Xer › 見積もり, then 組織なし › 採用 and 組織なし › プロジェクトなし.
   expect(projectGroups()).toHaveLength(3);
+  expect(screen.getByText('1 / 4 完了')).toBeVisible();
   const sidebar = screen.getByRole('complementary', SIDEBAR);
   // T2 is done: one open TODO in 見積もり, one in 採用.
   expect(within(sidebar).getByRole('button', { name: '見積もり' })).toHaveAccessibleDescription(
@@ -615,7 +614,7 @@ it("opens a TODO's conversation beside the list: its Action, its suggestion with
   await userEvent.click(screen.getByRole('button', { name: /^TODO T3/ }));
   const suggestion = screen.getByRole('region', { name: 'suggestion S5' });
   expect(within(suggestion).queryByRole('button', { name: 'dismiss' })).toBeNull();
-  // Accepting shows its Action at once, before the week names it.
+  // Accepting shows its Action at once, before the list names it.
   await userEvent.click(within(suggestion).getByRole('button', { name: 'accept' }));
   expect(screen.getByRole('region', { name: 'action A9' })).toBeInTheDocument();
 
@@ -626,7 +625,7 @@ it("opens a TODO's conversation beside the list: its Action, its suggestion with
 
   await userEvent.click(screen.getByRole('button', { name: '会話を閉じる' }));
   expect(location()).toHaveTextContent(/^\/history$/);
-  expect(screen.getByRole('heading', { level: 1, name: '今週' })).toHaveFocus();
+  expect(screen.getByRole('heading', { level: 1, name: 'すべての TODO' })).toHaveFocus();
   expect(screen.getByRole('complementary', SIDEBAR)).toBeVisible();
 });
 
@@ -635,8 +634,12 @@ it('the sidebar lists the scope’s projects, and one selects its TODOs within t
   const sidebar = screen.getByRole('complementary', SIDEBAR);
   await userEvent.click(await within(sidebar).findByRole('button', { name: '採用' }));
   expect(location()).toHaveTextContent('/history?scope=none&project=project:P2');
-  expect(projectGroups()).toHaveLength(1);
-  expect(within(projectGroups()[0]).getByRole('heading', { level: 3 })).toHaveTextContent('採用');
+  // One project is one list under its name, with no group heading.
+  expect(screen.getByRole('heading', { level: 1, name: '採用' })).toBeVisible();
+  expect(projectGroups()).toHaveLength(0);
+  const rows = within(screen.getByRole('list', { name: '採用' })).getAllByRole('checkbox');
+  expect(rows.map((row) => row.getAttribute('aria-label'))).toEqual(['完了: TODO T3']);
+  expect(screen.getByText('0 / 1 完了')).toBeVisible();
   expect(within(sidebar).getByRole('button', { name: '採用' })).toHaveAttribute(
     'aria-current',
     'true'
@@ -663,19 +666,36 @@ it('keeps the scope while a conversation is shown, and drops an organization tha
   expect(location()).toHaveTextContent(/^\/history$/);
 });
 
-it('「今週へ」 returns to this week and leaves focus on the list heading', async () => {
-  listWeek.mockImplementation(async ({ week_start }) =>
-    week_start ? { ...WEEK, week: { start: '2026-10-26', end: '2026-11-01' }, items: [] } : WEEK
+it('orders the list by due date from the sort switch, and keeps the order in the URL', async () => {
+  // T5 was added after T1 and falls due before it; the done T2 follows the open ones either way.
+  const [t1, t2, ...rest] = PAGE.items;
+  const t5 = todo('T5', 'P1');
+  list.mockImplementation(async ({ sort }) => ({
+    ...PAGE,
+    items: sort === 'due' ? [t5, t1, t2, ...rest] : [t1, t5, t2, ...rest],
+  }));
+  renderPage(['/history']);
+  await screen.findByRole('checkbox', { name: '完了: TODO T1' });
+  const sidebar = screen.getByRole('complementary', SIDEBAR);
+  const shownIn = (projectName: string) =>
+    within(screen.getByRole('list', { name: projectName }))
+      .getAllByRole('checkbox')
+      .map((check) => check.getAttribute('aria-label'));
+  expect(screen.getByRole('combobox', { name: '並び順' })).toHaveValue('added');
+
+  await userEvent.click(within(sidebar).getByRole('button', { name: '見積もり' }));
+  expect(shownIn('見積もり')).toEqual(['完了: TODO T1', '完了: TODO T5', '完了: TODO T2']);
+  await userEvent.selectOptions(screen.getByRole('combobox', { name: '並び順' }), '期限順');
+  expect(location()).toHaveTextContent('/history?project=project:P1&sort=due');
+  expect(list).toHaveBeenLastCalledWith({ scope: 'all', project: 'any', sort: 'due' });
+  await waitFor(() =>
+    expect(shownIn('見積もり')).toEqual(['完了: TODO T5', '完了: TODO T1', '完了: TODO T2'])
   );
-  renderPage(['/history?week=2026-10-26']);
-  expect(
-    await screen.findByRole('heading', { level: 1, name: '10月26日 – 11月1日' })
-  ).toBeVisible();
-  // An ended week takes no TODOs, so it has no add field.
-  expect(screen.queryByRole('textbox', { name: /TODO を追加/ })).toBeNull();
-  await userEvent.click(screen.getByRole('button', { name: '今週へ' }));
-  expect(location()).toHaveTextContent(/^\/history$/);
-  expect(screen.getByRole('heading', { level: 1, name: '今週' })).toHaveFocus();
+
+  // Every TODO in view keeps the order chosen.
+  await userEvent.click(within(sidebar).getByRole('button', { name: 'すべての TODO' }));
+  expect(location()).toHaveTextContent(/^\/history\?sort=due$/);
+  expect(screen.getByRole('combobox', { name: '並び順' })).toHaveValue('due');
 });
 
 it('adds to the project chosen in the add bar from today, and tells a refused write under its row', async () => {
@@ -701,38 +721,33 @@ it('adds to the project chosen in the add bar from today, and tells a refused wr
   expect(rows.findIndex((row) => row.contains(alert))).toBe(1);
 });
 
-const NEXT_WEEK = '2026-11-09';
 const addFields = () => screen.getAllByRole('textbox', { name: /TODO を追加/ });
 
-it("closes the week's writes while another week is read, so nothing is added to the last one", async () => {
+it("closes the list's writes while another order is read", async () => {
   renderPage(['/history']);
   await screen.findByRole('checkbox', { name: '完了: TODO T1' });
   expect(addFields()[0]).toBeEnabled();
-  listWeek.mockImplementation(({ week_start }) =>
-    week_start === NEXT_WEEK ? new Promise(() => {}) : Promise.resolve(WEEK)
+  list.mockImplementation(({ sort }) =>
+    sort === 'due' ? new Promise(() => {}) : Promise.resolve(PAGE)
   );
 
-  await userEvent.click(screen.getByRole('button', { name: '次の週' }));
-  expect(location()).toHaveTextContent(`/history?week=${NEXT_WEEK}`);
-  // The last week stays on screen, closed: its fields and checks take nothing.
+  await userEvent.selectOptions(screen.getByRole('combobox', { name: '並び順' }), '期限順');
+  // The last page stays on screen, closed: its fields and checks take nothing.
   for (const field of addFields()) expect(field).toBeDisabled();
   expect(screen.getByRole('checkbox', { name: '完了: TODO T1' })).toBeDisabled();
   await userEvent.type(addFields()[0], '請求書を送る{Enter}');
   expect(createTodo).not.toHaveBeenCalled();
-  // The week steps from the one selected, not the one still on screen.
-  await userEvent.click(screen.getByRole('button', { name: '次の週' }));
-  expect(location()).toHaveTextContent('/history?week=2026-11-16');
 });
 
-it('keeps the last week closed and says so when the selected week fails to load', async () => {
+it('keeps the last page closed and says so when the selected order fails to load', async () => {
   renderPage(['/history']);
   await screen.findByRole('checkbox', { name: '完了: TODO T1' });
-  listWeek.mockImplementation(async ({ week_start }) => {
-    if (week_start === NEXT_WEEK) throw new Error('offline');
-    return WEEK;
+  list.mockImplementation(async ({ sort }) => {
+    if (sort === 'due') throw new Error('offline');
+    return PAGE;
   });
 
-  await userEvent.click(screen.getByRole('button', { name: '次の週' }));
+  await userEvent.selectOptions(screen.getByRole('combobox', { name: '並び順' }), '期限順');
   expect(
     await screen.findByText('TODO を読み込めませんでした。表示が古いかもしれません。')
   ).toBeVisible();
@@ -763,10 +778,10 @@ it('says a list may be out of date when it fails to load again after a read', as
     cleanup();
   }
 
-  // The week's list says the same over the TODOs it last read.
+  // The TODO list says the same over the TODOs it last read.
   renderPage(['/history']);
   await screen.findByRole('checkbox', { name: '完了: TODO T1' });
-  listWeek.mockRejectedValue(new Error('offline'));
+  list.mockRejectedValue(new Error('offline'));
   act(() => todosChanged());
   await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(STALE));
   expect(screen.getByRole('checkbox', { name: '完了: TODO T1' })).toBeVisible();

@@ -32,9 +32,7 @@ from pantaray_agents.local_runtime.todos.reads import (
     read_deleted_todos,
     read_todo,
     read_todo_list,
-    read_todo_week,
 )
-from pantaray_agents.local_runtime.todos.week import effective_week
 from pantaray_agents.local_runtime.todos.writes import (
     create_todo_item,
     set_todo_check,
@@ -53,11 +51,8 @@ from pantaray_agents.schema.todos import (
     TodoScopeQuery,
     TodoStartRequest,
     TodoView,
-    TodoWeekPage,
-    TodoWeekQuery,
     deleted_todo_view,
     todo_view,
-    todo_week_page,
 )
 
 router = APIRouter(prefix="/v1/agents/users", tags=["TODOs"])
@@ -136,13 +131,7 @@ def _entry(user_id: str, todo_id: TodoId) -> TodoEntry:
 
 
 def _view(entry: TodoEntry, clock: TodoClock) -> TodoView:
-    placement = effective_week(entry.todo, clock.current_week_start, clock.zone)
-    return todo_view(
-        entry.todo,
-        entry.conversation,
-        carried=placement is not None and placement.carried,
-        today=clock.today,
-    )
+    return todo_view(entry.todo, entry.conversation, today=clock.today)
 
 
 def _read_view(user_id: str, todo_id: TodoId, clock: TodoClock) -> TodoView:
@@ -186,23 +175,6 @@ def get_todo_list(
         today=todo_list.today,
         items=tuple(_view(entry, clock) for entry in todo_list.items),
     )
-
-
-@router.get("/{user_id}/todos/weeks", response_model=TodoWeekPage)
-def get_todo_week(
-    user_id: str,
-    query: Annotated[TodoWeekQuery, Query()],
-    resolved_user_id: str = Depends(get_current_user_id_from_token),
-) -> TodoWeekPage:
-    _require_path_user(user_id, resolved_user_id)
-    week = read_todo_week(
-        user_id=user_id,
-        scope=query.todo_scope(),
-        project=query.project_filter(),
-        week_of=None if query.week_start is None else query.week_start.isoformat(),
-        clock=read_todo_clock(),
-    )
-    return todo_week_page(week)
 
 
 @router.post(

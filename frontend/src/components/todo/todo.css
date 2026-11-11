@@ -4,6 +4,7 @@
 .todo-add-bar,
 .todo-date-picker,
 .todo-group,
+.todo-list,
 .todo-deleted {
   --todo-faint: #687183;
   --todo-late: #c4a782;
@@ -216,7 +217,8 @@
   font-variant-numeric: tabular-nums;
 }
 
-.todo-group__rows {
+.todo-group__rows,
+.todo-list {
   margin: 0;
   padding: 0;
   list-style: none;

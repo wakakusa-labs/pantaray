@@ -7,12 +7,12 @@ from zoneinfo import ZoneInfo
 
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.todos.model import LocalDate
-from pantaray_agents.local_runtime.todos.week import local_date_at, week_start_of
+from pantaray_agents.local_runtime.todos.week import local_date_at
 from pantaray_agents.utils.local_time import local_zone_name
 
 
 class UnknownTimeZoneError(RuntimeError):
-    """The OS zone has no IANA name, so local weeks cannot be computed."""
+    """The OS zone has no IANA name, so local dates cannot be computed."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,10 +23,6 @@ class TodoClock:
     @property
     def today(self) -> LocalDate:
         return local_date_at(self.now, self.zone)
-
-    @property
-    def current_week_start(self) -> LocalDate:
-        return week_start_of(self.today)
 
 
 def read_todo_clock() -> TodoClock:

@@ -44,7 +44,7 @@ type OpenDialog = { kind: 'delete' | 'organizations' | 'goal'; project: Workspac
 export type ProjectTodos = {
   /** The project whose TODOs are in view, or null. */
   selectedProjectId: string | null;
-  /** Open TODOs by project id, for the week in view. */
+  /** Open TODOs by project id, for the scope in view. */
   openCounts: ReadonlyMap<string, number>;
   onSelectProject: (projectId: string) => void;
   /** The rail's scope: only its projects are listed, and ＋ creates one in it. */

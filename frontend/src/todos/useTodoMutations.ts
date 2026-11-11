@@ -39,9 +39,9 @@ type Outcome = 'ok' | 'refused' | 'unknown';
 
 const addKey = (projectId: string | null, startsOn: string) => `${startsOn}\n${projectId ?? ''}`;
 
-/** The reads that show a write's result: `useTodoWeek`'s and `useDeletedTodos`'s `reload`. */
+/** The reads that show a write's result: `useTodoList`'s and `useDeletedTodos`'s `reload`. */
 export type TodoReloads = {
-  reloadWeek: () => Promise<void>;
+  reloadList: () => Promise<void>;
   reloadDeleted: () => Promise<void>;
 };
 
@@ -51,7 +51,7 @@ export type TodoReloads = {
  * again, so its controls never act on the state from before the write. The latest failed write
  * is told next to where it was made.
  */
-export function useTodoMutations({ reloadWeek, reloadDeleted }: TodoReloads) {
+export function useTodoMutations({ reloadList, reloadDeleted }: TodoReloads) {
   const { t } = useI18n();
   const [pending, setPending] = useState<ReadonlySet<string>>(new Set());
   const [failure, setFailure] = useState<{ target: TodoMutationTarget; key: MessageKey } | null>(
@@ -81,7 +81,7 @@ export function useTodoMutations({ reloadWeek, reloadDeleted }: TodoReloads) {
     }
   };
 
-  const reloadBoth = () => Promise.all([reloadWeek(), reloadDeleted()]);
+  const reloadBoth = () => Promise.all([reloadList(), reloadDeleted()]);
 
   const writeRow = async <T>(
     todoId: string,
@@ -105,7 +105,7 @@ export function useTodoMutations({ reloadWeek, reloadDeleted }: TodoReloads) {
     }
   };
 
-  /** Resolves true once the added TODO has been read into the week, which empties the add field. */
+  /** Resolves true once the added TODO has been read into the list, which empties the add field. */
   const create = async (
     projectId: string | null,
     startsOn: string,
@@ -133,7 +133,7 @@ export function useTodoMutations({ reloadWeek, reloadDeleted }: TodoReloads) {
     );
     if (outcome !== 'unknown') unansweredAddsRef.current.delete(key);
     if (outcome !== 'ok') return false;
-    await reloadWeek();
+    await reloadList();
     return true;
   };
 
@@ -143,23 +143,23 @@ export function useTodoMutations({ reloadWeek, reloadDeleted }: TodoReloads) {
     failure: failure ? { target: failure.target, message: t(failure.key) } : null,
     create,
     setCheck: (todoId: string, checked: boolean) =>
-      writeRow(todoId, (todos) => todos.setCheck({ todo_id: todoId, checked }), reloadWeek),
+      writeRow(todoId, (todos) => todos.setCheck({ todo_id: todoId, checked }), reloadList),
     setDue: (todoId: string, due: TodoDue | null) =>
-      writeRow(todoId, (todos) => todos.setDue({ todo_id: todoId, due }), reloadWeek),
+      writeRow(todoId, (todos) => todos.setDue({ todo_id: todoId, due }), reloadList),
     setStart: (todoId: string, startsOn: string) =>
       writeRow(
         todoId,
         (todos) => todos.setStart({ todo_id: todoId, starts_on: startsOn }),
-        reloadWeek
+        reloadList
       ),
-    // Deleting and restoring move the TODO between the week and the deleted list.
+    // Deleting and restoring move the TODO between the list and the deleted list.
     deleteTodo: (todoId: string) =>
       writeRow(todoId, (todos) => todos.delete({ todo_id: todoId }), reloadBoth),
     answerDeletion: (todoId: string, requestId: string, answer: 'approve' | 'keep') =>
       writeRow(
         todoId,
         (todos) => todos.answerDeletion({ todo_id: todoId, request_id: requestId, answer }),
-        reloadWeek,
+        reloadList,
         { kind: 'deletion', todoId }
       ),
     restore: (todoId: string) =>

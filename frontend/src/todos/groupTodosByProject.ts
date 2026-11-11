@@ -5,9 +5,9 @@ import {
 } from '@/pages/settings/components/workspaceSettingsModel';
 
 import type {
+  TodoListPage,
   TodoScopeQuery,
   TodoView,
-  TodoWeekPage,
 } from '../../electron/src/todos/todoContracts';
 import type { TodoProjectFilter } from './todoSelection';
 
@@ -22,19 +22,15 @@ export type TodoProjectGroupView = {
   organization: TodoGroupOrganization | null;
   doneCount: number;
   totalCount: number;
-  /** In the order the week gave them; a done TODO stays in its place. */
+  /** In the order the list gave them: open ones first, then done ones. */
   items: TodoView[];
 };
 
-/** A project in view: a group of the week, and a place the add row can put a TODO. */
+/** A project in view: a group of the list, and a place the add bar can put a TODO. */
 export type TodoProjectSlot = Pick<
   TodoProjectGroupView,
   'projectId' | 'projectName' | 'organization'
 >;
-
-/** A week that has not ended takes new TODOs; an ended week only shows what it held. */
-export const weekTakesTodos = (page: TodoWeekPage): boolean =>
-  page.week.start >= page.current_week_start;
 
 /**
  * The projects the scope shows, in order: projects by the workspace's order and, while all
@@ -100,12 +96,12 @@ export const todoProjectSlots = (
   scopeSlots(settings, scope).filter((slot) => inFilter(slot.projectId, filter));
 
 /**
- * The week's TODOs by project, for the projects that hold any. A TODO whose project is not in
+ * The list's TODOs by project, for the projects that hold any. A TODO whose project is not in
  * `slots` is not shown: the settings are read with the page, and a deleted project's TODOs move
  * to no project.
  */
 export function groupTodosByProject(
-  page: TodoWeekPage,
+  page: TodoListPage,
   slots: readonly TodoProjectSlot[]
 ): TodoProjectGroupView[] {
   return slots

@@ -97,7 +97,7 @@ function Conversation({
 }) {
   const { t } = useI18n();
   const titleId = useId();
-  // An accepted suggestion's Action shows at once; the week names it once it is read again.
+  // An accepted suggestion's Action shows at once; the list names it once it is read again.
   const [started, setStarted] = useState<{ actionId: string; preview: TaskPreview | null } | null>(
     null
   );

@@ -27,8 +27,6 @@ import {
   type TodoScopeQuery,
   type TodoStartRequest,
   type TodoView,
-  type TodoWeekPage,
-  type TodoWeekQuery,
   type TodoWriteResult,
   parseDeletedTodos,
   parseGoalView,
@@ -37,7 +35,6 @@ import {
   parseTodoListPage,
   parseTodoProgressPage,
   parseTodoView,
-  parseTodoWeekPage,
 } from './todoContracts';
 
 /** The chat's wait (`CHAT_REQUEST_TIMEOUT_MS`): each route is one store transaction. */
@@ -55,7 +52,6 @@ export function createTodoFetcher(params: {
   getUserId: () => string | null;
 }): {
   list: (query: TodoListQuery) => Promise<TodoListPage>;
-  listWeek: (query: TodoWeekQuery) => Promise<TodoWeekPage>;
   create: (request: TodoCreateRequest) => Promise<TodoWriteResult<TodoView>>;
   setCheck: (request: TodoCheckRequest) => Promise<TodoWriteResult<TodoCheckResult>>;
   setDue: (request: TodoDueRequest) => Promise<TodoWriteResult<TodoView>>;
@@ -102,8 +98,6 @@ export function createTodoFetcher(params: {
   return {
     list: async (query) =>
       parseTodoListPage(await read({ path: todosPath(), method: 'GET', query })),
-    listWeek: async (query) =>
-      parseTodoWeekPage(await read({ path: `${todosPath()}/weeks`, method: 'GET', query })),
     create: (request) => write({ path: todosPath(), method: 'POST', body: request }, parseTodoView),
     setCheck: ({ todo_id, checked }) =>
       write(

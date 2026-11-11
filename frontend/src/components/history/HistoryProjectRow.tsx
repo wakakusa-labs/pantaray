@@ -25,7 +25,7 @@ const focusById = (id: string) => document.getElementById(id)?.focus();
 export type ProjectRowTodo = {
   /** Its TODOs are the ones in view. */
   selected: boolean;
-  /** The open TODOs of the week in view; none shows no badge. */
+  /** The open TODOs of the scope in view; none shows no badge. */
   openCount: number;
   onSelect: () => void;
 };

@@ -15,7 +15,6 @@ const OPEN_TODO = {
   author: 'user',
   origin: 'written',
   starts_on: '2026-11-02',
-  carried: false,
   due: { date: '2026-11-06', repeat: 'weekly' },
   state: { kind: 'not_started', reason: 'starting' },
   deletion_request: null,
@@ -36,7 +35,7 @@ const STATE_VARIANTS = [
   { state: { kind: 'stopped', outcome: 'failed' } },
   { state: { kind: 'stopped', outcome: 'canceled' } },
   { state: { kind: 'not_started', reason: 'scheduled' }, due: null },
-  { deletion_request: { request_id: 'req-1', reason: 'Duplicate' }, author: 'ai', carried: true },
+  { deletion_request: { request_id: 'req-1', reason: 'Duplicate' }, author: 'ai' },
 ].map((overrides, index) => ({ ...OPEN_TODO, todo_id: `todo-${index + 2}`, ...overrides }));
 
 const DELETED_TODO = {
@@ -86,12 +85,7 @@ async function withTodoBackend(respond, run) {
 }
 
 test('every route reaches its backend path with the token, and each response variant parses', async () => {
-  const page = {
-    today: '2026-11-04',
-    current_week_start: '2026-11-02',
-    week: { start: '2026-11-02', end: '2026-11-08' },
-    items: [OPEN_TODO, ...STATE_VARIANTS],
-  };
+  const page = { today: '2026-11-04', items: [OPEN_TODO, ...STATE_VARIANTS] };
   const checked = { ...OPEN_TODO, state: STATE_VARIANTS[0].state };
   const next = {
     ...OPEN_TODO,
@@ -123,12 +117,7 @@ test('every route reaches its backend path with the token, and each response var
         due: null,
       };
       assert.deepEqual(
-        await todos.listWeek({
-          scope: 'organization',
-          organization_id: 'org-1',
-          project: 'any',
-          week_start: '2026-11-04',
-        }),
+        await todos.list({ scope: 'organization', organization_id: 'org-1', project: 'any' }),
         page
       );
       assert.deepEqual(await todos.create(create), { kind: 'ok', result: OPEN_TODO });
@@ -158,11 +147,7 @@ test('every route reaches its backend path with the token, and each response var
           options.body === undefined ? undefined : JSON.parse(options.body),
         ]),
         [
-          [
-            'GET',
-            '/weeks?scope=organization&organization_id=org-1&project=any&week_start=2026-11-04',
-            undefined,
-          ],
+          ['GET', '?scope=organization&organization_id=org-1&project=any', undefined],
           ['POST', '', create],
           ['PUT', '/todo%201/check', { checked: true }],
           ['PUT', '/todo%201/check', { checked: false }],
@@ -460,7 +445,6 @@ function todoHandlers() {
     {
       todos: {
         list: record('list'),
-        listWeek: record('listWeek'),
         create: record('create'),
         setCheck: record('setCheck'),
         setDue: record('setDue'),
@@ -488,7 +472,6 @@ test('TODO IPC validates the renderer payload before anything reaches the backen
   const ipc = todoHandlers();
   const valid = {
     'todos:list': { scope: 'all', project: 'any', sort: 'due' },
-    'todos:listWeek': { scope: 'all', project: 'project', project_id: 'p-1' },
     'todos:create': {
       client_todo_id: 'c-1',
       project_id: null,
@@ -526,16 +509,12 @@ test('TODO IPC validates the renderer payload before anything reaches the backen
 
   const invalid = {
     'todos:list': [
-      { scope: 'all', project: 'project' },
-      { scope: 'all', project: 'any', sort: 'name' },
-      { scope: 'all', project: 'any', week_start: '2026-11-02' },
-    ],
-    'todos:listWeek': [
       { scope: 'organization', project: 'any' },
       { scope: 'all', organization_id: 'org-1', project: 'any' },
       { scope: 'all', project: 'project' },
       { scope: 'all', project: 'no_project', project_id: 'p-1' },
-      { scope: 'all', project: 'any', week_start: '11/04/2026' },
+      { scope: 'all', project: 'any', sort: 'name' },
+      { scope: 'all', project: 'any', week_start: '2026-11-02' },
       { scope: 'all', project: 'any', user_id: 'someone-else' },
     ],
     'todos:create': [

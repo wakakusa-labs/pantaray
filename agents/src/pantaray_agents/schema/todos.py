@@ -37,11 +37,7 @@ from pantaray_agents.local_runtime.todos.model import (
     TodoConversation,
     TodoDue,
 )
-from pantaray_agents.local_runtime.todos.reads import (
-    TodoListSort,
-    TodoWeek,
-)
-from pantaray_agents.local_runtime.todos.week import shift_days
+from pantaray_agents.local_runtime.todos.reads import TodoListSort
 from pantaray_agents.schema.agent.action_message import (
     ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS,
 )
@@ -108,12 +104,6 @@ class TodoListQuery(TodoProjectQuery):
     sort: TodoListSort = "added"
 
 
-class TodoWeekQuery(TodoProjectQuery):
-    """No `week_start` is the current week; any day of a week names that week."""
-
-    week_start: dt.date | None = None
-
-
 class TodoCreateRequest(_Request):
     """`client_todo_id` is the idempotency key; no `starts_on` starts it
     today. The text is one line, as the core decides."""
@@ -174,7 +164,6 @@ class TodoView(_View):
     author: TodoAuthor
     origin: Literal["written", "suggestion", "recurrence"]
     starts_on: LocalDate  # the AI picks it up from this date
-    carried: bool  # an open TODO from an earlier week, shown in the current one
     due: TodoDue | None
     state: Annotated[TodoDisplayState, Field(discriminator="kind")]
     deletion_request: PendingDeletionRequestView | None  # only while pending
@@ -190,18 +179,6 @@ class TodoCheckResult(_View):
 class TodoListPage(_View):
     today: LocalDate  # the backend owns the clock
     # Open TODOs first in the order asked for, then checked ones, last checked first.
-    items: tuple[TodoView, ...]
-
-
-class TodoWeekRange(_View):
-    start: LocalDate
-    end: LocalDate
-
-
-class TodoWeekPage(_View):
-    today: LocalDate  # the backend owns the clock
-    current_week_start: LocalDate
-    week: TodoWeekRange
     items: tuple[TodoView, ...]
 
 
@@ -221,11 +198,7 @@ class TodoChangedMessage(_View):
 
 
 def todo_view(
-    todo: Todo,
-    conversation: TodoConversation,
-    *,
-    carried: bool,
-    today: LocalDate,
+    todo: Todo, conversation: TodoConversation, *, today: LocalDate
 ) -> TodoView:
     request = todo.deletion_request
     return TodoView(
@@ -235,7 +208,6 @@ def todo_view(
         author=todo.author,
         origin=todo.origin.kind,
         starts_on=todo.starts_on,
-        carried=carried,
         due=todo.due,
         state=display_state(todo, conversation, today),
         deletion_request=(
@@ -246,23 +218,6 @@ def todo_view(
             else None
         ),
         conversation=_conversation_ref(conversation),
-    )
-
-
-def todo_week_page(week: TodoWeek) -> TodoWeekPage:
-    return TodoWeekPage(
-        today=week.today,
-        current_week_start=week.current_week_start,
-        week=TodoWeekRange(start=week.week_start, end=shift_days(week.week_start, 6)),
-        items=tuple(
-            todo_view(
-                item.todo,
-                item.conversation,
-                carried=item.carried,
-                today=week.today,
-            )
-            for item in week.items
-        ),
     )
 
 

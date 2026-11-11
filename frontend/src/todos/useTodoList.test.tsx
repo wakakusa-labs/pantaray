@@ -5,35 +5,31 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
 
 import type { OrchestrationStatus } from '../../electron/src/orchestration/eventContracts';
-import type { TodoView, TodoWeekPage, TodoWeekQuery } from '../../electron/src/todos/todoContracts';
+import type { TodoListPage, TodoListQuery, TodoView } from '../../electron/src/todos/todoContracts';
 import { useDeletedTodos } from './useDeletedTodos';
+import { useTodoList } from './useTodoList';
 import { useTodoMutations } from './useTodoMutations';
-import { useTodoWeek } from './useTodoWeek';
 
 let todoChanged: (() => void) | null;
 let historyChanged: (() => void) | null;
 let statusChanged: ((status: OrchestrationStatus) => void) | null;
 const setCheck = vi.fn();
-const listWeek = vi.fn<(query: TodoWeekQuery) => Promise<TodoWeekPage>>();
+const list = vi.fn<(query: TodoListQuery) => Promise<TodoListPage>>();
 const listDeleted = vi.fn();
 
-const weekPage = (start: string): TodoWeekPage => ({
-  today: '2026-11-07',
-  current_week_start: '2026-11-02',
-  week: { start, end: start },
-  items: [],
-});
+/** Pages read on different days, so a test can tell which read landed. */
+const listPage = (today: string): TodoListPage => ({ today, items: [] });
 
 beforeEach(() => {
   todoChanged = null;
   historyChanged = null;
   statusChanged = null;
   setCheck.mockReset();
-  listWeek.mockReset();
+  list.mockReset();
   listDeleted.mockReset();
   window.electron = {
     todos: {
-      listWeek,
+      list,
       listDeleted,
       setCheck,
       onChanged: (callback: () => void) => {
@@ -58,55 +54,57 @@ beforeEach(() => {
 
 afterEach(() => vi.restoreAllMocks());
 
-it('reads the week it is asked for, and again once for a burst of TODO and Action changes', async () => {
-  listWeek.mockResolvedValue(weekPage('2026-11-02'));
+it('reads the list it is asked for, and again once for a burst of TODO and Action changes', async () => {
+  list.mockResolvedValue(listPage('2026-11-02'));
   const { result } = renderHook(() =>
-    useTodoWeek({ scope: 'organization', organization_id: 'org-1' }, { project: 'any' }, null)
+    useTodoList({ scope: 'organization', organization_id: 'org-1' }, { project: 'any' }, 'due')
   );
-  await waitFor(() => expect(result.current.page?.week.start).toBe('2026-11-02'));
-  expect(listWeek).toHaveBeenCalledWith({
+  await waitFor(() => expect(result.current.page?.today).toBe('2026-11-02'));
+  expect(list).toHaveBeenCalledWith({
     scope: 'organization',
     organization_id: 'org-1',
     project: 'any',
+    sort: 'due',
   });
 
-  listWeek.mockResolvedValue(weekPage('2026-11-09'));
+  list.mockResolvedValue(listPage('2026-11-09'));
   act(() => {
     todoChanged?.();
     historyChanged?.();
   });
-  await waitFor(() => expect(result.current.page?.week.start).toBe('2026-11-09'));
-  expect(listWeek).toHaveBeenCalledTimes(2);
+  await waitFor(() => expect(result.current.page?.today).toBe('2026-11-09'));
+  expect(list).toHaveBeenCalledTimes(2);
 
-  // An Action's change alone also reads the week again: a row's state follows its conversation.
+  // An Action's change alone also reads the list again: a row's state follows its conversation.
   act(() => historyChanged?.());
-  await waitFor(() => expect(listWeek).toHaveBeenCalledTimes(3));
+  await waitFor(() => expect(list).toHaveBeenCalledTimes(3));
 });
 
-it('ignores an answer to a week no longer asked for', async () => {
-  let answerFirst: (page: TodoWeekPage) => void = () => undefined;
-  listWeek.mockReturnValueOnce(new Promise((resolve) => (answerFirst = resolve)));
-  listWeek.mockResolvedValueOnce(weekPage('2026-11-09'));
+it('ignores an answer to an order no longer asked for', async () => {
+  let answerFirst: (page: TodoListPage) => void = () => undefined;
+  list.mockReturnValueOnce(new Promise((resolve) => (answerFirst = resolve)));
+  list.mockResolvedValueOnce(listPage('2026-11-09'));
   const { result, rerender } = renderHook(
-    ({ week }: { week: string }) => useTodoWeek({ scope: 'all' }, { project: 'any' }, week),
-    { initialProps: { week: '2026-11-02' } }
+    ({ sort }: { sort: 'added' | 'due' }) =>
+      useTodoList({ scope: 'all' }, { project: 'any' }, sort),
+    { initialProps: { sort: 'added' } }
   );
-  rerender({ week: '2026-11-09' });
-  await waitFor(() => expect(result.current.page?.week.start).toBe('2026-11-09'));
+  rerender({ sort: 'due' });
+  await waitFor(() => expect(result.current.page?.today).toBe('2026-11-09'));
 
-  await act(async () => answerFirst(weekPage('2026-11-02')));
-  expect(result.current.page?.week.start).toBe('2026-11-09');
+  await act(async () => answerFirst(listPage('2026-11-02')));
+  expect(result.current.page?.today).toBe('2026-11-09');
 });
 
-it('keeps the last week read and reports the failed read', async () => {
-  listWeek.mockResolvedValueOnce(weekPage('2026-11-02'));
-  listWeek.mockRejectedValueOnce(new Error('backend down'));
-  const { result } = renderHook(() => useTodoWeek({ scope: 'all' }, { project: 'any' }, null));
+it('keeps the last list read and reports the failed read', async () => {
+  list.mockResolvedValueOnce(listPage('2026-11-02'));
+  list.mockRejectedValueOnce(new Error('backend down'));
+  const { result } = renderHook(() => useTodoList({ scope: 'all' }, { project: 'any' }, 'added'));
   await waitFor(() => expect(result.current.page).not.toBeNull());
 
   await act(() => result.current.reload());
   expect(result.current.error).toBe(true);
-  expect(result.current.page?.week.start).toBe('2026-11-02');
+  expect(result.current.page?.today).toBe('2026-11-02');
 });
 
 it('reads the deleted TODOs again when the TODOs change', async () => {
@@ -121,16 +119,16 @@ it('reads the deleted TODOs again when the TODOs change', async () => {
 });
 
 it('reads again when a new WS session starts, since changes made while disconnected are not replayed', async () => {
-  listWeek.mockResolvedValueOnce(weekPage('2026-11-02'));
-  const { result } = renderHook(() => useTodoWeek({ scope: 'all' }, { project: 'any' }, null));
-  await waitFor(() => expect(result.current.page?.week.start).toBe('2026-11-02'));
+  list.mockResolvedValueOnce(listPage('2026-11-02'));
+  const { result } = renderHook(() => useTodoList({ scope: 'all' }, { project: 'any' }, 'added'));
+  await waitFor(() => expect(result.current.page?.today).toBe('2026-11-02'));
 
   act(() => statusChanged?.({ status: 'closed' }));
-  expect(listWeek).toHaveBeenCalledOnce();
+  expect(list).toHaveBeenCalledOnce();
   // The TODOs changed while the session was down; no todos:changed came for it.
-  listWeek.mockResolvedValueOnce(weekPage('2026-11-09'));
+  list.mockResolvedValueOnce(listPage('2026-11-09'));
   act(() => statusChanged?.({ status: 'session_started' }));
-  await waitFor(() => expect(result.current.page?.week.start).toBe('2026-11-09'));
+  await waitFor(() => expect(result.current.page?.today).toBe('2026-11-09'));
 });
 
 const todo = (done: boolean): TodoView => ({
@@ -140,7 +138,6 @@ const todo = (done: boolean): TodoView => ({
   author: 'user',
   origin: 'written',
   starts_on: '2026-11-02',
-  carried: false,
   due: null,
   state: done
     ? { kind: 'done', by: 'user', at: '2026-11-03T00:00:00Z' }
@@ -150,21 +147,21 @@ const todo = (done: boolean): TodoView => ({
 });
 
 it('keeps a checked row pending through a read that a change notification superseded', async () => {
-  const pageWith = (done: boolean) => ({ ...weekPage('2026-11-02'), items: [todo(done)] });
-  listWeek.mockResolvedValueOnce(pageWith(false));
+  const pageWith = (done: boolean) => ({ ...listPage('2026-11-02'), items: [todo(done)] });
+  list.mockResolvedValueOnce(pageWith(false));
   setCheck.mockResolvedValueOnce({ kind: 'ok', result: {} });
-  let answerAfterWrite: (page: TodoWeekPage) => void = () => undefined;
-  let answerAfterChange: (page: TodoWeekPage) => void = () => undefined;
-  listWeek.mockReturnValueOnce(new Promise((resolve) => (answerAfterWrite = resolve)));
-  listWeek.mockReturnValueOnce(new Promise((resolve) => (answerAfterChange = resolve)));
+  let answerAfterWrite: (page: TodoListPage) => void = () => undefined;
+  let answerAfterChange: (page: TodoListPage) => void = () => undefined;
+  list.mockReturnValueOnce(new Promise((resolve) => (answerAfterWrite = resolve)));
+  list.mockReturnValueOnce(new Promise((resolve) => (answerAfterChange = resolve)));
   const { result } = renderHook(
     () => {
-      const week = useTodoWeek({ scope: 'all' }, { project: 'any' }, null);
+      const todoList = useTodoList({ scope: 'all' }, { project: 'any' }, 'added');
       const mutations = useTodoMutations({
-        reloadWeek: week.reload,
+        reloadList: todoList.reload,
         reloadDeleted: async () => undefined,
       });
-      return { week, mutations };
+      return { todoList, mutations };
     },
     {
       wrapper: ({ children }: { children: ReactNode }) => (
@@ -172,22 +169,22 @@ it('keeps a checked row pending through a read that a change notification supers
       ),
     }
   );
-  await waitFor(() => expect(result.current.week.page).not.toBeNull());
+  await waitFor(() => expect(result.current.todoList.page).not.toBeNull());
 
   let checked: Promise<boolean> = Promise.resolve(false);
   await act(async () => {
     checked = result.current.mutations.setCheck('t1', true);
   });
   act(() => todoChanged?.());
-  await waitFor(() => expect(listWeek).toHaveBeenCalledTimes(3));
+  await waitFor(() => expect(list).toHaveBeenCalledTimes(3));
 
   // The read after the write answers last-but-one: it is dropped, and the row still waits.
   await act(async () => answerAfterWrite(pageWith(true)));
   expect(result.current.mutations.pending.has('t1')).toBe(true);
-  expect(result.current.week.page?.items[0].state.kind).toBe('not_started');
+  expect(result.current.todoList.page?.items[0].state.kind).toBe('not_started');
 
   await act(async () => answerAfterChange(pageWith(true)));
   expect(await checked).toBe(true);
   expect(result.current.mutations.pending.size).toBe(0);
-  expect(result.current.week.page?.items[0].state.kind).toBe('done');
+  expect(result.current.todoList.page?.items[0].state.kind).toBe('done');
 });

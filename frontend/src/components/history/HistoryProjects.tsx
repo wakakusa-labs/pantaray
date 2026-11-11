@@ -14,6 +14,7 @@ import {
   resolveProjectOrganizations,
   type WorkspaceProject,
 } from '@/pages/settings/components/workspaceSettingsModel';
+import { projectInScope } from '@/todos/todoSelection';
 
 import type { TodoScopeQuery } from '../../../electron/src/todos/todoContracts';
 import { HistoryDeleteDialog } from './HistoryDeleteDialog';
@@ -32,7 +33,6 @@ export type WorkspaceProjects = Pick<
   | 'addFolderToProject'
   | 'removeFolderFromProject'
   | 'openFolder'
-  | 'addOrganization'
   | 'updateProjectOrganizations'
   | 'dragController'
   | 'busy'
@@ -47,7 +47,7 @@ export type ProjectTodos = {
   /** Open TODOs by project id, for the week in view. */
   openCounts: ReadonlyMap<string, number>;
   onSelectProject: (projectId: string) => void;
-  /** The rail's scope: ＋ creates the project in its organization, or in none. */
+  /** The rail's scope: only its projects are listed, and ＋ creates one in it. */
   scope: TodoScopeQuery;
 };
 
@@ -78,6 +78,7 @@ export function HistoryProjects({
 }) {
   const { settings, errorMessage, pending, dragController } = projects;
   const addButtonRef = useRef<HTMLButtonElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
   const [dialog, setDialog] = useState<OpenDialog | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [createdId, setCreatedId] = useState<string | null>(null);
@@ -116,10 +117,15 @@ export function HistoryProjects({
   };
   const confirmDelete = async (project: WorkspaceProject) => {
     setDialog(null);
-    if (await projects.removeProject(project.project_id)) addButtonRef.current?.focus();
+    // On all organizations there is no ＋; the list's title takes focus instead.
+    if (await projects.removeProject(project.project_id))
+      (addButtonRef.current ?? titleRef.current)?.focus();
     else focusMenuButton(project.project_id);
   };
 
+  const shownProjects = (settings?.projects ?? []).filter(
+    (project) => !scope || projectInScope(project, scope)
+  );
   const foldersOf = (projectId: string) =>
     (settings?.folders ?? []).filter((folder) => folder.project_ids.includes(projectId));
   const menuItems = (project: WorkspaceProject) => {
@@ -148,7 +154,9 @@ export function HistoryProjects({
   return (
     <section className="history-projects" aria-labelledby="history-projects-title">
       <div className="history-projects__head">
-        <h2 id="history-projects-title">{t('history.projects.title')}</h2>
+        <h2 id="history-projects-title" ref={titleRef} tabIndex={-1}>
+          {t('history.projects.title')}
+        </h2>
         {scope?.scope === 'all' ? null : (
           <button
             type="button"
@@ -169,7 +177,7 @@ export function HistoryProjects({
           {errorMessage}
         </div>
       ) : null}
-      {settings && (settings.projects.length > 0 || creating) ? (
+      {settings && (shownProjects.length > 0 || creating) ? (
         <DndContext
           sensors={dragController.sensors}
           accessibility={dragController.accessibility}
@@ -179,7 +187,7 @@ export function HistoryProjects({
           onDragCancel={dragController.onDragCancel}
         >
           <SortableContext
-            items={settings.projects.map((project) => project.project_id)}
+            items={shownProjects.map((project) => project.project_id)}
             strategy={verticalListSortingStrategy}
           >
             <ul className="history-projects__list">
@@ -194,7 +202,7 @@ export function HistoryProjects({
                   />
                 </li>
               ) : null}
-              {settings.projects.map((project) => (
+              {shownProjects.map((project) => (
                 <HistoryProjectRow
                   key={project.project_id}
                   project={project}
@@ -243,7 +251,6 @@ export function HistoryProjects({
           project={dialog.project}
           organizations={settings.organizations}
           t={t}
-          onAddOrganization={projects.addOrganization}
           onSave={(organizationId) =>
             projects.updateProjectOrganizations(
               dialog.project.project_id,

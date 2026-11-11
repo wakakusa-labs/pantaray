@@ -1,4 +1,13 @@
+import type { WorkspaceProject } from '@/pages/settings/components/workspaceSettingsModel';
+
 import type { TodoScopeQuery, TodoWeekQuery } from '../../electron/src/todos/todoContracts';
+
+/** Whether a project's TODOs are among the scope's. */
+export function projectInScope(project: WorkspaceProject, scope: TodoScopeQuery): boolean {
+  if (scope.scope === 'all') return true;
+  if (scope.scope === 'no_organization') return project.organization_ids.length === 0;
+  return project.organization_ids.some((id) => id === scope.organization_id);
+}
 
 /** Which of the week's projects are in view. */
 export type TodoProjectFilter = Pick<TodoWeekQuery, 'project' | 'project_id'>;

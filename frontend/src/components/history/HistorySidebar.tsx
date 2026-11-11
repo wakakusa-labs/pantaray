@@ -443,7 +443,7 @@ export function HistorySidebar({
       <div className="history-sidebar__head">
         {/* The search filters the conversations only. */}
         {TODO_UX_ENABLED ? (
-          <TodoScopeTitle name={todoNav.scopeName} />
+          <TodoScopeTitle nav={todoNav} />
         ) : (
           <HistorySearchField searchText={searchText} onSearch={setSearchText} />
         )}

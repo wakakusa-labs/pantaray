@@ -1,5 +1,6 @@
 import { PanelLeft } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { useLocation, useNavigate, useOutletContext } from 'react-router-dom';
 
 import { AiConnectionNotice } from '@/components/AiConnectionNotice';
@@ -7,8 +8,14 @@ import { OpenWorkContext } from '@/components/action-conversation/sentMessageRef
 import { ChatView, type ChatViewHandle } from '@/components/chat/ChatView';
 import { useChatSession } from '@/components/chat/chatSession';
 import { HISTORY_SIDEBAR_ID, HistorySidebar } from '@/components/history/HistorySidebar';
-import type { TodoListPlace, TodoSidebarNav } from '@/components/history/TodoSidebarNav';
+import {
+  ORGANIZATION_EDIT_BUTTON_ID,
+  type TodoListPlace,
+  type TodoSidebarNav,
+} from '@/components/history/TodoSidebarNav';
 import type { LayoutOutletContext } from '@/components/Layout';
+import { OrganizationDialog } from '@/components/todo/OrganizationDialog';
+import { ORGANIZATION_ADD_BUTTON_ID } from '@/components/todo/OrganizationRail';
 import { NewTaskPane } from '@/components/task/NewTaskPane';
 import { SuggestionTaskPane } from '@/components/task/SuggestionTaskPane';
 import { TaskWorkspace } from '@/components/task/TaskWorkspace';
@@ -24,7 +31,7 @@ import {
   type HistorySelection,
 } from '@/history/historySelection';
 import { useSuggestionHistory } from '@/hooks/useSuggestionHistory';
-import type { WorkspaceProject } from '@/pages/settings/components/workspaceSettingsModel';
+import type { WorkspaceOrganization } from '@/pages/settings/components/workspaceSettingsModel';
 import {
   DEFAULT_TODO_SELECTION,
   parseTodoSelection,
@@ -61,13 +68,6 @@ function itemSearch(item: HistorySelection, scope: TodoScopeQuery) {
   const scopeQuery = todoSelectionSearch({ ...DEFAULT_TODO_SELECTION, scope }).slice(1);
   const query = historySelectionSearch(item);
   return scopeQuery ? `${query}&${scopeQuery}` : query;
-}
-
-/** Whether a project's TODOs are among the scope's. */
-function inScope(project: WorkspaceProject, scope: TodoScopeQuery): boolean {
-  if (scope.scope === 'all') return true;
-  if (scope.scope === 'no_organization') return project.organization_ids.length === 0;
-  return project.organization_ids.some((id) => id === scope.organization_id);
 }
 
 /** Which TODO list the sidebar marks current. */
@@ -125,7 +125,8 @@ const SuggestionHistoryPage = () => {
   const workspace = useWorkspaceSettingsController(t);
   const location = useLocation();
   const navigate = useNavigate();
-  const { publishOrganizations } = useOutletContext<LayoutOutletContext>();
+  const { publishOrganizations, creatingOrganization, onCreatingOrganizationChange } =
+    useOutletContext<LayoutOutletContext>();
   const selection =
     TODO_UX_ENABLED && !new URLSearchParams(location.search).has(ITEM_PARAM)
       ? null
@@ -155,6 +156,12 @@ const SuggestionHistoryPage = () => {
     scope.scope === 'organization' &&
     organizations !== undefined &&
     !organizations.some((organization) => organization.organization_id === scope.organization_id);
+  const scopeOrganization =
+    scope.scope === 'organization'
+      ? organizations?.find(
+          (organization) => organization.organization_id === scope.organization_id
+        )
+      : undefined;
   useEffect(() => {
     if (scopeGone)
       navigate({ search: todoSelectionSearch(DEFAULT_TODO_SELECTION) }, { replace: true });
@@ -241,9 +248,8 @@ const SuggestionHistoryPage = () => {
         ? t('todo.rail.all')
         : scope.scope === 'no_organization'
           ? t('todo.rail.none')
-          : (organizations?.find(
-              (organization) => organization.organization_id === scope.organization_id
-            )?.display_name ?? null),
+          : (scopeOrganization?.display_name ?? null),
+    onEditOrganization: scopeOrganization ? () => setEditingOrganization(true) : null,
     openCounts,
     onShowAll: () =>
       selectTodos({ ...DEFAULT_TODO_SELECTION, scope, weekStart: todoSelection.weekStart }),
@@ -258,17 +264,51 @@ const SuggestionHistoryPage = () => {
         progressSpan: todoSelection.progressSpan,
       }),
     onShowDeleted: () => selectTodos({ ...DEFAULT_TODO_SELECTION, scope, view: 'deleted' }),
-    onSelectProject: (projectId) => {
-      const project = settings?.projects.find((candidate) => candidate.project_id === projectId);
+    // The sidebar lists the scope's projects only, so the scope stays.
+    onSelectProject: (projectId) =>
       selectTodos({
         ...DEFAULT_TODO_SELECTION,
-        // A project outside the scope in view is shown among all organizations'.
-        scope: project && inScope(project, scope) ? scope : DEFAULT_TODO_SELECTION.scope,
+        scope,
         project: { project: 'project', project_id: projectId },
         weekStart: todoSelection.weekStart,
-      });
-    },
+      }),
   };
+  // The rail's ＋ adds an organization and then shows it; the sidebar's title edits the one in view.
+  const [editingOrganization, setEditingOrganization] = useState(false);
+  const organizationDialog: {
+    organization: WorkspaceOrganization | null;
+    anchorId: string;
+  } | null =
+    settings === null
+      ? null
+      : creatingOrganization
+        ? { organization: null, anchorId: ORGANIZATION_ADD_BUTTON_ID }
+        : editingOrganization && scopeOrganization
+          ? { organization: scopeOrganization, anchorId: ORGANIZATION_EDIT_BUTTON_ID }
+          : null;
+  const saveOrganization = async (
+    organization: WorkspaceOrganization | null,
+    name: string,
+    icon: string | null
+  ) => {
+    if (organization) return workspace.updateOrganization(organization.organization_id, name, icon);
+    const organizationId = await workspace.addOrganization(name, icon);
+    if (organizationId === null) return false;
+    selectTodos({
+      ...DEFAULT_TODO_SELECTION,
+      scope: { scope: 'organization', organization_id: organizationId },
+    });
+    return true;
+  };
+  // A modal dialog holds focus until it is gone, so it closes before focus moves.
+  const closeOrganizationDialog = (anchorId: string) => {
+    flushSync(() => {
+      onCreatingOrganizationChange(false);
+      setEditingOrganization(false);
+    });
+    document.getElementById(anchorId)?.focus();
+  };
+
   // The composers' Add project starts naming one in the sidebar, as its ＋ does.
   const [creatingProject, setCreatingProject] = useState(false);
   const addProject = () => setCreatingProject(true);
@@ -381,6 +421,16 @@ const SuggestionHistoryPage = () => {
           </OpenWorkContext.Provider>
         </div>
       )}
+      {organizationDialog && settings ? (
+        <OrganizationDialog
+          organization={organizationDialog.organization}
+          organizations={settings.organizations}
+          anchorId={organizationDialog.anchorId}
+          errorMessage={workspace.errorMessage}
+          onSave={(name, icon) => saveOrganization(organizationDialog.organization, name, icon)}
+          onClose={() => closeOrganizationDialog(organizationDialog.anchorId)}
+        />
+      ) : null}
     </div>
   );
 };

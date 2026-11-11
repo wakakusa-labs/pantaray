@@ -45,15 +45,6 @@ let api: ReturnType<typeof createApi>;
 function createApi() {
   return {
     get: vi.fn(async () => structuredClone(store)),
-    createOrganization: vi.fn(async ({ displayName }: { displayName: string }) => {
-      const created = {
-        organization_id: `org-${displayName}`,
-        display_name: displayName,
-        icon_data_url: null,
-      };
-      store.organizations.push(created);
-      return created;
-    }),
     renameProject: vi.fn(async (projectId: string, { displayName }: { displayName: string }) => {
       const renamed = store.projects.find((p) => p.project_id === projectId)!;
       renamed.display_name = displayName;
@@ -110,7 +101,7 @@ const projectButton = (name: string) => screen.getByRole('button', { name });
 function Projects({
   openCounts = new Map(),
   withTodos = true,
-  scope = { scope: 'no_organization' },
+  scope = { scope: 'all' },
 }: {
   openCounts?: ReadonlyMap<string, number>;
   /** False: the projects as they were before the TODO list. */
@@ -159,8 +150,11 @@ async function renderProjects(scope?: TodoScopeQuery) {
       <Projects scope={scope} />
     </LocalOwnerContext.Provider>
   );
-  await screen.findByRole('button', { name: 'a' });
+  await screen.findAllByRole('button', { name: /^history\.projects\.menu/u });
 }
+
+/** Where ＋ shows: a scope other than all organizations, here the projects in none. */
+const NO_ORGANIZATION: TodoScopeQuery = { scope: 'no_organization' };
 
 async function chooseFromMenu(projectName: string, item: string) {
   await userEvent.click(
@@ -314,19 +308,9 @@ it('組織はなしを含めて一つを選んで保存し、新しい組織も�
 
   await chooseFromMenu('b', 'history.projects.setOrganization');
   const second = screen.getByRole('dialog');
-  await userEvent.type(
-    within(second).getByRole('textbox', { name: 'history.projects.organizationNew' }),
-    'Wakakusa{Enter}'
-  );
-  expect(api.createOrganization).toHaveBeenCalledWith({
-    displayName: 'Wakakusa',
-    iconDataUrl: null,
-  });
-  expect(await within(second).findByRole('radio', { name: 'Wakakusa' })).toBeChecked();
+  await userEvent.click(within(second).getByRole('radio', { name: 'Xer' }));
   await userEvent.click(within(second).getByRole('button', { name: 'common.save' }));
-  expect(api.updateProjectLinks).toHaveBeenLastCalledWith('b', {
-    organizationIds: ['org-Wakakusa'],
-  });
+  expect(api.updateProjectLinks).toHaveBeenLastCalledWith('b', { organizationIds: ['org-x'] });
 });
 
 it('フォルダを外すと、ほかのプロジェクトにもあるものはリンクだけ、このプロジェクトだけのものは登録ごと外す', async () => {
@@ -418,7 +402,7 @@ it('フォルダ選択の間はほかの変更を受け付けず、選んだ後�
 
 it('＋ はフォルダを選ばずに名前を聞き、Enter で作ったプロジェクトへ移り、そのフォルダを足せる', async () => {
   api.selectFolder.mockResolvedValue({ canceled: false, path: '/Users/me/delta' });
-  await renderProjects();
+  await renderProjects(NO_ORGANIZATION);
 
   await userEvent.click(screen.getByRole('button', { name: 'history.projects.add' }));
   const name = screen.getByRole('textbox', { name: 'history.projects.nameLabel' });
@@ -443,7 +427,7 @@ it('＋ はフォルダを選ばずに名前を聞き、Enter で作ったプロ
 });
 
 it('新しい名前は Esc や空のまま離れると取りやめて ＋ へ戻り、使われている名前は欄を残して知らせる', async () => {
-  await renderProjects();
+  await renderProjects(NO_ORGANIZATION);
   const add = screen.getByRole('button', { name: 'history.projects.add' });
 
   await userEvent.click(add);
@@ -452,7 +436,7 @@ it('新しい名前は Esc や空のまま離れると取りやめて ＋ へ戻
   expect(add).toHaveFocus();
 
   await userEvent.click(add);
-  await userEvent.click(projectButton('a'));
+  await userEvent.click(projectButton('b'));
   expect(screen.queryByRole('textbox')).toBeNull();
 
   await userEvent.click(add);
@@ -517,7 +501,7 @@ it('フォルダの行は横に流れず、パス・Finder・外すを並べ、�
 });
 
 it('プロジェクトは確認してから削除し、キャンセルならメニューのボタンへ戻る', async () => {
-  await renderProjects();
+  await renderProjects(NO_ORGANIZATION);
 
   await chooseFromMenu('b', 'common.delete');
   expect(
@@ -618,8 +602,17 @@ function rectAt(top: number): DOMRect {
   };
 }
 
-it('＋ は見ている組織の中に作り、組織なしならどこにも属さず、すべての組織では出さない', async () => {
+it('見ている組織のプロジェクトだけを並べ、＋ はその中に作り、すべての組織では出さない', async () => {
+  const listed = () =>
+    screen
+      .getAllByRole('button', { name: /^history\.projects\.menu/u })
+      .map((menu) => menu.closest('[data-project-id]')?.getAttribute('data-project-id'));
+  await renderProjects(NO_ORGANIZATION);
+  expect(listed()).toEqual(['b']);
+  cleanup();
+
   await renderProjects({ scope: 'organization', organization_id: 'org-x' });
+  expect(listed()).toEqual(['a']);
   await userEvent.click(screen.getByRole('button', { name: 'history.projects.add' }));
   await userEvent.keyboard('delta{Enter}');
   expect(api.createProject).toHaveBeenCalledWith({
@@ -629,5 +622,12 @@ it('＋ は見ている組織の中に作り、組織なしならどこにも属
   cleanup();
 
   await renderProjects({ scope: 'all' });
+  expect(listed()).toEqual(['a', 'b', 'p-delta']);
   expect(screen.queryByRole('button', { name: 'history.projects.add' })).toBeNull();
+  // Without ＋, a deleted project leaves focus on the list's title.
+  await chooseFromMenu('b', 'common.delete');
+  await userEvent.click(screen.getByRole('button', { name: 'common.delete' }));
+  await waitFor(() =>
+    expect(screen.getByRole('heading', { name: 'history.projects.title' })).toHaveFocus()
+  );
 });

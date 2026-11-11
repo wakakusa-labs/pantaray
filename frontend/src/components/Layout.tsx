@@ -25,9 +25,14 @@ import './Layout.css';
 
 const HOME_PATH = '/history';
 
-/** What the home page hands the shell: the organizations its settings read, for the rail. */
+/**
+ * What the home page and the shell share: the organizations its settings read, for the rail, and
+ * whether the rail's ＋ asked it to add one.
+ */
 export type LayoutOutletContext = {
   publishOrganizations: (organizations: readonly WorkspaceOrganization[]) => void;
+  creatingOrganization: boolean;
+  onCreatingOrganizationChange: (creating: boolean) => void;
 };
 
 const sameScope = (a: TodoScopeQuery, b: TodoScopeQuery) =>
@@ -85,9 +90,14 @@ const Layout: React.FC = () => {
   // The home page reads the workspace on every visit and hands its organizations up; until then
   // the rail holds the entries every workspace has.
   const [organizations, setOrganizations] = useState<readonly WorkspaceOrganization[]>([]);
+  const [creatingOrganization, setCreatingOrganization] = useState(false);
   const outletContext = useMemo<LayoutOutletContext>(
-    () => ({ publishOrganizations: setOrganizations }),
-    []
+    () => ({
+      publishOrganizations: setOrganizations,
+      creatingOrganization,
+      onCreatingOrganizationChange: setCreatingOrganization,
+    }),
+    [creatingOrganization]
   );
   // The rail's scope, or without the TODO list its Home, reopens what the home page last showed,
   // for as long as the window is open.
@@ -164,7 +174,16 @@ const Layout: React.FC = () => {
         <nav className="app-rail">
           {TODO_UX_ENABLED ? (
             // The home: the TODOs of all organizations, of one, or of none.
-            <OrganizationRail organizations={organizations} selected={scope} onSelect={openScope} />
+            // Its ＋ adds an organization on the home page, which holds the workspace.
+            <OrganizationRail
+              organizations={organizations}
+              selected={scope}
+              onSelect={openScope}
+              onAdd={() => {
+                if (!onHome) navigate({ pathname: HOME_PATH, search: lastHomeSearch });
+                setCreatingOrganization(true);
+              }}
+            />
           ) : (
             // On the home page, Home leaves the selection as it is.
             <RailPageButton

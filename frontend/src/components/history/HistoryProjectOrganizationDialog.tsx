@@ -9,7 +9,8 @@ import type {
 const NO_ORGANIZATION = '';
 
 /**
- * Chooses the project's organization, or none, and can add a new one by name. A project holds
+ * Moves the project to an existing organization, or to none; organizations are added from the
+ * rail. A project holds
  * at most one organization (the backend refuses more), so the choices are radio buttons. Mounted
  * only while open; the caller moves focus back once it is gone.
  */
@@ -17,35 +18,23 @@ export function HistoryProjectOrganizationDialog({
   project,
   organizations,
   t,
-  onAddOrganization,
   onSave,
   onClose,
 }: {
   project: WorkspaceProject;
   organizations: WorkspaceOrganization[];
   t: ReturnType<typeof useI18n>['t'];
-  onAddOrganization: (displayName: string) => Promise<string | null>;
   onSave: (organizationId: string | null) => Promise<boolean>;
   onClose: () => void;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [chosen, setChosen] = useState(project.organization_ids[0] ?? NO_ORGANIZATION);
-  const [newName, setNewName] = useState('');
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     const dialog = dialogRef.current;
     if (dialog && !dialog.open) dialog.showModal();
   }, []);
 
-  const addOrganization = async () => {
-    if (!newName.trim()) return;
-    setBusy(true);
-    const organizationId = await onAddOrganization(newName);
-    setBusy(false);
-    if (!organizationId) return;
-    setChosen(organizationId);
-    setNewName('');
-  };
   const save = async () => {
     setBusy(true);
     const saved = await onSave(chosen === NO_ORGANIZATION ? null : chosen);
@@ -88,25 +77,6 @@ export function HistoryProjectOrganizationDialog({
           </label>
         ))}
       </fieldset>
-      <form
-        className="history-project-organizations__new"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void addOrganization();
-        }}
-      >
-        <input
-          type="text"
-          className="history-filter-input"
-          value={newName}
-          aria-label={t('history.projects.organizationNew')}
-          placeholder={t('history.projects.organizationNew')}
-          onChange={(event) => setNewName(event.target.value)}
-        />
-        <button type="submit" className="history-filter-button" disabled={busy || !newName.trim()}>
-          {t('history.projects.organizationAdd')}
-        </button>
-      </form>
       <div className="history-delete-dialog__actions">
         <button type="button" className="history-filter-button" onClick={onClose}>
           {t('common.cancel')}

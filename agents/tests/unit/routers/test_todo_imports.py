@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import os
+import sqlite3
 from collections.abc import Iterator
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -23,6 +27,8 @@ from pantaray_agents.routers import todo_imports as todo_imports_router
 from pantaray_agents.routers.local.registry import register_local_routers
 
 IMPORT = "6f1c2a52-7d0e-4c55-9f0e-1f2b3c4d5e6f"
+# Where `action:attachImage` writes it: the user's scope, a date, a UUID name.
+IMAGE = {"storage_path": f"{USER}/2026-11-04/00000000-0000-4000-8000-00000000000a.png"}
 IMPORTS = f"/v1/agents/users/{USER}/todo-imports"
 ONE_IMPORT = f"{IMPORTS}/{IMPORT}"
 
@@ -160,6 +166,44 @@ def test_a_start_refuses_a_deleted_organization_and_a_missing_file(
     assert _refusal(gone)["reason"] == "organization_not_found"
     assert missing.status_code == 422
     assert _refusal(missing)["reason"] == "files_unavailable"
+
+
+def test_images_alone_start_the_import_and_go_on_its_first_message(
+    client: TestClient,
+) -> None:
+    started = _start(client, text=None, images=[IMAGE])
+
+    assert started.status_code == 200, started.text
+    with closing(sqlite3.connect(os.environ["LOCAL_DB_PATH"])) as connection:
+        (message_json,) = connection.execute(
+            "SELECT step.user_message_json FROM agent_actions AS action "
+            "JOIN agent_action_steps AS step ON step.action_id = action.action_id "
+            "AND step.user_message_id = action.initial_user_message_id "
+            "WHERE action.action_id = ?",
+            (started.json()["action_id"],),
+        ).fetchone()
+    message = json.loads(message_json)
+    assert message["content"] == "1 image"
+    assert message["images"] == [{"kind": "image", **IMAGE}]
+    assert _start(client, text=None, images=[IMAGE]).json() == started.json()
+
+
+@pytest.mark.parametrize(
+    "storage_path",
+    [
+        "someone-else/2026-11-04/00000000-0000-4000-8000-00000000000a.png",
+        f"{USER}/2026-11-04/../secret.png",
+        f"{USER}/2026-11-04/00000000-0000-4000-8000-00000000000a.txt",
+    ],
+)
+def test_an_image_outside_the_users_scope_is_refused_before_anything_opens(
+    client: TestClient, storage_path: str
+) -> None:
+    refused = _start(client, images=[{"storage_path": storage_path}])
+
+    assert refused.status_code == 422
+    assert _refusal(refused)["reason"] == "images_invalid"
+    assert client.get(ONE_IMPORT).status_code == 404
 
 
 def test_the_path_user_must_be_the_token_user(client: TestClient) -> None:

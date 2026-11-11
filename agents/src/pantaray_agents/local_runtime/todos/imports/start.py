@@ -1,5 +1,5 @@
-"""Start a TODO import: open its draft, then hand the user's text and files to
-the Action that drafts it, through `submit_action_message`.
+"""Start a TODO import: open its draft, then hand the user's text, files and
+images to the Action that drafts it, through `submit_action_message`.
 
 The Action's first message id derives from the import id, so
 `UNIQUE (user_id, initial_user_message_id)` keeps one Action per import however
@@ -42,6 +42,7 @@ from pantaray_agents.schema.agent.action_message import (
     FileAttachmentInput,
     TodoImportHandoffInput,
 )
+from pantaray_agents.schema.agent.image import ImageInput
 
 _NAMESPACE_TODO_IMPORT_MESSAGE: Final = uuid.uuid5(
     uuid.NAMESPACE_URL, "pantaray:todo_import_message:v1"
@@ -67,12 +68,14 @@ def start_todo_import(
     scope: TodoScope,
     text: str | None,
     files: tuple[FileAttachmentInput, ...],
+    images: tuple[ImageInput, ...],
     clock: TodoClock,
 ) -> TodoImportStarted | DraftIssue:
-    """Open the import and start its Action with ``text`` and ``files``.
+    """Open the import and start its Action with ``text``, ``files`` and
+    ``images``, the images in the user's own scope.
 
-    The caller gives text, files or both. With no text, the message names the
-    files, as the user gave nothing else.
+    The caller gives at least one of them. With no text, the message names the
+    files and counts the images, as the user gave nothing else.
     """
 
     opened = open_todo_import(
@@ -88,7 +91,7 @@ def start_todo_import(
         # Deleted since an earlier start opened the import.
         if organization_name is None:
             return DraftIssue("organization_not_found")
-    content = (text or "").strip() or ", ".join(file.name for file in files)
+    content = (text or "").strip() or _attachments_named(files, images)
     submitted = submit_action_message(
         SubmitActionMessageCommand(
             user_id=user_id,
@@ -96,6 +99,7 @@ def start_todo_import(
             message=ActionUserMessageInput(
                 message_id=todo_import_message_id(import_id),
                 content=content,
+                images=images,
                 files=files,
                 todo_import_handoff=TodoImportHandoffInput(
                     import_id=import_id,
@@ -106,6 +110,15 @@ def start_todo_import(
         )
     )
     return TodoImportStarted(view=opened, action_id=submitted.action_id)
+
+
+def _attachments_named(
+    files: tuple[FileAttachmentInput, ...], images: tuple[ImageInput, ...]
+) -> str:
+    names = [file.name for file in files]
+    if images:
+        names.append("1 image" if len(images) == 1 else f"{len(images)} images")
+    return ", ".join(names)
 
 
 def read_todo_import_action_id(*, user_id: str, import_id: str) -> str | None:

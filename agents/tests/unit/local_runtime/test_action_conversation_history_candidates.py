@@ -25,6 +25,7 @@ from pantaray_agents.schema.agent.action_message import (
     ActionUserMessageInput,
     SuggestionApprovalInput,
     TodoHandoffInput,
+    TodoImportHandoffInput,
 )
 
 from .local_action_repository_support import bootstrap_action_repository_db
@@ -584,3 +585,45 @@ def test_a_deleted_todos_conversation_stays_out_while_the_todo_list_is_off(
         "action-reply",
         "suggestion-invalid",
     }
+
+
+def _insert_import_action(connection: sqlite3.Connection) -> None:
+    # An import's start names the import in its Action's first USER message.
+    _insert_action(
+        connection,
+        "action-import",
+        message=ActionUserMessageInput(
+            message_id="message-import",
+            content="Import needle",
+            todo_import_handoff=TodoImportHandoffInput(
+                import_id="import-1", scope="all", organization_name=None
+            ),
+        ),
+    )
+
+
+@pytest.mark.parametrize(("todo_ux", "listed"), [(True, False), (False, True)])
+def test_an_imports_conversation_leaves_the_dated_list_while_the_todo_list_is_on(
+    history_connection: sqlite3.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    todo_ux: bool,
+    listed: bool,
+) -> None:
+    monkeypatch.setattr(todo_ux_feature, "TODO_UX_ENABLED", todo_ux)
+    _insert_import_action(history_connection)
+
+    everything = _listed(history_connection)
+    assert {"act-1", "action-terminal"} <= everything
+    assert ("action-import" in everything) is listed
+    assert (_listed(history_connection, "import needle") == {"action-import"}) is (
+        listed
+    )
+    page = read_conversation_history_candidates_in_connection(
+        connection=history_connection,
+        user_id="user-1",
+        search_text="",
+        cursor=None,
+        limit=1,
+        item=("conversation", "action-import"),
+    )
+    assert [candidate.stable_id for candidate in page.candidates] == ["action-import"]

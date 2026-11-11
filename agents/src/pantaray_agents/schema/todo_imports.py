@@ -27,8 +27,10 @@ from pantaray_agents.local_runtime.todos.imports.model import (
 from pantaray_agents.schema.agent.action_message import (
     ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS,
     ACTION_MESSAGE_MAX_FILES,
+    ACTION_MESSAGE_MAX_IMAGES,
     FileAttachmentInput,
 )
+from pantaray_agents.schema.agent.image import ImageInput
 from pantaray_agents.schema.todos import TodoScopeQuery, _Request, _View
 
 # The client names the import, so resending the start opens no second one.
@@ -39,7 +41,8 @@ type _ImportId = Annotated[
 
 
 class TodoImportStartRequest(TodoScopeQuery):
-    """The user's pasted text, the files the composer staged, or both."""
+    """The user's pasted text, the files and images the composer staged, or any
+    of them."""
 
     import_id: _ImportId
     # The import's Action takes the text as its first message.
@@ -49,11 +52,15 @@ class TodoImportStartRequest(TodoScopeQuery):
     files: Annotated[
         tuple[FileAttachmentInput, ...], Field(max_length=ACTION_MESSAGE_MAX_FILES)
     ] = ()
+    # As `action:attachImage` wrote them, for the Action to see as images.
+    images: Annotated[
+        tuple[ImageInput, ...], Field(max_length=ACTION_MESSAGE_MAX_IMAGES)
+    ] = ()
 
     @model_validator(mode="after")
     def _requires_something_to_import(self) -> Self:
-        if not (self.text or "").strip() and not self.files:
-            raise ValueError("text or files are required")
+        if not (self.text or "").strip() and not self.files and not self.images:
+            raise ValueError("text, files or images are required")
         return self
 
 
@@ -117,8 +124,10 @@ type TodoImportRefusalReason = (
         "stale_revision",
         "registered",
         "canceled",
-        # A staged file is gone, or another start already used this import id.
+        # A staged file is gone, an image is not the user's, or another start
+        # already used this import id.
         "files_unavailable",
+        "images_invalid",
         "start_conflict",
     ]
 )

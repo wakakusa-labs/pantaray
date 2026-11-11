@@ -45,6 +45,7 @@ from pantaray_agents.schema.todo_imports import (
     TodoImportStartRequest,
     todo_import_http_view,
 )
+from pantaray_agents.security.storage_paths import is_valid_image_storage_path
 
 router = APIRouter(
     prefix="/v1/agents/users",
@@ -118,9 +119,11 @@ def _written(
     "/{user_id}/todo-imports",
     response_model=TodoImportHttpView,
     description=(
-        "Open the import and start the Action that drafts it from the text and "
-        "files. Resending the same `import_id` returns the same import and "
-        "Action; with different text or files, 409 `start_conflict`."
+        "Open the import and start the Action that drafts it from the text, "
+        "files and images. Resending the same `import_id` returns the same "
+        "import and Action; with different text, files or images, 409 "
+        "`start_conflict`. An image outside the user's scope is 422 "
+        "`images_invalid`, before anything opens."
     ),
 )
 def post_todo_import(
@@ -129,6 +132,12 @@ def post_todo_import(
     resolved_user_id: str = Depends(get_current_user_id_from_token),
 ) -> TodoImportHttpView | JSONResponse:
     _require_path_user(user_id, resolved_user_id)
+    # The check `POST .../actions/messages` holds an image to.
+    if not all(
+        is_valid_image_storage_path(user_id=user_id, storage_path=image.storage_path)
+        for image in body.images
+    ):
+        return _refused("images_invalid")
     try:
         started = start_todo_import(
             user_id=user_id,
@@ -136,6 +145,7 @@ def post_todo_import(
             scope=body.todo_scope(),
             text=body.text,
             files=body.files,
+            images=body.images,
             clock=read_todo_clock(),
         )
     except ActionFileAttachmentUnavailableError:

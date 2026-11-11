@@ -1,4 +1,5 @@
-// The TODO list and its progress, for the main window: main refuses these channels from an Overlay.
+// The TODO list, its progress and its imports, for the main window: main refuses these channels
+// from an Overlay.
 function createTodosApi({ ipcRenderer }) {
   return {
     todos: {
@@ -21,6 +22,13 @@ function createTodosApi({ ipcRenderer }) {
         ipcRenderer.on('todos:changed', listener);
         return () => ipcRenderer.removeListener('todos:changed', listener);
       },
+    },
+    todoImports: {
+      start: (request) => ipcRenderer.invoke('todoImports:start', request),
+      read: (request) => ipcRenderer.invoke('todoImports:read', request),
+      write: (request) => ipcRenderer.invoke('todoImports:write', request),
+      register: (request) => ipcRenderer.invoke('todoImports:register', request),
+      cancel: (request) => ipcRenderer.invoke('todoImports:cancel', request),
     },
   };
 }

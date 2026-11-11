@@ -30,6 +30,7 @@ import { registerOverlayPlacementHandlers } from './handlers/overlayPlacement';
 import { registerShortcutHandlers } from './handlers/shortcut';
 import { registerSuggestionHandlers } from './handlers/suggestion';
 import { registerTaskDraftHandlers } from './handlers/taskDrafts';
+import { registerTodoImportHandlers } from './handlers/todoImports';
 import { registerTodoHandlers } from './handlers/todos';
 import { registerUiLanguageHandlers } from './handlers/uiLanguage';
 import { registerUpdateHandlers } from './handlers/update';
@@ -63,6 +64,7 @@ export function registerAllIpcHandlers(ctx: MainContext): RegisterAllResult {
   registerTaskDraftHandlers(ctx, registrar);
   registerChatHandlers(ctx, registrar);
   registerTodoHandlers(ctx, registrar);
+  registerTodoImportHandlers(ctx, registrar);
   registerHistoryHandlers(ctx, registrar);
   registerSuggestionHandlers(ctx, registrar);
   registerUiLanguageHandlers(ctx, registrar);

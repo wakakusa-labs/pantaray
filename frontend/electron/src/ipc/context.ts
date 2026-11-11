@@ -70,6 +70,7 @@ import type { ChatTurnState } from '../chat/chatContracts';
 import type { TaskDraftStore } from '../actions/taskDraftStore';
 import type { createChatFetcher } from '../chat/chatFetch';
 import type { createTodoFetcher } from '../todos/todoFetch';
+import type { createTodoImportFetcher } from '../todos/todoImportFetch';
 import type { IntegrationSettingsApi } from '../settings/integrationSettingsFetch';
 import type {
   CreateNotificationIpcHandlers,
@@ -207,6 +208,8 @@ export type MainContext = {
   };
 
   todos: ReturnType<typeof createTodoFetcher>;
+
+  todoImports: ReturnType<typeof createTodoImportFetcher>;
 
   actions: ReturnType<typeof createActionFetcher> & {
     getCurrentSubjectId: () => string | null;

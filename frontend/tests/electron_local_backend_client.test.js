@@ -242,6 +242,11 @@ test('local backend client の route allowlist は現在の全 call site を許�
     ['/v1/agents/users/user-1/workspace-settings/projects/project-1/name', 'PUT'],
     ['/v1/agents/users/user-1/approval-preferences/workspace-edit-and-command', 'GET'],
     ['/v1/agents/users/user-1/approval-preferences/workspace-edit-and-command', 'PUT'],
+    ['/v1/agents/users/user-1/todo-imports', 'POST'],
+    ['/v1/agents/users/user-1/todo-imports/import-1', 'GET'],
+    ['/v1/agents/users/user-1/todo-imports/import-1', 'PUT'],
+    ['/v1/agents/users/user-1/todo-imports/import-1/register', 'POST'],
+    ['/v1/agents/users/user-1/todo-imports/import-1/cancel', 'POST'],
   ];
 
   try {

@@ -5,6 +5,7 @@ import { useI18n } from '@/context/useI18n';
 import { nextMonday, shiftDays } from './todoDates';
 
 import './todo.css';
+import './todoAddBar.css';
 
 /**
  * A button that opens a small date picker under it: 今日, 明日 and 来週, the native date field,

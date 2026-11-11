@@ -33,6 +33,8 @@ export type TodoSelection = {
   progressDay: string | null;
   /** The TODO whose conversation is open beside the list. */
   todoId: string | null;
+  /** The import whose draft is open beside the list, in place of a TODO's conversation. */
+  importId: string | null;
 };
 
 export const DEFAULT_TODO_SELECTION: TodoSelection = {
@@ -44,6 +46,7 @@ export const DEFAULT_TODO_SELECTION: TodoSelection = {
   progressOn: null,
   progressDay: null,
   todoId: null,
+  importId: null,
 };
 
 const SCOPE_PARAM = 'scope';
@@ -54,6 +57,7 @@ const SPAN_PARAM = 'span';
 const ON_PARAM = 'on';
 const DAY_PARAM = 'day';
 const TODO_PARAM = 'todo';
+const IMPORT_PARAM = 'import';
 /** The value for TODOs in no organization, and for TODOs in no project. */
 const NONE = 'none';
 const ORGANIZATION_PREFIX = 'organization:';
@@ -110,6 +114,7 @@ export function parseTodoSelection(search: string): TodoSelection {
     progressOn: localDate(params.get(ON_PARAM)),
     progressDay: localDate(params.get(DAY_PARAM)),
     todoId: canonicalId(params.get(TODO_PARAM)),
+    importId: canonicalId(params.get(IMPORT_PARAM)),
   };
 }
 
@@ -140,6 +145,9 @@ export function todoSelectionSearch(selection: TodoSelection): string {
   if (selection.progressDay !== null) entries.push(`${DAY_PARAM}=${selection.progressDay}`);
   if (selection.todoId !== null) {
     entries.push(`${TODO_PARAM}=${encodeURIComponent(selection.todoId)}`);
+  }
+  if (selection.importId !== null) {
+    entries.push(`${IMPORT_PARAM}=${encodeURIComponent(selection.importId)}`);
   }
   return entries.length === 0 ? '' : `?${entries.join('&')}`;
 }

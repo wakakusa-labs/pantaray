@@ -18,9 +18,11 @@ import { workspacePendingKey } from '@/pages/settings/useWorkspaceSettingsContro
 import { groupTodosByProject, todoProjectSlots } from '@/todos/groupTodosByProject';
 import type { TodoListSort, TodoSelection } from '@/todos/todoSelection';
 import { useDeletedTodos } from '@/todos/useDeletedTodos';
+import { useTodoImportStart, type TodoImportProblem } from '@/todos/useTodoImport';
 import type { TodoListRead } from '@/todos/useTodoList';
 import { useTodoMutations, type TodoMutationFailure } from '@/todos/useTodoMutations';
 
+import type { ActionFileAttachment } from '../../electron/src/actions/actionContracts';
 import type { TodoView } from '../../electron/src/todos/todoContracts';
 import './todoScreen.css';
 
@@ -34,6 +36,10 @@ function FailureLine({ failure }: { failure: TodoMutationFailure }) {
     </p>
   );
 }
+
+/** Why an import did not start, told under the add bar. */
+const startProblemMessage = (problem: TodoImportProblem) =>
+  problem === 'files_unavailable' ? 'todo.import.filesUnavailable' : 'todo.import.startFailed';
 
 /** What the header's folders of the project in view are changed with. */
 type ProjectFolderActions = Pick<
@@ -78,6 +84,7 @@ export function TodoScreen({
 }) {
   const { t } = useI18n();
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const importStart = useTodoImportStart();
   const deleted = useDeletedTodos(selection.scope);
   const mutations = useTodoMutations({
     reloadList: todoList.reload,
@@ -144,7 +151,7 @@ export function TodoScreen({
           selected={todo.todo_id === selectedTodo?.todo_id}
           pending={mutations.pending.has(todo.todo_id)}
           onToggleCheck={() => void mutations.setCheck(todo.todo_id, todo.state.kind !== 'done')}
-          onSelect={() => onSelect({ ...selection, todoId: todo.todo_id })}
+          onSelect={() => onSelect({ ...selection, todoId: todo.todo_id, importId: null })}
           onDelete={() => void mutations.deleteTodo(todo.todo_id)}
           onSetDue={(due) => void mutations.setDue(todo.todo_id, due)}
           onSetStart={(startsOn) => void mutations.setStart(todo.todo_id, startsOn)}
@@ -221,17 +228,31 @@ export function TodoScreen({
     );
   };
 
+  /** Starts drafting from the add bar's text and files, in the scope in view, and opens it. */
+  const startImport = async (text: string, files: readonly ActionFileAttachment[]) => {
+    const started = await importStart.start(selection.scope, text, files);
+    if (started === null) return false;
+    onSelect({ ...selection, todoId: null, importId: started });
+    return true;
+  };
+
   /** The bar under the list that adds a TODO. */
   const renderAddBar = (): ReactNode => {
     if (!page || !settings || projects.length === 0) return null;
     return (
       <div className="todo-screen__add">
         {failureFor((target) => target.kind === 'add')}
+        {importStart.problem ? (
+          <p className="todo-screen__failure" role="alert">
+            {t(startProblemMessage(importStart.problem))}
+          </p>
+        ) : null}
         <TodoAddBar
           today={page.today}
           projects={projects}
           disabled={!listShowsSelection}
           onSubmit={mutations.create}
+          onImport={startImport}
         />
       </div>
     );

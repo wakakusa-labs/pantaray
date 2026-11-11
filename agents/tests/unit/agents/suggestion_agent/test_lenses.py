@@ -139,6 +139,7 @@ async def _decide(model, steps: list[ReactLoopStep], research_tools=None):
         send_turn=send,
         generate_tool_call=generate,
         record_step=record,
+        project_names=(),
     )
 
 

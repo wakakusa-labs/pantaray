@@ -404,6 +404,8 @@ def test_snapshot_lists_open_todos_of_the_week_with_project_due_and_state(
         ),
         omitted=0,
     )
+    # The only projects the run's target may name.
+    assert snapshot.stable_memory.project_names == ("Website",)
 
 
 def test_snapshot_keeps_the_newest_open_todos_and_counts_the_rest(
@@ -1482,6 +1484,7 @@ async def test_a_suggestion_run_reads_back_a_spilled_folder_listing(
         parse_output=parse_suggestion_output,
         record_step=record_step,
         past=PastSuggestions((), datetime(2026, 10, 12, tzinfo=UTC)),
+        project_names=(),
     )
 
     assert run.extraction["has_suggestion"] is False

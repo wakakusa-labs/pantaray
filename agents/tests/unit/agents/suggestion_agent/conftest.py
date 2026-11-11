@@ -157,6 +157,7 @@ def suggestion_agent(
                 prompt="No stable memory roots are available.",
                 has_facts=False,
                 has_insights=False,
+                project_names=("Pantaray",),
             ),
         )
         agent.client = mock_llm_client

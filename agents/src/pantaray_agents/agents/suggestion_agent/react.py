@@ -171,7 +171,13 @@ def _stored_activity_output(output: JSONValue) -> dict[str, JSONValue]:
     return stored
 
 
-def _terminal_tool() -> LlmToolDefinition:
+def _terminal_tool(project_names: Sequence[str]) -> LlmToolDefinition:
+    # The run may name only one of the user's projects, or none.
+    project_name: dict[str, object] = (
+        {"type": ["string", "null"], "enum": [*project_names, None]}
+        if project_names
+        else {"type": "null"}
+    )
     return LlmToolDefinition(
         name=SUBMIT_SUGGESTION_TOOL_NAME,
         description=(
@@ -215,7 +221,7 @@ def _terminal_tool() -> LlmToolDefinition:
                             "required": ["organization_name", "project_name"],
                             "properties": {
                                 "organization_name": {"type": ["string", "null"]},
-                                "project_name": {"type": ["string", "null"]},
+                                "project_name": project_name,
                             },
                         },
                     ]
@@ -385,6 +391,7 @@ async def run_suggestion_react(
     parse_output: SuggestionOutputParser,
     record_step: SuggestionStepRecorder,
     past: PastSuggestions,
+    project_names: tuple[str, ...],
 ) -> LensRunResult:
     """Research behind ``context`` for ``lens`` until a submission is accepted.
 
@@ -418,6 +425,7 @@ async def run_suggestion_react(
         try:
             parsed = SuggestionStructuredOutput.model_validate(arguments)
             extraction = parse_output(raw_text=raw_text, parsed_output=parsed)
+            _check_project(extraction, project_names)
         except ValueError as exc:
             return Continue(
                 f"{SUBMIT_SUGGESTION_TOOL_NAME} was rejected: {str(exc)[:1200]}"
@@ -440,7 +448,7 @@ async def run_suggestion_react(
 
     extraction = await conversation.converse(
         tools=tool_definitions,
-        ending_tool=_terminal_tool(),
+        ending_tool=_terminal_tool(project_names),
         opening=(ConversationEntry(_user_text(lens)),),
         steps=SuggestionRunSteps(
             run_id=suggestion_id, record=record_step, prompt=prompt_text
@@ -448,6 +456,21 @@ async def run_suggestion_react(
         decide=decide,
     )
     return LensRunResult(extraction, conversation)
+
+
+def _check_project(
+    extraction: SuggestionExtraction, project_names: tuple[str, ...]
+) -> None:
+    """Reject a project the user does not have; a provider may not enforce the enum."""
+
+    target = extraction["target_context"]
+    if target is None or target.project_name is None:
+        return
+    if target.project_name not in project_names:
+        raise ValueError(
+            f"project_name {target.project_name!r} is not one of the user's "
+            "projects; name one of them or null"
+        )
 
 
 @dataclass(slots=True)

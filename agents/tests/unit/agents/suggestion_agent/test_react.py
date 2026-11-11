@@ -171,6 +171,7 @@ async def _run(
         parse_output=parse_suggestion_output,
         record_step=record_step,
         past=past or PastSuggestions((), _NOW),
+        project_names=("Pantaray", "Zanei"),
     )
     return result.extraction
 
@@ -191,10 +192,40 @@ def _text(item: LlmTurnItem) -> str:
 
 
 def test_terminal_tool_declares_action_message_content_limit() -> None:
-    properties = _terminal_tool().parameters["properties"]
+    properties = _terminal_tool(()).parameters["properties"]
 
     assert "answer" not in properties
     assert properties["key_point"]["maxLength"] == ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS
+
+
+def _project_name_schema(project_names: tuple[str, ...]) -> object:
+    target = _terminal_tool(project_names).parameters["properties"]["target_context"]
+    return target["oneOf"][1]["properties"]["project_name"]
+
+
+def test_the_target_project_is_one_of_the_users_projects_or_none() -> None:
+    assert _project_name_schema(("Pantaray", "Zanei")) == {
+        "type": ["string", "null"],
+        "enum": ["Pantaray", "Zanei", None],
+    }
+    assert _project_name_schema(()) == {"type": "null"}
+
+
+@pytest.mark.asyncio
+async def test_a_project_the_user_does_not_have_is_sent_back() -> None:
+    unknown = {"organization_name": None, "project_name": "Hitachi"}
+    model = _scripted(
+        _submit("submit-unknown", {**_terminal_payload(), "target_context": unknown}),
+        _submit("submit-repaired"),
+    )
+
+    result = await _run(model)
+
+    rejected = _results(model.requests[1])["submit-unknown"]
+    assert isinstance(rejected, dict)
+    assert "'Hitachi' is not one of the user's projects" in str(rejected["message"])
+    target = result["target_context"]
+    assert target is not None and target.project_name == "Pantaray"
 
 
 @pytest.mark.asyncio

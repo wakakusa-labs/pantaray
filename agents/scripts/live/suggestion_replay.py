@@ -287,6 +287,16 @@ async def _replay_one(
     finally:
         discard_suggestion_tool_results(db_path=db, run_id=suggestion_id)
     error = response.error
+    target = response.target_context
+    # The project the TODO is stored in: the user's project of exactly that name.
+    todo_project = next(
+        (
+            {"project_id": project.project_id, "project_name": project.display_name}
+            for project in settings.projects
+            if target is not None and project.display_name == target.project_name
+        ),
+        None,
+    )
     return {
         "label": label,
         "model": MODEL,
@@ -302,6 +312,8 @@ async def _replay_one(
         "interaction_contract": response.interaction_contract,
         "answer": response.answer,
         "todo": None if response.todo is None else response.todo.model_dump(),
+        "target_context": None if target is None else target.model_dump(),
+        "todo_project": todo_project,
         "suggestion_summary": response.suggestion_summary,
         **_step_summary(db, suggestion_id),
     }
@@ -458,7 +470,8 @@ def _compare(args: argparse.Namespace) -> int:
             )
             print(f"{record['answer'] or '(no suggestion)'}\n")
             if record.get("todo"):
-                print(f"TODO: {record['todo']}\n")
+                print(f"TODO: {record['todo']}")
+                print(f"TODO project: {record.get('todo_project')}\n")
     print("## Totals\n")
     for label, total in totals.items():
         print(

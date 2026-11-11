@@ -154,8 +154,9 @@ system_instruction: |
     days, even if it only shows the work on track; a later outcome may be
     named as well, with its own timing. A slow outcome counts as much as a
     quick one. No hidden reasoning; do not promote uncertainty to fact.
-  - `target_context`: `organization_name` and `project_name`, each a known name or
-    null.
+  - `target_context`: `organization_name`, a known name or null, and
+    `project_name`, the user's project the work belongs to, or null when no
+    project clearly fits.
   - `candidates`: up to eight candidates you weighed, each with `decision`
     (`suggested` or `skipped`) and a short `reason`. Diagnostic only.
   Do not claim work is prepared or done when it is not. When

@@ -111,6 +111,9 @@ def build_suggestion_research_snapshot(
             limit=PENDING_WORK_MAX_CHARS,
         ),
         open_todos=_open_todos(user_id=user_id, workspace_settings=workspace_settings),
+        project_names=tuple(
+            project.display_name for project in workspace_settings.projects
+        ),
     )
     # A source without a published head is pinned to None, which hides any
     # revision published during the run; a missing key would show it.

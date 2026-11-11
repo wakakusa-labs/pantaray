@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import uuid
 from contextlib import closing
 from pathlib import Path
 from typing import cast
@@ -37,6 +38,7 @@ from pantaray_agents.local_runtime.todos.imports.start import (
 )
 from pantaray_agents.schema.agent.action_message import FileAttachmentInput
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.schema.agent.image import ImageInput
 
 from .store_support import NOW, USER, seed_action
 
@@ -57,6 +59,7 @@ def _start(
         scope=scope,
         text="Call the bank\nRenew the passport",
         files=(),
+        images=(),
         clock=NOW,
     )
     assert isinstance(started, TodoImportStarted), started
@@ -151,11 +154,49 @@ def test_files_alone_are_named_as_the_message(db: Path, tmp_path: Path) -> None:
         scope=AllScope(),
         text=None,
         files=(file,),
+        images=(),
         clock=NOW,
     )
 
     assert isinstance(started, TodoImportStarted)
     assert _first_message(db, started.action_id)["content"] == "minutes.txt"
+
+
+def test_images_go_on_the_first_message_beside_the_files(
+    db: Path, tmp_path: Path
+) -> None:
+    file = FileAttachmentInput(
+        attachment_id="00000000-0000-4000-8000-000000000001",
+        name="minutes.txt",
+        byte_size=4,
+    )
+    staged = tmp_path / "artifacts" / "generated" / "attachments" / USER
+    staged.mkdir(parents=True)
+    (staged / f"{file.attachment_id}.txt").write_bytes(b"Pay\n")
+    images = tuple(
+        ImageInput(storage_path=f"{USER}/2026-11-04/{uuid.uuid4()}.png")
+        for _ in range(2)
+    )
+
+    started = start_todo_import(
+        user_id=USER,
+        import_id=IMPORT,
+        scope=AllScope(),
+        text=None,
+        files=(file,),
+        images=images,
+        clock=NOW,
+    )
+
+    assert isinstance(started, TodoImportStarted)
+    message = _first_message(db, started.action_id)
+    assert message["content"] == "minutes.txt, 2 images"
+    assert message["images"] == [image.model_dump(mode="json") for image in images]
+    files = message["files"]
+    assert isinstance(files, list)
+    assert [cast("dict[str, JSONValue]", item)["name"] for item in files] == [
+        "minutes.txt"
+    ]
 
 
 def test_only_the_import_s_action_finds_it_and_is_offered_the_draft_tool(

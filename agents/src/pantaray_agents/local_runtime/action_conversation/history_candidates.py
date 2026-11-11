@@ -106,9 +106,18 @@ class ConversationHistoryCandidatePage:
 # dated list and its search leave it out; one row read by its key, as a link to
 # the conversation names it, still finds it. The pickup's first USER message
 # names the TODO it serves; a Suggestion's TODO owns the Action that accepted or
-# replied to it. ``todos`` narrows which TODOs count.
-def _not_todo_scopes(todos: str) -> tuple[str, str]:
-    action = f"""
+# replied to it. ``todos`` narrows which TODOs count. An import's Action is its
+# import screen's, which only the TODO list opens: its first USER message names
+# the import, which only the import's start writes. ``imports`` leaves it out.
+def _not_todo_scopes(todos: str, *, imports: bool) -> tuple[str, str]:
+    import_scope = (
+        """
+    AND json_extract(initial.user_message_json,'$.todo_import_handoff.import_id')
+      IS NULL"""
+        if imports
+        else ""
+    )
+    action = f"""{import_scope}
     AND NOT EXISTS (SELECT 1 FROM todo_items AS todo
       WHERE todo.todo_id=json_extract(initial.user_message_json,'$.todo_handoff.todo_id')
         AND todo.user_id=action.user_id {todos})
@@ -126,11 +135,14 @@ def _not_todo_scopes(todos: str) -> tuple[str, str]:
     return action, suggestion
 
 
-_NOT_TODO_SCOPES: Final = _not_todo_scopes("")
-# Off, nothing lists the TODOs, so a live TODO's conversation is a dated one
-# again. A deleted TODO's stays out: the purge erases it with its TODO, which
-# would take any work continued in it.
-_NOT_DELETED_TODO_SCOPES: Final = _not_todo_scopes("AND todo.deleted_at IS NOT NULL")
+_NOT_TODO_SCOPES: Final = _not_todo_scopes("", imports=True)
+# Off, nothing lists the TODOs or opens an import, so a live TODO's
+# conversation and an import's are dated ones again. A deleted TODO's stays
+# out: the purge erases it with its TODO, which would take any work continued
+# in it.
+_NOT_DELETED_TODO_SCOPES: Final = _not_todo_scopes(
+    "AND todo.deleted_at IS NOT NULL", imports=False
+)
 
 
 def _candidate_query(*, cursor_bound: bool, item_bound: bool) -> str:

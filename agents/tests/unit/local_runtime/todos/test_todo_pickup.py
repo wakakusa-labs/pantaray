@@ -59,7 +59,10 @@ def _fixed_clock(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _write(
-    text: str, *, starts_on: str = "2026-11-04", project_id: str | None = "project-1"
+    text: str,
+    *,
+    starts_on: str | None = "2026-11-04",
+    project_id: str | None = "project-1",
 ) -> Todo:
     created = create_todo_item(
         user_id=USER,
@@ -190,6 +193,7 @@ def test_an_ai_todo_continues_as_pantaray_and_asks_before_every_step(
 def test_only_open_todos_whose_start_date_came_are_picked(db: Path) -> None:
     # Tomorrow, though in the week that holds today.
     _write("Tomorrow", starts_on="2026-11-05")
+    _write("No start yet", starts_on=None)
     checked = _write("Checked")
     set_todo_check(
         user_id=USER, todo_id=checked.todo_id, by="user", checked=True, clock=NOW

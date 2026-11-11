@@ -228,6 +228,27 @@ def test_the_list_sorts_by_due_and_a_todo_moved_to_tomorrow_waits_for_it(
     assert client.get(TODOS, params=unknown).status_code == 422
 
 
+def test_a_todo_created_with_no_start_waits_until_the_user_sets_one(
+    client: TestClient,
+) -> None:
+    created = _create(client, starts_on=None)
+    todo_id = created.json()["todo_id"]
+
+    assert created.status_code == 200, created.text
+    assert created.json()["starts_on"] is None
+    assert created.json()["state"] == {"kind": "not_started", "reason": "unscheduled"}
+    assert _create(client, starts_on=None).json() == created.json()
+
+    today = client.put(f"{TODOS}/{todo_id}/start", json={"starts_on": "2026-11-04"})
+    unset = client.put(f"{TODOS}/{todo_id}/start", json={"starts_on": None})
+
+    assert today.json()["state"] == {"kind": "not_started", "reason": "starting"}
+    assert unset.status_code == 200, unset.text
+    assert unset.json()["starts_on"] is None
+    assert unset.json()["state"] == {"kind": "not_started", "reason": "unscheduled"}
+    assert client.put(f"{TODOS}/{todo_id}/start", json={}).status_code == 422
+
+
 def test_a_deleted_todo_refuses_check_and_due_but_deleting_again_is_fine(
     client: TestClient,
 ) -> None:

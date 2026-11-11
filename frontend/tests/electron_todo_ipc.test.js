@@ -35,6 +35,7 @@ const STATE_VARIANTS = [
   { state: { kind: 'stopped', outcome: 'failed' } },
   { state: { kind: 'stopped', outcome: 'canceled' } },
   { state: { kind: 'not_started', reason: 'scheduled' }, due: null },
+  { state: { kind: 'not_started', reason: 'unscheduled' }, starts_on: null },
   { deletion_request: { request_id: 'req-1', reason: 'Duplicate' }, author: 'ai' },
 ].map((overrides, index) => ({ ...OPEN_TODO, todo_id: `todo-${index + 2}`, ...overrides }));
 
@@ -476,12 +477,12 @@ test('TODO IPC validates the renderer payload before anything reaches the backen
       client_todo_id: 'c-1',
       project_id: null,
       text: ' two\nlines ',
-      starts_on: '2026-11-04',
+      starts_on: null,
       due: { date: '2026-11-06', repeat: 'none' },
     },
     'todos:setCheck': { todo_id: 't-1', checked: false },
     'todos:setDue': { todo_id: 't-1', due: null },
-    'todos:setStart': { todo_id: 't-1', starts_on: '2026-11-09' },
+    'todos:setStart': { todo_id: 't-1', starts_on: null },
     'todos:delete': { todo_id: 't-1' },
     'todos:answerDeletion': { todo_id: 't-1', request_id: 'r-1', answer: 'approve' },
     'todos:restore': { todo_id: 't-1' },

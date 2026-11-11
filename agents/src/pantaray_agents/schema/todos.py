@@ -105,8 +105,9 @@ class TodoListQuery(TodoProjectQuery):
 
 
 class TodoCreateRequest(_Request):
-    """`client_todo_id` is the idempotency key; no `starts_on` starts it
-    today. The text is one line, as the core decides."""
+    """`client_todo_id` is the idempotency key; an omitted `starts_on` starts
+    it today and `null` leaves it with no start. The text is one line, as the
+    core decides."""
 
     client_todo_id: _Id
     project_id: _Id | None
@@ -125,7 +126,7 @@ class TodoDueRequest(_Request):
 
 
 class TodoStartRequest(_Request):
-    starts_on: dt.date
+    starts_on: dt.date | None  # null: no start, so the AI does not pick it up
 
 
 class TodoDeletionAnswerRequest(_Request):
@@ -163,7 +164,7 @@ class TodoView(_View):
     text: str
     author: TodoAuthor
     origin: Literal["written", "suggestion", "recurrence"]
-    starts_on: LocalDate  # the AI picks it up from this date
+    starts_on: LocalDate | None  # the AI picks it up from this date; null never
     due: TodoDue | None
     state: Annotated[TodoDisplayState, Field(discriminator="kind")]
     deletion_request: PendingDeletionRequestView | None  # only while pending

@@ -112,6 +112,7 @@ def test_deleted_todo_cannot_be_checked_or_unchecked(
         (WEEK, "2026-11-28T15:30:00.000Z", ("2026-11-30", "2026-12-06")),
         (PREVIOUS_WEEK, "2026-11-20T03:00:00.000Z", (NEXT_WEEK, "2026-11-22")),
         ("2026-11-04", NOW, ("2026-11-11", "2026-11-15")),
+        (None, NOW, (None, "2026-11-15")),
     ],
     ids=[
         "before-due",
@@ -119,10 +120,11 @@ def test_deleted_todo_cannot_be_checked_or_unchecked(
         "three-weeks-late",
         "keeps-start-offset",
         "mid-week-start",
+        "no-start-stays-unset",
     ],
 )
 def test_next_instance_is_the_first_occurrence_due_after_the_check(
-    starts_on: str, checked_at: str, expected: tuple[str, str]
+    starts_on: str | None, checked_at: str, expected: tuple[str | None, str]
 ) -> None:
     todo = make_todo(author="ai", starts_on=starts_on, due=WEEKLY_DUE)
 

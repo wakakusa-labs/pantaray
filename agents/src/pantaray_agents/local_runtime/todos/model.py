@@ -76,7 +76,9 @@ class Todo:
     text: str
     author: TodoAuthor
     origin: TodoOrigin
-    starts_on: LocalDate  # The AI picks it up from this date; the user may move it.
+    # The AI picks it up from this date, or never while it is unset; the user
+    # may move it.
+    starts_on: LocalDate | None
     due: TodoDue | None
     check: TodoCheck | None
     ai_report: AiReport | None

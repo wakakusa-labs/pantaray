@@ -11,9 +11,9 @@ import {
 } from './workspaceSettingsModel';
 
 const organizations: WorkspaceOrganization[] = [
-  { organization_id: 'org-z', display_name: 'Alpha' },
-  { organization_id: 'org-a', display_name: 'Alpha' },
-  { organization_id: 'org-b', display_name: 'Beta' },
+  { organization_id: 'org-z', display_name: 'Alpha', icon_data_url: null },
+  { organization_id: 'org-a', display_name: 'Alpha', icon_data_url: null },
+  { organization_id: 'org-b', display_name: 'Beta', icon_data_url: null },
 ];
 
 const projects: WorkspaceProject[] = [
@@ -92,7 +92,7 @@ describe('workspaceSettingsModel', () => {
   it('orders mutation upserts with the SQLite BINARY collation', () => {
     const lowercaseSettings: WorkspaceSettings = {
       read_access_scope: 'workspace',
-      organizations: [{ organization_id: 'org-apple', display_name: 'apple' }],
+      organizations: [{ organization_id: 'org-apple', display_name: 'apple', icon_data_url: null }],
       projects: [
         {
           project_id: 'project-apple',
@@ -114,7 +114,7 @@ describe('workspaceSettingsModel', () => {
     };
     const withOrganization = applyWorkspaceMutation(lowercaseSettings, {
       type: 'organizationCreated',
-      organization: { organization_id: 'org-zebra', display_name: 'Zebra' },
+      organization: { organization_id: 'org-zebra', display_name: 'Zebra', icon_data_url: null },
     });
     const withProject = applyWorkspaceMutation(lowercaseSettings, {
       type: 'projectCreated',
@@ -149,7 +149,7 @@ describe('workspaceSettingsModel', () => {
     {
       event: {
         type: 'organizationCreated' as const,
-        organization: { organization_id: 'org-new', display_name: 'Aardvark' },
+        organization: { organization_id: 'org-new', display_name: 'Aardvark', icon_data_url: null },
       },
       select: (next: WorkspaceSettings) => next.organizations,
       expectedIds: ['org-new', 'org-a', 'org-z', 'org-b'],

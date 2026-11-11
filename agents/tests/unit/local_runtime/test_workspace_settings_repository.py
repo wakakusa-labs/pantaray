@@ -85,6 +85,7 @@ def test_workspace_settings_crud_and_duplicate_folder_update(tmp_path: Path) -> 
         busy_timeout_ms=1_000,
         user_id="user-1",
         display_name="Acme",
+        icon_data_url=None,
         now=TIMESTAMP,
     )
     project = create_workspace_project(
@@ -145,6 +146,7 @@ def test_workspace_settings_deletes_entities_and_cascades_links(tmp_path: Path) 
         busy_timeout_ms=1_000,
         user_id="user-1",
         display_name="Acme",
+        icon_data_url=None,
         now=TIMESTAMP,
     )
     core, other = (
@@ -235,6 +237,7 @@ def test_workspace_project_create_refuses_a_taken_name_and_keeps_that_project(
         busy_timeout_ms=1_000,
         user_id="user-1",
         display_name="Acme",
+        icon_data_url=None,
         now=TIMESTAMP,
     )
     existing = create_workspace_project(
@@ -292,6 +295,7 @@ def test_workspace_settings_supports_multiple_context_links(tmp_path: Path) -> N
         busy_timeout_ms=1_000,
         user_id="user-1",
         display_name="Org A",
+        icon_data_url=None,
         now=TIMESTAMP,
     )
     org_b = create_workspace_organization(
@@ -299,6 +303,7 @@ def test_workspace_settings_supports_multiple_context_links(tmp_path: Path) -> N
         busy_timeout_ms=1_000,
         user_id="user-1",
         display_name="Org B",
+        icon_data_url=None,
         now=TIMESTAMP,
     )
     project_a = create_workspace_project(
@@ -357,6 +362,7 @@ def test_workspace_settings_replaces_existing_context_links(tmp_path: Path) -> N
         busy_timeout_ms=1_000,
         user_id="user-1",
         display_name="Org A",
+        icon_data_url=None,
         now=TIMESTAMP,
     )
     org_b = create_workspace_organization(
@@ -364,6 +370,7 @@ def test_workspace_settings_replaces_existing_context_links(tmp_path: Path) -> N
         busy_timeout_ms=1_000,
         user_id="user-1",
         display_name="Org B",
+        icon_data_url=None,
         now=TIMESTAMP,
     )
     project = create_workspace_project(
@@ -427,6 +434,7 @@ def test_workspace_project_rename_keeps_links_and_refuses_a_taken_name(
         busy_timeout_ms=1_000,
         user_id="user-1",
         display_name="Xer",
+        icon_data_url=None,
         now=TIMESTAMP,
     )
     alpha, beta = (
@@ -677,6 +685,7 @@ def test_workspace_manifest_catalog_uses_manifest_roots(
         busy_timeout_ms=1_000,
         user_id="user-1",
         display_name="Org A",
+        icon_data_url=None,
         now=TIMESTAMP,
     )
     project_z = create_workspace_project(

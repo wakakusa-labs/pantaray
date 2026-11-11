@@ -139,6 +139,10 @@ const ALLOWED_LOCAL_BACKEND_ROUTES: ReadonlyArray<{
     methods: new Set(['DELETE']),
   },
   {
+    path: /^\/v1\/agents\/users\/[^/]+\/workspace-settings\/organizations\/[^/]+$/,
+    methods: new Set(['PUT']),
+  },
+  {
     path: /^\/v1\/agents\/users\/[^/]+\/workspace-settings\/(projects|folders)\/[^/]+\/links$/,
     methods: new Set(['PUT']),
   },

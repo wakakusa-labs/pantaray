@@ -8,6 +8,7 @@ export type WorkspaceFolder = WorkspaceSettings['folders'][number];
 
 export type WorkspaceMutationEvent =
   | { type: 'organizationCreated'; organization: WorkspaceOrganization }
+  | { type: 'organizationUpdated'; organization: WorkspaceOrganization }
   | { type: 'projectCreated'; project: WorkspaceProject }
   | { type: 'projectRenamed'; project: WorkspaceProject }
   | { type: 'projectDeleted'; projectId: string }
@@ -28,6 +29,7 @@ export function applyWorkspaceMutation(
 ): WorkspaceSettings {
   switch (event.type) {
     case 'organizationCreated':
+    case 'organizationUpdated':
       return {
         ...settings,
         organizations: upsertSorted(

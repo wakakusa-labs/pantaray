@@ -1,8 +1,14 @@
 import { LocalBackendRequestError, type createLocalBackendClient } from '../localBackend/client';
+import type {
+  CreateOrganizationInput,
+  UpdateOrganizationInput,
+} from '../ipc/schemas/workspaceSettings';
 
 export type WorkspaceOrganization = {
   organization_id: string;
   display_name: string;
+  /** A data URL the renderer can show as is: a PNG, JPEG or WebP of at most 64 KiB. */
+  icon_data_url: string | null;
 };
 
 export type WorkspaceProject = {
@@ -26,6 +32,11 @@ export type WorkspaceFolder = {
  * IPC as data because an Error thrown across `invoke` loses its status.
  */
 export type WorkspaceProjectCreateResult = WorkspaceProject | { errorCode: 'PROJECT_NAME_TAKEN' };
+
+/** A name another organization has is refused the same way. */
+export type WorkspaceOrganizationUpdateResult =
+  | WorkspaceOrganization
+  | { errorCode: 'ORGANIZATION_NAME_TAKEN' };
 
 const HTTP_CONFLICT = 409;
 
@@ -118,7 +129,9 @@ function isWorkspaceOrganization(value: unknown): value is WorkspaceOrganization
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Partial<WorkspaceOrganization>;
   return (
-    typeof candidate.organization_id === 'string' && typeof candidate.display_name === 'string'
+    typeof candidate.organization_id === 'string' &&
+    typeof candidate.display_name === 'string' &&
+    (candidate.icon_data_url === null || typeof candidate.icon_data_url === 'string')
   );
 }
 
@@ -212,7 +225,11 @@ export function createWorkspaceSettingsFetcher(params: {
   getReadAccessScope: () => Promise<ReadAccessScopeSettings>;
   getCommandNetwork: () => Promise<CommandNetworkSettings>;
   updateCommandNetwork: (enabled: boolean) => Promise<CommandNetworkSettings>;
-  createOrganization: (input: unknown) => Promise<WorkspaceOrganization>;
+  createOrganization: (input: CreateOrganizationInput) => Promise<WorkspaceOrganization>;
+  updateOrganization: (
+    organizationId: string,
+    input: UpdateOrganizationInput
+  ) => Promise<WorkspaceOrganizationUpdateResult>;
   createProject: (input: unknown) => Promise<WorkspaceProjectCreateResult>;
   renameProject: (projectId: string, input: { displayName: string }) => Promise<WorkspaceProject>;
   createFolder: (input: unknown) => Promise<WorkspaceFolder>;
@@ -265,15 +282,31 @@ export function createWorkspaceSettingsFetcher(params: {
           timeoutMs: COMMAND_NETWORK_REQUEST_TIMEOUT_MS,
         })
       ),
-    createOrganization: async (input: unknown): Promise<WorkspaceOrganization> => {
-      const normalized = normalizeCreateInput(input);
-      return parseWorkspaceOrganization(
+    createOrganization: async (input): Promise<WorkspaceOrganization> =>
+      parseWorkspaceOrganization(
         await params.requestJson<unknown>({
           path: `${buildUrl()}/organizations`,
           method: 'POST',
-          body: { display_name: normalized.displayName },
+          body: { display_name: input.displayName, icon_data_url: input.iconDataUrl },
         })
-      );
+      ),
+    updateOrganization: async (
+      organizationId,
+      input
+    ): Promise<WorkspaceOrganizationUpdateResult> => {
+      try {
+        return parseWorkspaceOrganization(
+          await params.requestJson<unknown>({
+            path: `${buildUrl()}/organizations/${encodeURIComponent(organizationId)}`,
+            method: 'PUT',
+            body: { display_name: input.displayName, icon_data_url: input.iconDataUrl },
+          })
+        );
+      } catch (error) {
+        if (error instanceof LocalBackendRequestError && error.status === HTTP_CONFLICT)
+          return { errorCode: 'ORGANIZATION_NAME_TAKEN' };
+        throw error;
+      }
     },
     createProject: async (input: unknown): Promise<WorkspaceProjectCreateResult> => {
       const normalized = normalizeCreateInput(input);

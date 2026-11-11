@@ -44,7 +44,11 @@ describe('useWorkspaceSettingsController', () => {
   });
 
   it('guards duplicate mutation calls synchronously within the same tick', async () => {
-    const createRequest = createDeferred<{ organization_id: string; display_name: string }>();
+    const createRequest = createDeferred<{
+      organization_id: string;
+      display_name: string;
+      icon_data_url: string | null;
+    }>();
     const createOrganization = vi.fn(() => createRequest.promise);
     installWorkspaceApi({ get: async () => emptySettings, createOrganization });
     const { result } = renderHook(() => useWorkspaceSettingsController(translate), { wrapper });
@@ -57,7 +61,11 @@ describe('useWorkspaceSettingsController', () => {
 
     expect(createOrganization).toHaveBeenCalledOnce();
     await act(async () =>
-      createRequest.resolve({ organization_id: 'org-a', display_name: 'Org A' })
+      createRequest.resolve({
+        organization_id: 'org-a',
+        display_name: 'Org A',
+        icon_data_url: null,
+      })
     );
     await waitFor(() => expect(result.current.pending.size).toBe(0));
   });
@@ -65,7 +73,7 @@ describe('useWorkspaceSettingsController', () => {
   it('shows the settings cached for this owner before the read answers', async () => {
     const saved = {
       ...emptySettings,
-      organizations: [{ organization_id: 'saved-org', display_name: 'Saved' }],
+      organizations: [{ organization_id: 'saved-org', display_name: 'Saved', icon_data_url: null }],
     };
     setCachedWorkspaceSettings(OWNER.id, saved);
     const initial = createDeferred<typeof saved>();
@@ -80,7 +88,7 @@ describe('useWorkspaceSettingsController', () => {
   it('keeps a mutation that landed while the mount read was still in flight', async () => {
     setCachedWorkspaceSettings(OWNER.id, emptySettings);
     const read = createDeferred<typeof emptySettings>();
-    const created = { organization_id: 'org-a', display_name: 'Org A' };
+    const created = { organization_id: 'org-a', display_name: 'Org A', icon_data_url: null };
     installWorkspaceApi({ get: () => read.promise, createOrganization: async () => created });
     const { result } = renderHook(() => useWorkspaceSettingsController(translate), { wrapper });
     await act(async () => {
@@ -97,7 +105,11 @@ describe('useWorkspaceSettingsController', () => {
       get: async () => {
         throw new Error('workspace settings unavailable');
       },
-      createOrganization: async () => ({ organization_id: 'org-a', display_name: 'Org A' }),
+      createOrganization: async () => ({
+        organization_id: 'org-a',
+        display_name: 'Org A',
+        icon_data_url: null,
+      }),
     });
     const { result } = renderHook(() => useWorkspaceSettingsController(translate), { wrapper });
     await waitFor(() => expect(result.current.errorMessage).toBe('settings.workspace.loadFailed'));
@@ -432,6 +444,70 @@ describe('useWorkspaceSettingsController', () => {
       'billing',
     ]);
     expect(result.current.settings?.folders).toEqual([]);
+  });
+
+  it('creates a project inside the organization it is given', async () => {
+    const createProject = vi.fn(
+      async (input: { displayName: string; organizationIds: string[] }) => ({
+        project_id: 'p-1',
+        display_name: input.displayName,
+        sort_order: 0,
+        organization_ids: input.organizationIds,
+      })
+    );
+    installWorkspaceApi({ get: async () => emptySettings, createProject });
+    const { result } = renderHook(() => useWorkspaceSettingsController(translate), { wrapper });
+    await waitFor(() => expect(result.current.settings).not.toBeNull());
+
+    await act(async () => {
+      await result.current.createProject('aurora', 'org-a');
+    });
+
+    expect(createProject).toHaveBeenCalledWith({
+      displayName: 'aurora',
+      organizationIds: ['org-a'],
+    });
+    expect(result.current.settings?.projects[0]?.organization_ids).toEqual(['org-a']);
+  });
+
+  it('replaces an organization name and icon, and refuses a name another one has', async () => {
+    const acme = { organization_id: 'org-a', display_name: 'Acme', icon_data_url: null };
+    const beta = { organization_id: 'org-b', display_name: 'Beta', icon_data_url: null };
+    const icon = 'data:image/png;base64,AA==';
+    const updateOrganization = vi
+      .fn()
+      .mockResolvedValueOnce({ errorCode: 'ORGANIZATION_NAME_TAKEN' })
+      .mockResolvedValueOnce({ ...acme, display_name: 'Acme Inc', icon_data_url: icon });
+    installWorkspaceApi({
+      get: async () => ({ ...emptySettings, organizations: [acme, beta] }),
+      updateOrganization,
+    });
+    const { result } = renderHook(() => useWorkspaceSettingsController(translate), { wrapper });
+    await waitFor(() => expect(result.current.settings).not.toBeNull());
+
+    // Taken here: refused before anything is sent.
+    await act(async () => {
+      expect(await result.current.updateOrganization('org-a', ' Beta ', null)).toBe(false);
+    });
+    expect(updateOrganization).not.toHaveBeenCalled();
+    expect(result.current.errorMessage).toBe('history.organizations.nameTaken');
+    // Taken on the backend since the last read: its refusal says the same.
+    await act(async () => {
+      expect(await result.current.updateOrganization('org-a', 'Gamma', null)).toBe(false);
+    });
+    expect(result.current.errorMessage).toBe('history.organizations.nameTaken');
+
+    await act(async () => {
+      expect(await result.current.updateOrganization('org-a', 'Acme Inc', icon)).toBe(true);
+    });
+    expect(updateOrganization).toHaveBeenLastCalledWith('org-a', {
+      displayName: 'Acme Inc',
+      iconDataUrl: icon,
+    });
+    expect(result.current.settings?.organizations).toEqual([
+      { ...acme, display_name: 'Acme Inc', icon_data_url: icon },
+      beta,
+    ]);
   });
 });
 

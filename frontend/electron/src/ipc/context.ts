@@ -38,6 +38,7 @@ import type {
   CommandNetworkSettings,
   WorkspaceFolder,
   WorkspaceOrganization,
+  WorkspaceOrganizationUpdateResult,
   WorkspaceProject,
   WorkspaceProjectCreateResult,
   WorkspaceSettings,
@@ -57,6 +58,7 @@ import type {
   RenameProjectInput,
   ReorderProjectsInput,
   UpdateFolderLinksInput,
+  UpdateOrganizationInput,
   UpdateProjectLinksInput,
 } from './schemas/workspaceSettings';
 import type { ActionFileOpenInput } from './schemas/actionFiles';
@@ -251,6 +253,10 @@ export type MainContext = {
     getCommandNetwork: () => Promise<CommandNetworkSettings>;
     updateCommandNetwork: (enabled: boolean) => Promise<CommandNetworkSettings>;
     createOrganization: (input: CreateOrganizationInput) => Promise<WorkspaceOrganization>;
+    updateOrganization: (
+      organizationId: string,
+      input: UpdateOrganizationInput
+    ) => Promise<WorkspaceOrganizationUpdateResult>;
     createProject: (input: CreateProjectInput) => Promise<WorkspaceProjectCreateResult>;
     renameProject: (projectId: string, input: RenameProjectInput) => Promise<WorkspaceProject>;
     createFolder: (input: CreateFolderInput) => Promise<WorkspaceFolder>;

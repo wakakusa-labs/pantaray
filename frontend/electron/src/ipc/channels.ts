@@ -90,6 +90,7 @@ export const validInvokeChannels = [
   'workspaceSettings:getCommandNetwork',
   'workspaceSettings:updateCommandNetwork',
   'workspaceSettings:createOrganization',
+  'workspaceSettings:updateOrganization',
   'workspaceSettings:createProject',
   'workspaceSettings:renameProject',
   'workspaceSettings:createFolder',

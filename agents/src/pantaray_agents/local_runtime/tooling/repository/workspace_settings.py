@@ -34,6 +34,7 @@ def create_workspace_organization(
     busy_timeout_ms: int,
     user_id: str,
     display_name: str,
+    icon_data_url: str | None,
     now: str,
 ) -> WorkspaceOrganization:
     normalized_name = _normalize_display_name(display_name)
@@ -42,16 +43,18 @@ def create_workspace_organization(
         _configure_connection(connection=connection, busy_timeout_ms=busy_timeout_ms)
         with connection:
             ensure_user_row(connection, user_id=user_id)
+            # A taken name answers with that organization as it is, its icon included.
             connection.execute(
                 """
                 INSERT INTO workspace_organizations(
-                    organization_id, user_id, display_name, status, created_at, updated_at
-                ) VALUES (?, ?, ?, 'active', ?, ?)
+                    organization_id, user_id, display_name, icon_data_url, status,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, 'active', ?, ?)
                 ON CONFLICT(user_id, display_name) DO UPDATE SET
                     status = 'active',
                     updated_at = excluded.updated_at
                 """,
-                (organization_id, user_id, normalized_name, now, now),
+                (organization_id, user_id, normalized_name, icon_data_url, now, now),
             )
             row = _fetch_organization_by_name(
                 connection=connection,

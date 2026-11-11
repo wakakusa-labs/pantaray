@@ -48,6 +48,9 @@ def test_workspace_settings_response_includes_project_sort_order(monkeypatch) ->
             folders=(),
         ),
     )
+    monkeypatch.setattr(
+        router_module, "load_workspace_organization_icons", lambda **_kwargs: {}
+    )
 
     with _client() as client:
         response = client.get("/v1/agents/users/user-1/workspace-settings")

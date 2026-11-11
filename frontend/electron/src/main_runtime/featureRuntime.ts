@@ -470,6 +470,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
         workspaceSettingsGetCommandNetwork: workspaceSettingsFetch.getCommandNetwork,
         workspaceSettingsUpdateCommandNetwork: workspaceSettingsFetch.updateCommandNetwork,
         workspaceSettingsCreateOrganization: workspaceSettingsFetch.createOrganization,
+        workspaceSettingsUpdateOrganization: workspaceSettingsFetch.updateOrganization,
         workspaceSettingsCreateProject: workspaceSettingsFetch.createProject,
         workspaceSettingsRenameProject: workspaceSettingsFetch.renameProject,
         workspaceSettingsCreateFolder: workspaceSettingsFetch.createFolder,

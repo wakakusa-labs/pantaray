@@ -502,6 +502,7 @@ async def test_initialize_context_uses_manifest_root_context_names(
         busy_timeout_ms=1_000,
         user_id="user-1",
         display_name="Org A",
+        icon_data_url=None,
         now="2026-03-23T00:00:00Z",
     )
     project = create_workspace_project(
@@ -560,6 +561,7 @@ async def test_initialize_context_uses_workspace_context_snapshot_not_current_se
         busy_timeout_ms=1_000,
         user_id="user-1",
         display_name="Org A",
+        icon_data_url=None,
         now="2026-03-23T00:00:00Z",
     )
     project = create_workspace_project(
@@ -593,6 +595,7 @@ async def test_initialize_context_uses_workspace_context_snapshot_not_current_se
         busy_timeout_ms=1_000,
         user_id="user-1",
         display_name="Org B",
+        icon_data_url=None,
         now="2026-03-24T00:00:00Z",
     )
     create_workspace_project(

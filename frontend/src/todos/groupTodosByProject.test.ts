@@ -5,8 +5,8 @@ import { groupTodosByProject, todoProjectSlots } from './groupTodosByProject';
 
 const settings = {
   organizations: [
-    { organization_id: 'org-a', display_name: 'Alpha' },
-    { organization_id: 'org-b', display_name: 'Beta' },
+    { organization_id: 'org-a', display_name: 'Alpha', icon_data_url: null },
+    { organization_id: 'org-b', display_name: 'Beta', icon_data_url: null },
   ],
   // Listed out of order: the groups follow sort_order, not this list.
   projects: [

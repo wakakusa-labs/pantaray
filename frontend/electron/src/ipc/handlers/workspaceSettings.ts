@@ -11,6 +11,7 @@ import {
   RenameProjectInputSchema,
   ReorderProjectsInputSchema,
   UpdateFolderLinksInputSchema,
+  UpdateOrganizationInputSchema,
   UpdateProjectLinksInputSchema,
 } from '../schemas/workspaceSettings';
 
@@ -29,6 +30,18 @@ export function registerWorkspaceSettingsHandlers(ctx: MainContext, registrar: I
     );
     return await ctx.workspaceSettings.createOrganization(parsed);
   });
+  registrar.handle(
+    'workspaceSettings:updateOrganization',
+    async (_event, organizationId, input) => {
+      const id = parseInput(IdSchema, 'workspaceSettings:updateOrganization', organizationId);
+      const parsed = parseInput(
+        UpdateOrganizationInputSchema,
+        'workspaceSettings:updateOrganization',
+        input
+      );
+      return await ctx.workspaceSettings.updateOrganization(id, parsed);
+    }
+  );
   registrar.handle('workspaceSettings:createProject', async (_event, input) => {
     const parsed = parseInput(CreateProjectInputSchema, 'workspaceSettings:createProject', input);
     return await ctx.workspaceSettings.createProject(parsed);

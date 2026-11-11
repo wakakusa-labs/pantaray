@@ -1,6 +1,6 @@
 import type { WorkspaceProject } from '@/pages/settings/components/workspaceSettingsModel';
 
-import type { TodoScopeQuery, TodoWeekQuery } from '../../electron/src/todos/todoContracts';
+import type { TodoListQuery, TodoScopeQuery } from '../../electron/src/todos/todoContracts';
 
 /** Whether a project's TODOs are among the scope's. */
 export function projectInScope(project: WorkspaceProject, scope: TodoScopeQuery): boolean {
@@ -9,8 +9,11 @@ export function projectInScope(project: WorkspaceProject, scope: TodoScopeQuery)
   return project.organization_ids.some((id) => id === scope.organization_id);
 }
 
-/** Which of the week's projects are in view. */
-export type TodoProjectFilter = Pick<TodoWeekQuery, 'project' | 'project_id'>;
+/** Which of the scope's projects are in view. */
+export type TodoProjectFilter = Pick<TodoListQuery, 'project' | 'project_id'>;
+
+/** The order of the open TODOs: by date added, or by due date. */
+export type TodoListSort = NonNullable<TodoListQuery['sort']>;
 
 export type TodoPageView = 'list' | 'progress' | 'deleted';
 
@@ -21,8 +24,7 @@ export type ProgressSpan = 'month' | 'year';
 export type TodoSelection = {
   scope: TodoScopeQuery;
   project: TodoProjectFilter;
-  /** Null is the current week; any day of a week names that week. */
-  weekStart: string | null;
+  sort: TodoListSort;
   view: TodoPageView;
   progressSpan: ProgressSpan;
   /** Null is the month (year) holding today; any day of a month (year) names that one. */
@@ -36,7 +38,7 @@ export type TodoSelection = {
 export const DEFAULT_TODO_SELECTION: TodoSelection = {
   scope: { scope: 'all' },
   project: { project: 'any' },
-  weekStart: null,
+  sort: 'added',
   view: 'list',
   progressSpan: 'month',
   progressOn: null,
@@ -46,7 +48,7 @@ export const DEFAULT_TODO_SELECTION: TodoSelection = {
 
 const SCOPE_PARAM = 'scope';
 const PROJECT_PARAM = 'project';
-const WEEK_PARAM = 'week';
+const SORT_PARAM = 'sort';
 const VIEW_PARAM = 'view';
 const SPAN_PARAM = 'span';
 const ON_PARAM = 'on';
@@ -58,6 +60,7 @@ const ORGANIZATION_PREFIX = 'organization:';
 const PROJECT_PREFIX = 'project:';
 const LOCAL_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const VIEWS: readonly TodoPageView[] = ['list', 'progress', 'deleted'];
+const SORTS: readonly TodoListSort[] = ['added', 'due'];
 const SPANS: readonly ProgressSpan[] = ['month', 'year'];
 
 /** Ids are canonical: never blank, never padded. */
@@ -96,10 +99,11 @@ export function parseTodoSelection(search: string): TodoSelection {
   const params = new URLSearchParams(search);
   const view = params.get(VIEW_PARAM);
   const span = params.get(SPAN_PARAM);
+  const sort = params.get(SORT_PARAM);
   return {
     scope: parseScope(params.get(SCOPE_PARAM)),
     project: parseProject(params.get(PROJECT_PARAM)),
-    weekStart: localDate(params.get(WEEK_PARAM)),
+    sort: SORTS.find((candidate) => candidate === sort) ?? DEFAULT_TODO_SELECTION.sort,
     view: VIEWS.find((candidate) => candidate === view) ?? DEFAULT_TODO_SELECTION.view,
     progressSpan:
       SPANS.find((candidate) => candidate === span) ?? DEFAULT_TODO_SELECTION.progressSpan,
@@ -124,7 +128,8 @@ export function todoSelectionSearch(selection: TodoSelection): string {
   if (project.project === 'project' && project.project_id !== undefined) {
     entries.push(`${PROJECT_PARAM}=${PROJECT_PREFIX}${encodeURIComponent(project.project_id)}`);
   }
-  if (selection.weekStart !== null) entries.push(`${WEEK_PARAM}=${selection.weekStart}`);
+  if (selection.sort !== DEFAULT_TODO_SELECTION.sort)
+    entries.push(`${SORT_PARAM}=${selection.sort}`);
   if (selection.view !== DEFAULT_TODO_SELECTION.view) {
     entries.push(`${VIEW_PARAM}=${selection.view}`);
   }

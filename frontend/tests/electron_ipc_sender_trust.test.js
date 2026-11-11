@@ -187,7 +187,6 @@ test('Only the main window uses the chat and the TODO list', () => {
     'chat:getTurnState',
     // The TODO list is the main window's too.
     'todos:list',
-    'todos:listWeek',
     'todos:create',
     'todos:setCheck',
     'todos:setDue',

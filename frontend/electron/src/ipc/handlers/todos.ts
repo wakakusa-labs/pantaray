@@ -21,16 +21,12 @@ import {
   TodoRefRequestSchema,
   TodoScopeQuerySchema,
   TodoStartRequestSchema,
-  TodoWeekQuerySchema,
 } from '../../todos/todoContracts';
 import { parseInput } from '../schemas/error';
 
 export function registerTodoHandlers(ctx: MainContext, registrar: IpcRegistrar): void {
   registrar.handle('todos:list', async (_event, query) =>
     ctx.todos.list(parseInput(TodoListQuerySchema, 'todos:list', query))
-  );
-  registrar.handle('todos:listWeek', async (_event, query) =>
-    ctx.todos.listWeek(parseInput(TodoWeekQuerySchema, 'todos:listWeek', query))
   );
   registrar.handle('todos:create', async (_event, request) =>
     ctx.todos.create(parseInput(TodoCreateRequestSchema, 'todos:create', request))

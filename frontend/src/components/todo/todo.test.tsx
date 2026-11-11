@@ -26,7 +26,6 @@ const makeTodo = (overrides: Partial<TodoView> = {}): TodoView => ({
   author: 'user',
   origin: 'written',
   starts_on: '2026-11-02',
-  carried: false,
   due: null,
   state: { kind: 'not_started', reason: 'starting' },
   deletion_request: null,
@@ -77,7 +76,7 @@ it('checks the TODO with a checkbox of its own, apart from opening the TODO', as
 });
 
 it('says where the TODO stands in a word, Pantaray’s deletion request first', () => {
-  renderRow({ carried: true, state: { kind: 'waiting', reason: 'approval', note: '確認を' } });
+  renderRow({ state: { kind: 'waiting', reason: 'approval', note: '確認を' } });
   expect(stateWord()).toHaveTextContent(/^返事待ち$/);
 
   renderRow({

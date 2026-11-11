@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { useRef, type ReactNode } from 'react';
 
 import { AiConnectionNotice } from '@/components/AiConnectionNotice';
@@ -11,27 +11,20 @@ import { TodoAddBar } from '@/components/todo/TodoAddBar';
 import { TodoConversationPane } from '@/components/todo/TodoConversationPane';
 import { TodoProjectGroup } from '@/components/todo/TodoProjectGroup';
 import { TodoRow } from '@/components/todo/TodoRow';
-import { weekEnds } from '@/components/todo/todoDates';
 import { useI18n } from '@/context/useI18n';
 import type { HistorySelection } from '@/history/historySelection';
 import type { WorkspaceSettings } from '@/pages/settings/components/workspaceSettingsModel';
 import { workspacePendingKey } from '@/pages/settings/useWorkspaceSettingsController';
-import { groupTodosByProject, todoProjectSlots, weekTakesTodos } from '@/todos/groupTodosByProject';
-import type { TodoSelection } from '@/todos/todoSelection';
+import { groupTodosByProject, todoProjectSlots } from '@/todos/groupTodosByProject';
+import type { TodoListSort, TodoSelection } from '@/todos/todoSelection';
 import { useDeletedTodos } from '@/todos/useDeletedTodos';
+import type { TodoListRead } from '@/todos/useTodoList';
 import { useTodoMutations, type TodoMutationFailure } from '@/todos/useTodoMutations';
-import type { TodoWeekRead } from '@/todos/useTodoWeek';
 
+import type { TodoView } from '../../electron/src/todos/todoContracts';
 import './todoScreen.css';
 
-const DAY_MS = 86_400_000;
-const WEEK_DAYS = 7;
-
-/** The YYYY-MM-DD `weeks` weeks from a week's first day; calendar days, so no time zone moves it. */
-const shiftWeek = (start: string, weeks: number) =>
-  new Date(Date.parse(`${start}T00:00:00Z`) + weeks * WEEK_DAYS * DAY_MS)
-    .toISOString()
-    .slice(0, 10);
+const SORTS: readonly TodoListSort[] = ['added', 'due'];
 
 /** A failed write, told under the row or the add row it was made from. */
 function FailureLine({ failure }: { failure: TodoMutationFailure }) {
@@ -49,15 +42,16 @@ type ProjectFolderActions = Pick<
 >;
 
 /**
- * The home page's TODO list: the week's TODOs by project (or their progress, or the deleted
- * TODOs), with the folders of the one project in view under its header, and beside the week the
- * conversation of the TODO selected. What is shown is the page's URL; this reads and writes
- * the TODOs through the TODO hooks and draws them with the TODO parts.
+ * The home page's TODO list: every TODO in view, by project while several projects are in view
+ * and as one list for one project (or their progress, or the deleted TODOs), with the folders of
+ * the one project in view under its header, and beside the list the conversation of the TODO
+ * selected. What is shown is the page's URL; this reads and writes the TODOs through the TODO
+ * hooks and draws them with the TODO parts.
  */
 export function TodoScreen({
   selection,
-  week,
-  weekShowsSelection,
+  todoList,
+  listShowsSelection,
   settings,
   settingsFailed,
   folderActions,
@@ -66,13 +60,13 @@ export function TodoScreen({
   onAddProject,
 }: {
   selection: TodoSelection;
-  /** Read by the page, whose sidebar counts the week's open TODOs too. */
-  week: TodoWeekRead;
+  /** Every project's TODOs in the scope, read by the page, whose sidebar counts them too. */
+  todoList: TodoListRead;
   /**
-   * The page was read for the selected scope and week. Until another selection's read lands,
-   * the last page stays on screen, dimmed and closed to writes: an add would go to its week.
+   * The page was read for the selected scope and order. Until another selection's read lands,
+   * the last page stays on screen, dimmed and closed to writes.
    */
-  weekShowsSelection: boolean;
+  listShowsSelection: boolean;
   settings: WorkspaceSettings | null;
   /** The workspace could not be read, so the TODOs cannot be put in their projects. */
   settingsFailed: boolean;
@@ -82,11 +76,14 @@ export function TodoScreen({
   onOpenWork: (work: HistorySelection) => void;
   onAddProject: () => void;
 }) {
-  const { t, language } = useI18n();
+  const { t } = useI18n();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const deleted = useDeletedTodos(selection.scope);
-  const mutations = useTodoMutations({ reloadWeek: week.reload, reloadDeleted: deleted.reload });
-  const { page } = week;
+  const mutations = useTodoMutations({
+    reloadList: todoList.reload,
+    reloadDeleted: deleted.reload,
+  });
+  const { page } = todoList;
   const { failure } = mutations;
   const failureFor = (match: (target: TodoMutationFailure['target']) => boolean) =>
     failure && match(failure.target) ? <FailureLine failure={failure} /> : null;
@@ -98,33 +95,22 @@ export function TodoScreen({
     selection.view === 'list' && selection.todoId !== null
       ? (page?.items.find((todo) => todo.todo_id === selection.todoId) ?? null)
       : null;
-  const showingWeek = selection.view === 'list';
+  const showingList = selection.view === 'list';
   const selectedProjectId =
     selection.project.project === 'project' ? (selection.project.project_id ?? null) : null;
-  const isCurrentWeek = !page || page.week.start === page.current_week_start;
-  const weekRange = page
-    ? t('todo.week.range', weekEnds(language, page.week.start, page.week.end))
-    : null;
-  // The week is named by its days away from this week; the groups name its projects.
-  const title = showingWeek
-    ? isCurrentWeek
-      ? t('todo.week.title')
-      : weekRange
-    : t('todo.nav.deleted');
+  // One project in view is one list under its name; with several, the groups name them.
+  const oneProject = selection.project.project !== 'any';
+  const title = !showingList
+    ? t('todo.nav.deleted')
+    : selectedProjectId !== null
+      ? // Named once the workspace is read; the list waits for it too.
+        (projectName(selectedProjectId) ?? '')
+      : oneProject
+        ? t('todo.noProject')
+        : t('todo.nav.all');
 
-  // Focus returns to the list: 「今週へ」 and the conversation's close button go away once used.
+  // Focus returns to the list: the conversation's close button goes away once used.
   const focusHeading = () => headingRef.current?.focus();
-  // Weeks step from the one selected, not the one on screen, which may still be the last read.
-  const showWeek = (weeks: number | null) => {
-    if (!page) return;
-    const start =
-      weeks === null ? null : shiftWeek(selection.weekStart ?? page.current_week_start, weeks);
-    onSelect({
-      ...selection,
-      weekStart: start === null || start === page.current_week_start ? null : start,
-      todoId: null,
-    });
-  };
   /** A read that failed after one landed: what is shown may be out of date. */
   const staleAlert = (
     <p className="history-error" role="alert">
@@ -145,134 +131,106 @@ export function TodoScreen({
   const projects = settings ? todoProjectSlots(settings, selection.scope, selection.project) : [];
   const groups = page ? groupTodosByProject(page, projects) : [];
 
-  const renderWeek = (): ReactNode => {
-    if (!page || !settings) return (week.error && !page) || settingsFailed ? loadFailed : loading;
+  const renderRows = (items: TodoView[], today: string) =>
+    items.flatMap((todo) => {
+      const rowFailure = failureFor(
+        (target) => target.kind === 'todo' && target.todoId === todo.todo_id
+      );
+      return [
+        <TodoRow
+          key={todo.todo_id}
+          todo={todo}
+          today={today}
+          selected={todo.todo_id === selectedTodo?.todo_id}
+          pending={mutations.pending.has(todo.todo_id)}
+          onToggleCheck={() => void mutations.setCheck(todo.todo_id, todo.state.kind !== 'done')}
+          onSelect={() => onSelect({ ...selection, todoId: todo.todo_id })}
+          onDelete={() => void mutations.deleteTodo(todo.todo_id)}
+          onSetDue={(due) => void mutations.setDue(todo.todo_id, due)}
+          onSetStart={(startsOn) => void mutations.setStart(todo.todo_id, startsOn)}
+        />,
+        rowFailure ? (
+          <li key={`${todo.todo_id}:failure`} className="todo-screen__failure-row">
+            {rowFailure}
+          </li>
+        ) : null,
+      ];
+    });
+
+  const renderList = (): ReactNode => {
+    if (!page || !settings)
+      return (todoList.error && !page) || settingsFailed ? loadFailed : loading;
     return (
       <>
         {/* What was read before the failure stays; the next change reads again. */}
-        {week.error ? staleAlert : null}
+        {todoList.error ? staleAlert : null}
         {/* A disabled fieldset closes every control in it to the keyboard and the pointer. */}
         <fieldset
           className={
-            weekShowsSelection ? 'todo-screen__week' : 'todo-screen__week todo-screen__week--stale'
+            listShowsSelection
+              ? 'todo-screen__todos'
+              : 'todo-screen__todos todo-screen__todos--stale'
           }
-          disabled={!weekShowsSelection}
-          aria-busy={!weekShowsSelection && !week.error}
+          disabled={!listShowsSelection}
+          aria-busy={!listShowsSelection && !todoList.error}
         >
           {groups.length === 0 ? (
             <p className="todo-screen__empty">
-              {projects.length === 0 ? t('todo.page.noProjects') : t('todo.page.emptyWeek')}
+              {projects.length === 0 ? t('todo.page.noProjects') : t('todo.page.empty')}
             </p>
-          ) : null}
-          {groups.map((group) => (
-            <TodoProjectGroup
-              key={group.projectId ?? ''}
-              projectName={group.projectName}
-              organizationName={
-                group.organization === null
-                  ? null
-                  : group.organization.kind === 'organization'
-                    ? group.organization.name
-                    : t('todo.rail.none')
-              }
-              doneCount={group.doneCount}
-              totalCount={group.totalCount}
-            >
-              {group.items.flatMap((todo) => {
-                const rowFailure = failureFor(
-                  (target) => target.kind === 'todo' && target.todoId === todo.todo_id
-                );
-                return [
-                  <TodoRow
-                    key={todo.todo_id}
-                    todo={todo}
-                    today={page.today}
-                    selected={todo.todo_id === selectedTodo?.todo_id}
-                    pending={mutations.pending.has(todo.todo_id)}
-                    onToggleCheck={() =>
-                      void mutations.setCheck(todo.todo_id, todo.state.kind !== 'done')
-                    }
-                    onSelect={() => onSelect({ ...selection, todoId: todo.todo_id })}
-                    onDelete={() => void mutations.deleteTodo(todo.todo_id)}
-                    onSetDue={(due) => void mutations.setDue(todo.todo_id, due)}
-                    onSetStart={(startsOn) => void mutations.setStart(todo.todo_id, startsOn)}
-                  />,
-                  rowFailure ? (
-                    <li key={`${todo.todo_id}:failure`} className="todo-screen__failure-row">
-                      {rowFailure}
-                    </li>
-                  ) : null,
-                ];
-              })}
-            </TodoProjectGroup>
-          ))}
+          ) : oneProject ? (
+            <ul className="todo-list" aria-labelledby="todo-screen-title">
+              {renderRows(groups[0].items, page.today)}
+            </ul>
+          ) : (
+            groups.map((group) => (
+              <TodoProjectGroup
+                key={group.projectId ?? ''}
+                projectName={group.projectName}
+                organizationName={
+                  group.organization === null
+                    ? null
+                    : group.organization.kind === 'organization'
+                      ? group.organization.name
+                      : t('todo.rail.none')
+                }
+                doneCount={group.doneCount}
+                totalCount={group.totalCount}
+              >
+                {renderRows(group.items, page.today)}
+              </TodoProjectGroup>
+            ))
+          )}
         </fieldset>
       </>
     );
   };
 
-  /** The week's steps and how much of what is in view is done, beside the week's name. */
-  const renderWeekControls = (): ReactNode => {
-    if (!page) return null;
+  /** How much of what is in view is done, beside the title. */
+  const renderSummary = (): ReactNode => {
     const done = groups.reduce((sum, group) => sum + group.doneCount, 0);
     const total = groups.reduce((sum, group) => sum + group.totalCount, 0);
+    if (total === 0) return null;
     return (
-      <>
-        {isCurrentWeek ? <span className="todo-screen__range">{weekRange}</span> : null}
-        <span className="todo-screen__steps">
-          <button
-            type="button"
-            className="todo-screen__step"
-            aria-label={t('todo.week.previous')}
-            data-tooltip={t('todo.week.previous')}
-            onClick={() => showWeek(-1)}
-          >
-            <ChevronLeft size={15} aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            className="todo-screen__step"
-            aria-label={t('todo.week.next')}
-            data-tooltip={t('todo.week.next')}
-            onClick={() => showWeek(1)}
-          >
-            <ChevronRight size={15} aria-hidden="true" />
-          </button>
-          {isCurrentWeek ? null : (
-            <button
-              type="button"
-              className="history-filter-button todo-screen__current"
-              onClick={() => {
-                showWeek(null);
-                focusHeading();
-              }}
-            >
-              {t('todo.week.current')}
-            </button>
-          )}
+      <span className="todo-screen__summary">
+        {t('todo.list.doneCount', { done, total })}
+        <span className="todo-screen__track" aria-hidden="true">
+          <span style={{ width: `${(done / total) * 100}%` }} />
         </span>
-        {total > 0 ? (
-          <span className="todo-screen__summary">
-            {t('todo.week.doneCount', { done, total })}
-            <span className="todo-screen__track" aria-hidden="true">
-              <span style={{ width: `${(done / total) * 100}%` }} />
-            </span>
-          </span>
-        ) : null}
-      </>
+      </span>
     );
   };
 
-  /** The bar under the week that adds a TODO, in a week that takes them. */
+  /** The bar under the list that adds a TODO. */
   const renderAddBar = (): ReactNode => {
-    if (!page || !settings || !weekTakesTodos(page) || projects.length === 0) return null;
+    if (!page || !settings || projects.length === 0) return null;
     return (
       <div className="todo-screen__add">
         {failureFor((target) => target.kind === 'add')}
         <TodoAddBar
           today={page.today}
           projects={projects}
-          disabled={!weekShowsSelection}
+          disabled={!listShowsSelection}
           onSubmit={mutations.create}
         />
       </div>
@@ -281,7 +239,7 @@ export function TodoScreen({
 
   const renderDeleted = (): ReactNode => {
     const { items } = deleted;
-    if (!items || !page) return deleted.error || (week.error && !page) ? loadFailed : loading;
+    if (!items || !page) return deleted.error || (todoList.error && !page) ? loadFailed : loading;
     // What was read before the failure stays; the next change reads again.
     const alert = deleted.error ? staleAlert : null;
     if (items.length === 0)
@@ -321,7 +279,7 @@ export function TodoScreen({
   };
 
   // The progress is a page of its own under the same layout, with its own header and pane. The
-  // projects' names come with the workspace, so it waits for it as the week does.
+  // projects' names come with the workspace, so it waits for it as the list does.
   if (selection.view === 'progress')
     return (
       <ProgressScreen
@@ -341,9 +299,9 @@ export function TodoScreen({
           <h1 id="todo-screen-title" ref={headingRef} tabIndex={-1}>
             {title}
           </h1>
-          {showingWeek ? renderWeekControls() : null}
+          {showingList ? renderSummary() : null}
         </header>
-        {showingWeek && settings && selectedProjectId !== null ? (
+        {showingList && settings && selectedProjectId !== null ? (
           <div className="todo-screen__folders">
             <span className="todo-screen__folders-label" aria-hidden="true">
               {t('history.projects.folders')}
@@ -366,11 +324,28 @@ export function TodoScreen({
             />
           </div>
         ) : null}
+        {showingList ? (
+          <div className="todo-screen__columns">
+            <span aria-hidden="true">{t('todo.list.column')}</span>
+            <select
+              className="todo-screen__sort"
+              aria-label={t('todo.list.sort')}
+              value={selection.sort}
+              onChange={(event) => {
+                const sort = SORTS.find((candidate) => candidate === event.target.value);
+                if (sort) onSelect({ ...selection, sort });
+              }}
+            >
+              <option value="added">{t('todo.list.sortAdded')}</option>
+              <option value="due">{t('todo.list.sortDue')}</option>
+            </select>
+          </div>
+        ) : null}
         <div className="todo-screen__scroll">
           <AiConnectionNotice />
-          {showingDeleted ? renderDeleted() : renderWeek()}
+          {showingDeleted ? renderDeleted() : renderList()}
         </div>
-        {showingWeek ? renderAddBar() : null}
+        {showingList ? renderAddBar() : null}
       </section>
       {selectedTodo ? (
         <div className="history-detail todo-screen__conversation">

@@ -25,7 +25,7 @@ export type TodoSidebarNav = {
   scopeName: string | null;
   /** Renames the organization in view or changes its icon; null when no organization is. */
   onEditOrganization: (() => void) | null;
-  /** Open TODOs by project id, for the week in view. */
+  /** Open TODOs by project id, for the scope in view. */
   openCounts: ReadonlyMap<string, number>;
   onShowAll: () => void;
   onShowProgress: () => void;

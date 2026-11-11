@@ -26,11 +26,6 @@ from pantaray_agents.local_runtime.todos.model import (
     TodoConversation,
     TodoId,
 )
-from pantaray_agents.local_runtime.todos.week import (
-    effective_week,
-    shift_days,
-    week_start_of,
-)
 
 type TodoListSort = Literal["added", "due"]
 
@@ -52,21 +47,6 @@ class TodoEntry:
 class TodoList:
     today: LocalDate
     items: tuple[TodoEntry, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class WeekTodo:
-    todo: Todo
-    conversation: TodoConversation
-    carried: bool  # an open TODO from an earlier week, shown in this one
-
-
-@dataclass(frozen=True, slots=True)
-class TodoWeek:
-    today: LocalDate
-    current_week_start: LocalDate
-    week_start: LocalDate
-    items: tuple[WeekTodo, ...]
 
 
 def read_todo(*, user_id: str, todo_id: TodoId) -> TodoEntry | None:
@@ -113,64 +93,6 @@ def read_todo_list(
         items=tuple(
             TodoEntry(todo=todo, conversation=conversations[todo.todo_id])
             for todo in todos
-        ),
-    )
-
-
-def read_todo_week(
-    *,
-    user_id: str,
-    scope: TodoScope,
-    project: TodoProjectFilter,
-    week_of: LocalDate | None,
-    clock: TodoClock,
-) -> TodoWeek:
-    """The TODOs one week's list shows; `week_of` None is the current week."""
-
-    current = clock.current_week_start
-    week = current if week_of is None else week_start_of(week_of)
-    scope_sql, scope_params = todo_scope_sql(scope)
-    project_sql, project_params = todo_project_sql(project)
-    # Design limit: every open TODO from earlier weeks is read, as the current
-    # week shows them all; bound the read when open TODOs exceed 1,000.
-    sql = (
-        f"SELECT {TODO_SELECT} FROM todo_items AS todo "
-        "WHERE todo.user_id = :user_id AND todo.deleted_at IS NULL "
-        "AND todo.starts_on <= :week_end AND (todo.checked_at IS NULL "
-        # A check on a local date in the week is no earlier in UTC than the day
-        # before it, and one checked before its own week began stays there; the
-        # exact week comes from effective_week below.
-        "OR todo.checked_at >= :checked_from OR todo.starts_on >= :week) "
-        f"AND {scope_sql} AND {project_sql} "
-        "ORDER BY todo.starts_on, todo.created_at, todo.todo_id"
-    )
-    params = {
-        "user_id": user_id,
-        "week": week,
-        "week_end": shift_days(week, 6),
-        "checked_from": shift_days(week, -1),
-        **scope_params,
-        **project_params,
-    }
-    with todo_db_connection() as connection:
-        shown = [
-            (todo, placement.carried)
-            for todo in map(todo_from_row, connection.execute(sql, params))
-            if (placement := effective_week(todo, current, clock.zone)) is not None
-            and placement.week_start == week
-        ]
-        conversations = resolve_todo_conversations(
-            connection, user_id=user_id, todos=[todo for todo, _ in shown]
-        )
-    return TodoWeek(
-        today=clock.today,
-        current_week_start=current,
-        week_start=week,
-        items=tuple(
-            WeekTodo(
-                todo=todo, conversation=conversations[todo.todo_id], carried=carried
-            )
-            for todo, carried in shown
         ),
     )
 

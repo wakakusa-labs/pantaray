@@ -5,8 +5,8 @@ import { useI18n } from '@/context/useI18n';
 import './todo.css';
 
 /**
- * One project's TODOs for the week: its heading, how many are done, and its rows (`TodoRow`s,
- * in the order given, done ones in place).
+ * One project's TODOs: its heading, how many are done, and its rows (`TodoRow`s, in the order
+ * given).
  */
 export function TodoProjectGroup({
   projectName,

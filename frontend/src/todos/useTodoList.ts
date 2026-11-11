@@ -1,14 +1,8 @@
 import { useCallback } from 'react';
 
-import type {
-  TodoListPage,
-  TodoListQuery,
-  TodoScopeQuery,
-} from '../../electron/src/todos/todoContracts';
-import type { TodoProjectFilter } from './todoSelection';
+import type { TodoListPage, TodoScopeQuery } from '../../electron/src/todos/todoContracts';
+import type { TodoListSort, TodoProjectFilter } from './todoSelection';
 import { useTodoRead, type TodosBridge } from './useTodoRead';
-
-export type TodoListSort = NonNullable<TodoListQuery['sort']>;
 
 export type TodoListRead = {
   page: TodoListPage | null;
@@ -19,6 +13,8 @@ export type TodoListRead = {
 /**
  * Every TODO of the scope and project, open ones first in `sort` order, read again when the TODOs
  * change and when an Action starts, waits or ends, since a row's state follows its conversation.
+ * Writes are not anticipated here: a row waits for its write (`useTodoMutations`) and then for
+ * this read.
  */
 export function useTodoList(
   scope: TodoScopeQuery,

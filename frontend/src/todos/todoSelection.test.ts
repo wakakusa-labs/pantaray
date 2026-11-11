@@ -17,7 +17,7 @@ it('round-trips every part of a selection, ids with reserved characters included
     {
       scope: { scope: 'organization', organization_id: 'org 1&x=y' },
       project: { project: 'project', project_id: 'p:1/2' },
-      weekStart: '2026-11-09',
+      sort: 'due',
       view: 'progress',
       progressSpan: 'year',
       progressOn: '2025-03-01',
@@ -27,7 +27,7 @@ it('round-trips every part of a selection, ids with reserved characters included
     {
       scope: { scope: 'no_organization' },
       project: { project: 'no_project' },
-      weekStart: null,
+      sort: 'added',
       view: 'deleted',
       progressSpan: 'month',
       progressOn: null,
@@ -39,7 +39,7 @@ it('round-trips every part of a selection, ids with reserved characters included
     expect(parseTodoSelection(todoSelectionSearch(selection))).toEqual(selection);
   }
   expect(todoSelectionSearch(selections[0])).toBe(
-    '?scope=organization:org%201%26x%3Dy&project=project:p%3A1%2F2&week=2026-11-09&view=progress&span=year&on=2025-03-01&day=2025-03-04&todo=todo%20%231'
+    '?scope=organization:org%201%26x%3Dy&project=project:p%3A1%2F2&sort=due&view=progress&span=year&on=2025-03-01&day=2025-03-04&todo=todo%20%231'
   );
 });
 
@@ -50,8 +50,8 @@ it('falls back to the default for each malformed value', () => {
     '?scope=org-1',
     '?project=project:',
     '?project=p-1',
-    '?week=2026-02-30',
-    '?week=2026-1-9',
+    '?sort=name',
+    '?sort=Due',
     '?view=board',
     '?span=week',
     '?span=Year',

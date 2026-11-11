@@ -15,9 +15,9 @@ import type {
   TodoCreateRequest,
   TodoDueRequest,
   TodoStartRequest,
+  TodoListPage,
+  TodoListQuery,
   TodoView,
-  TodoWeekPage,
-  TodoWeekQuery,
 } from '../../electron/src/todos/todoContracts';
 import { waitForAnimationsToSettle } from './animations';
 import { installTaskDrafts } from './taskDrafts';
@@ -58,7 +58,6 @@ function todo(todoId: string, projectId: string | null, text: string, extra: Par
     author: 'user',
     origin: 'written',
     starts_on: '2026-11-02',
-    carried: false,
     due: null,
     state: { kind: 'working', note: null },
     deletion_request: null,
@@ -71,7 +70,6 @@ const ITEMS: TodoView[] = [
   todo('t-resubmit', 'estimate', '見積書を再提出する', {
     author: 'ai',
     origin: 'suggestion',
-    carried: true,
     starts_on: '2026-10-26',
     due: { date: '2026-11-06', repeat: 'none' },
     state: { kind: 'partial', note: '数量と納期は直しました' },
@@ -86,11 +84,7 @@ const ITEMS: TodoView[] = [
     state: { kind: 'waiting', reason: 'approval', note: null },
     conversation: { kind: 'suggestion', suggestion_id: 'suggestion-questions' },
   }),
-  todo('t-notes', 'product', 'リリースノートの下書きを書く', {
-    due: { date: '2026-11-05', repeat: 'none' },
-    state: { kind: 'working', note: '変更点を集めています' },
-    conversation: { kind: 'action', action_id: 'action-notes' },
-  }),
+  // Added before the TODO due 11/5 beside it, so 期限順 puts it second.
   todo('t-branches', 'product', '古いブランチを消す', {
     state: { kind: 'partial', note: null },
     deletion_request: {
@@ -98,6 +92,11 @@ const ITEMS: TodoView[] = [
       reason: 'どれも main に取り込み済みで、残す理由が見当たりません。',
     },
     conversation: { kind: 'action', action_id: 'action-branches' },
+  }),
+  todo('t-notes', 'product', 'リリースノートの下書きを書く', {
+    due: { date: '2026-11-05', repeat: 'none' },
+    state: { kind: 'working', note: '変更点を集めています' },
+    conversation: { kind: 'action', action_id: 'action-notes' },
   }),
   todo('t-garbage', 'home', '粗大ごみの申し込み', {
     due: { date: '2026-11-07', repeat: 'weekly' },
@@ -231,7 +230,6 @@ async function openHome(page: Page, search = '') {
     ({ organizations, projects, items, deleted, suggestion, initialGoals, records }) => {
       localStorage.setItem('pantaray_ui_language', 'ja');
       const noop = () => {};
-      const CURRENT = '2026-11-02';
       const shift = (date: string, days: number) =>
         new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
       // The backend's scope: a TODO belongs to its project's organization.
@@ -437,20 +435,22 @@ async function openHome(page: Page, search = '') {
             deleteItem: async () => ({ ok: true }),
           },
           todos: {
-            listWeek: async (query: TodoWeekQuery): Promise<TodoWeekPage> => {
-              const start = query.week_start ?? CURRENT;
-              // An ended week holds what was done in it; a week ahead holds nothing yet.
-              const shown =
-                start === CURRENT
-                  ? items
-                  : start < CURRENT
-                    ? items.filter((item) => item.todo_id === 't-cards')
-                    : [];
+            // The backend's order: open TODOs as added or by due date (none last), then the
+            // checked ones, the last checked first.
+            list: async (query: TodoListQuery): Promise<TodoListPage> => {
+              const checkedAt = (item: TodoView) =>
+                item.state.kind === 'done' ? item.state.at : '';
+              const dueKey = (item: TodoView) =>
+                query.sort === 'due' ? (item.due?.date ?? '9999-12-31') : '';
+              const open = items
+                .filter((item) => !checkedAt(item))
+                .sort((a, b) => dueKey(a).localeCompare(dueKey(b)));
+              const checked = items
+                .filter(checkedAt)
+                .sort((a, b) => checkedAt(b).localeCompare(checkedAt(a)));
               return {
-                today: '2026-11-04',
-                current_week_start: CURRENT,
-                week: { start, end: shift(start, 6) },
-                items: shown.filter((item) => inScope(item.project_id, query)),
+                today: TODAY,
+                items: [...open, ...checked].filter((item) => inScope(item.project_id, query)),
               };
             },
             // Writes change the TODOs the next read returns, as the backend's do.
@@ -462,7 +462,6 @@ async function openHome(page: Page, search = '') {
                 author: 'user',
                 origin: 'written',
                 starts_on: request.starts_on ?? TODAY,
-                carried: false,
                 due: request.due,
                 state: { kind: 'not_started', reason: 'starting' },
                 deletion_request: null,
@@ -553,13 +552,13 @@ const rowOf = (scope: Page | Locator, text: string) =>
 const hasNoSideScroll = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
 
-test('the home lists every organization’s week by project, with the rail and the sidebar', async ({
+test('the home lists every organization’s TODOs by project, with the rail and the sidebar', async ({
   page,
 }, info) => {
   await openHome(page);
-  await expect(page.getByRole('heading', { level: 1, name: '今週' })).toBeVisible();
-  await expect(page.locator('.todo-screen__header')).toContainText('11月2日 – 8日');
+  await expect(page.getByRole('heading', { level: 1, name: 'すべての TODO' })).toBeVisible();
   await expect(page.locator('.todo-screen__summary')).toHaveText('2 / 7 完了');
+  await expect(page.getByRole('combobox', { name: '並び順' })).toHaveValue('added');
 
   // The rail: the organizations in place of Home, then Settings.
   const rail = railOf(page);
@@ -622,14 +621,14 @@ test('the home lists every organization’s week by project, with the rail and t
     0
   );
   expect(await hasNoSideScroll(page)).toBe(true);
-  await capture(page, info, 'week-all');
+  await capture(page, info, 'list-all');
 
   // The keyboard reaches a row's check and shows where it is.
   await estimate.getByRole('checkbox', { name: '完了: 見積書を再提出する' }).focus();
   await page.keyboard.press('Shift+Tab');
   await page.keyboard.press('Tab');
   await expect(estimate.getByRole('checkbox', { name: '完了: 見積書を再提出する' })).toBeFocused();
-  await capture(page, info, 'week-focus');
+  await capture(page, info, 'list-focus');
 });
 
 test('a selected TODO opens its conversation beside the list, with 承認 and no 見送る', async ({
@@ -666,10 +665,10 @@ test('a selected TODO opens its conversation beside the list, with 承認 and no
 
   await page.getByRole('button', { name: '会話を閉じる' }).click();
   await expect(page).toHaveURL(/#\/history$/);
-  await expect(page.getByRole('heading', { level: 1, name: '今週' })).toBeFocused();
+  await expect(page.getByRole('heading', { level: 1, name: 'すべての TODO' })).toBeFocused();
 });
 
-test('the rail scopes the week to one organization, a project filters it, and 今週へ keeps focus', async ({
+test('the rail scopes the list to one organization, and a project shows its TODOs as one list', async ({
   page,
 }, info) => {
   await openHome(page);
@@ -680,11 +679,15 @@ test('the rail scopes the week to one organization, a project filters it, and �
     'true'
   );
   await expect(groups(page).locator('h3')).toHaveText(['見積もり', '採用']);
-  await capture(page, info, 'week-organization');
+  await capture(page, info, 'list-organization');
 
   await sidebarOf(page).getByRole('button', { name: '見積もり', exact: true }).click();
   await expect(page).toHaveURL(/#\/history\?scope=organization:xer&project=project:estimate$/);
-  await expect(groups(page).locator('h3')).toHaveText(['見積もり']);
+  // One project: its name is the title, and its TODOs are one list with no group heading.
+  await expect(page.getByRole('heading', { level: 1, name: '見積もり' })).toBeVisible();
+  await expect(groups(page)).toHaveCount(0);
+  await expect(page.getByRole('list', { name: '見積もり' }).getByRole('checkbox')).toHaveCount(2);
+  await expect(page.locator('.todo-screen__summary')).toHaveText('1 / 2 完了');
   // Its folders on one line under the header, each path cut in its middle.
   const folders = page.getByRole('list', { name: 'フォルダ' });
   await expect(folders.getByRole('listitem')).toHaveCount(2);
@@ -692,19 +695,46 @@ test('the rail scopes the week to one organization, a project filters it, and �
     folders.getByRole('button', { name: '/Users/me/Developer/clients/xer/estimates' })
   ).toBeVisible();
   expect(await hasNoSideScroll(page)).toBe(true);
-  await capture(page, info, 'week-project-folders');
+  await capture(page, info, 'list-project-folders');
 
-  // An ended week shows what was done in it, takes no new TODOs, and offers 今週へ.
-  await page.getByRole('button', { name: '前の週' }).click();
-  await expect(page.getByRole('heading', { level: 1, name: '10月26日 – 11月1日' })).toBeVisible();
-  await expect(page.getByRole('textbox', { name: 'TODO を追加' })).toHaveCount(0);
-  const thisWeek = page.getByRole('button', { name: '今週へ' });
-  await capture(page, info, 'week-past');
-  await thisWeek.focus();
-  await page.keyboard.press('Enter');
-  await expect(thisWeek).toHaveCount(0);
-  await expect(page.getByRole('heading', { level: 1, name: '今週' })).toBeFocused();
-  await expect(page.locator('.todo-screen__header')).toContainText('11月2日 – 8日');
+  // A TODO's conversation opens beside the one list; the folders stay under the header.
+  await page.getByRole('button', { name: /^見積書を再提出する/ }).click();
+  await expect(page.getByRole('region', { name: '見積書を再提出する' })).toBeVisible();
+  await expect(folders).toBeVisible();
+  expect(await hasNoSideScroll(page)).toBe(true);
+  await capture(page, info, 'list-project-folders-conversation');
+});
+
+test('期限順 puts the open TODOs by due date before the done ones, and stays in the address', async ({
+  page,
+}, info) => {
+  await openHome(page);
+  const product = page.getByRole('region', { name: 'プロダクト Wakakusa' });
+  const texts = (scope: Locator) => scope.locator('.todo-row__text');
+  await expect(texts(product)).toHaveText(['古いブランチを消す', 'リリースノートの下書きを書く']);
+
+  const sort = page.getByRole('combobox', { name: '並び順' });
+  await sort.focus();
+  await sort.selectOption({ label: '期限順' });
+  await expect(page).toHaveURL(/#\/history\?sort=due$/);
+  await expect(texts(product)).toHaveText(['リリースノートの下書きを書く', '古いブランチを消す']);
+  // A done TODO follows the open ones whatever the order.
+  await expect(texts(page.getByRole('region', { name: '見積もり Xer' }))).toHaveText([
+    '見積書を再提出する',
+    '名刺 40 枚を入れておく',
+  ]);
+  await expect(sort).toBeFocused();
+  await capture(page, info, 'list-due');
+
+  // The order chosen is kept for a project's list and after a reload.
+  await sidebarOf(page).getByRole('button', { name: 'プロダクト', exact: true }).click();
+  await expect(page).toHaveURL(/#\/history\?project=project:product&sort=due$/);
+  await page.reload();
+  await expect(page.getByRole('combobox', { name: '並び順' })).toHaveValue('due');
+  await expect(texts(page.getByRole('list', { name: 'プロダクト' }))).toHaveText([
+    'リリースノートの下書きを書く',
+    '古いブランチを消す',
+  ]);
 });
 
 test('a project’s TODO opens beside its list, with the add bar under it offering no project', async ({
@@ -792,9 +822,9 @@ test('a narrow window stacks the conversation under the list header, with nothin
 }, info) => {
   await page.setViewportSize({ width: 900, height: 820 });
   await openHome(page);
-  await expect(page.getByRole('heading', { level: 1, name: '今週' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'すべての TODO' })).toBeVisible();
   expect(await hasNoSideScroll(page)).toBe(true);
-  await capture(page, info, 'narrow-week');
+  await capture(page, info, 'narrow-list');
 
   await page.getByRole('button', { name: /^来週の面接の質問リストを作る/ }).click();
   const pane = page.getByRole('region', { name: '来週の面接の質問リストを作る' });

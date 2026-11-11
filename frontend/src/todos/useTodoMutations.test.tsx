@@ -11,7 +11,7 @@ import type {
 } from '../../electron/src/todos/todoContracts';
 import { useTodoMutations } from './useTodoMutations';
 
-const reloadWeek = vi.fn<() => Promise<void>>();
+const reloadList = vi.fn<() => Promise<void>>();
 const reloadDeleted = vi.fn<() => Promise<void>>();
 const create = vi.fn<(request: TodoCreateRequest) => Promise<TodoWriteResult<TodoView>>>();
 const remove = vi.fn();
@@ -21,7 +21,7 @@ beforeEach(() => {
   create.mockReset();
   remove.mockReset();
   restore.mockReset();
-  reloadWeek.mockReset().mockResolvedValue(undefined);
+  reloadList.mockReset().mockResolvedValue(undefined);
   reloadDeleted.mockReset().mockResolvedValue(undefined);
   window.electron = { todos: { create, delete: remove, restore } } as unknown as Window['electron'];
 });
@@ -34,7 +34,7 @@ const ok = { kind: 'ok', result: {} } as TodoWriteResult<TodoView>;
 it('holds a row pending while its write is in flight, and lets it go when the write fails', async () => {
   let answer: (result: unknown) => void = () => undefined;
   remove.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)));
-  const { result } = renderHook(() => useTodoMutations({ reloadWeek, reloadDeleted }), { wrapper });
+  const { result } = renderHook(() => useTodoMutations({ reloadList, reloadDeleted }), { wrapper });
 
   let deleted: Promise<boolean> = Promise.resolve(true);
   act(() => {
@@ -58,7 +58,7 @@ it('holds a row pending while its write is in flight, and lets it go when the wr
 });
 
 it('tells what the user can act on, and only a generic message for the rest', async () => {
-  const { result } = renderHook(() => useTodoMutations({ reloadWeek, reloadDeleted }), { wrapper });
+  const { result } = renderHook(() => useTodoMutations({ reloadList, reloadDeleted }), { wrapper });
   restore.mockResolvedValueOnce({ kind: 'refused', code: 'TODO_RESTORE_EXPIRED' });
   await act(() => result.current.restore('t1'));
   expect(result.current.failure?.message).toBe('30 日を過ぎたので戻せません。');
@@ -74,7 +74,7 @@ it('tells what the user can act on, and only a generic message for the rest', as
 });
 
 it('resends an unanswered add with the same id, so the same line is added once', async () => {
-  const { result } = renderHook(() => useTodoMutations({ reloadWeek, reloadDeleted }), { wrapper });
+  const { result } = renderHook(() => useTodoMutations({ reloadList, reloadDeleted }), { wrapper });
   const due = { date: '2026-11-06', repeat: 'none' } as const;
   create.mockRejectedValueOnce(new Error('timeout'));
   await act(async () => {
@@ -110,7 +110,7 @@ it('resends an unanswered add with the same id, so the same line is added once',
 });
 
 it('adds nothing for an empty line', async () => {
-  const { result } = renderHook(() => useTodoMutations({ reloadWeek, reloadDeleted }), { wrapper });
+  const { result } = renderHook(() => useTodoMutations({ reloadList, reloadDeleted }), { wrapper });
   await act(async () => {
     expect(await result.current.create(null, '2026-11-02', '   ', null)).toBe(false);
   });
@@ -119,10 +119,10 @@ it('adds nothing for an empty line', async () => {
 });
 
 it('keeps a row pending until the lists showing its write have been read again', async () => {
-  let weekRead: () => void = () => undefined;
-  reloadWeek.mockReturnValueOnce(new Promise((resolve) => (weekRead = resolve)));
+  let listRead: () => void = () => undefined;
+  reloadList.mockReturnValueOnce(new Promise((resolve) => (listRead = resolve)));
   remove.mockResolvedValueOnce(ok);
-  const { result } = renderHook(() => useTodoMutations({ reloadWeek, reloadDeleted }), {
+  const { result } = renderHook(() => useTodoMutations({ reloadList, reloadDeleted }), {
     wrapper,
   });
 
@@ -130,11 +130,11 @@ it('keeps a row pending until the lists showing its write have been read again',
   await act(async () => {
     deleted = result.current.deleteTodo('t1');
   });
-  expect(reloadWeek).toHaveBeenCalledOnce();
+  expect(reloadList).toHaveBeenCalledOnce();
   expect(reloadDeleted).toHaveBeenCalledOnce();
   expect(result.current.pending.has('t1')).toBe(true);
 
-  await act(async () => weekRead());
+  await act(async () => listRead());
   expect(await deleted).toBe(true);
   expect(result.current.pending.size).toBe(0);
 });

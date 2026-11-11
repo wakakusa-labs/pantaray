@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 
-import type { TodoView, TodoWeekPage } from '../../electron/src/todos/todoContracts';
+import type { TodoListPage, TodoView } from '../../electron/src/todos/todoContracts';
 import { groupTodosByProject, todoProjectSlots } from './groupTodosByProject';
 
 const settings = {
@@ -36,7 +36,6 @@ function todo(todoId: string, projectId: string | null, done = false): TodoView 
     author: 'user',
     origin: 'written',
     starts_on: '2026-11-02',
-    carried: false,
     due: null,
     state: done
       ? { kind: 'done', by: 'user', at: '2026-11-03T00:00:00Z' }
@@ -46,12 +45,7 @@ function todo(todoId: string, projectId: string | null, done = false): TodoView 
   };
 }
 
-const page = (items: TodoView[]): TodoWeekPage => ({
-  today: '2026-11-07',
-  current_week_start: '2026-11-02',
-  week: { start: '2026-11-02', end: '2026-11-08' },
-  items,
-});
+const page = (items: TodoView[]): TodoListPage => ({ today: '2026-11-07', items });
 
 const ids = (slots: readonly { projectId: string | null }[]) => slots.map((g) => g.projectId);
 

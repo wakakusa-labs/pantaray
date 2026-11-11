@@ -1,1 +1,1 @@
-"""Pure core of the weekly TODO list: types and state transitions."""
+"""Pure core of the TODO list: types and state transitions."""

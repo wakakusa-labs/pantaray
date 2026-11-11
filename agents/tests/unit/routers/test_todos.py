@@ -119,10 +119,8 @@ def _error_code(response: Response) -> str:
     return str(response.json()["detail"]["error_code"])
 
 
-def _week(client: TestClient, **params: str) -> Any:  # the JSON body
-    response = client.get(
-        f"{TODOS}/weeks", params={"scope": "all", "project": "any", **params}
-    )
+def _list(client: TestClient, **params: str) -> Any:  # the JSON body
+    response = client.get(TODOS, params={"scope": "all", "project": "any", **params})
     assert response.status_code == 200, response.text
     return response.json()
 
@@ -130,7 +128,7 @@ def _week(client: TestClient, **params: str) -> Any:  # the JSON body
 def test_another_users_path_is_forbidden(client: TestClient) -> None:
     other = "/v1/agents/users/someone-else/todos"
 
-    assert client.get(f"{other}/weeks?scope=all&project=any").status_code == 403
+    assert client.get(f"{other}?scope=all&project=any").status_code == 403
     assert client.delete(f"{other}/any-todo").status_code == 403
 
 
@@ -148,7 +146,7 @@ def test_a_replayed_create_returns_the_same_todo_and_a_changed_one_conflicts(
     assert first.json()["starts_on"] == "2026-11-04"
     assert conflicting.status_code == 409
     assert _error_code(conflicting) == "TODO_CLIENT_ID_CONFLICT"
-    assert len(_week(client)["items"]) == 1
+    assert len(_list(client)["items"]) == 1
 
 
 @pytest.mark.parametrize(
@@ -177,7 +175,7 @@ def test_a_repeat_without_a_date_or_an_unknown_scope_is_an_input_error(
         {"scope": "all", "project": "any", "organization_id": "org-a"},
         {"scope": "all", "project": "project"},
     ):
-        assert client.get(f"{TODOS}/weeks", params=params).status_code == 422
+        assert client.get(TODOS, params=params).status_code == 422
 
 
 def test_the_user_removes_the_ais_check_and_checking_a_weekly_todo_adds_the_next(
@@ -284,7 +282,7 @@ def test_approving_the_ais_deletion_request_waits_for_the_run_and_answers_once(
     )
     answer = f"{TODOS}/{todo_id}/deletion-requests/r-1/answer"
 
-    assert _week(client)["items"][0]["deletion_request"] == {
+    assert _list(client)["items"][0]["deletion_request"] == {
         "request_id": "r-1",
         "reason": "Duplicate",
     }
@@ -330,11 +328,11 @@ def test_a_deleted_todo_is_listed_and_restorable_until_retention_ends(
     assert client.get(f"{TODOS}/deleted", params={"scope": "all"}).json() == []
 
 
-def test_the_week_page_shows_carried_todos_with_their_state_and_conversation(
+def test_the_list_shows_each_todo_with_its_state_and_conversation(
     client: TestClient, db: Path, clock: _Clock
 ) -> None:
     clock.current = PREVIOUS_WEEK
-    carried_id = _created_id(client, "c-old", starts_on="2026-10-28")
+    old_id = _created_id(client, "c-old", starts_on="2026-10-28")
     clock.current = NOW
     working_id = _created_id(client, "c-now")
     seed_action(
@@ -345,28 +343,21 @@ def test_the_week_page_shows_carried_todos_with_their_state_and_conversation(
         run="running",
     )
 
-    page = _week(client)
-    previous = _week(client, week_start="2026-10-27")
+    page = _list(client)
 
     assert page["today"] == "2026-11-04"
-    assert page["current_week_start"] == "2026-11-02"
-    assert page["week"] == {"start": "2026-11-02", "end": "2026-11-08"}
     assert [
-        (item["todo_id"], item["carried"], item["state"], item["conversation"])
-        for item in page["items"]
+        (item["todo_id"], item["state"], item["conversation"]) for item in page["items"]
     ] == [
         (
-            carried_id,
-            True,
+            old_id,
             {"kind": "not_started", "reason": "starting"},
             {"kind": "none"},
         ),
         (
             working_id,
-            False,
             {"kind": "working", "note": None},
             {"kind": "action", "action_id": "a"},
         ),
     ]
     assert page["items"][0]["starts_on"] == "2026-10-28"
-    assert previous["items"] == []

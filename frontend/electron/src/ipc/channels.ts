@@ -137,7 +137,6 @@ export const validInvokeChannels = [
   'chat:getTurnState',
   // The TODO list and its progress (main window only)
   'todos:list',
-  'todos:listWeek',
   'todos:create',
   'todos:setCheck',
   'todos:setDue',

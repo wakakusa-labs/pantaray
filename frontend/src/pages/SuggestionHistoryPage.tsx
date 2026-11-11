@@ -40,7 +40,7 @@ import {
   type TodoSelection,
 } from '@/todos/todoSelection';
 import { TODO_UX_ENABLED } from '@/todos/todoUxFeature';
-import { useTodoWeek } from '@/todos/useTodoWeek';
+import { useTodoList } from '@/todos/useTodoList';
 
 import type { TodoScopeQuery } from '../../electron/src/todos/todoContracts';
 import { TodoScreen } from './TodoScreen';
@@ -57,7 +57,7 @@ const UNLISTED_TITLE = {
  * without the TODO list, the chat.
  */
 const ITEM_PARAM = 'item';
-/** The week is read whole: the sidebar counts every project's open TODOs. */
+/** The scope is read whole: the sidebar counts every project's open TODOs. */
 const ANY_PROJECT: TodoProjectFilter = { project: 'any' };
 
 /**
@@ -133,17 +133,17 @@ const SuggestionHistoryPage = () => {
       : parseHistorySelection(location.search);
   const todoSelection = parseTodoSelection(location.search);
   const { scope } = todoSelection;
-  const week = useTodoWeek(scope, ANY_PROJECT, todoSelection.weekStart);
-  // The read keeps its last page while another scope or week is read, and only the latest
+  const todoList = useTodoList(scope, ANY_PROJECT, todoSelection.sort);
+  // The read keeps its last page while another scope or order is read, and only the latest
   // query's answer lands, so a page that arrived since the query last changed is that query's.
-  const weekQuery = todoSelectionSearch({
+  const listQuery = todoSelectionSearch({
     ...DEFAULT_TODO_SELECTION,
     scope,
-    weekStart: todoSelection.weekStart,
+    sort: todoSelection.sort,
   });
-  const [weekReadFor, setWeekReadFor] = useState({ page: week.page, query: weekQuery });
-  if (weekReadFor.page !== week.page) setWeekReadFor({ page: week.page, query: weekQuery });
-  const weekShowsSelection = week.page !== null && weekReadFor.query === weekQuery;
+  const [listReadFor, setListReadFor] = useState({ page: todoList.page, query: listQuery });
+  if (listReadFor.page !== todoList.page) setListReadFor({ page: todoList.page, query: listQuery });
+  const listShowsSelection = todoList.page !== null && listReadFor.query === listQuery;
   const { settings } = workspace;
 
   // The rail's organizations are the ones this visit read.
@@ -175,7 +175,7 @@ const SuggestionHistoryPage = () => {
   const paneOpen =
     selection === null &&
     (todoSelection.view === 'list'
-      ? (week.page?.items.some((todo) => todo.todo_id === todoSelection.todoId) ?? false)
+      ? (todoList.page?.items.some((todo) => todo.todo_id === todoSelection.todoId) ?? false)
       : todoSelection.view === 'progress' &&
         todoSelection.progressSpan === 'month' &&
         todoSelection.progressDay !== null);
@@ -236,7 +236,7 @@ const SuggestionHistoryPage = () => {
   };
   const selectTodos = (next: TodoSelection) => navigate({ search: todoSelectionSearch(next) });
   const openCounts = new Map<string, number>();
-  for (const todo of week.page?.items ?? []) {
+  for (const todo of todoList.page?.items ?? []) {
     if (todo.project_id !== null && todo.state.kind !== 'done')
       openCounts.set(todo.project_id, (openCounts.get(todo.project_id) ?? 0) + 1);
   }
@@ -251,15 +251,14 @@ const SuggestionHistoryPage = () => {
           : (scopeOrganization?.display_name ?? null),
     onEditOrganization: scopeOrganization ? () => setEditingOrganization(true) : null,
     openCounts,
-    onShowAll: () =>
-      selectTodos({ ...DEFAULT_TODO_SELECTION, scope, weekStart: todoSelection.weekStart }),
+    onShowAll: () => selectTodos({ ...DEFAULT_TODO_SELECTION, scope, sort: todoSelection.sort }),
     // The progress of what is in view, as a month or a year as last chosen, from today's.
     onShowProgress: () =>
       selectTodos({
         ...DEFAULT_TODO_SELECTION,
         scope,
         project: todoSelection.project,
-        weekStart: todoSelection.weekStart,
+        sort: todoSelection.sort,
         view: 'progress',
         progressSpan: todoSelection.progressSpan,
       }),
@@ -270,7 +269,7 @@ const SuggestionHistoryPage = () => {
         ...DEFAULT_TODO_SELECTION,
         scope,
         project: { project: 'project', project_id: projectId },
-        weekStart: todoSelection.weekStart,
+        sort: todoSelection.sort,
       }),
   };
   // The rail's ＋ adds an organization and then shows it; the sidebar's title edits the one in view.
@@ -404,8 +403,8 @@ const SuggestionHistoryPage = () => {
       {selection === null ? (
         <TodoScreen
           selection={todoSelection}
-          week={week}
-          weekShowsSelection={weekShowsSelection}
+          todoList={todoList}
+          listShowsSelection={listShowsSelection}
           settings={settings}
           settingsFailed={settings === null && workspace.errorMessage !== null}
           folderActions={workspace}

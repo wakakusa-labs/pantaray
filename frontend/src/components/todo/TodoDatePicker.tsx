@@ -33,7 +33,7 @@ export function TodoDatePicker({
   /** The backend's today, which 今日, 明日 and 来週 count from. */
   today: string;
   clearLabel?: string;
-  /** A write on the TODO is waiting; a second choice would race it. */
+  /** A write on the TODO is waiting; a choice now would race it, so it is dropped. */
   disabled?: boolean;
   onChoose: (date: string | null) => void;
   children: ReactNode;
@@ -66,7 +66,7 @@ export function TodoDatePicker({
 
   const choose = (date: string | null) => {
     panelRef.current?.hidePopover();
-    if (date !== value) onChoose(date);
+    if (!disabled && date !== value) onChoose(date);
   };
   const quick: [string, string][] = [
     [t('todo.date.today'), today],
@@ -81,7 +81,6 @@ export function TodoDatePicker({
         className={triggerClassName}
         aria-label={triggerLabel}
         aria-haspopup="dialog"
-        disabled={disabled}
       >
         {children}
       </button>

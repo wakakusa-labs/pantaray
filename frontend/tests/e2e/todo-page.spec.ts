@@ -361,7 +361,17 @@ async function openHome(page: Page, search = '') {
               read_access_scope: 'workspace',
               organizations,
               projects,
-              folders: [],
+              // 見積もり's folders, shown under the header while it is in view.
+              folders: ['/Users/me/Developer/clients/xer/estimates', '/Users/me/Documents/xer'].map(
+                (path, index) => ({
+                  folder_id: `folder-${index}`,
+                  display_name: path.split('/').pop(),
+                  real_path: path,
+                  canonical_real_path: path,
+                  organization_ids: [],
+                  project_ids: ['estimate'],
+                })
+              ),
             }),
           },
           auth: {
@@ -663,6 +673,14 @@ test('the rail scopes the week to one organization, a project filters it, and �
   await sidebarOf(page).getByRole('button', { name: '見積もり', exact: true }).click();
   await expect(page).toHaveURL(/#\/history\?scope=organization:xer&project=project:estimate$/);
   await expect(groups(page).locator('h3')).toHaveText(['見積もり']);
+  // Its folders on one line under the header, each path cut in its middle.
+  const folders = page.getByRole('list', { name: 'フォルダ' });
+  await expect(folders.getByRole('listitem')).toHaveCount(2);
+  await expect(
+    folders.getByRole('button', { name: '/Users/me/Developer/clients/xer/estimates' })
+  ).toBeVisible();
+  expect(await hasNoSideScroll(page)).toBe(true);
+  await capture(page, info, 'week-project-folders');
 
   // An ended week shows what was done in it, takes no new TODOs, and offers 今週へ.
   await page.getByRole('button', { name: '前の週' }).click();

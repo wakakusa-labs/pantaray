@@ -3,6 +3,8 @@ import { useRef, type ReactNode } from 'react';
 
 import { AiConnectionNotice } from '@/components/AiConnectionNotice';
 import { OpenWorkContext } from '@/components/action-conversation/sentMessageRefs';
+import type { WorkspaceProjects } from '@/components/history/HistoryProjects';
+import { ProjectFolders } from '@/components/history/ProjectFolders';
 import { DeletedTodoRow } from '@/components/todo/DeletedTodoRow';
 import { ProgressScreen } from '@/components/todo/progress/ProgressScreen';
 import { TodoAddBar } from '@/components/todo/TodoAddBar';
@@ -13,6 +15,7 @@ import { weekEnds } from '@/components/todo/todoDates';
 import { useI18n } from '@/context/useI18n';
 import type { HistorySelection } from '@/history/historySelection';
 import type { WorkspaceSettings } from '@/pages/settings/components/workspaceSettingsModel';
+import { workspacePendingKey } from '@/pages/settings/useWorkspaceSettingsController';
 import { groupTodosByProject, todoProjectSlots, weekTakesTodos } from '@/todos/groupTodosByProject';
 import type { TodoSelection } from '@/todos/todoSelection';
 import { useDeletedTodos } from '@/todos/useDeletedTodos';
@@ -39,9 +42,16 @@ function FailureLine({ failure }: { failure: TodoMutationFailure }) {
   );
 }
 
+/** What the header's folders of the project in view are changed with. */
+type ProjectFolderActions = Pick<
+  WorkspaceProjects,
+  'pending' | 'addFolderToProject' | 'removeFolderFromProject' | 'openFolder'
+>;
+
 /**
  * The home page's TODO list: the week's TODOs by project (or their progress, or the deleted
- * TODOs), and beside the week the conversation of the TODO selected. What is shown is the page's URL; this reads and writes
+ * TODOs), with the folders of the one project in view under its header, and beside the week the
+ * conversation of the TODO selected. What is shown is the page's URL; this reads and writes
  * the TODOs through the TODO hooks and draws them with the TODO parts.
  */
 export function TodoScreen({
@@ -50,6 +60,7 @@ export function TodoScreen({
   weekShowsSelection,
   settings,
   settingsFailed,
+  folderActions,
   onSelect,
   onOpenWork,
   onAddProject,
@@ -65,6 +76,7 @@ export function TodoScreen({
   settings: WorkspaceSettings | null;
   /** The workspace could not be read, so the TODOs cannot be put in their projects. */
   settingsFailed: boolean;
+  folderActions: ProjectFolderActions;
   onSelect: (next: TodoSelection) => void;
   /** A work named in a conversation opens in the page's main area. */
   onOpenWork: (work: HistorySelection) => void;
@@ -87,6 +99,8 @@ export function TodoScreen({
       ? (page?.items.find((todo) => todo.todo_id === selection.todoId) ?? null)
       : null;
   const showingWeek = selection.view === 'list';
+  const selectedProjectId =
+    selection.project.project === 'project' ? (selection.project.project_id ?? null) : null;
   const isCurrentWeek = !page || page.week.start === page.current_week_start;
   const weekRange = page
     ? t('todo.week.range', weekEnds(language, page.week.start, page.week.end))
@@ -329,6 +343,29 @@ export function TodoScreen({
           </h1>
           {showingWeek ? renderWeekControls() : null}
         </header>
+        {showingWeek && settings && selectedProjectId !== null ? (
+          <div className="todo-screen__folders">
+            <span className="todo-screen__folders-label" aria-hidden="true">
+              {t('history.projects.folders')}
+            </span>
+            <ProjectFolders
+              key={selectedProjectId}
+              projectId={selectedProjectId}
+              folders={settings.folders.filter((folder) =>
+                folder.project_ids.includes(selectedProjectId)
+              )}
+              isFolderPending={(folderId) =>
+                folderActions.pending.has(workspacePendingKey.folder(folderId))
+              }
+              onOpenFolder={(folderId) => void folderActions.openFolder(folderId)}
+              onRemoveFolder={(folderId) =>
+                folderActions.removeFolderFromProject(folderId, selectedProjectId)
+              }
+              onAddFolder={() => void folderActions.addFolderToProject(selectedProjectId)}
+              t={t}
+            />
+          </div>
+        ) : null}
         <div className="todo-screen__scroll">
           <AiConnectionNotice />
           {showingDeleted ? renderDeleted() : renderWeek()}

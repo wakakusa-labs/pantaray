@@ -63,6 +63,40 @@
   letter-spacing: -0.01em;
 }
 
+/* The project in view's folders on one line under the header: each path cut in its middle. */
+.todo-screen__folders {
+  display: flex;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 0 24px 8px;
+  color: var(--fog-text-3);
+  font-size: var(--text-meta-size);
+}
+
+.todo-screen__folders-label {
+  flex: none;
+}
+
+.todo-screen__folders .project-folders {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 12px;
+  min-width: 0;
+}
+
+.todo-screen__folders .project-folders ul {
+  display: contents;
+}
+
+.todo-screen__folders .history-project__folder {
+  max-width: 280px;
+}
+
+.todo-screen__folders .project-folders__add {
+  margin: 0;
+}
+
 .todo-screen__range {
   flex: none;
   margin-right: 6px;

@@ -372,6 +372,20 @@ export function TodoScreen({
             {title}
           </h1>
           {showingList ? renderSummary() : null}
+          {showingList ? (
+            <select
+              className="todo-screen__sort"
+              aria-label={t('todo.list.sort')}
+              value={selection.sort}
+              onChange={(event) => {
+                const sort = SORTS.find((candidate) => candidate === event.target.value);
+                if (sort) onSelect({ ...selection, sort });
+              }}
+            >
+              <option value="added">{t('todo.list.sortAdded')}</option>
+              <option value="due">{t('todo.list.sortDue')}</option>
+            </select>
+          ) : null}
         </header>
         {showingList && settings && selectedProjectId !== null ? (
           <div className="todo-screen__folders">
@@ -394,23 +408,6 @@ export function TodoScreen({
               onAddFolder={() => void folderActions.addFolderToProject(selectedProjectId)}
               t={t}
             />
-          </div>
-        ) : null}
-        {showingList ? (
-          <div className="todo-screen__columns">
-            <span aria-hidden="true">{t('todo.list.column')}</span>
-            <select
-              className="todo-screen__sort"
-              aria-label={t('todo.list.sort')}
-              value={selection.sort}
-              onChange={(event) => {
-                const sort = SORTS.find((candidate) => candidate === event.target.value);
-                if (sort) onSelect({ ...selection, sort });
-              }}
-            >
-              <option value="added">{t('todo.list.sortAdded')}</option>
-              <option value="due">{t('todo.list.sortDue')}</option>
-            </select>
           </div>
         ) : null}
         <div className="todo-screen__scroll">

@@ -83,7 +83,7 @@
   -webkit-app-region: drag;
 }
 
-.todo-screen__header button {
+.todo-screen__header :is(button, select) {
   -webkit-app-region: no-drag;
 }
 
@@ -96,9 +96,7 @@
 }
 
 /* The list's and the progress's names are the page's title, a size up from the panes' headers. */
-.todo-screen__list:is(:has(.todo-screen__steps), :has(.todo-screen__columns))
-  .todo-screen__header
-  h1 {
+.todo-screen__list:is(:has(.todo-screen__steps), :has(.todo-screen__sort)) .todo-screen__header h1 {
   font-size: 20px;
   letter-spacing: -0.01em;
 }
@@ -214,7 +212,7 @@
   margin-left: auto;
 }
 
-.todo-screen__summary + .action-task__icon-button {
+.todo-screen__summary + :is(.action-task__icon-button, .todo-screen__sort) {
   margin-left: 4px;
 }
 
@@ -237,22 +235,11 @@
   margin-bottom: 12px;
 }
 
-/* The list's column names and its order, over the list, whatever its scroll. */
-.todo-screen__columns {
-  display: flex;
-  flex: none;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 0 28px;
-  padding: 0 6px 6px 12px;
-  border-bottom: 1px solid var(--fog-line);
-  color: var(--fog-text-3);
-  font-size: var(--text-meta-size);
-}
-
-/* A quiet text button: the native select with its frame taken off, as wide as its choice. */
+/* The list's order at the header's end, after its progress when there is one. A quiet text
+   button: the native select with its frame taken off, as wide as its choice. */
 .todo-screen__sort {
+  flex: none;
+  margin-left: auto;
   field-sizing: content;
   height: 24px;
   padding: 0 16px 0 6px;
@@ -263,6 +250,7 @@
     right 4px center / 8px no-repeat;
   color: var(--fog-text-2);
   font: inherit;
+  font-size: 12.5px;
   cursor: pointer;
   appearance: none;
 }

@@ -55,6 +55,12 @@ export function TodoAddBar({
   const files = useAddBarFiles();
   const [importing, setImporting] = useState(false);
   const [text, setText] = useState('');
+  // The text as last typed, which a send reads once its answer comes.
+  const textRef = useRef('');
+  const changeText = (next: string) => {
+    textRef.current = next;
+    setText(next);
+  };
   const [sending, setSending] = useState(false);
   const [chosenProject, setChosenProject] = useState(projects[0]?.projectId ?? '');
   // A TODO was sent where no project can take it.
@@ -83,7 +89,7 @@ export function TodoAddBar({
     // Files staged for an import are nobody's once it is off.
     if (importing) {
       files.discardAll();
-      setText(oneLine);
+      changeText(oneLine(textRef.current));
     }
     setImporting(!importing);
     setNeedsProject(false);
@@ -105,12 +111,14 @@ export function TodoAddBar({
           sent.trim(),
           due === null ? null : { date: due, repeat: 'none' }
         );
-    // Text typed while the add was deciding is the next TODO, so only the sent text is cleared.
+    // Text typed while the send was answering is the next one, so only the sent text is cleared,
+    // and an import stays on for newer text, which may have lines no TODO can take.
     if (taken) {
-      setText((current) => (current === sent ? '' : current));
+      const cleared = textRef.current === sent;
+      if (cleared) changeText('');
       if (importing) {
         files.clearSent();
-        setImporting(false);
+        if (cleared) setImporting(false);
       }
     }
     setSending(false);
@@ -147,7 +155,7 @@ export function TodoAddBar({
         value={text}
         onChange={(event) => {
           const value = event.target.value;
-          setText(importing ? value : oneLine(value));
+          changeText(importing ? value : oneLine(value));
           setNeedsProject(false);
         }}
         onKeyDown={(event) => {

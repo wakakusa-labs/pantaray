@@ -475,6 +475,33 @@ it('adds no file while an import is starting', async () => {
   window.electron = undefined;
 });
 
+it('stays importing when lines typed while an import was starting are left', async () => {
+  let answer: (started: boolean) => void = () => undefined;
+  const pendingImport = vi.fn(() => new Promise<boolean>((resolve) => (answer = resolve)));
+  const onSubmit = vi.fn(async () => true);
+  render(
+    ja(
+      <TodoAddBar
+        today={TODAY}
+        projects={PROJECTS}
+        disabled={false}
+        onSubmit={onSubmit}
+        onImport={pendingImport}
+      />
+    )
+  );
+  await userEvent.click(modeButton());
+  await userEvent.type(addField(), 'a{Shift>}{Enter}{/Shift}b{Enter}');
+  fireEvent.change(addField(), { target: { value: 'c\nd' } });
+  await act(async () => answer(true));
+  // The newer lines are the next import's, not a TODO that would be refused for its lines.
+  expect(addField()).toHaveValue('c\nd');
+  expect(modeButton()).toHaveAttribute('aria-pressed', 'true');
+  await userEvent.type(addField(), '{Enter}');
+  expect(pendingImport).toHaveBeenLastCalledWith('c\nd', { files: [], images: [] });
+  expect(onSubmit).not.toHaveBeenCalled();
+});
+
 it('discards the files staged for an import turned off, those still being written too', async () => {
   let written: (file: unknown) => void = () => undefined;
   const attachFile = vi

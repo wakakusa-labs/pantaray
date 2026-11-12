@@ -1,4 +1,4 @@
-import { ArrowUp, Paperclip } from 'lucide-react';
+import { ArrowUp, CalendarDays, Paperclip } from 'lucide-react';
 import { useRef, useState } from 'react';
 
 import { ComposerAlert, ComposerAttachments } from '@/components/agent-overlay/ComposerAttachments';
@@ -9,8 +9,8 @@ import type { TodoProjectSlot } from '@/todos/groupTodosByProject';
 import type { TodoImportAttachments } from '@/todos/useTodoImport';
 
 import type { TodoDue } from '../../../electron/src/todos/todoContracts';
-import { TodoDatePicker } from './TodoDatePicker';
-import { dueDay } from './todoDates';
+import { TodoDateRangePicker } from './TodoDateRangePicker';
+import { compactDates, datesName } from './todoDates';
 import { useAddBarFiles } from './useAddBarFiles';
 
 import './todo.css';
@@ -18,7 +18,7 @@ import './todoAddBar.css';
 
 /**
  * The bar under the list that adds a TODO: its text, its project (while several are in view),
- * due day (none at first) and start (today at first, or none), and send. An IME's Enter does not
+ * its start (today at first, or none) and due day (none at first), and send. An IME's Enter does not
  * send; Shift+Enter starts a new line. Text of several lines, or documents and images attached
  * with the paperclip, dropped or pasted on the bar, are imported instead: Pantaray drafts TODOs from them, so the
  * project and dates, which belong to one TODO, step aside. The text empties once it was taken;
@@ -62,6 +62,7 @@ export function TodoAddBar({
   const project: TodoProjectSlot | undefined =
     projects.find((slot) => (slot.projectId ?? '') === chosenProject) ?? projects[0];
   const startsOn = start === 'today' ? today : start.date;
+  const dates = { start: startsOn, due };
   const importing = files.attachments.length > 0 || text.trim().includes('\n');
   const canSend = !sending && !files.busy && (text.trim() !== '' || files.attachments.length > 0);
 
@@ -114,30 +115,22 @@ export function TodoAddBar({
           </select>
         </span>
       ) : null}
-      <TodoDatePicker
-        label={t('todo.date.due')}
-        triggerClassName="todo-add-bar__chip"
-        value={due}
+      {/* The icon alone stands for the first dates; others show beside it, start first. */}
+      <TodoDateRangePicker
+        triggerLabel={datesName(t, language, today, dates)}
+        tooltip
+        triggerClassName="todo-add-bar__icon todo-add-bar__dates"
+        dates={dates}
         today={today}
-        clearLabel={t('todo.date.clearDue')}
-        onChoose={setDue}
+        opensOn="start"
+        onChange={(next) => {
+          setStart(next.start === today ? 'today' : { date: next.start });
+          setDue(next.due);
+        }}
       >
-        {due ? t('todo.add.due', { date: dueDay(language, due) }) : t('todo.add.noDue')}
-      </TodoDatePicker>
-      <TodoDatePicker
-        label={t('todo.date.start')}
-        triggerClassName="todo-add-bar__chip"
-        value={startsOn}
-        today={today}
-        clearLabel={t('todo.date.unsetStart')}
-        onChoose={(date) => setStart(date === today ? 'today' : { date })}
-      >
-        {startsOn === null
-          ? t('todo.add.startsUnset')
-          : startsOn === today
-            ? t('todo.add.startsToday')
-            : t('todo.add.startsOn', { date: dueDay(language, startsOn) })}
-      </TodoDatePicker>
+        <CalendarDays size={15} strokeWidth={1.8} aria-hidden="true" />
+        {compactDates(t, today, dates)}
+      </TodoDateRangePicker>
     </>
   );
 
@@ -200,12 +193,13 @@ export function TodoAddBar({
         />
         <button
           type="button"
-          className="todo-add-bar__chip todo-add-bar__attach"
+          className="todo-add-bar__icon"
+          aria-label={t('todo.add.attach')}
+          data-tooltip={t('todo.add.attach')}
           disabled={sending}
           onClick={() => fileInputRef.current?.click()}
         >
-          <Paperclip size={13} strokeWidth={1.8} aria-hidden="true" />
-          {t('todo.add.attach')}
+          <Paperclip size={15} strokeWidth={1.8} aria-hidden="true" />
         </button>
         {importing ? null : choices}
         <button

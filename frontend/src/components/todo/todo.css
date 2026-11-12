@@ -283,11 +283,10 @@
 .todo-row__body:focus-visible,
 .todo-row__date:focus-visible,
 .todo-row__delete:focus-visible,
-.todo-add-bar__chip:focus-visible,
+.todo-add-bar__icon:focus-visible,
 .todo-add-bar__project select:focus-visible,
 .todo-add-bar__send:focus-visible,
-.todo-date-picker button:focus-visible,
-.todo-date-picker__field:focus-visible {
+.todo-date-picker button:not(.todo-date-picker__day):focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
 }

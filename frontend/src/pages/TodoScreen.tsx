@@ -186,8 +186,7 @@ export function TodoScreen({
           onToggleCheck={() => void mutations.setCheck(todo.todo_id, todo.state.kind !== 'done')}
           onSelect={() => onSelect({ ...selection, todoId: todo.todo_id, importId: null })}
           onDelete={() => void mutations.deleteTodo(todo.todo_id)}
-          onSetDue={(due) => void mutations.setDue(todo.todo_id, due)}
-          onSetStart={(startsOn) => void mutations.setStart(todo.todo_id, startsOn)}
+          onSetDates={(change) => void mutations.setDates(todo.todo_id, change)}
         />,
         rowFailure ? (
           <li key={`${todo.todo_id}:failure`} className="todo-screen__failure-row">

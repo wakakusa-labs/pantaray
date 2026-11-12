@@ -1,4 +1,4 @@
-/* The add bar under the list, and the date picker that its chips, the rows and an import's
+/* The add bar under the list, and the date range picker that it, the rows and an import's
    draft open. The TODO list's greys are set in todo.css. */
 
 /* The add bar: under the list, as the chat's composer sits under the chat. */
@@ -32,12 +32,6 @@
   line-height: 20px;
   resize: none;
   outline: none;
-}
-
-.todo-add-bar__attach {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
 }
 
 .todo-add-bar__choices {
@@ -75,24 +69,37 @@
   appearance: none;
 }
 
-/* The bar's and the picker's small framed text buttons. */
-.todo-add-bar__chip,
-.todo-date-picker button {
+/* The bar's icon buttons, unframed. The dates button shows dates other than the first beside
+   its icon. */
+.todo-add-bar__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 26px;
   height: 26px;
-  padding: 0 9px;
-  border: 1px solid var(--todo-line-strong);
+  padding: 0 5px;
+  border: 0;
   border-radius: 6px;
   background: transparent;
-  color: var(--fog-text-2);
+  color: var(--fog-text-3);
   font: inherit;
   font-size: var(--todo-state-size);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
   cursor: pointer;
 }
 
-.todo-add-bar__chip:hover:not(:disabled),
-.todo-add-bar__project:hover:has(select:not(:disabled)),
-.todo-date-picker button:hover {
+.todo-add-bar__dates {
+  color: var(--fog-text-2);
+}
+
+.todo-add-bar__dates > svg {
+  color: var(--fog-text-3);
+}
+
+.todo-add-bar__icon:hover:not(:disabled),
+.todo-add-bar__project:hover:has(select:not(:disabled)) {
   background: var(--fog-mist-strong);
   color: var(--fog-text);
 }
@@ -121,18 +128,21 @@
   opacity: 0.5;
 }
 
-/* The date picker: a native popover under the button that opened it, above it when there is
-   no room below. */
+/* The date range picker: a native popover under the button that opened it, above it when there
+   is no room below. */
 .todo-date-picker {
+  /* The days between the start and the due day, on the popover's ground. */
+  --todo-range: rgba(170, 186, 212, 0.16);
+
   position-area: block-end span-inline-start;
   position-try-fallbacks:
     flip-block,
     flip-inline,
     flip-block flip-inline;
   box-sizing: border-box;
-  width: 232px;
+  width: 256px;
   margin: 6px 0;
-  padding: 10px;
+  padding: 10px 12px;
   border: 1px solid var(--control-border);
   border-radius: 10px;
   background: var(--fog-popover);
@@ -145,30 +155,195 @@
   gap: 8px;
 }
 
-.todo-date-picker__quick {
-  display: flex;
-  gap: 6px;
-}
-
-.todo-date-picker__quick button[aria-pressed='true'] {
-  border-color: var(--fog-text-3);
-  color: var(--fog-text);
-}
-
-.todo-date-picker__field {
-  box-sizing: border-box;
-  width: 100%;
-  height: 30px;
-  padding: 0 8px;
-  border: 1px solid var(--todo-line-strong);
+.todo-date-picker button {
+  padding: 0;
+  border: 0;
   border-radius: 6px;
   background: transparent;
-  color: var(--fog-text);
+  color: inherit;
   font: inherit;
-  font-size: 13px;
+  cursor: pointer;
 }
 
-.todo-date-picker .todo-date-picker__clear {
-  justify-self: start;
-  border-color: transparent;
+/* 開始 → 期限: the end the next click picks is underlined. */
+.todo-date-picker__ends {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--fog-line);
+}
+
+.todo-date-picker__end {
+  display: grid;
+  justify-items: start;
+  gap: 1px;
+  padding: 3px 6px 4px;
+  text-align: start;
+}
+
+.todo-date-picker__end-name {
+  color: var(--fog-text-3);
+  font-size: 11.5px;
+}
+
+.todo-date-picker__end-day {
+  color: var(--fog-text-2);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.todo-date-picker .todo-date-picker__end[aria-pressed='true'] {
+  border-radius: 6px 6px 0 0;
+  box-shadow: inset 0 -1.5px 0 var(--fog-text-2);
+}
+
+.todo-date-picker__end[aria-pressed='true'] .todo-date-picker__end-day {
+  color: var(--fog-text);
+  font-weight: var(--weight-semibold);
+}
+
+.todo-date-picker__arrow {
+  color: var(--fog-text-3);
+  font-size: 12px;
+}
+
+.todo-date-picker__month {
+  display: grid;
+  gap: 2px;
+}
+
+.todo-date-picker__month-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 4px;
+}
+
+.todo-date-picker__month-name {
+  font-size: 13px;
+  font-weight: var(--weight-semibold);
+}
+
+.todo-date-picker .todo-date-picker__nav {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  color: var(--fog-text-3);
+}
+
+.todo-date-picker__days {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.todo-date-picker__weekday {
+  color: var(--fog-text-3);
+  font-size: 11px;
+  line-height: 20px;
+  text-align: center;
+}
+
+/* A day: its number over a 26px circle, which an end of the range fills; the band between the
+   ends runs at the circle's height. */
+.todo-date-picker .todo-date-picker__day {
+  position: relative;
+  isolation: isolate;
+  height: 30px;
+  border-radius: 0;
+  background: no-repeat center / 100% 26px;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.todo-date-picker__day::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: 2px calc(50% - 13px);
+  border-radius: 50%;
+}
+
+.todo-date-picker__day[data-outside] {
+  color: var(--fog-text-3);
+}
+
+/* On the band the faint grey falls under 4.5:1, so another month's days there are drawn lighter. */
+.todo-date-picker__day[data-outside][data-range='between'] {
+  color: var(--fog-text-2);
+}
+
+.todo-date-picker__day[aria-current='date']::before {
+  box-shadow: inset 0 0 0 1px var(--fog-text-3);
+}
+
+.todo-date-picker__day[data-range='between'] {
+  background-image: linear-gradient(var(--todo-range), var(--todo-range));
+}
+
+.todo-date-picker__day[data-range='start'] {
+  background-image: linear-gradient(to right, transparent 50%, var(--todo-range) 50%);
+}
+
+.todo-date-picker__day[data-range='end'] {
+  background-image: linear-gradient(to left, transparent 50%, var(--todo-range) 50%);
+}
+
+.todo-date-picker__day:not([aria-disabled]):hover::before {
+  background: var(--fog-mist-strong);
+}
+
+.todo-date-picker
+  .todo-date-picker__day:is([data-range='start'], [data-range='end'], [data-range='single']) {
+  color: var(--app-background);
+  font-weight: var(--weight-semibold);
+}
+
+.todo-date-picker__day:is([data-range='start'], [data-range='end'], [data-range='single'])::before,
+.todo-date-picker__day:is(
+    [data-range='start'],
+    [data-range='end'],
+    [data-range='single']
+  ):hover::before {
+  background: var(--fog-text);
+}
+
+.todo-date-picker .todo-date-picker__day[aria-disabled] {
+  color: var(--fog-text-3);
+  opacity: 0.45;
+  cursor: default;
+}
+
+.todo-date-picker__day:focus-visible::before {
+  box-shadow: var(--focus-ring);
+}
+
+.todo-date-picker__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--fog-line);
+}
+
+.todo-date-picker__choices button {
+  height: 26px;
+  padding: 0 6px;
+  color: var(--fog-text-2);
+  font-size: var(--todo-state-size);
+  white-space: nowrap;
+}
+
+.todo-date-picker__choices button[aria-pressed='true'] {
+  color: var(--fog-text);
+  font-weight: var(--weight-semibold);
+}
+
+.todo-date-picker
+  :is(.todo-date-picker__end, .todo-date-picker__nav, .todo-date-picker__choices button):hover {
+  background: var(--fog-mist-strong);
+  color: var(--fog-text);
 }

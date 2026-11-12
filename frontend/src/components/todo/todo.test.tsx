@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
-import { expectIconButtonTooltips } from '@/tests/iconTooltip';
+import { expectIconButtonTooltips, expectTooltipIsName } from '@/tests/iconTooltip';
 
 import type { TodoView } from '../../../electron/src/todos/todoContracts';
 import { DeletedTodoRow } from './DeletedTodoRow';
@@ -38,8 +38,7 @@ function renderRow(overrides: Partial<TodoView> = {}, selected = false, pending 
     onToggleCheck: vi.fn(),
     onSelect: vi.fn(),
     onDelete: vi.fn(),
-    onSetDue: vi.fn(),
-    onSetStart: vi.fn(),
+    onSetDates: vi.fn(),
   };
   const row = (
     <ul>
@@ -90,17 +89,23 @@ it('says where the TODO stands in a word, Pantaray’s deletion request first', 
 
 it('draws a due day gone by in the late tone, never a done one, and marks a weekly one', () => {
   renderRow({ due: { date: '2026-11-08', repeat: 'weekly' } });
-  expect(screen.getByText('日 11/8')).not.toHaveClass('todo-row__due--late');
+  expect(screen.getByRole('button', { name: '期限 日 11/8: 見積書を送る' })).not.toHaveClass(
+    'todo-row__due--late'
+  );
   expect(screen.getByRole('img', { name: '毎週くり返す' })).toBeInTheDocument();
 
   renderRow({ due: { date: '2026-11-06', repeat: 'none' } });
-  expect(screen.getByText('金 11/6')).toHaveClass('todo-row__due--late');
+  expect(screen.getByRole('button', { name: '期限 金 11/6: 見積書を送る' })).toHaveClass(
+    'todo-row__due--late'
+  );
 
   renderRow({
     due: { date: '2026-11-05', repeat: 'none' },
     state: { kind: 'done', by: 'user', at: '2026-11-04T12:00:00Z' },
   });
-  expect(screen.getByText('木 11/5')).not.toHaveClass('todo-row__due--late');
+  expect(screen.getByRole('button', { name: '期限 木 11/5: 見積書を送る' })).not.toHaveClass(
+    'todo-row__due--late'
+  );
 });
 
 it('waits on a row while its write is pending', () => {
@@ -110,62 +115,120 @@ it('waits on a row while its write is pending', () => {
   expect(screen.getByRole('button', { name: '削除: 見積書を送る' })).toBeDisabled();
 });
 
-it('changes the due day from its row, keeping its repeat, and takes it away', () => {
-  const handlers = renderRow({ due: { date: '2026-11-08', repeat: 'weekly' } });
-  expect(screen.getByRole('button', { name: '期限 日 11/8: 見積書を送る' })).toHaveTextContent(
-    '日 11/8'
-  );
-  const picker = screen.getByRole('dialog', { name: '期限' });
-  // 来週 is the Monday after today (Saturday 11/7); 明日 is the date it has, so nothing changes.
-  fireEvent.click(within(picker).getByRole('button', { name: '明日' }));
-  expect(handlers.onSetDue).not.toHaveBeenCalled();
-  fireEvent.click(within(picker).getByRole('button', { name: '来週' }));
-  expect(handlers.onSetDue).toHaveBeenLastCalledWith({ date: '2026-11-09', repeat: 'weekly' });
-  fireEvent.click(within(picker).getByRole('button', { name: '期限をなくす' }));
-  expect(handlers.onSetDue).toHaveBeenLastCalledWith(null);
+// happy-dom has no Popover API, so the picker's panel is opened and closed by its toggle event.
+const toggle = (trigger: HTMLElement, newState: 'open' | 'closed') => {
+  const panel = trigger.nextElementSibling!;
+  act(() => {
+    panel.dispatchEvent(Object.assign(new Event('toggle'), { newState }));
+  });
+  return within(panel as HTMLElement);
+};
+const day = (picker: ReturnType<typeof within>, name: string) =>
+  picker.getByRole('button', { name: new RegExp(`^2026年${name}`) });
 
-  // A date picked from the field's calendar is taken; a typed one waits for Enter, since typing
-  // passes through other dates on the way.
-  const field = within(picker).getByLabelText('日付');
-  fireEvent.change(field, { target: { value: '2026-11-20' } });
-  expect(handlers.onSetDue).toHaveBeenLastCalledWith({ date: '2026-11-20', repeat: 'weekly' });
-  fireEvent.keyDown(field, { key: '2' });
-  fireEvent.change(field, { target: { value: '0002-11-20' } });
-  expect(handlers.onSetDue).toHaveBeenCalledTimes(3);
-  fireEvent.change(field, { target: { value: '2026-12-01' } });
-  fireEvent.keyDown(field, { key: 'Enter' });
-  expect(handlers.onSetDue).toHaveBeenLastCalledWith({ date: '2026-12-01', repeat: 'weekly' });
-});
-
-it('changes the start of a TODO Pantaray has not started, and only of one', () => {
+it('picks a row’s start, then its due day, and begins again from a day before the start', () => {
   const handlers = renderRow({
-    starts_on: '2026-11-18',
+    starts_on: '2026-11-10',
+    due: { date: '2026-11-20', repeat: 'weekly' },
     state: { kind: 'not_started', reason: 'scheduled' },
   });
-  screen.getByRole('button', { name: '開始日 水 11/18から: 見積書を送る' });
-  const picker = screen.getByRole('dialog', { name: '開始日' });
-  expect(within(picker).queryByRole('button', { name: '期限をなくす' })).toBeNull();
-  fireEvent.click(within(picker).getByRole('button', { name: '明日' }));
-  expect(handlers.onSetStart).toHaveBeenLastCalledWith('2026-11-08');
-  fireEvent.click(within(picker).getByRole('button', { name: '未定にする' }));
-  expect(handlers.onSetStart).toHaveBeenLastCalledWith(null);
-
-  // With no start, Pantaray waits for the user to give it one from the same word.
-  const unset = renderRow({
-    starts_on: null,
-    state: { kind: 'not_started', reason: 'unscheduled' },
+  const picker = toggle(
+    screen.getByRole('button', { name: '開始日 火 11/10から: 見積書を送る' }),
+    'open'
+  );
+  expect(picker.getByRole('button', { name: /^開始 / })).toHaveAttribute('aria-pressed', 'true');
+  // A start after the due day takes the due day away; the next click picks the due day.
+  fireEvent.click(day(picker, '11月24日'));
+  expect(picker.getByRole('button', { name: /^期限 / })).toHaveAttribute('aria-pressed', 'true');
+  expect(picker.getByRole('button', { name: /^期限 / })).toHaveTextContent('なし');
+  // A day before the start begins the range again from it.
+  fireEvent.click(day(picker, '11月12日'));
+  expect(handlers.onSetDates).not.toHaveBeenCalled();
+  expect(picker.getByRole('button', { name: /^開始 / })).toHaveTextContent('木 11/12');
+  fireEvent.click(day(picker, '11月14日'));
+  expect(handlers.onSetDates).toHaveBeenCalledOnce();
+  expect(handlers.onSetDates).toHaveBeenLastCalledWith({
+    startsOn: '2026-11-12',
+    due: { date: '2026-11-14', repeat: 'weekly' },
   });
-  expect(screen.getByRole('button', { name: '開始日未定: 見積書を送る' })).toHaveTextContent(
-    /^開始日未定$/
-  );
-  fireEvent.click(
-    within(screen.getByRole('dialog', { name: '開始日' })).getByRole('button', { name: '今日' })
-  );
-  expect(unset.onSetStart).toHaveBeenLastCalledWith(TODAY);
+  expect(day(picker, '11月13日')).toHaveAttribute('data-range', 'between');
+});
 
-  renderRow({ state: { kind: 'working', note: null } });
+it('writes only the date that changed, and the start alone when the panel closes on it', () => {
+  const handlers = renderRow({
+    starts_on: '2026-11-10',
+    due: { date: '2026-11-20', repeat: 'none' },
+    state: { kind: 'not_started', reason: 'scheduled' },
+  });
+  const trigger = screen.getByRole('button', { name: '期限 金 11/20: 見積書を送る' });
+  // From the due day, the first click picks the due day.
+  fireEvent.click(day(toggle(trigger, 'open'), '11月18日'));
+  expect(handlers.onSetDates).toHaveBeenLastCalledWith({
+    due: { date: '2026-11-18', repeat: 'none' },
+  });
+  toggle(trigger, 'closed');
+  expect(handlers.onSetDates).toHaveBeenCalledOnce();
+
+  // A start picked and the panel let go: the start is handed over once, on its own.
+  const start = screen.getByRole('button', { name: '開始日 火 11/10から: 見積書を送る' });
+  fireEvent.click(day(toggle(start, 'open'), '11月9日'));
+  toggle(start, 'closed');
+  toggle(start, 'closed');
+  expect(handlers.onSetDates).toHaveBeenCalledTimes(2);
+  expect(handlers.onSetDates).toHaveBeenLastCalledWith({ startsOn: '2026-11-09' });
+
+  fireEvent.click(toggle(start, 'open').getByRole('button', { name: '開始を未定にする' }));
+  expect(handlers.onSetDates).toHaveBeenLastCalledWith({ startsOn: null });
+  fireEvent.click(toggle(trigger, 'open').getByRole('button', { name: '期限なし' }));
+  expect(handlers.onSetDates).toHaveBeenLastCalledWith({ due: null });
+});
+
+it('drops the dates chosen while a write on the row is pending', () => {
+  const handlers = renderRow({ due: { date: '2026-11-20', repeat: 'none' } }, false, true);
+  const trigger = screen.getByRole('button', { name: '期限 金 11/20: 見積書を送る' });
+  fireEvent.click(day(toggle(trigger, 'open'), '11月18日'));
+  toggle(trigger, 'closed');
+  expect(handlers.onSetDates).not.toHaveBeenCalled();
+});
+
+it('once Pantaray started, changes only the due day, never before the start', () => {
+  const handlers = renderRow({
+    starts_on: '2026-11-02',
+    due: { date: '2026-11-08', repeat: 'weekly' },
+    state: { kind: 'working', note: null },
+  });
   expect(screen.queryByRole('button', { name: /^開始日/ })).toBeNull();
   expect(stateWord()).toHaveTextContent(/^作業中$/);
+  const picker = toggle(screen.getByRole('button', { name: '期限 日 11/8: 見積書を送る' }), 'open');
+  expect(picker.queryByRole('button', { name: /^開始 / })).toBeNull();
+  expect(picker.queryByRole('button', { name: '開始を未定にする' })).toBeNull();
+  expect(day(picker, '11月1日')).toHaveAttribute('aria-disabled', 'true');
+  fireEvent.click(day(picker, '11月1日'));
+  expect(handlers.onSetDates).not.toHaveBeenCalled();
+  fireEvent.click(day(picker, '11月20日'));
+  expect(handlers.onSetDates).toHaveBeenLastCalledWith({
+    due: { date: '2026-11-20', repeat: 'weekly' },
+  });
+});
+
+it('moves the focus over the days with the arrow keys, into the next month past this one', () => {
+  renderRow({ due: { date: '2026-11-27', repeat: 'none' } });
+  const picker = toggle(
+    screen.getByRole('button', { name: '期限 金 11/27: 見積書を送る' }),
+    'open'
+  );
+  expect(day(picker, '11月27日')).toHaveFocus();
+  expect(day(picker, '11月27日')).toHaveAttribute('tabindex', '0');
+  fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight' });
+  expect(day(picker, '11月28日')).toHaveFocus();
+  fireEvent.keyDown(document.activeElement!, { key: 'ArrowUp' });
+  expect(day(picker, '11月21日')).toHaveFocus();
+  // The six weeks in view end on Sunday 12/6; a week down from 12/5 is the next month's.
+  fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
+  fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
+  fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
+  expect(day(picker, '12月12日')).toHaveFocus();
+  expect(picker.getByRole('group', { name: '2026年12月' })).toBeInTheDocument();
 });
 
 it('answers Pantaray’s deletion request under the conversation, and waits while pending', async () => {
@@ -246,7 +309,7 @@ it('imports text of several lines instead of adding it as one TODO', async () =>
   // Shift+Enter starts a new line; the project and dates, one TODO's, step aside.
   await userEvent.type(addField(), '見積書を送る{Shift>}{Enter}{/Shift}請求書を作る');
   expect(screen.queryByRole('combobox', { name: 'プロジェクト' })).toBeNull();
-  expect(screen.queryByRole('button', { name: '期限なし' })).toBeNull();
+  expect(screen.queryByRole('button', { name: /期限/ })).toBeNull();
   await userEvent.type(addField(), '{Enter}');
   expect(onSubmit).not.toHaveBeenCalled();
   expect(onImport).toHaveBeenLastCalledWith('見積書を送る\n請求書を作る', {
@@ -378,7 +441,7 @@ it('adds no file while an import is starting', async () => {
   window.electron = undefined;
 });
 
-it('adds to the project, due and start chosen, and offers no project with one in view', async () => {
+it('adds to the project and the dates chosen, shown short beside the calendar icon', async () => {
   const onSubmit = vi.fn(async () => true);
   const bar = (projects: typeof PROJECTS) =>
     ja(
@@ -391,48 +454,36 @@ it('adds to the project, due and start chosen, and offers no project with one in
       />
     );
   const { rerender } = render(bar(PROJECTS));
+  const dates = screen.getByRole('button', { name: '今日から、期限なし' });
+  expect(dates).toHaveTextContent(/^$/);
+  expectTooltipIsName(dates);
   await userEvent.selectOptions(screen.getByRole('combobox', { name: 'プロジェクト' }), '');
-  await userEvent.click(screen.getByRole('button', { name: '期限なし' }));
-  fireEvent.click(
-    within(screen.getByRole('dialog', { name: '期限' })).getByRole('button', { name: '明日' })
-  );
-  fireEvent.click(
-    within(screen.getByRole('dialog', { name: '開始日' })).getByRole('button', { name: '来週' })
-  );
-  expect(screen.getByRole('button', { name: '期限 日 11/8' })).toBeVisible();
-  expect(screen.getByRole('button', { name: '開始 月 11/9' })).toBeVisible();
+  const picker = toggle(dates, 'open');
+  fireEvent.click(day(picker, '11月9日'));
+  fireEvent.click(day(picker, '11月12日'));
+  expect(dates).toHaveAccessibleName('月 11/9から、期限 木 11/12');
+  expect(dates).toHaveTextContent(/^11\/9 → 11\/12$/);
   await userEvent.type(addField(), '請求書');
   await userEvent.click(screen.getByRole('button', { name: '追加' }));
   expect(onSubmit).toHaveBeenLastCalledWith(null, '2026-11-09', '請求書', {
-    date: '2026-11-08',
+    date: '2026-11-12',
     repeat: 'none',
   });
 
+  // With no start, a TODO waits until one is set; a start of today is left out of the text.
+  fireEvent.click(toggle(dates, 'open').getByRole('button', { name: '開始を未定にする' }));
+  expect(dates).toHaveTextContent(/^未定 → 11\/12$/);
+  await userEvent.type(addField(), '見積書{Enter}');
+  expect(onSubmit).toHaveBeenLastCalledWith(null, null, '見積書', {
+    date: '2026-11-12',
+    repeat: 'none',
+  });
+  fireEvent.click(day(toggle(dates, 'open'), '11月7日'));
+  toggle(dates, 'closed');
+  expect(dates).toHaveTextContent(/^→ 11\/12$/);
+
   rerender(bar(PROJECTS.slice(0, 1)));
   expect(screen.queryByRole('combobox', { name: 'プロジェクト' })).toBeNull();
-});
-
-it('adds a TODO with no start, which a date chosen later replaces', async () => {
-  const onSubmit = vi.fn(async () => true);
-  render(
-    ja(
-      <TodoAddBar
-        today={TODAY}
-        projects={PROJECTS}
-        disabled={false}
-        onSubmit={onSubmit}
-        onImport={onImport}
-      />
-    )
-  );
-  const startPicker = () => within(screen.getByRole('dialog', { name: '開始日' }));
-  fireEvent.click(startPicker().getByRole('button', { name: '未定にする' }));
-  expect(screen.getByRole('button', { name: '開始 未定' })).toBeVisible();
-  await userEvent.type(addField(), '請求書{Enter}');
-  expect(onSubmit).toHaveBeenLastCalledWith('p1', null, '請求書', null);
-
-  fireEvent.click(startPicker().getByRole('button', { name: '今日' }));
-  expect(screen.getByRole('button', { name: '開始 今日' })).toBeVisible();
 });
 
 it('counts a group’s done TODOs and names its organization after it when one is given', () => {

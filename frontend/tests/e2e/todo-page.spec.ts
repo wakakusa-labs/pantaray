@@ -780,8 +780,7 @@ test('the home lists every organization’s TODOs by project, with the rail and 
   // One add bar under the list, into the first project in view until another is chosen.
   await expect(page.getByRole('textbox', { name: 'TODO を追加' })).toHaveCount(1);
   await expect(page.getByRole('combobox', { name: 'プロジェクト' })).toHaveValue('estimate');
-  await expect(page.getByRole('button', { name: '期限なし', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: '開始 今日' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '今日から、期限なし' })).toBeVisible();
   // Every row is one line.
   const heights = await page
     .locator('.todo-row')
@@ -934,72 +933,84 @@ test('a project’s TODO opens beside its list, with the add bar under it offeri
   await capture(page, info, 'project-conversation');
 });
 
-test('a row’s due day and start change from a small picker, and the bar under the list adds', async ({
+test('a row’s start and due day change on one calendar, and the bar under the list adds', async ({
   page,
 }, info) => {
   await openHome(page);
   const estimate = page.getByRole('region', { name: '見積もり Xer' });
+  // Pantaray started on it, so only its due day changes, from the day it has.
   const due = estimate.getByRole('button', { name: '期限 金 11/6: 見積書を再提出する' });
   await due.click();
-  const picker = page.getByRole('dialog', { name: '期限' });
-  await expect(picker.getByRole('button', { name: '今日' })).toBeFocused();
+  const picker = page.getByRole('dialog', { name: '開始日と期限' });
+  await expect(picker.getByRole('button', { name: '2026年11月6日(金)' })).toBeFocused();
+  await expect(picker.getByRole('button', { name: '開始を未定にする' })).toHaveCount(0);
   const [trigger, panel] = await Promise.all([due.boundingBox(), picker.boundingBox()]);
   expect(panel!.y).toBeGreaterThan(trigger!.y + trigger!.height);
   expect(panel!.x + panel!.width).toBeLessThanOrEqual(trigger!.x + trigger!.width + 1);
-  await capture(page, info, 'due-picker');
+  await capture(page, info, 'due-only-picker');
   await page.keyboard.press('Escape');
   await expect(picker).toBeHidden();
   await expect(due).toBeFocused();
 
-  // 明日 is Thursday 11/5; focus returns to the row's due day, and 期限をなくす takes it away.
+  // The arrow keys move over the days and Enter picks one; focus returns to the row's due day.
   await due.click();
-  await picker.getByRole('button', { name: '明日' }).click();
+  await expect(picker.getByRole('button', { name: '2026年11月6日(金)' })).toBeFocused();
+  await page.keyboard.press('ArrowLeft');
+  await expect(picker.getByRole('button', { name: '2026年11月5日(木)' })).toBeFocused();
+  await page.keyboard.press('Enter');
   const moved = estimate.getByRole('button', { name: '期限 木 11/5: 見積書を再提出する' });
   await expect(moved).toBeFocused();
   await moved.click();
-  await picker.getByRole('button', { name: '期限をなくす' }).click();
+  await picker.getByRole('button', { name: '期限なし' }).click();
   await expect(
     estimate.getByRole('button', { name: '期限なし: 見積書を再提出する' })
   ).toBeFocused();
 
-  // The bar adds to the project, due and start chosen; a start ahead shows on the row.
+  // The bar: the first click picks the start, the second the due day, which closes the panel.
   await page.getByRole('combobox', { name: 'プロジェクト' }).selectOption({ label: '採用' });
-  await page.getByRole('button', { name: '開始 今日' }).click();
-  await page.getByRole('dialog', { name: '開始日' }).getByLabel('日付').fill('2026-11-18');
-  await page.getByRole('button', { name: '期限なし', exact: true }).click();
-  await page.getByRole('dialog', { name: '期限' }).getByRole('button', { name: '来週' }).click();
+  const dates = page.getByRole('button', { name: '今日から、期限なし' });
+  await capture(page, info, 'add-bar');
+  await dates.click();
+  await picker.getByRole('button', { name: '2026年11月9日(月)' }).click();
+  await picker.getByRole('button', { name: '2026年11月18日(水)' }).hover();
+  await expect(picker.getByRole('button', { name: '2026年11月12日(木)' })).toHaveAttribute(
+    'data-range',
+    'between'
+  );
+  await picker.getByRole('button', { name: '2026年11月18日(水)' }).click();
+  await expect(picker).toBeHidden();
+  const chosen = page.getByRole('button', { name: '月 11/9から、期限 水 11/18' });
+  await expect(chosen).toBeFocused();
+  await expect(chosen).toHaveText('11/9 → 11/18');
   const field = page.getByRole('textbox', { name: 'TODO を追加' });
   await field.fill('面接官の日程を押さえる');
-  await expect(page.getByRole('button', { name: '開始 水 11/18' })).toBeVisible();
-  await expect(page.getByRole('button', { name: '期限 月 11/9' })).toBeVisible();
-  await capture(page, info, 'add-bar');
+  await capture(page, info, 'add-bar-dates');
+  await chosen.click();
+  await capture(page, info, 'range-picker');
+  await page.keyboard.press('Escape');
   await field.press('Enter');
   await expect(field).toHaveValue('');
   const added = rowOf(page.getByRole('region', { name: '採用 Xer' }), '面接官の日程を押さえる');
   await expect(
-    added.getByRole('button', { name: '期限 月 11/9: 面接官の日程を押さえる' })
+    added.getByRole('button', { name: '期限 水 11/18: 面接官の日程を押さえる' })
   ).toBeVisible();
 
-  // The start of a TODO not started yet changes from its row.
-  await added.getByRole('button', { name: '開始日 水 11/18から: 面接官の日程を押さえる' }).click();
-  await page.getByRole('dialog', { name: '開始日' }).getByRole('button', { name: '今日' }).click();
+  // The start of a TODO not started yet changes from its state; a panel let go keeps the pick.
+  const start = added.getByRole('button', { name: '開始日 月 11/9から: 面接官の日程を押さえる' });
+  await start.click();
+  await picker.getByRole('button', { name: '2026年11月4日(水)' }).click();
+  await page.keyboard.press('Escape');
+  const soon = added.getByRole('button', { name: '開始日 まもなく: 面接官の日程を押さえる' });
+  await expect(soon).toBeFocused();
   await expect(
-    added.getByRole('button', { name: '開始日 まもなく: 面接官の日程を押さえる' })
-  ).toBeFocused();
+    added.getByRole('button', { name: '期限 水 11/18: 面接官の日程を押さえる' })
+  ).toBeVisible();
 
-  // 未定にする leaves it with no start until a date is set again from the same word.
-  await added.getByRole('button', { name: '開始日 まもなく: 面接官の日程を押さえる' }).click();
-  await capture(page, info, 'start-picker');
-  await page
-    .getByRole('dialog', { name: '開始日' })
-    .getByRole('button', { name: '未定にする' })
-    .click();
-  const unset = added.getByRole('button', { name: '開始日未定: 面接官の日程を押さえる' });
-  await expect(unset).toBeFocused();
-  await unset.click();
-  await page.getByRole('dialog', { name: '開始日' }).getByRole('button', { name: '明日' }).click();
+  // 開始を未定にする leaves it with no start until a date is set again from the same word.
+  await soon.click();
+  await picker.getByRole('button', { name: '開始を未定にする' }).click();
   await expect(
-    added.getByRole('button', { name: '開始日 木 11/5から: 面接官の日程を押さえる' })
+    added.getByRole('button', { name: '開始日未定: 面接官の日程を押さえる' })
   ).toBeFocused();
 });
 
@@ -1323,7 +1334,9 @@ test('lines pasted into the bar open a draft beside the list, which registers wh
   await expect(pane.getByRole('heading', { name: 'サイト改修 新規' })).toBeVisible();
   await expect(pane.getByRole('heading', { name: 'Xer', exact: true })).toBeVisible();
   await expect(pane.getByText('すでにある')).toBeVisible();
-  await expect(pane.getByText('開始 未定').first()).toBeVisible();
+  await expect(
+    pane.getByRole('button', { name: /^開始日未定、期限なし: / }).first()
+  ).toHaveText('未定 →');
   await expect(pane.getByRole('button', { name: '3 件を登録' })).toBeEnabled();
   await capture(page, info, 'import-draft');
 
@@ -1372,7 +1385,7 @@ test('a file attached in an organization drafts inside it, and やめる closes 
     buffer: Buffer.from('# 議事録'),
   });
   await expect(page.locator('.todo-add-bar').getByText('notes.md')).toBeVisible();
-  await expect(page.getByRole('button', { name: '期限なし', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '今日から、期限なし' })).toHaveCount(0);
   await capture(page, info, 'add-bar-attached');
 
   await page.getByRole('button', { name: '下書きを作る' }).click();

@@ -143,7 +143,15 @@
 }
 
 .todo-import__date {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   padding: 0 7px;
+  font-variant-numeric: tabular-nums;
+}
+
+.todo-import__date > svg {
+  color: var(--fog-text-3);
 }
 
 .todo-import__remove {

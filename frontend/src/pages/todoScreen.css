@@ -31,9 +31,16 @@
   }
 
   .todo-screen--with-pane:has(.action-task--split, .suggestion-task--split) .todo-screen__list {
-    flex: 0 1 var(--todo-split-list-width, 440px);
-    /* useTodoPaneWidth's least for the list: a row's title keeps about 100px. */
-    min-width: 440px;
+    flex: 0 1 var(--todo-split-list-width, 420px);
+    /* Below the rule's least: an area too narrow for both gives the conversation's column its
+       room before the list's titles. */
+    min-width: 320px;
+  }
+
+  /* The conversation's 400px column beside the file: an area too narrow for both takes the room
+     from the list. */
+  .todo-screen > .todo-screen__conversation:has(.action-task--split, .suggestion-task--split) {
+    min-width: 400px;
   }
 }
 

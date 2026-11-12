@@ -1567,12 +1567,12 @@ test('beside a file the same rule sets the list, remembered apart from the conve
   await chip.click();
   await expect(page.locator('.suggestion-task--split')).toBeVisible();
   const initial = await paneWidths(page);
-  expect(initial.list).toBeCloseTo(440, 0);
+  expect(initial.list).toBeCloseTo(420, 0);
 
   await dragRule(page, 120);
   const split = await paneWidths(page);
-  expect(split.list).toBeCloseTo(560, 0);
-  expect(split.pane).toBeCloseTo(split.screen - 1 - 560, 0);
+  expect(split.list).toBeCloseTo(540, 0);
+  expect(split.pane).toBeCloseTo(split.screen - 1 - 540, 0);
   // Not past the room the file and the conversation's column need.
   await dragRule(page, 2000);
   expect((await paneWidths(page)).pane).toBeCloseTo(560, 0);
@@ -1589,4 +1589,13 @@ test('beside a file the same rule sets the list, remembered apart from the conve
   await chip.click();
   await expect(page.locator('.suggestion-task--split')).toBeVisible();
   expect((await paneWidths(page)).list).toBeCloseTo(chosen, 0);
+
+  // With the sidebar shown in a narrower window the list gives way, and the conversation's
+  // answer stays on screen.
+  await page.getByRole('button', { name: 'サイドバーを表示' }).click();
+  await expect(sidebarOf(page)).toBeVisible();
+  await page.setViewportSize({ width: 1170, height: 900 });
+  const approve = (await page.getByRole('button', { name: '承認' }).boundingBox())!;
+  expect(approve.x + approve.width).toBeLessThanOrEqual(1170);
+  expect(await hasNoSideScroll(page)).toBe(true);
 });

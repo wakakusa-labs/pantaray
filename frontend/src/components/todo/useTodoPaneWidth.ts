@@ -20,8 +20,8 @@ const SPLIT_SELECTOR = ':has(.action-task--split, .suggestion-task--split)';
 /**
  * The narrowest each side gets, in px. The list's least leaves a row's title about 100px: a row's
  * fixed columns, gaps and padding take 278px (todo.css's .todo-row) and the list's sides 56px
- * (.todo-screen__scroll); todoScreen.css's split min-width is the same. A split pane holds the
- * conversation's 400px column and some of the file beside it.
+ * (.todo-screen__scroll). Where the area is too narrow for both, todoScreen.css still lets a split
+ * list shrink below it. A split pane holds the conversation's 400px column and some of the file.
  */
 const LIMITS: Record<TodoPaneLayout, { list: number; pane: number }> = {
   conversation: { list: 440, pane: 360 },

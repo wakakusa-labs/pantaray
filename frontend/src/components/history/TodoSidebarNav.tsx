@@ -1,4 +1,4 @@
-import { ChartNoAxesColumn, ListTodo, Pencil } from 'lucide-react';
+import { ChartNoAxesColumn, ListTodo, Pencil, Trash2 } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { useI18n } from '@/context/useI18n';
@@ -104,7 +104,7 @@ export function TodoSidebarEntries({ nav }: { nav: TodoSidebarNav }) {
   );
 }
 
-/** The deleted TODOs: rarely visited, so a quiet link at the sidebar's foot. */
+/** The deleted TODOs: rarely visited, so a quiet icon at the sidebar's foot. */
 export function DeletedTodosLink({ nav }: { nav: TodoSidebarNav }) {
   const { t } = useI18n();
   return (
@@ -112,10 +112,12 @@ export function DeletedTodosLink({ nav }: { nav: TodoSidebarNav }) {
       <button
         type="button"
         className="history-sidebar__deleted"
+        aria-label={t('todo.nav.deleted')}
+        data-tooltip={t('todo.nav.deleted')}
         aria-current={nav.current?.kind === 'deleted' ? 'true' : undefined}
         onClick={nav.onShowDeleted}
       >
-        {t('todo.nav.deleted')}
+        <Trash2 size={15} strokeWidth={1.8} aria-hidden="true" />
       </button>
     </div>
   );

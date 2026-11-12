@@ -1012,6 +1012,17 @@ test('a row’s start and due day change on one calendar, and the bar under the 
   await expect(
     added.getByRole('button', { name: '開始日未定: 面接官の日程を押さえる' })
   ).toBeFocused();
+
+  // A start picked and the panel dismissed by the click on 追加 itself: the TODO takes it.
+  await field.fill('面接の部屋を予約する');
+  await page.getByRole('button', { name: '月 11/9から、期限 水 11/18' }).click();
+  await picker.getByRole('button', { name: '2026年11月10日(火)' }).click();
+  await page.getByRole('button', { name: '追加', exact: true }).click();
+  await expect(field).toHaveValue('');
+  const roomRow = rowOf(page.getByRole('region', { name: '採用 Xer' }), '面接の部屋を予約する');
+  await expect(
+    roomRow.getByRole('button', { name: '開始日 火 11/10から: 面接の部屋を予約する' })
+  ).toBeVisible();
 });
 
 test('the deleted TODOs list what can still be restored', async ({ page }, info) => {

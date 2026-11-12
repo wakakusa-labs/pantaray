@@ -115,13 +115,16 @@ it('waits on a row while its write is pending', () => {
   expect(screen.getByRole('button', { name: '削除: 見積書を送る' })).toBeDisabled();
 });
 
-// happy-dom has no Popover API, so the picker's panel is opened and closed by its toggle event.
-const toggle = (trigger: HTMLElement, newState: 'open' | 'closed') => {
-  const panel = trigger.nextElementSibling!;
+// happy-dom has no Popover API, so the picker's panel is opened and closed by the events a
+// browser fires: `beforetoggle` as a panel closes, then `toggle`.
+const toggleEvent = (trigger: HTMLElement, type: 'beforetoggle' | 'toggle', newState: string) =>
   act(() => {
-    panel.dispatchEvent(Object.assign(new Event('toggle'), { newState }));
+    trigger.nextElementSibling!.dispatchEvent(Object.assign(new Event(type), { newState }));
   });
-  return within(panel as HTMLElement);
+const toggle = (trigger: HTMLElement, newState: 'open' | 'closed') => {
+  if (newState === 'closed') toggleEvent(trigger, 'beforetoggle', newState);
+  toggleEvent(trigger, 'toggle', newState);
+  return within(trigger.nextElementSibling as HTMLElement);
 };
 const day = (picker: ReturnType<typeof within>, name: string) =>
   picker.getByRole('button', { name: new RegExp(`^2026年${name}`) });
@@ -539,6 +542,31 @@ it('discards the files staged for an import turned off, those still being writte
   await userEvent.click(modeButton());
   expect(screen.queryByText('notes.md')).toBeNull();
   window.electron = undefined;
+});
+
+it('adds with the start just picked when a click outside the panel sends', async () => {
+  const onSubmit = vi.fn(async () => true);
+  render(
+    ja(
+      <TodoAddBar
+        today={TODAY}
+        projects={PROJECTS}
+        disabled={false}
+        onSubmit={onSubmit}
+        onImport={onImport}
+      />
+    )
+  );
+  await userEvent.type(addField(), '請求書');
+  const dates = screen.getByRole('button', { name: '今日から、期限なし' });
+  fireEvent.click(day(toggle(dates, 'open'), '11月9日'));
+  // The click on 追加 dismisses the panel: `beforetoggle` within it, `toggle` only after it.
+  toggleEvent(dates, 'beforetoggle', 'closed');
+  fireEvent.click(screen.getByRole('button', { name: '追加' }));
+  toggleEvent(dates, 'toggle', 'closed');
+  await act(async () => undefined);
+  expect(onSubmit).toHaveBeenCalledOnce();
+  expect(onSubmit).toHaveBeenLastCalledWith('p1', '2026-11-09', '請求書', null);
 });
 
 it('adds to the project and the dates chosen, shown short beside the calendar icon', async () => {

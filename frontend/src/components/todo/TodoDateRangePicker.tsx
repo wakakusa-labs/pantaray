@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
 
 import { useI18n } from '@/context/useI18n';
 
@@ -17,7 +18,7 @@ type End = 'start' | 'due';
  * before its start cannot be picked. With `startFixed` only the due day changes, on or after the
  * start. The header says which end the next click picks, and either end can be chosen there.
  *
- * The panel edits a draft. It is handed to `onChange` once, if it changed, when the panel closes:
+ * The panel edits a draft. It is handed to `onChange` once, if it changed, as the panel closes:
  * on the second click, on 開始を未定にする or 期限なし, or on Escape or a click outside. It is a
  * native popover anchored to its button, so those close it and focus returns to the button.
  */
@@ -75,7 +76,10 @@ export function TodoDateRangePicker({
     const next = openDraftRef.current;
     openDraftRef.current = null;
     if (next === null || disabled) return;
-    if (next.start !== dates.start || next.due !== dates.due) onChange(next);
+    if (next.start === dates.start && next.due === dates.due) return;
+    // A panel let go by a click elsewhere closes in a browser event React does not render in
+    // time for that click, so the new dates are rendered before it acts (the add bar's 追加).
+    flushSync(() => onChange(next));
   };
   const close = (next: TodoDates) => {
     edit(next);
@@ -91,15 +95,18 @@ export function TodoDateRangePicker({
     if (!trigger || !panel) return;
     panel.popover = 'auto';
     trigger.popoverTargetElement = panel;
+    // A closing panel hands its draft over before the click that closed it acts: `beforetoggle`
+    // fires within the light dismiss, while `toggle` comes later as a task of its own.
+    const onBeforeToggle = (event: Event) => {
+      if ((event as ToggleEvent).newState === 'closed') handOver();
+    };
+    // Opening waits for `toggle`: the panel is shown by then, so its day can take the focus.
     const onToggle = (event: Event) => {
       const open = (event as ToggleEvent).newState === 'open';
       // The tooltip steps aside while the panel it opened is in view.
       trigger.setAttribute('aria-expanded', String(open));
       setOpen(open);
-      if (!open) {
-        handOver();
-        return;
-      }
+      if (!open) return;
       openDraftRef.current = dates;
       setDraft(dates);
       setPicking(firstEnd);
@@ -108,8 +115,12 @@ export function TodoDateRangePicker({
       setPointed(null);
       setFocusMoves((count) => count + 1);
     };
+    panel.addEventListener('beforetoggle', onBeforeToggle);
     panel.addEventListener('toggle', onToggle);
-    return () => panel.removeEventListener('toggle', onToggle);
+    return () => {
+      panel.removeEventListener('beforetoggle', onBeforeToggle);
+      panel.removeEventListener('toggle', onToggle);
+    };
   });
 
   useLayoutEffect(() => {

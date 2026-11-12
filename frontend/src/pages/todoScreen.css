@@ -19,21 +19,51 @@
 .todo-screen > .todo-screen__conversation {
   flex: 1 1 0;
   margin: 0;
-  border-left: 1px solid var(--fog-line);
 }
 
 /* Beside a conversation the list takes what the conversation's column leaves, until a file
-   opens beside the conversation and needs the room. */
+   opens beside the conversation and needs the room. The rule between them sets the fixed side's
+   width (useTodoPaneWidth); until it is moved, these defaults stand. */
 @media (min-width: 1101px) {
   .todo-screen
     > .todo-screen__conversation:not(:has(.action-task--split, .suggestion-task--split)) {
-    flex: 0 0 clamp(420px, 40%, 560px);
+    flex: 0 0 var(--todo-pane-width, clamp(420px, 40%, 560px));
   }
 
   .todo-screen--with-pane:has(.action-task--split, .suggestion-task--split) .todo-screen__list {
-    flex: 0 1 420px;
+    flex: 0 1 var(--todo-split-list-width, 420px);
     min-width: 320px;
   }
+}
+
+/* The line between the list and the pane, and its handle: a few px either side take the
+   pointer without moving the layout. Above the window's drag strip, like the headers. */
+.todo-screen__rule {
+  position: relative;
+  z-index: 4;
+  flex: none;
+  width: 1px;
+  background: var(--fog-line);
+  cursor: col-resize;
+  touch-action: none;
+  -webkit-app-region: no-drag;
+}
+
+.todo-screen__rule::before {
+  content: '';
+  position: absolute;
+  inset: 0 -4px;
+}
+
+.todo-screen__rule:hover,
+.todo-screen__rule:active {
+  background: var(--border-color-hover);
+}
+
+.todo-screen__rule:focus-visible {
+  outline: none;
+  background: var(--border-color-hover);
+  box-shadow: var(--focus-ring);
 }
 
 /* Like the task panes' headers: above the window's drag strip so its close button takes the
@@ -310,8 +340,11 @@
   }
 
   .todo-screen--with-pane > .todo-screen__conversation {
-    border-left: 0;
     border-top: 1px solid var(--fog-line);
+  }
+
+  .todo-screen__rule {
+    display: none;
   }
 }
 

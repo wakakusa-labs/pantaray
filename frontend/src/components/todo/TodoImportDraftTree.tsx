@@ -1,4 +1,4 @@
-import { X } from 'lucide-react';
+import { CalendarDays, X } from 'lucide-react';
 
 import { isImeKey } from '@/components/ui/imeKey';
 import { useI18n } from '@/context/useI18n';
@@ -9,13 +9,13 @@ import type {
   DraftTodoView,
 } from '@/todos/todoImportDraft';
 
-import { TodoDatePicker } from './TodoDatePicker';
-import { dueDay } from './todoDates';
+import { TodoDateRangePicker } from './TodoDateRangePicker';
+import { compactDates, datesName } from './todoDates';
 
 /**
  * An import's draft as a tree: organization (when every organization is in view), project, and
  * its TODOs, each name marked 新規 when registering creates it. A TODO that repeats an open one
- * is marked 「すでにある」 and is left out unless kept. Each TODO's text, due day and start
+ * is marked 「すでにある」 and is left out unless kept. Each TODO's text, start and due day
  * change here, and it can be taken out; every change is the caller's to write.
  */
 export function TodoImportDraftTree({
@@ -140,6 +140,7 @@ function DraftRow({
     else if (text !== todo.text) onEdit(at, { text });
   };
   const leftOut = todo.duplicate && !todo.keep_duplicate;
+  const dates = { start: todo.starts_on, due: todo.due };
   return (
     <li className={leftOut ? 'todo-import__todo todo-import__todo--left-out' : 'todo-import__todo'}>
       <input
@@ -168,38 +169,20 @@ function DraftRow({
           </label>
         </span>
       ) : null}
-      <TodoDatePicker
-        label={t('todo.date.due')}
-        triggerLabel={
-          todo.due
-            ? t('todo.row.due', { date: dueDay(language, todo.due), text: todo.text })
-            : t('todo.row.noDue', { text: todo.text })
-        }
+      <TodoDateRangePicker
+        triggerLabel={t('todo.import.dates', {
+          dates: datesName(t, language, today, dates),
+          text: todo.text,
+        })}
         triggerClassName="todo-import__date"
-        value={todo.due}
+        dates={dates}
         today={today}
-        clearLabel={t('todo.date.clearDue')}
-        onChoose={(due) => onEdit(at, { due })}
+        opensOn="start"
+        onChange={(next) => onEdit(at, { starts_on: next.start, due: next.due })}
       >
-        {todo.due ? dueDay(language, todo.due) : t('todo.add.noDue')}
-      </TodoDatePicker>
-      <TodoDatePicker
-        label={t('todo.date.start')}
-        triggerLabel={
-          todo.starts_on
-            ? t('todo.import.start', { date: dueDay(language, todo.starts_on), text: todo.text })
-            : t('todo.row.noStart', { text: todo.text })
-        }
-        triggerClassName="todo-import__date"
-        value={todo.starts_on}
-        today={today}
-        clearLabel={t('todo.date.unsetStart')}
-        onChoose={(startsOn) => onEdit(at, { starts_on: startsOn })}
-      >
-        {todo.starts_on
-          ? t('todo.add.startsOn', { date: dueDay(language, todo.starts_on) })
-          : t('todo.add.startsUnset')}
-      </TodoDatePicker>
+        <CalendarDays size={14} strokeWidth={1.8} aria-hidden="true" />
+        {compactDates(t, today, dates)}
+      </TodoDateRangePicker>
       <button
         type="button"
         className="todo-import__remove"

@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
-import { expectIconButtonTooltips } from '@/tests/iconTooltip';
+import { expectIconButtonTooltips, expectTooltipIsName } from '@/tests/iconTooltip';
 
 import type { TodoView } from '../../../electron/src/todos/todoContracts';
 import { DeletedTodoRow } from './DeletedTodoRow';
@@ -38,8 +38,7 @@ function renderRow(overrides: Partial<TodoView> = {}, selected = false, pending 
     onToggleCheck: vi.fn(),
     onSelect: vi.fn(),
     onDelete: vi.fn(),
-    onSetDue: vi.fn(),
-    onSetStart: vi.fn(),
+    onSetDates: vi.fn(),
   };
   const row = (
     <ul>
@@ -90,17 +89,23 @@ it('says where the TODO stands in a word, Pantaray’s deletion request first', 
 
 it('draws a due day gone by in the late tone, never a done one, and marks a weekly one', () => {
   renderRow({ due: { date: '2026-11-08', repeat: 'weekly' } });
-  expect(screen.getByText('日 11/8')).not.toHaveClass('todo-row__due--late');
+  expect(screen.getByRole('button', { name: '期限 日 11/8: 見積書を送る' })).not.toHaveClass(
+    'todo-row__due--late'
+  );
   expect(screen.getByRole('img', { name: '毎週くり返す' })).toBeInTheDocument();
 
   renderRow({ due: { date: '2026-11-06', repeat: 'none' } });
-  expect(screen.getByText('金 11/6')).toHaveClass('todo-row__due--late');
+  expect(screen.getByRole('button', { name: '期限 金 11/6: 見積書を送る' })).toHaveClass(
+    'todo-row__due--late'
+  );
 
   renderRow({
     due: { date: '2026-11-05', repeat: 'none' },
     state: { kind: 'done', by: 'user', at: '2026-11-04T12:00:00Z' },
   });
-  expect(screen.getByText('木 11/5')).not.toHaveClass('todo-row__due--late');
+  expect(screen.getByRole('button', { name: '期限 木 11/5: 見積書を送る' })).not.toHaveClass(
+    'todo-row__due--late'
+  );
 });
 
 it('waits on a row while its write is pending', () => {
@@ -110,62 +115,123 @@ it('waits on a row while its write is pending', () => {
   expect(screen.getByRole('button', { name: '削除: 見積書を送る' })).toBeDisabled();
 });
 
-it('changes the due day from its row, keeping its repeat, and takes it away', () => {
-  const handlers = renderRow({ due: { date: '2026-11-08', repeat: 'weekly' } });
-  expect(screen.getByRole('button', { name: '期限 日 11/8: 見積書を送る' })).toHaveTextContent(
-    '日 11/8'
-  );
-  const picker = screen.getByRole('dialog', { name: '期限' });
-  // 来週 is the Monday after today (Saturday 11/7); 明日 is the date it has, so nothing changes.
-  fireEvent.click(within(picker).getByRole('button', { name: '明日' }));
-  expect(handlers.onSetDue).not.toHaveBeenCalled();
-  fireEvent.click(within(picker).getByRole('button', { name: '来週' }));
-  expect(handlers.onSetDue).toHaveBeenLastCalledWith({ date: '2026-11-09', repeat: 'weekly' });
-  fireEvent.click(within(picker).getByRole('button', { name: '期限をなくす' }));
-  expect(handlers.onSetDue).toHaveBeenLastCalledWith(null);
+// happy-dom has no Popover API, so the picker's panel is opened and closed by the events a
+// browser fires: `beforetoggle` as a panel closes, then `toggle`.
+const toggleEvent = (trigger: HTMLElement, type: 'beforetoggle' | 'toggle', newState: string) =>
+  act(() => {
+    trigger.nextElementSibling!.dispatchEvent(Object.assign(new Event(type), { newState }));
+  });
+const toggle = (trigger: HTMLElement, newState: 'open' | 'closed') => {
+  if (newState === 'closed') toggleEvent(trigger, 'beforetoggle', newState);
+  toggleEvent(trigger, 'toggle', newState);
+  return within(trigger.nextElementSibling as HTMLElement);
+};
+const day = (picker: ReturnType<typeof within>, name: string) =>
+  picker.getByRole('button', { name: new RegExp(`^2026年${name}`) });
 
-  // A date picked from the field's calendar is taken; a typed one waits for Enter, since typing
-  // passes through other dates on the way.
-  const field = within(picker).getByLabelText('日付');
-  fireEvent.change(field, { target: { value: '2026-11-20' } });
-  expect(handlers.onSetDue).toHaveBeenLastCalledWith({ date: '2026-11-20', repeat: 'weekly' });
-  fireEvent.keyDown(field, { key: '2' });
-  fireEvent.change(field, { target: { value: '0002-11-20' } });
-  expect(handlers.onSetDue).toHaveBeenCalledTimes(3);
-  fireEvent.change(field, { target: { value: '2026-12-01' } });
-  fireEvent.keyDown(field, { key: 'Enter' });
-  expect(handlers.onSetDue).toHaveBeenLastCalledWith({ date: '2026-12-01', repeat: 'weekly' });
-});
-
-it('changes the start of a TODO Pantaray has not started, and only of one', () => {
+it('picks a row’s start, then its due day, and begins again from a day before the start', () => {
   const handlers = renderRow({
-    starts_on: '2026-11-18',
+    starts_on: '2026-11-10',
+    due: { date: '2026-11-20', repeat: 'weekly' },
     state: { kind: 'not_started', reason: 'scheduled' },
   });
-  screen.getByRole('button', { name: '開始日 水 11/18から: 見積書を送る' });
-  const picker = screen.getByRole('dialog', { name: '開始日' });
-  expect(within(picker).queryByRole('button', { name: '期限をなくす' })).toBeNull();
-  fireEvent.click(within(picker).getByRole('button', { name: '明日' }));
-  expect(handlers.onSetStart).toHaveBeenLastCalledWith('2026-11-08');
-  fireEvent.click(within(picker).getByRole('button', { name: '未定にする' }));
-  expect(handlers.onSetStart).toHaveBeenLastCalledWith(null);
-
-  // With no start, Pantaray waits for the user to give it one from the same word.
-  const unset = renderRow({
-    starts_on: null,
-    state: { kind: 'not_started', reason: 'unscheduled' },
+  const picker = toggle(
+    screen.getByRole('button', { name: '開始日 火 11/10から: 見積書を送る' }),
+    'open'
+  );
+  expect(picker.getByRole('button', { name: /^開始 / })).toHaveAttribute('aria-pressed', 'true');
+  // A start after the due day takes the due day away; the next click picks the due day.
+  fireEvent.click(day(picker, '11月24日'));
+  expect(picker.getByRole('button', { name: /^期限 / })).toHaveAttribute('aria-pressed', 'true');
+  expect(picker.getByRole('button', { name: /^期限 / })).toHaveTextContent('なし');
+  // A day before the start begins the range again from it.
+  fireEvent.click(day(picker, '11月12日'));
+  expect(handlers.onSetDates).not.toHaveBeenCalled();
+  expect(picker.getByRole('button', { name: /^開始 / })).toHaveTextContent('木 11/12');
+  fireEvent.click(day(picker, '11月14日'));
+  expect(handlers.onSetDates).toHaveBeenCalledOnce();
+  expect(handlers.onSetDates).toHaveBeenLastCalledWith({
+    startsOn: '2026-11-12',
+    due: { date: '2026-11-14', repeat: 'weekly' },
   });
-  expect(screen.getByRole('button', { name: '開始日未定: 見積書を送る' })).toHaveTextContent(
-    /^開始日未定$/
-  );
-  fireEvent.click(
-    within(screen.getByRole('dialog', { name: '開始日' })).getByRole('button', { name: '今日' })
-  );
-  expect(unset.onSetStart).toHaveBeenLastCalledWith(TODAY);
+  expect(day(picker, '11月13日')).toHaveAttribute('data-range', 'between');
+});
 
-  renderRow({ state: { kind: 'working', note: null } });
+it('writes only the date that changed, and the start alone when the panel closes on it', () => {
+  const handlers = renderRow({
+    starts_on: '2026-11-10',
+    due: { date: '2026-11-20', repeat: 'none' },
+    state: { kind: 'not_started', reason: 'scheduled' },
+  });
+  const trigger = screen.getByRole('button', { name: '期限 金 11/20: 見積書を送る' });
+  // From the due day, the first click picks the due day.
+  fireEvent.click(day(toggle(trigger, 'open'), '11月18日'));
+  expect(handlers.onSetDates).toHaveBeenLastCalledWith({
+    due: { date: '2026-11-18', repeat: 'none' },
+  });
+  toggle(trigger, 'closed');
+  expect(handlers.onSetDates).toHaveBeenCalledOnce();
+
+  // A start picked and the panel let go: the start is handed over once, on its own.
+  const start = screen.getByRole('button', { name: '開始日 火 11/10から: 見積書を送る' });
+  fireEvent.click(day(toggle(start, 'open'), '11月9日'));
+  toggle(start, 'closed');
+  toggle(start, 'closed');
+  expect(handlers.onSetDates).toHaveBeenCalledTimes(2);
+  expect(handlers.onSetDates).toHaveBeenLastCalledWith({ startsOn: '2026-11-09' });
+
+  fireEvent.click(toggle(start, 'open').getByRole('button', { name: '開始を未定にする' }));
+  expect(handlers.onSetDates).toHaveBeenLastCalledWith({ startsOn: null });
+  fireEvent.click(toggle(trigger, 'open').getByRole('button', { name: '期限なし' }));
+  expect(handlers.onSetDates).toHaveBeenLastCalledWith({ due: null });
+});
+
+it('drops the dates chosen while a write on the row is pending', () => {
+  const handlers = renderRow({ due: { date: '2026-11-20', repeat: 'none' } }, false, true);
+  const trigger = screen.getByRole('button', { name: '期限 金 11/20: 見積書を送る' });
+  fireEvent.click(day(toggle(trigger, 'open'), '11月18日'));
+  toggle(trigger, 'closed');
+  expect(handlers.onSetDates).not.toHaveBeenCalled();
+});
+
+it('once Pantaray started, changes only the due day, never before the start', () => {
+  const handlers = renderRow({
+    starts_on: '2026-11-02',
+    due: { date: '2026-11-08', repeat: 'weekly' },
+    state: { kind: 'working', note: null },
+  });
   expect(screen.queryByRole('button', { name: /^開始日/ })).toBeNull();
   expect(stateWord()).toHaveTextContent(/^作業中$/);
+  const picker = toggle(screen.getByRole('button', { name: '期限 日 11/8: 見積書を送る' }), 'open');
+  expect(picker.queryByRole('button', { name: /^開始 / })).toBeNull();
+  expect(picker.queryByRole('button', { name: '開始を未定にする' })).toBeNull();
+  expect(day(picker, '11月1日')).toHaveAttribute('aria-disabled', 'true');
+  fireEvent.click(day(picker, '11月1日'));
+  expect(handlers.onSetDates).not.toHaveBeenCalled();
+  fireEvent.click(day(picker, '11月20日'));
+  expect(handlers.onSetDates).toHaveBeenLastCalledWith({
+    due: { date: '2026-11-20', repeat: 'weekly' },
+  });
+});
+
+it('moves the focus over the days with the arrow keys, into the next month past this one', () => {
+  renderRow({ due: { date: '2026-11-27', repeat: 'none' } });
+  const picker = toggle(
+    screen.getByRole('button', { name: '期限 金 11/27: 見積書を送る' }),
+    'open'
+  );
+  expect(day(picker, '11月27日')).toHaveFocus();
+  expect(day(picker, '11月27日')).toHaveAttribute('tabindex', '0');
+  fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight' });
+  expect(day(picker, '11月28日')).toHaveFocus();
+  fireEvent.keyDown(document.activeElement!, { key: 'ArrowUp' });
+  expect(day(picker, '11月21日')).toHaveFocus();
+  // The six weeks in view end on Sunday 12/6; a week down from 12/5 is the next month's.
+  fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
+  fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
+  fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
+  expect(day(picker, '12月12日')).toHaveFocus();
+  expect(picker.getByRole('group', { name: '2026年12月' })).toBeInTheDocument();
 });
 
 it('answers Pantaray’s deletion request under the conversation, and waits while pending', async () => {
@@ -226,10 +292,18 @@ it('adds to the first project from today with no due, and an IME’s Enter sends
   await userEvent.type(addField(), '{Enter}');
   expect(onSubmit).toHaveBeenLastCalledWith('p1', TODAY, '見積書を送る', null);
   expect(addField()).toHaveValue('');
+
+  // A TODO is one line: pasted lines are joined, and Shift+Enter adds as Enter does.
+  fireEvent.change(addField(), { target: { value: '見積書を\n  送る\n' } });
+  expect(addField()).toHaveValue('見積書を 送る ');
+  await userEvent.type(addField(), '{Shift>}{Enter}{/Shift}');
+  expect(onSubmit).toHaveBeenLastCalledWith('p1', TODAY, '見積書を 送る', null);
   expect(onImport).not.toHaveBeenCalled();
 });
 
-it('imports text of several lines instead of adding it as one TODO', async () => {
+const modeButton = () => screen.getByRole('button', { name: 'ファイルやテキストから取り込む' });
+
+it('imports text of several lines once its button turns importing on, then turns back', async () => {
   onImport.mockClear();
   const onSubmit = vi.fn(async () => true);
   render(
@@ -243,10 +317,26 @@ it('imports text of several lines instead of adding it as one TODO', async () =>
       />
     )
   );
-  // Shift+Enter starts a new line; the project and dates, one TODO's, step aside.
-  await userEvent.type(addField(), '見積書を送る{Shift>}{Enter}{/Shift}請求書を作る');
+  expect(modeButton()).toHaveAttribute('aria-pressed', 'false');
+  expect(screen.queryByRole('button', { name: '添付' })).toBeNull();
+  expectIconButtonTooltips(document.querySelector('.todo-add-bar__choices')!);
+  await userEvent.click(modeButton());
+  // Importing: the field says so, the send button drafts, and one TODO's choices step aside.
+  expect(modeButton()).toHaveAttribute('aria-pressed', 'true');
+  expect(addField()).toHaveAttribute(
+    'placeholder',
+    'テキストを貼るか、ファイルを添付すると、TODO の下書きを作ります'
+  );
+  expectTooltipIsName(screen.getByRole('button', { name: '下書きを作る' }));
+  expect(screen.getByRole('button', { name: '添付' })).toBeVisible();
   expect(screen.queryByRole('combobox', { name: 'プロジェクト' })).toBeNull();
-  expect(screen.queryByRole('button', { name: '期限なし' })).toBeNull();
+  expect(screen.queryByRole('button', { name: /期限/ })).toBeNull();
+  await userEvent.type(addField(), '見積書を送る{Shift>}{Enter}{/Shift}請求書を作る');
+  // Lines kept when importing goes off become one TODO's line.
+  await userEvent.click(modeButton());
+  expect(addField()).toHaveValue('見積書を送る 請求書を作る');
+  await userEvent.click(modeButton());
+  fireEvent.change(addField(), { target: { value: '見積書を送る\n請求書を作る' } });
   await userEvent.type(addField(), '{Enter}');
   expect(onSubmit).not.toHaveBeenCalled();
   expect(onImport).toHaveBeenLastCalledWith('見積書を送る\n請求書を作る', {
@@ -254,6 +344,9 @@ it('imports text of several lines instead of adding it as one TODO', async () =>
     images: [],
   });
   expect(addField()).toHaveValue('');
+  expect(modeButton()).toHaveAttribute('aria-pressed', 'false');
+  expect(addField()).toHaveAttribute('placeholder', 'TODO を追加');
+  expect(screen.getByRole('button', { name: '追加' })).toBeVisible();
 });
 
 it('imports attached documents and images, staged as the composers stage them', async () => {
@@ -280,9 +373,11 @@ it('imports attached documents and images, staged as the composers stage them', 
     )
   );
   const bar = container.querySelector('fieldset')!;
+  // A file dropped while adding turns importing on in view.
   fireEvent.drop(bar, {
     dataTransfer: { files: [new File(['x'], 'board.png', { type: 'image/png' })] },
   });
+  expect(modeButton()).toHaveAttribute('aria-pressed', 'true');
   expect(await screen.findByRole('img')).toBeVisible();
   // An image alone imports.
   await userEvent.click(screen.getByRole('button', { name: '下書きを作る' }));
@@ -293,9 +388,12 @@ it('imports attached documents and images, staged as the composers stage them', 
   });
   expect(screen.queryByRole('img')).toBeNull();
 
-  fireEvent.drop(bar, {
-    dataTransfer: { files: [new File(['x'], 'board.png', { type: 'image/png' })] },
+  expect(modeButton()).toHaveAttribute('aria-pressed', 'false');
+
+  fireEvent.paste(addField(), {
+    clipboardData: { files: [new File(['x'], 'board.png', { type: 'image/png' })] },
   });
+  expect(modeButton()).toHaveAttribute('aria-pressed', 'true');
   await screen.findByRole('img');
   await userEvent.click(screen.getByRole('button', { name: '添付' }));
   await userEvent.upload(
@@ -313,7 +411,7 @@ it('imports attached documents and images, staged as the composers stage them', 
   window.electron = undefined;
 });
 
-it('in a scope with no project, imports lines but says a single TODO needs a project', async () => {
+it('in a scope with no project, imports but says a single TODO needs a project', async () => {
   onImport.mockClear();
   const onSubmit = vi.fn(async () => true);
   render(
@@ -332,9 +430,9 @@ it('in a scope with no project, imports lines but says a single TODO needs a pro
   expect(screen.getByRole('alert')).toHaveTextContent('TODO を入れるプロジェクトがありません');
   expect(addField()).toHaveValue('見積書を送る');
 
-  await userEvent.type(addField(), '{Shift>}{Enter}{/Shift}請求書を作る');
+  await userEvent.click(modeButton());
   expect(screen.queryByRole('alert')).toBeNull();
-  await userEvent.type(addField(), '{Enter}');
+  await userEvent.type(addField(), '{Shift>}{Enter}{/Shift}請求書を作る{Enter}');
   expect(onImport).toHaveBeenLastCalledWith('見積書を送る\n請求書を作る', {
     files: [],
     images: [],
@@ -363,8 +461,10 @@ it('adds no file while an import is starting', async () => {
       />
     )
   );
+  await userEvent.click(modeButton());
   await userEvent.type(addField(), 'a{Shift>}{Enter}{/Shift}b{Enter}');
   expect(pendingImport).toHaveBeenCalledOnce();
+  expect(modeButton()).toBeDisabled();
   const notes = new File(['# 議事録'], 'notes.md', { type: 'text/markdown' });
   expect(screen.getByRole('button', { name: '添付' })).toBeDisabled();
   fireEvent.drop(container.querySelector('fieldset')!, { dataTransfer: { files: [notes] } });
@@ -374,45 +474,77 @@ it('adds no file while an import is starting', async () => {
 
   await act(async () => answer(true));
   expect(screen.queryByText('notes.md')).toBeNull();
-  expect(screen.getByRole('button', { name: '添付' })).toBeEnabled();
+  expect(modeButton()).toBeEnabled();
   window.electron = undefined;
 });
 
-it('adds to the project, due and start chosen, and offers no project with one in view', async () => {
+it('stays importing when lines typed while an import was starting are left', async () => {
+  let answer: (started: boolean) => void = () => undefined;
+  const pendingImport = vi.fn(() => new Promise<boolean>((resolve) => (answer = resolve)));
   const onSubmit = vi.fn(async () => true);
-  const bar = (projects: typeof PROJECTS) =>
+  render(
     ja(
       <TodoAddBar
         today={TODAY}
-        projects={projects}
+        projects={PROJECTS}
         disabled={false}
         onSubmit={onSubmit}
-        onImport={onImport}
+        onImport={pendingImport}
       />
-    );
-  const { rerender } = render(bar(PROJECTS));
-  await userEvent.selectOptions(screen.getByRole('combobox', { name: 'プロジェクト' }), '');
-  await userEvent.click(screen.getByRole('button', { name: '期限なし' }));
-  fireEvent.click(
-    within(screen.getByRole('dialog', { name: '期限' })).getByRole('button', { name: '明日' })
+    )
   );
-  fireEvent.click(
-    within(screen.getByRole('dialog', { name: '開始日' })).getByRole('button', { name: '来週' })
-  );
-  expect(screen.getByRole('button', { name: '期限 日 11/8' })).toBeVisible();
-  expect(screen.getByRole('button', { name: '開始 月 11/9' })).toBeVisible();
-  await userEvent.type(addField(), '請求書');
-  await userEvent.click(screen.getByRole('button', { name: '追加' }));
-  expect(onSubmit).toHaveBeenLastCalledWith(null, '2026-11-09', '請求書', {
-    date: '2026-11-08',
-    repeat: 'none',
-  });
-
-  rerender(bar(PROJECTS.slice(0, 1)));
-  expect(screen.queryByRole('combobox', { name: 'プロジェクト' })).toBeNull();
+  await userEvent.click(modeButton());
+  await userEvent.type(addField(), 'a{Shift>}{Enter}{/Shift}b{Enter}');
+  fireEvent.change(addField(), { target: { value: 'c\nd' } });
+  await act(async () => answer(true));
+  // The newer lines are the next import's, not a TODO that would be refused for its lines.
+  expect(addField()).toHaveValue('c\nd');
+  expect(modeButton()).toHaveAttribute('aria-pressed', 'true');
+  await userEvent.type(addField(), '{Enter}');
+  expect(pendingImport).toHaveBeenLastCalledWith('c\nd', { files: [], images: [] });
+  expect(onSubmit).not.toHaveBeenCalled();
 });
 
-it('adds a TODO with no start, which a date chosen later replaces', async () => {
+it('discards the files staged for an import turned off, those still being written too', async () => {
+  let written: (file: unknown) => void = () => undefined;
+  const attachFile = vi
+    .fn()
+    .mockResolvedValueOnce({ attachmentId: 'a-staged', name: 'notes.md', byteSize: 12 })
+    .mockReturnValueOnce(new Promise((resolve) => (written = resolve)));
+  const discardAttachment = vi.fn(async () => undefined);
+  window.electron = {
+    actions: { attachFile, attachImage: vi.fn(), discardAttachment },
+  } as unknown as Window['electron'];
+  const { container } = render(
+    ja(
+      <TodoAddBar
+        today={TODAY}
+        projects={PROJECTS}
+        disabled={false}
+        onSubmit={vi.fn(async () => true)}
+        onImport={onImport}
+      />
+    )
+  );
+  const bar = container.querySelector('fieldset')!;
+  const notes = new File(['# 議事録'], 'notes.md', { type: 'text/markdown' });
+  fireEvent.drop(bar, { dataTransfer: { files: [notes] } });
+  expect(await screen.findByText('notes.md')).toBeVisible();
+  await userEvent.click(modeButton());
+  expect(discardAttachment).toHaveBeenLastCalledWith({ attachmentId: 'a-staged' });
+  expect(screen.queryByText('notes.md')).toBeNull();
+
+  // A file whose write lands after importing went off is discarded, not shown.
+  fireEvent.drop(bar, { dataTransfer: { files: [notes] } });
+  await userEvent.click(modeButton());
+  await act(async () => written({ attachmentId: 'a-late', name: 'notes.md', byteSize: 12 }));
+  expect(discardAttachment).toHaveBeenLastCalledWith({ attachmentId: 'a-late' });
+  await userEvent.click(modeButton());
+  expect(screen.queryByText('notes.md')).toBeNull();
+  window.electron = undefined;
+});
+
+it('adds with the start just picked when a click outside the panel sends', async () => {
   const onSubmit = vi.fn(async () => true);
   render(
     ja(
@@ -425,14 +557,61 @@ it('adds a TODO with no start, which a date chosen later replaces', async () => 
       />
     )
   );
-  const startPicker = () => within(screen.getByRole('dialog', { name: '開始日' }));
-  fireEvent.click(startPicker().getByRole('button', { name: '未定にする' }));
-  expect(screen.getByRole('button', { name: '開始 未定' })).toBeVisible();
-  await userEvent.type(addField(), '請求書{Enter}');
-  expect(onSubmit).toHaveBeenLastCalledWith('p1', null, '請求書', null);
+  await userEvent.type(addField(), '請求書');
+  const dates = screen.getByRole('button', { name: '今日から、期限なし' });
+  fireEvent.click(day(toggle(dates, 'open'), '11月9日'));
+  // The click on 追加 dismisses the panel: `beforetoggle` within it, `toggle` only after it.
+  toggleEvent(dates, 'beforetoggle', 'closed');
+  fireEvent.click(screen.getByRole('button', { name: '追加' }));
+  toggleEvent(dates, 'toggle', 'closed');
+  await act(async () => undefined);
+  expect(onSubmit).toHaveBeenCalledOnce();
+  expect(onSubmit).toHaveBeenLastCalledWith('p1', '2026-11-09', '請求書', null);
+});
 
-  fireEvent.click(startPicker().getByRole('button', { name: '今日' }));
-  expect(screen.getByRole('button', { name: '開始 今日' })).toBeVisible();
+it('adds to the project and the dates chosen, shown short beside the calendar icon', async () => {
+  const onSubmit = vi.fn(async () => true);
+  const bar = (projects: typeof PROJECTS) =>
+    ja(
+      <TodoAddBar
+        today={TODAY}
+        projects={projects}
+        disabled={false}
+        onSubmit={onSubmit}
+        onImport={onImport}
+      />
+    );
+  const { rerender } = render(bar(PROJECTS));
+  const dates = screen.getByRole('button', { name: '今日から、期限なし' });
+  expect(dates).toHaveTextContent(/^$/);
+  expectTooltipIsName(dates);
+  await userEvent.selectOptions(screen.getByRole('combobox', { name: 'プロジェクト' }), '');
+  const picker = toggle(dates, 'open');
+  fireEvent.click(day(picker, '11月9日'));
+  fireEvent.click(day(picker, '11月12日'));
+  expect(dates).toHaveAccessibleName('月 11/9から、期限 木 11/12');
+  expect(dates).toHaveTextContent(/^11\/9 → 11\/12$/);
+  await userEvent.type(addField(), '請求書');
+  await userEvent.click(screen.getByRole('button', { name: '追加' }));
+  expect(onSubmit).toHaveBeenLastCalledWith(null, '2026-11-09', '請求書', {
+    date: '2026-11-12',
+    repeat: 'none',
+  });
+
+  // With no start, a TODO waits until one is set; a start of today is left out of the text.
+  fireEvent.click(toggle(dates, 'open').getByRole('button', { name: '開始を未定にする' }));
+  expect(dates).toHaveTextContent(/^未定 → 11\/12$/);
+  await userEvent.type(addField(), '見積書{Enter}');
+  expect(onSubmit).toHaveBeenLastCalledWith(null, null, '見積書', {
+    date: '2026-11-12',
+    repeat: 'none',
+  });
+  fireEvent.click(day(toggle(dates, 'open'), '11月7日'));
+  toggle(dates, 'closed');
+  expect(dates).toHaveTextContent(/^→ 11\/12$/);
+
+  rerender(bar(PROJECTS.slice(0, 1)));
+  expect(screen.queryByRole('combobox', { name: 'プロジェクト' })).toBeNull();
 });
 
 it('counts a group’s done TODOs and names its organization after it when one is given', () => {

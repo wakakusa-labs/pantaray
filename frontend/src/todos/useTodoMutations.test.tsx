@@ -16,14 +16,20 @@ const reloadDeleted = vi.fn<() => Promise<void>>();
 const create = vi.fn<(request: TodoCreateRequest) => Promise<TodoWriteResult<TodoView>>>();
 const remove = vi.fn();
 const restore = vi.fn();
+const setStart = vi.fn();
+const setDue = vi.fn();
 
 beforeEach(() => {
   create.mockReset();
   remove.mockReset();
   restore.mockReset();
+  setStart.mockReset();
+  setDue.mockReset();
   reloadList.mockReset().mockResolvedValue(undefined);
   reloadDeleted.mockReset().mockResolvedValue(undefined);
-  window.electron = { todos: { create, delete: remove, restore } } as unknown as Window['electron'];
+  window.electron = {
+    todos: { create, delete: remove, restore, setStart, setDue },
+  } as unknown as Window['electron'];
 });
 
 const wrapper = ({ children }: { children: ReactNode }) => (
@@ -136,5 +142,33 @@ it('keeps a row pending until the lists showing its write have been read again',
 
   await act(async () => listRead());
   expect(await deleted).toBe(true);
+  expect(result.current.pending.size).toBe(0);
+});
+
+it('writes a row’s start, then its due day, in one pending span, and stops at a refused start', async () => {
+  let started: (result: unknown) => void = () => undefined;
+  setStart.mockReturnValueOnce(new Promise((resolve) => (started = resolve)));
+  setDue.mockResolvedValueOnce(ok);
+  const { result } = renderHook(() => useTodoMutations({ reloadList, reloadDeleted }), { wrapper });
+  const due = { date: '2026-11-20', repeat: 'none' } as const;
+
+  let written: Promise<boolean> = Promise.resolve(false);
+  act(() => {
+    written = result.current.setDates('t1', { startsOn: '2026-11-10', due });
+  });
+  expect(result.current.pending.has('t1')).toBe(true);
+  // The due day waits for the start's answer, and the row stays pending between the two.
+  expect(setDue).not.toHaveBeenCalled();
+  await act(async () => started(ok));
+  expect(setDue).toHaveBeenCalledWith({ todo_id: 't1', due });
+  expect(await written).toBe(true);
+  expect(result.current.pending.size).toBe(0);
+  expect(reloadList).toHaveBeenCalledOnce();
+
+  setStart.mockResolvedValueOnce({ kind: 'refused', code: 'TODO_NOT_FOUND' });
+  await act(async () => {
+    expect(await result.current.setDates('t1', { startsOn: null, due: null })).toBe(false);
+  });
+  expect(setDue).toHaveBeenCalledOnce();
   expect(result.current.pending.size).toBe(0);
 });

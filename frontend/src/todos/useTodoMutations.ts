@@ -40,6 +40,11 @@ type Outcome = 'ok' | 'refused' | 'unknown';
 const addKey = (projectId: string | null, startsOn: string | null) =>
   `${startsOn ?? ''}\n${projectId ?? ''}`;
 
+/** A row's dates to write: the start, the due day, or both; what is left out stays. */
+export type TodoDatesChange =
+  | { startsOn: string | null; due?: TodoDue | null }
+  | { due: TodoDue | null };
+
 /** The reads that show a write's result: `useTodoList`'s and `useDeletedTodos`'s `reload`. */
 export type TodoReloads = {
   reloadList: () => Promise<void>;
@@ -145,12 +150,17 @@ export function useTodoMutations({ reloadList, reloadDeleted }: TodoReloads) {
     create,
     setCheck: (todoId: string, checked: boolean) =>
       writeRow(todoId, (todos) => todos.setCheck({ todo_id: todoId, checked }), reloadList),
-    setDue: (todoId: string, due: TodoDue | null) =>
-      writeRow(todoId, (todos) => todos.setDue({ todo_id: todoId, due }), reloadList),
-    setStart: (todoId: string, startsOn: string | null) =>
+    // Both dates are written in one pending span, the start first, so the row's controls wait
+    // for the pair and a choice made meanwhile is dropped rather than raced.
+    setDates: (todoId: string, change: TodoDatesChange) =>
       writeRow(
         todoId,
-        (todos) => todos.setStart({ todo_id: todoId, starts_on: startsOn }),
+        async (todos) => {
+          if (!('startsOn' in change)) return todos.setDue({ todo_id: todoId, due: change.due });
+          const started = await todos.setStart({ todo_id: todoId, starts_on: change.startsOn });
+          if (started.kind !== 'ok' || change.due === undefined) return started;
+          return todos.setDue({ todo_id: todoId, due: change.due });
+        },
         reloadList
       ),
     // Deleting and restoring move the TODO between the list and the deleted list.

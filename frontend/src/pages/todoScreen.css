@@ -103,12 +103,13 @@
   letter-spacing: -0.01em;
 }
 
-/* The project in view's folders on one line under the header: each path cut in its middle. */
+/* The project in view's folders under the header, as many lines as they take: a path is cut in
+   its middle only when it is wider than the whole line. */
 .todo-screen__folders {
   display: flex;
   align-items: baseline;
-  gap: 4px 10px;
-  padding: 0 24px 8px;
+  gap: 6px 12px;
+  padding: 2px 24px 12px;
   color: var(--fog-text-3);
   font-size: var(--text-meta-size);
 }
@@ -121,16 +122,12 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 2px 12px;
+  gap: 6px 20px;
   min-width: 0;
 }
 
 .todo-screen__folders .project-folders ul {
   display: contents;
-}
-
-.todo-screen__folders .history-project__folder {
-  max-width: 280px;
 }
 
 .todo-screen__folders .project-folders__add {

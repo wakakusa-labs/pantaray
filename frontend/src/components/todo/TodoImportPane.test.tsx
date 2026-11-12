@@ -223,7 +223,7 @@ it('removes a TODO, and its group with it once it is the last', async () => {
 it('holds edits and 登録 while the Action runs, and lets the user cancel', async () => {
   running = true;
   const handlers = renderPane();
-  expect(await screen.findByText(/^Pantaray が書き終えると/)).toHaveRole('status');
+  expect(await screen.findByText(/^Pantaray が下書きを書いています/)).toHaveRole('status');
   expect(registerButton()).toBeDisabled();
   for (const field of screen.getAllByRole('textbox', { name: 'TODO' }))
     expect(field).toBeDisabled();

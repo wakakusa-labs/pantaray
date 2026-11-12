@@ -12,6 +12,7 @@ import { TodoConversationPane } from '@/components/todo/TodoConversationPane';
 import { TodoImportPane } from '@/components/todo/TodoImportPane';
 import { TodoProjectGroup } from '@/components/todo/TodoProjectGroup';
 import { TodoRow } from '@/components/todo/TodoRow';
+import { useTodoPaneWidth } from '@/components/todo/useTodoPaneWidth';
 import { useI18n } from '@/context/useI18n';
 import type { HistorySelection } from '@/history/historySelection';
 import type { WorkspaceSettings } from '@/pages/settings/components/workspaceSettingsModel';
@@ -109,6 +110,10 @@ export function TodoScreen({
   const { t } = useI18n();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const importPaneRef = useRef<HTMLDivElement>(null);
+  // Measured by the rule between the list and the pane, so held as state to follow remounts.
+  const [screenElement, setScreenElement] = useState<HTMLDivElement | null>(null);
+  const [listElement, setListElement] = useState<HTMLElement | null>(null);
+  const paneWidth = useTodoPaneWidth(screenElement, listElement);
   const importStart = useTodoImportStart();
   // How many TODOs the last import added, told over the list once its pane closed.
   const [registered, setRegistered] = useState<number | null>(null);
@@ -352,8 +357,16 @@ export function TodoScreen({
     );
 
   return (
-    <div className={paneOpen ? 'todo-screen todo-screen--with-pane' : 'todo-screen'}>
-      <section className="todo-screen__list" aria-labelledby="todo-screen-title">
+    <div
+      ref={setScreenElement}
+      className={paneOpen ? 'todo-screen todo-screen--with-pane' : 'todo-screen'}
+      style={paneWidth.style}
+    >
+      <section
+        ref={setListElement}
+        className="todo-screen__list"
+        aria-labelledby="todo-screen-title"
+      >
         <header className="history-pane-header todo-screen__header">
           <h1 id="todo-screen-title" ref={headingRef} tabIndex={-1}>
             {title}
@@ -411,6 +424,13 @@ export function TodoScreen({
         </div>
         {showingList ? renderAddBar() : null}
       </section>
+      {paneOpen ? (
+        <div
+          className="todo-screen__rule"
+          aria-label={t('todo.pane.resize')}
+          {...paneWidth.separatorProps}
+        />
+      ) : null}
       {importId !== null && page ? (
         <div
           ref={importPaneRef}

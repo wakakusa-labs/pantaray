@@ -233,7 +233,7 @@ const SUGGESTION: OverlaySnapshot = {
   isLive: true,
 };
 
-async function openHome(page: Page, search = '') {
+async function openHome(page: Page, search = '', suggestion: OverlaySnapshot = SUGGESTION) {
   await page.addInitScript(
     ({ organizations, projects, items, deleted, suggestion, initialGoals, records }) => {
       localStorage.setItem('pantaray_ui_language', 'ja');
@@ -712,7 +712,7 @@ async function openHome(page: Page, search = '') {
       projects: PROJECTS,
       items: ITEMS,
       deleted: DELETED,
-      suggestion: SUGGESTION,
+      suggestion,
       initialGoals: GOALS,
       records: RECORDS,
     }
@@ -1452,4 +1452,150 @@ test('an organization with no project yet takes an import, though not a single T
     organization_id: 'labs',
     text: '見積書を送る\n請求書を作る',
   });
+});
+
+/** The list's and the pane's widths, and the rule's place, as drawn. */
+async function paneWidths(page: Page) {
+  const width = async (selector: string) => (await page.locator(selector).boundingBox())!.width;
+  return {
+    list: await width('.todo-screen__list'),
+    pane: await width('.todo-screen__conversation'),
+    screen: await width('.todo-screen'),
+  };
+}
+
+/** Drags the rule by `dx` with the mouse, from a point on its hit area beside the line. */
+async function dragRule(page: Page, dx: number) {
+  const box = (await page.locator('.todo-screen__rule').boundingBox())!;
+  const x = box.x + 3;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + dx, y, { steps: 6 });
+  await page.mouse.up();
+}
+
+test('the rule beside a conversation drags, steps with the keys and is remembered', async ({
+  page,
+}, info) => {
+  await openHome(page);
+  await page.getByRole('button', { name: /^来週の面接の質問リストを作る/ }).click();
+  const rule = page.getByRole('separator', { name: 'TODO と会話の幅' });
+  await expect(rule).toHaveAttribute('aria-orientation', 'vertical');
+  const initial = await paneWidths(page);
+  // The default: 40% of the screen, between 420px and 560px.
+  expect(initial.pane).toBeCloseTo(Math.min(Math.max(initial.screen * 0.4, 420), 560), 0);
+
+  const box = (await rule.boundingBox())!;
+  await page.mouse.move(box.x + 3, box.y + box.height / 2);
+  await expect(rule).toHaveCSS('cursor', 'col-resize');
+  await capture(page, info, 'rule-hover');
+
+  await dragRule(page, -200);
+  let widths = await paneWidths(page);
+  expect(widths.pane).toBeCloseTo(initial.pane + 200, 0);
+  await expect(rule).toHaveAttribute('aria-valuenow', String(Math.round(widths.list)));
+  await capture(page, info, 'rule-wider');
+
+  // Past either end the other side keeps its least.
+  await dragRule(page, -2000);
+  expect((await paneWidths(page)).list).toBeCloseTo(440, 0);
+  await dragRule(page, 2000);
+  widths = await paneWidths(page);
+  expect(widths.pane).toBeCloseTo(360, 0);
+  await capture(page, info, 'rule-narrower');
+
+  // The keys: an arrow moves it a step, Home and End to the ends.
+  await rule.focus();
+  await page.keyboard.press('ArrowLeft');
+  expect((await paneWidths(page)).pane).toBeCloseTo(360 + 24, 0);
+  await page.keyboard.press('Home');
+  await expect(rule).toHaveAttribute('aria-valuenow', '440');
+  // At the list's least a row's title still shows, and opens its conversation.
+  const title = page
+    .getByRole('button', { name: /^リリースノートの下書きを書く/ })
+    .locator('.todo-row__text');
+  expect((await title.boundingBox())!.width).toBeGreaterThan(80);
+  await capture(page, info, 'rule-list-least');
+  await title.click();
+  await expect(page.getByRole('region', { name: 'リリースノートの下書きを書く' })).toBeVisible();
+  await page.getByRole('button', { name: /^来週の面接の質問リストを作る/ }).click();
+  await rule.focus();
+  await page.keyboard.press('End');
+  await expect(rule).toHaveAttribute('aria-valuenow', await rule.getAttribute('aria-valuemax'));
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowLeft');
+  const chosen = (await paneWidths(page)).pane;
+  expect(chosen).toBeCloseTo(360 + 48, 0);
+  await capture(page, info, 'rule-focus');
+
+  // Closed and opened again, and after a restart, it keeps its width.
+  await page.getByRole('button', { name: '会話を閉じる' }).click();
+  await expect(rule).toHaveCount(0);
+  await page.getByRole('button', { name: /^来週の面接の質問リストを作る/ }).click();
+  expect((await paneWidths(page)).pane).toBeCloseTo(chosen, 0);
+  await page.reload();
+  await expect(rule).toBeVisible();
+  expect((await paneWidths(page)).pane).toBeCloseTo(chosen, 0);
+
+  // A narrower window keeps the list its least; made wide again, the width the user chose returns.
+  await rule.focus();
+  await page.keyboard.press('Home');
+  const widest = (await paneWidths(page)).pane;
+  await page.setViewportSize({ width: 1180, height: 900 });
+  await expect.poll(async () => (await paneWidths(page)).list).toBeCloseTo(440, 0);
+  expect(await hasNoSideScroll(page)).toBe(true);
+  await page.setViewportSize({ width: 1360, height: 900 });
+  await expect.poll(async () => (await paneWidths(page)).pane).toBeCloseTo(widest, 0);
+
+  // A double click goes back to the default.
+  await rule.dblclick();
+  expect((await paneWidths(page)).pane).toBeCloseTo(initial.pane, 0);
+  await page.reload();
+  await expect(rule).toBeVisible();
+  expect((await paneWidths(page)).pane).toBeCloseTo(initial.pane, 0);
+});
+
+test('beside a file the same rule sets the list, remembered apart from the conversation’s', async ({
+  page,
+}) => {
+  await openHome(page, '', { ...SUGGESTION, artifacts: ['/Users/me/Documents/質問リスト.md'] });
+  await page.getByRole('button', { name: /^来週の面接の質問リストを作る/ }).click();
+  const chip = page
+    .getByRole('region', { name: '来週の面接の質問リストを作る' })
+    .getByRole('button', { name: 'MD 質問リスト.md' });
+  await chip.click();
+  await expect(page.locator('.suggestion-task--split')).toBeVisible();
+  const initial = await paneWidths(page);
+  expect(initial.list).toBeCloseTo(420, 0);
+
+  await dragRule(page, 120);
+  const split = await paneWidths(page);
+  expect(split.list).toBeCloseTo(540, 0);
+  expect(split.pane).toBeCloseTo(split.screen - 1 - 540, 0);
+  // Not past the room the file and the conversation's column need.
+  await dragRule(page, 2000);
+  expect((await paneWidths(page)).pane).toBeCloseTo(560, 0);
+  await dragRule(page, -2000);
+  expect((await paneWidths(page)).list).toBeCloseTo(440, 0);
+  await dragRule(page, 160);
+  const chosen = (await paneWidths(page)).list;
+
+  // The file closed, the conversation keeps its own default; opened again, the list its width.
+  await chip.click();
+  await expect(page.locator('.suggestion-task--split')).toHaveCount(0);
+  const conversation = await paneWidths(page);
+  expect(conversation.pane).toBeCloseTo(Math.min(Math.max(conversation.screen * 0.4, 420), 560), 0);
+  await chip.click();
+  await expect(page.locator('.suggestion-task--split')).toBeVisible();
+  expect((await paneWidths(page)).list).toBeCloseTo(chosen, 0);
+
+  // With the sidebar shown in a narrower window the list gives way, and the conversation's
+  // answer stays on screen.
+  await page.getByRole('button', { name: 'サイドバーを表示' }).click();
+  await expect(sidebarOf(page)).toBeVisible();
+  await page.setViewportSize({ width: 1170, height: 900 });
+  const approve = (await page.getByRole('button', { name: '承認' }).boundingBox())!;
+  expect(approve.x + approve.width).toBeLessThanOrEqual(1170);
+  expect(await hasNoSideScroll(page)).toBe(true);
 });

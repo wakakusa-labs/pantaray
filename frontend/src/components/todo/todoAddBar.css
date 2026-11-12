@@ -104,6 +104,13 @@
   color: var(--fog-text);
 }
 
+/* Importing on: filled in the text's grey, as the rail fills the scope in view. */
+.todo-add-bar__mode[aria-pressed='true'],
+.todo-add-bar__mode[aria-pressed='true']:hover:not(:disabled) {
+  background: var(--fog-text);
+  color: var(--app-background);
+}
+
 .todo-add-bar__send {
   display: grid;
   place-items: center;

@@ -12,8 +12,8 @@ import {
 
 /**
  * The documents and images staged in the add bar for an import, through the composers'
- * staging. Documents are discarded when the bar goes away unsent, including those whose write
- * lands after it went.
+ * staging. Documents are discarded when the bar goes away unsent or lets them go, including those
+ * whose write lands after that.
  */
 export function useAddBarFiles() {
   const actions = window.electron?.actions;
@@ -24,6 +24,8 @@ export function useAddBarFiles() {
   const [inFlight, setInFlight] = useState(0);
   const unsentRef = useRef<readonly ComposerAttachment[]>([]);
   const closedRef = useRef(false);
+  // Counts the times the bar let its files go; a write that began before one of them is not kept.
+  const droppedRef = useRef(0);
   useEffect(() => {
     unsentRef.current = attachments;
   });
@@ -38,15 +40,20 @@ export function useAddBarFiles() {
   const attach = async (picked: readonly File[]) => {
     if (!actions || picked.length === 0) return;
     setInFlight((count) => count + 1);
+    const dropped = droppedRef.current;
     const staged = await stageFiles(actions, picked, attachments);
     if (closedRef.current) {
+      discardDocuments(actions, staged.accepted);
+      return;
+    }
+    setInFlight((count) => count - 1);
+    if (droppedRef.current !== dropped) {
       discardDocuments(actions, staged.accepted);
       return;
     }
     setStaged((current) =>
       addStagedAttachments(actions, current.attachments, staged.accepted, staged.failure)
     );
-    setInFlight((count) => count - 1);
   };
 
   return {
@@ -66,6 +73,12 @@ export function useAddBarFiles() {
     },
     /** The documents and images as an import's start takes them. */
     payload: attachmentPayload(attachments),
+    /** Lets every file go, those still being written too: the import they were for is off. */
+    discardAll: () => {
+      droppedRef.current += 1;
+      discardDocuments(actions, attachments);
+      setStaged({ attachments: [], failure: null });
+    },
     /** The import took the files, so they are no longer the bar's to discard. */
     clearSent: () => {
       unsentRef.current = [];

@@ -1311,9 +1311,14 @@ test('lines pasted into the bar open a draft beside the list, which registers wh
 }, info) => {
   await openHome(page);
   const field = page.getByRole('textbox', { name: 'TODO を追加' });
-  await field.fill('見積書を再提出する\n値引きの条件をまとめる');
-  // Several lines draft TODOs, so one TODO's project and dates step aside.
+  const mode = page.getByRole('button', { name: 'ファイルやテキストから取り込む' });
+  await capture(page, info, 'add-bar-add-mode');
+  // Importing drafts TODOs from the lines, so one TODO's project and dates step aside.
+  await mode.click();
+  await expect(mode).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByRole('combobox', { name: 'プロジェクト' })).toHaveCount(0);
+  await field.fill('見積書を再提出する\n値引きの条件をまとめる');
+  await capture(page, info, 'add-bar-import-mode');
   await field.press('Enter');
 
   const pane = page.locator('.todo-screen__import');
@@ -1328,15 +1333,16 @@ test('lines pasted into the bar open a draft beside the list, which registers wh
     },
   ]);
   await expect(field).toHaveValue('');
+  await expect(mode).toHaveAttribute('aria-pressed', 'false');
 
   // A new organization and project are marked; the open TODO the draft repeats is left out.
   await expect(pane.getByRole('heading', { name: '取引先 B 新規' })).toBeVisible();
   await expect(pane.getByRole('heading', { name: 'サイト改修 新規' })).toBeVisible();
   await expect(pane.getByRole('heading', { name: 'Xer', exact: true })).toBeVisible();
   await expect(pane.getByText('すでにある')).toBeVisible();
-  await expect(
-    pane.getByRole('button', { name: /^開始日未定、期限なし: / }).first()
-  ).toHaveText('未定 →');
+  await expect(pane.getByRole('button', { name: /^開始日未定、期限なし: / }).first()).toHaveText(
+    '未定 →'
+  );
   await expect(pane.getByRole('button', { name: '3 件を登録' })).toBeEnabled();
   await capture(page, info, 'import-draft');
 
@@ -1379,6 +1385,7 @@ test('a file attached in an organization drafts inside it, and やめる closes 
   page,
 }, info) => {
   await openHome(page, '?scope=organization:xer');
+  await page.getByRole('button', { name: 'ファイルやテキストから取り込む' }).click();
   await page.locator('.todo-add-bar input[type="file"]').setInputFiles({
     name: 'notes.md',
     mimeType: 'text/markdown',
@@ -1424,6 +1431,7 @@ test('an organization with no project yet takes an import, though not a single T
   await expect(page.locator('.todo-add-bar').getByRole('alert')).toContainText(
     'TODO を入れるプロジェクトがありません'
   );
+  await page.getByRole('button', { name: 'ファイルやテキストから取り込む' }).click();
   await field.fill('見積書を送る\n請求書を作る');
   await field.press('Enter');
   await expect(page.locator('.todo-screen__import')).toBeVisible();

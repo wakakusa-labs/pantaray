@@ -289,10 +289,18 @@ it('adds to the first project from today with no due, and an IME’s Enter sends
   await userEvent.type(addField(), '{Enter}');
   expect(onSubmit).toHaveBeenLastCalledWith('p1', TODAY, '見積書を送る', null);
   expect(addField()).toHaveValue('');
+
+  // A TODO is one line: pasted lines are joined, and Shift+Enter adds as Enter does.
+  fireEvent.change(addField(), { target: { value: '見積書を\n  送る\n' } });
+  expect(addField()).toHaveValue('見積書を 送る ');
+  await userEvent.type(addField(), '{Shift>}{Enter}{/Shift}');
+  expect(onSubmit).toHaveBeenLastCalledWith('p1', TODAY, '見積書を 送る', null);
   expect(onImport).not.toHaveBeenCalled();
 });
 
-it('imports text of several lines instead of adding it as one TODO', async () => {
+const modeButton = () => screen.getByRole('button', { name: 'ファイルやテキストから取り込む' });
+
+it('imports text of several lines once its button turns importing on, then turns back', async () => {
   onImport.mockClear();
   const onSubmit = vi.fn(async () => true);
   render(
@@ -306,10 +314,26 @@ it('imports text of several lines instead of adding it as one TODO', async () =>
       />
     )
   );
-  // Shift+Enter starts a new line; the project and dates, one TODO's, step aside.
-  await userEvent.type(addField(), '見積書を送る{Shift>}{Enter}{/Shift}請求書を作る');
+  expect(modeButton()).toHaveAttribute('aria-pressed', 'false');
+  expect(screen.queryByRole('button', { name: '添付' })).toBeNull();
+  expectIconButtonTooltips(document.querySelector('.todo-add-bar__choices')!);
+  await userEvent.click(modeButton());
+  // Importing: the field says so, the send button drafts, and one TODO's choices step aside.
+  expect(modeButton()).toHaveAttribute('aria-pressed', 'true');
+  expect(addField()).toHaveAttribute(
+    'placeholder',
+    'テキストを貼るか、ファイルを添付すると、TODO の下書きを作ります'
+  );
+  expectTooltipIsName(screen.getByRole('button', { name: '下書きを作る' }));
+  expect(screen.getByRole('button', { name: '添付' })).toBeVisible();
   expect(screen.queryByRole('combobox', { name: 'プロジェクト' })).toBeNull();
   expect(screen.queryByRole('button', { name: /期限/ })).toBeNull();
+  await userEvent.type(addField(), '見積書を送る{Shift>}{Enter}{/Shift}請求書を作る');
+  // Lines kept when importing goes off become one TODO's line.
+  await userEvent.click(modeButton());
+  expect(addField()).toHaveValue('見積書を送る 請求書を作る');
+  await userEvent.click(modeButton());
+  fireEvent.change(addField(), { target: { value: '見積書を送る\n請求書を作る' } });
   await userEvent.type(addField(), '{Enter}');
   expect(onSubmit).not.toHaveBeenCalled();
   expect(onImport).toHaveBeenLastCalledWith('見積書を送る\n請求書を作る', {
@@ -317,6 +341,9 @@ it('imports text of several lines instead of adding it as one TODO', async () =>
     images: [],
   });
   expect(addField()).toHaveValue('');
+  expect(modeButton()).toHaveAttribute('aria-pressed', 'false');
+  expect(addField()).toHaveAttribute('placeholder', 'TODO を追加');
+  expect(screen.getByRole('button', { name: '追加' })).toBeVisible();
 });
 
 it('imports attached documents and images, staged as the composers stage them', async () => {
@@ -343,9 +370,11 @@ it('imports attached documents and images, staged as the composers stage them', 
     )
   );
   const bar = container.querySelector('fieldset')!;
+  // A file dropped while adding turns importing on in view.
   fireEvent.drop(bar, {
     dataTransfer: { files: [new File(['x'], 'board.png', { type: 'image/png' })] },
   });
+  expect(modeButton()).toHaveAttribute('aria-pressed', 'true');
   expect(await screen.findByRole('img')).toBeVisible();
   // An image alone imports.
   await userEvent.click(screen.getByRole('button', { name: '下書きを作る' }));
@@ -356,9 +385,12 @@ it('imports attached documents and images, staged as the composers stage them', 
   });
   expect(screen.queryByRole('img')).toBeNull();
 
-  fireEvent.drop(bar, {
-    dataTransfer: { files: [new File(['x'], 'board.png', { type: 'image/png' })] },
+  expect(modeButton()).toHaveAttribute('aria-pressed', 'false');
+
+  fireEvent.paste(addField(), {
+    clipboardData: { files: [new File(['x'], 'board.png', { type: 'image/png' })] },
   });
+  expect(modeButton()).toHaveAttribute('aria-pressed', 'true');
   await screen.findByRole('img');
   await userEvent.click(screen.getByRole('button', { name: '添付' }));
   await userEvent.upload(
@@ -376,7 +408,7 @@ it('imports attached documents and images, staged as the composers stage them', 
   window.electron = undefined;
 });
 
-it('in a scope with no project, imports lines but says a single TODO needs a project', async () => {
+it('in a scope with no project, imports but says a single TODO needs a project', async () => {
   onImport.mockClear();
   const onSubmit = vi.fn(async () => true);
   render(
@@ -395,9 +427,9 @@ it('in a scope with no project, imports lines but says a single TODO needs a pro
   expect(screen.getByRole('alert')).toHaveTextContent('TODO を入れるプロジェクトがありません');
   expect(addField()).toHaveValue('見積書を送る');
 
-  await userEvent.type(addField(), '{Shift>}{Enter}{/Shift}請求書を作る');
+  await userEvent.click(modeButton());
   expect(screen.queryByRole('alert')).toBeNull();
-  await userEvent.type(addField(), '{Enter}');
+  await userEvent.type(addField(), '{Shift>}{Enter}{/Shift}請求書を作る{Enter}');
   expect(onImport).toHaveBeenLastCalledWith('見積書を送る\n請求書を作る', {
     files: [],
     images: [],
@@ -426,8 +458,10 @@ it('adds no file while an import is starting', async () => {
       />
     )
   );
+  await userEvent.click(modeButton());
   await userEvent.type(addField(), 'a{Shift>}{Enter}{/Shift}b{Enter}');
   expect(pendingImport).toHaveBeenCalledOnce();
+  expect(modeButton()).toBeDisabled();
   const notes = new File(['# 議事録'], 'notes.md', { type: 'text/markdown' });
   expect(screen.getByRole('button', { name: '添付' })).toBeDisabled();
   fireEvent.drop(container.querySelector('fieldset')!, { dataTransfer: { files: [notes] } });
@@ -437,7 +471,46 @@ it('adds no file while an import is starting', async () => {
 
   await act(async () => answer(true));
   expect(screen.queryByText('notes.md')).toBeNull();
-  expect(screen.getByRole('button', { name: '添付' })).toBeEnabled();
+  expect(modeButton()).toBeEnabled();
+  window.electron = undefined;
+});
+
+it('discards the files staged for an import turned off, those still being written too', async () => {
+  let written: (file: unknown) => void = () => undefined;
+  const attachFile = vi
+    .fn()
+    .mockResolvedValueOnce({ attachmentId: 'a-staged', name: 'notes.md', byteSize: 12 })
+    .mockReturnValueOnce(new Promise((resolve) => (written = resolve)));
+  const discardAttachment = vi.fn(async () => undefined);
+  window.electron = {
+    actions: { attachFile, attachImage: vi.fn(), discardAttachment },
+  } as unknown as Window['electron'];
+  const { container } = render(
+    ja(
+      <TodoAddBar
+        today={TODAY}
+        projects={PROJECTS}
+        disabled={false}
+        onSubmit={vi.fn(async () => true)}
+        onImport={onImport}
+      />
+    )
+  );
+  const bar = container.querySelector('fieldset')!;
+  const notes = new File(['# 議事録'], 'notes.md', { type: 'text/markdown' });
+  fireEvent.drop(bar, { dataTransfer: { files: [notes] } });
+  expect(await screen.findByText('notes.md')).toBeVisible();
+  await userEvent.click(modeButton());
+  expect(discardAttachment).toHaveBeenLastCalledWith({ attachmentId: 'a-staged' });
+  expect(screen.queryByText('notes.md')).toBeNull();
+
+  // A file whose write lands after importing went off is discarded, not shown.
+  fireEvent.drop(bar, { dataTransfer: { files: [notes] } });
+  await userEvent.click(modeButton());
+  await act(async () => written({ attachmentId: 'a-late', name: 'notes.md', byteSize: 12 }));
+  expect(discardAttachment).toHaveBeenLastCalledWith({ attachmentId: 'a-late' });
+  await userEvent.click(modeButton());
+  expect(screen.queryByText('notes.md')).toBeNull();
   window.electron = undefined;
 });
 

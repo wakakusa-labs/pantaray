@@ -31,8 +31,9 @@
   }
 
   .todo-screen--with-pane:has(.action-task--split, .suggestion-task--split) .todo-screen__list {
-    flex: 0 1 var(--todo-split-list-width, 420px);
-    min-width: 320px;
+    flex: 0 1 var(--todo-split-list-width, 440px);
+    /* useTodoPaneWidth's least for the list: a row's title keeps about 100px. */
+    min-width: 440px;
   }
 }
 

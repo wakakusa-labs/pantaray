@@ -1499,7 +1499,7 @@ test('the rule beside a conversation drags, steps with the keys and is remembere
 
   // Past either end the other side keeps its least.
   await dragRule(page, -2000);
-  expect((await paneWidths(page)).list).toBeCloseTo(320, 0);
+  expect((await paneWidths(page)).list).toBeCloseTo(440, 0);
   await dragRule(page, 2000);
   widths = await paneWidths(page);
   expect(widths.pane).toBeCloseTo(360, 0);
@@ -1510,7 +1510,17 @@ test('the rule beside a conversation drags, steps with the keys and is remembere
   await page.keyboard.press('ArrowLeft');
   expect((await paneWidths(page)).pane).toBeCloseTo(360 + 24, 0);
   await page.keyboard.press('Home');
-  await expect(rule).toHaveAttribute('aria-valuenow', '320');
+  await expect(rule).toHaveAttribute('aria-valuenow', '440');
+  // At the list's least a row's title still shows, and opens its conversation.
+  const title = page
+    .getByRole('button', { name: /^リリースノートの下書きを書く/ })
+    .locator('.todo-row__text');
+  expect((await title.boundingBox())!.width).toBeGreaterThan(80);
+  await capture(page, info, 'rule-list-least');
+  await title.click();
+  await expect(page.getByRole('region', { name: 'リリースノートの下書きを書く' })).toBeVisible();
+  await page.getByRole('button', { name: /^来週の面接の質問リストを作る/ }).click();
+  await rule.focus();
   await page.keyboard.press('End');
   await expect(rule).toHaveAttribute('aria-valuenow', await rule.getAttribute('aria-valuemax'));
   await page.keyboard.press('ArrowLeft');
@@ -1533,7 +1543,7 @@ test('the rule beside a conversation drags, steps with the keys and is remembere
   await page.keyboard.press('Home');
   const widest = (await paneWidths(page)).pane;
   await page.setViewportSize({ width: 1180, height: 900 });
-  await expect.poll(async () => (await paneWidths(page)).list).toBeCloseTo(320, 0);
+  await expect.poll(async () => (await paneWidths(page)).list).toBeCloseTo(440, 0);
   expect(await hasNoSideScroll(page)).toBe(true);
   await page.setViewportSize({ width: 1360, height: 900 });
   await expect.poll(async () => (await paneWidths(page)).pane).toBeCloseTo(widest, 0);
@@ -1557,18 +1567,18 @@ test('beside a file the same rule sets the list, remembered apart from the conve
   await chip.click();
   await expect(page.locator('.suggestion-task--split')).toBeVisible();
   const initial = await paneWidths(page);
-  expect(initial.list).toBeCloseTo(420, 0);
+  expect(initial.list).toBeCloseTo(440, 0);
 
   await dragRule(page, 120);
   const split = await paneWidths(page);
-  expect(split.list).toBeCloseTo(540, 0);
-  expect(split.pane).toBeCloseTo(split.screen - 1 - 540, 0);
+  expect(split.list).toBeCloseTo(560, 0);
+  expect(split.pane).toBeCloseTo(split.screen - 1 - 560, 0);
   // Not past the room the file and the conversation's column need.
   await dragRule(page, 2000);
   expect((await paneWidths(page)).pane).toBeCloseTo(560, 0);
   await dragRule(page, -2000);
-  expect((await paneWidths(page)).list).toBeCloseTo(320, 0);
-  await dragRule(page, 220);
+  expect((await paneWidths(page)).list).toBeCloseTo(440, 0);
+  await dragRule(page, 160);
   const chosen = (await paneWidths(page)).list;
 
   // The file closed, the conversation keeps its own default; opened again, the list its width.

@@ -18,29 +18,29 @@ describe('the rule between the TODO list and its pane', () => {
   it('beside a conversation sets the pane, keeping both sides their least', () => {
     // 1,201px: the list, the 1px rule and the pane.
     expect(fixedWidthAt('conversation', 1201, 700)).toBe(500);
-    expect(fixedWidthAt('conversation', 1201, 100)).toBe(1201 - 1 - 320);
+    expect(fixedWidthAt('conversation', 1201, 100)).toBe(1201 - 1 - 440);
     expect(fixedWidthAt('conversation', 1201, 1150)).toBe(360);
   });
 
   it('beside a file sets the list, leaving the file and the conversation their room', () => {
     expect(fixedWidthAt('split', 1201, 500)).toBe(500);
-    expect(fixedWidthAt('split', 1201, 100)).toBe(320);
+    expect(fixedWidthAt('split', 1201, 100)).toBe(440);
     expect(fixedWidthAt('split', 1201, 1000)).toBe(1201 - 1 - 560);
   });
 
   it('keeps a remembered width inside a window narrowed since, and the list its least', () => {
     expect(shownFixedWidth('conversation', 1201, 600)).toBe(600);
-    expect(shownFixedWidth('conversation', 900, 800)).toBe(900 - 1 - 320);
+    expect(shownFixedWidth('conversation', 900, 800)).toBe(900 - 1 - 440);
     // Too narrow for both: the list keeps its least.
-    expect(shownFixedWidth('split', 700, 500)).toBe(320);
-    expect(boundaryRange('split', 700)).toEqual({ min: 320, max: 320 });
+    expect(shownFixedWidth('split', 700, 500)).toBe(440);
+    expect(boundaryRange('split', 700)).toEqual({ min: 440, max: 440 });
   });
 
   it('steps with the arrow keys and goes to either end with Home and End', () => {
     expect(keyedBoundary('ArrowRight', 'conversation', 1201, 600)).toBe(624);
     expect(keyedBoundary('ArrowLeft', 'conversation', 1201, 600)).toBe(576);
-    expect(keyedBoundary('ArrowLeft', 'conversation', 1201, 330)).toBe(320);
-    expect(keyedBoundary('Home', 'conversation', 1201, 600)).toBe(320);
+    expect(keyedBoundary('ArrowLeft', 'conversation', 1201, 450)).toBe(440);
+    expect(keyedBoundary('Home', 'conversation', 1201, 600)).toBe(440);
     expect(keyedBoundary('End', 'conversation', 1201, 600)).toBe(1201 - 1 - 360);
     expect(keyedBoundary('Enter', 'conversation', 1201, 600)).toBeNull();
   });

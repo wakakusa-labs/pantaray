@@ -305,3 +305,22 @@ def test_a_canceled_import_takes_no_edit_and_an_unknown_one_is_not_found(
     assert client.post(f"{ONE_IMPORT}/cancel").json() == canceled.json()
     assert (edit.status_code, _refusal(edit)["reason"]) == (409, "canceled")
     assert (unknown.status_code, _refusal(unknown)["reason"]) == (404, "not_found")
+
+
+def test_the_open_imports_of_a_scope_are_listed_until_one_closes(
+    client: TestClient,
+) -> None:
+    _start(client)
+
+    listed = client.get(IMPORTS, params={"scope": "all"})
+    in_a = client.get(
+        IMPORTS, params={"scope": "organization", "organization_id": "org-a"}
+    )
+    client.post(f"{ONE_IMPORT}/cancel")
+
+    assert listed.json() == [
+        {"import_id": IMPORT, "request": "Call the bank", "started_at": NOW.now}
+    ]
+    assert in_a.json() == []
+    assert client.get(IMPORTS, params={"scope": "all"}).json() == []
+    assert client.get(IMPORTS, params={"scope": "organization"}).status_code == 422

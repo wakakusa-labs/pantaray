@@ -599,6 +599,28 @@ async function openHome(page: Page, search = '', suggestion: OverlaySnapshot = S
               });
               return answer(request.import_id);
             },
+            // The open ones started in the scope, newest first, named by the first line sent.
+            listOpen: async (query: TodoScopeQuery) =>
+              [...imports.values()]
+                .filter(
+                  (found) =>
+                    found.state === 'open' &&
+                    (query.scope === 'all' ||
+                      (query.scope === 'organization'
+                        ? found.organization_id === query.organization_id
+                        : found.scope === 'no_organization'))
+                )
+                .reverse()
+                .map((found) => {
+                  const sent = importStarts.find((start) => start.import_id === found.import_id)!;
+                  const text =
+                    sent.text?.trim() || (sent.files ?? []).map((f) => f.name).join(', ');
+                  return {
+                    import_id: found.import_id,
+                    request: text.split('\n')[0],
+                    started_at: '2026-11-04T03:00:00.000Z',
+                  };
+                }),
             read: async ({ import_id }: TodoImportRefRequest) => answer(import_id),
             write: async ({ import_id, expected_revision, draft }: TodoImportWriteRequest) => {
               const current = imports.get(import_id)!;
@@ -1317,6 +1339,9 @@ const importStarts = (page: Page) =>
     () => (window as unknown as { importStarts: TodoImportStartRequest[] }).importStarts
   );
 
+const openImportRows = (page: Page) =>
+  page.getByRole('list', { name: '途中の取り込み' }).getByRole('button');
+
 test('lines pasted into the bar open a draft beside the list, which registers what it names', async ({
   page,
 }, info) => {
@@ -1379,6 +1404,7 @@ test('lines pasted into the bar open a draft beside the list, which registers wh
   await pane.getByRole('button', { name: '3 件を登録' }).click();
   await expect(pane).toHaveCount(0);
   await expect(page).not.toHaveURL(/import=/);
+  await expect(openImportRows(page)).toHaveCount(0);
   await expect(page.getByText('3 件の TODO を登録しました。')).toHaveRole('status');
   await expect(page.getByRole('heading', { level: 1, name: 'すべての TODO' })).toBeFocused();
   // The new organization's project is read with the workspace, and lists its TODO.
@@ -1420,10 +1446,50 @@ test('a file attached in an organization drafts inside it, and やめる closes 
     ],
   });
   await expect(page.locator('.todo-add-bar').getByText('notes.md')).toHaveCount(0);
+  // Sent with no text, the draft in progress is named by its file.
+  await expect(openImportRows(page)).toHaveCount(1);
+  await expect(page.getByRole('button', { name: '下書きを開く: notes.md' })).toHaveAttribute(
+    'aria-current',
+    'true'
+  );
 
   await pane.getByRole('button', { name: 'やめる' }).click();
   await expect(pane).toHaveCount(0);
+  await expect(openImportRows(page)).toHaveCount(0);
   await expect(page.getByRole('heading', { level: 1, name: 'すべての TODO' })).toBeFocused();
+});
+
+test('a draft left for another organization is listed over its TODOs, and reopens beside them', async ({
+  page,
+}, info) => {
+  await openHome(page);
+  await page.getByRole('button', { name: 'ファイルやテキストから取り込む' }).click();
+  const field = page.getByRole('textbox', { name: 'TODO を追加' });
+  await field.fill('見積書を再提出する\n値引きの条件をまとめる');
+  await field.press('Enter');
+  const pane = page.locator('.todo-screen__import');
+  await expect(pane.getByRole('heading', { level: 1, name: 'TODO の取り込み' })).toBeVisible();
+  const row = page.getByRole('button', { name: '下書きを開く: 見積書を再提出する' });
+  await expect(row).toHaveAttribute('aria-current', 'true');
+
+  // Another organization leaves the draft, and lists only the imports started in it.
+  await railOf(page).getByRole('button', { name: 'Xer' }).click();
+  await expect(page).toHaveURL(/#\/history\?scope=organization:xer$/);
+  await expect(pane).toHaveCount(0);
+  await expect(openImportRows(page)).toHaveCount(0);
+
+  await railOf(page).getByRole('button', { name: 'すべての組織' }).click();
+  await expect(page).toHaveURL(/#\/history$/);
+  await expect(row).toBeVisible();
+  await expect(row).not.toHaveAttribute('aria-current');
+  await expect(row).toContainText('下書き中');
+  await capture(page, info, 'open-import-row');
+
+  await row.click();
+  await expect(page).toHaveURL(/[?&]import=[0-9a-f-]{36}/);
+  await expect(pane.getByRole('heading', { name: 'Xer', exact: true })).toBeVisible();
+  await expect(row).toHaveAttribute('aria-current', 'true');
+  await capture(page, info, 'open-import-reopened');
 });
 
 test('an organization with no project yet takes an import, though not a single TODO', async ({

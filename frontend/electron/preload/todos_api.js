@@ -25,6 +25,7 @@ function createTodosApi({ ipcRenderer }) {
     },
     todoImports: {
       start: (request) => ipcRenderer.invoke('todoImports:start', request),
+      listOpen: (query) => ipcRenderer.invoke('todoImports:listOpen', query),
       read: (request) => ipcRenderer.invoke('todoImports:read', request),
       write: (request) => ipcRenderer.invoke('todoImports:write', request),
       register: (request) => ipcRenderer.invoke('todoImports:register', request),

@@ -10,8 +10,13 @@ import type {
   DeletedTodoView,
   TodoListPage,
   TodoListQuery,
+  TodoScopeQuery,
   TodoView,
 } from '../../electron/src/todos/todoContracts';
+import type {
+  OpenTodoImport,
+  TodoImportResult,
+} from '../../electron/src/todos/todoImportContracts';
 import { UserItem } from '@/components/action-conversation/UserMessage';
 import type { ChatViewHandle } from '@/components/chat/ChatView';
 import type { TaskPreview } from '@/components/task/taskFiles';
@@ -217,6 +222,7 @@ beforeEach(() => {
   });
   window.electron = {
     process: { platform: 'darwin' },
+    todoImports: { listOpen: vi.fn(async () => []) },
     history: {
       fetch: vi.fn(async () => ({
         data: ITEMS,
@@ -862,4 +868,44 @@ it('the sidebar’s title renames the organization in view, and all organization
   });
   expect(await screen.findByRole('heading', { level: 2, name: 'Xer Inc' })).toBeVisible();
   expect(screen.getByRole('button', { name: 'Xer Inc を編集' })).toHaveFocus();
+});
+
+it('lists the scope’s open imports over the TODOs, and one reopens its draft beside the list', async () => {
+  const listOpen = vi.fn(
+    async (_query: TodoScopeQuery): Promise<OpenTodoImport[]> => [
+      { import_id: 'I1', request: '見積書を再提出する', started_at: '2026-11-04T03:00:00.000Z' },
+    ]
+  );
+  const read = vi.fn(
+    async (): Promise<TodoImportResult> => ({
+      kind: 'ok',
+      result: {
+        import_id: 'I1',
+        scope: 'organization',
+        organization_id: 'O1',
+        revision: 1,
+        state: 'open',
+        // The Action's pane has its own tests.
+        action_id: null,
+        groups: [],
+        issue: null,
+        result: null,
+      },
+    })
+  );
+  Object.assign(window.electron!, { todoImports: { listOpen, read } });
+  renderPage(['/history?scope=organization:O1']);
+
+  const row = await screen.findByRole('button', { name: '下書きを開く: 見積書を再提出する' });
+  expect(listOpen).toHaveBeenLastCalledWith({ scope: 'organization', organization_id: 'O1' });
+  await userEvent.click(row);
+  expect(location()).toHaveTextContent('/history?scope=organization:O1&import=I1');
+  expect(await screen.findByRole('heading', { level: 1, name: 'TODO の取り込み' })).toBeVisible();
+  expect(read).toHaveBeenCalledWith({ import_id: 'I1' });
+  expect(row).toHaveAttribute('aria-current', 'true');
+
+  // Registered or canceled elsewhere: the change after it reads the import gone.
+  listOpen.mockResolvedValue([]);
+  act(() => todosChanged());
+  await waitFor(() => expect(screen.queryByRole('button', { name: /^下書きを開く/ })).toBeNull());
 });

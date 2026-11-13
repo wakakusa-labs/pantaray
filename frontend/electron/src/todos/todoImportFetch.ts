@@ -1,12 +1,15 @@
 import { LocalBackendRequestError, type createLocalBackendClient } from '../localBackend/client';
 
+import type { TodoScopeQuery } from './todoContracts';
 import {
+  type OpenTodoImport,
   TodoImportRefusedSchema,
   type TodoImportRefRequest,
   type TodoImportRegisterRequest,
   type TodoImportResult,
   type TodoImportStartRequest,
   type TodoImportWriteRequest,
+  parseOpenTodoImports,
   parseTodoImportView,
 } from './todoImportContracts';
 
@@ -21,6 +24,7 @@ export function createTodoImportFetcher(params: {
   getUserId: () => string | null;
 }): {
   start: (request: TodoImportStartRequest) => Promise<TodoImportResult>;
+  listOpen: (query: TodoScopeQuery) => Promise<OpenTodoImport[]>;
   read: (request: TodoImportRefRequest) => Promise<TodoImportResult>;
   write: (request: TodoImportWriteRequest) => Promise<TodoImportResult>;
   register: (request: TodoImportRegisterRequest) => Promise<TodoImportResult>;
@@ -58,6 +62,15 @@ export function createTodoImportFetcher(params: {
 
   return {
     start: (request) => send(importsPath(), 'POST', request),
+    listOpen: async (query) =>
+      parseOpenTodoImports(
+        await params.requestJson<unknown>({
+          path: importsPath(),
+          method: 'GET',
+          query,
+          timeoutMs: TODO_IMPORT_REQUEST_TIMEOUT_MS,
+        })
+      ),
     read: ({ import_id }) => send(importPath(import_id), 'GET'),
     write: ({ import_id, ...body }) => send(importPath(import_id), 'PUT', body),
     register: ({ import_id, expected_revision }) =>

@@ -110,7 +110,7 @@ const ALLOWED_LOCAL_BACKEND_ROUTES: ReadonlyArray<{
     path: /^\/v1\/agents\/users\/[^/]+\/todos\/progress-records\/[^/]+$/,
     methods: new Set(['DELETE']),
   },
-  { path: /^\/v1\/agents\/users\/[^/]+\/todo-imports$/, methods: new Set(['POST']) },
+  { path: /^\/v1\/agents\/users\/[^/]+\/todo-imports$/, methods: new Set(['GET', 'POST']) },
   { path: /^\/v1\/agents\/users\/[^/]+\/todo-imports\/[^/]+$/, methods: new Set(['GET', 'PUT']) },
   {
     path: /^\/v1\/agents\/users\/[^/]+\/todo-imports\/[^/]+\/(register|cancel)$/,

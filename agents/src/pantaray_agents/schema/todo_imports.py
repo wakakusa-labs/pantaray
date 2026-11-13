@@ -117,6 +117,15 @@ class TodoImportHttpView(_View):
     result: TodoImportResult | None
 
 
+class OpenTodoImportView(_View):
+    """An import neither registered nor canceled, for the list to reopen."""
+
+    import_id: str
+    # The first line of what the user sent: the text, or the files named.
+    request: str
+    started_at: str
+
+
 type TodoImportRefusalReason = (
     DraftIssueReason
     | Literal[

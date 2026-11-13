@@ -165,6 +165,14 @@ const TodoImportViewSchema = z
   })
   .strict();
 
+/**
+ * An import neither registered nor canceled, as `GET /todo-imports` lists them for a scope, newest
+ * first. `request` is the first line of what the user sent: the text, or the files named.
+ */
+const OpenTodoImportSchema = z
+  .object({ import_id: z.string(), request: z.string(), started_at: z.string() })
+  .strict();
+
 /** `TodoImportRefused`: the indexes locate a draft issue. */
 export const TodoImportRefusedSchema = z
   .object({
@@ -194,6 +202,7 @@ export type TodoImportRefRequest = z.infer<typeof TodoImportRefRequestSchema>;
 export type TodoImportWriteRequest = z.infer<typeof TodoImportWriteRequestSchema>;
 export type TodoImportRegisterRequest = z.infer<typeof TodoImportRegisterRequestSchema>;
 export type TodoImportView = z.infer<typeof TodoImportViewSchema>;
+export type OpenTodoImport = z.infer<typeof OpenTodoImportSchema>;
 export type TodoImportRefusal = Omit<z.infer<typeof TodoImportRefusedSchema>, 'type'>;
 /** A request the backend refused keeps its reason; what the screen shows is its to decide. */
 export type TodoImportResult =
@@ -203,5 +212,11 @@ export type TodoImportResult =
 export function parseTodoImportView(payload: unknown): TodoImportView {
   const result = TodoImportViewSchema.safeParse(payload);
   if (!result.success) throw new ActionWireContractError('TODO import');
+  return result.data;
+}
+
+export function parseOpenTodoImports(payload: unknown): OpenTodoImport[] {
+  const result = z.array(OpenTodoImportSchema).safeParse(payload);
+  if (!result.success) throw new ActionWireContractError('open TODO imports');
   return result.data;
 }

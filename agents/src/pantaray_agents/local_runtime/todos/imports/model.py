@@ -147,6 +147,17 @@ class TodoImportView:
 
 
 @dataclass(frozen=True, slots=True)
+class OpenTodoImport:
+    """An import neither registered nor canceled, named by what the user sent."""
+
+    import_id: str
+    # The first line of the Action's first message: the user's text, or the
+    # files and images named when they sent no text.
+    request: str
+    started_at: str
+
+
+@dataclass(frozen=True, slots=True)
 class StaleRevision:
     """The draft changed since `expected_revision`; write on top of `current`."""
 

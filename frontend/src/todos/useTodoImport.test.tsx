@@ -1,12 +1,14 @@
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 
+import type { TodoScopeQuery } from '../../electron/src/todos/todoContracts';
 import type {
+  OpenTodoImport,
   TodoImportResult,
   TodoImportStartRequest,
   TodoImportView,
 } from '../../electron/src/todos/todoImportContracts';
-import { useTodoImportStart } from './useTodoImport';
+import { useOpenTodoImports, useTodoImportStart } from './useTodoImport';
 
 const start = vi.fn<(request: TodoImportStartRequest) => Promise<TodoImportResult>>();
 
@@ -106,4 +108,30 @@ it('resends an unanswered start under the same id, and a changed one under a new
   });
   expect(refused).toBeNull();
   expect(result.current.problem).toBe('files_unavailable');
+});
+
+it('shows no other scope’s open imports while the new scope’s are read or fail', async () => {
+  const listOpen = vi.fn(
+    async (query: TodoScopeQuery): Promise<OpenTodoImport[]> =>
+      query.organization_id === 'xer'
+        ? [{ import_id: 'I1', request: 'a', started_at: '2026-11-04T03:00:00.000Z' }]
+        : Promise.reject(new Error('backend down'))
+  );
+  window.electron = {
+    todoImports: { listOpen },
+    todos: { onChanged: () => () => undefined },
+  } as unknown as Window['electron'];
+  const { result, rerender } = renderHook(
+    ({ scope }: { scope: TodoScopeQuery }) => useOpenTodoImports(scope),
+    { initialProps: { scope: { scope: 'organization', organization_id: 'xer' } } }
+  );
+  await act(() => result.current.reload());
+  expect(result.current.items.map((item) => item.import_id)).toEqual(['I1']);
+
+  rerender({ scope: { scope: 'organization', organization_id: 'wakakusa' } });
+  expect(result.current.items).toEqual([]);
+  await act(() => result.current.reload());
+  expect(result.current.items).toEqual([]);
+  // Told, so a missing row does not read as no import at all.
+  expect(result.current.error).toBe(true);
 });

@@ -6,6 +6,7 @@ import { OpenWorkContext } from '@/components/action-conversation/sentMessageRef
 import type { WorkspaceProjects } from '@/components/history/HistoryProjects';
 import { ProjectFolders } from '@/components/history/ProjectFolders';
 import { DeletedTodoRow } from '@/components/todo/DeletedTodoRow';
+import { OpenTodoImportRows } from '@/components/todo/OpenTodoImportRows';
 import { ProgressScreen } from '@/components/todo/progress/ProgressScreen';
 import { TodoAddBar } from '@/components/todo/TodoAddBar';
 import { TodoConversationPane } from '@/components/todo/TodoConversationPane';
@@ -21,6 +22,7 @@ import { groupTodosByProject, todoProjectSlots } from '@/todos/groupTodosByProje
 import type { TodoListSort, TodoSelection } from '@/todos/todoSelection';
 import { useDeletedTodos } from '@/todos/useDeletedTodos';
 import {
+  useOpenTodoImports,
   useTodoImportStart,
   type TodoImportAttachments,
   type TodoImportProblem,
@@ -115,6 +117,7 @@ export function TodoScreen({
   const [listElement, setListElement] = useState<HTMLElement | null>(null);
   const paneWidth = useTodoPaneWidth(screenElement, listElement);
   const importStart = useTodoImportStart();
+  const openImports = useOpenTodoImports(selection.scope);
   // How many TODOs the last import added, told over the list once its pane closed.
   const [registered, setRegistered] = useState<number | null>(null);
   const deleted = useDeletedTodos(selection.scope);
@@ -208,6 +211,13 @@ export function TodoScreen({
       <>
         {/* What was read before the failure stays; the next change reads again. */}
         {todoList.error ? staleAlert : null}
+        {/* Without them a draft has no way back in, so their failure is told, unless the TODOs'
+            failure already says so; a change reads again. */}
+        {openImports.error && !todoList.error ? (
+          <p className="history-error" role="alert">
+            {t('todo.openImports.loadFailed')}
+          </p>
+        ) : null}
         {/* A disabled fieldset closes every control in it to the keyboard and the pointer. */}
         <fieldset
           className={
@@ -218,6 +228,11 @@ export function TodoScreen({
           disabled={!listShowsSelection}
           aria-busy={!listShowsSelection && !todoList.error}
         >
+          <OpenTodoImportRows
+            imports={openImports.items}
+            openImportId={importId}
+            onOpen={(id) => onSelect({ ...selection, todoId: null, importId: id })}
+          />
           {groups.length === 0 ? (
             <p className="todo-screen__empty">
               {projects.length === 0 ? t('todo.page.noProjects') : t('todo.page.empty')}
@@ -271,11 +286,13 @@ export function TodoScreen({
     const started = await importStart.start(selection.scope, text, attachments);
     if (started === null) return false;
     onSelect({ ...selection, todoId: null, importId: started });
+    void openImports.reload();
     return true;
   };
   const closeImport = () => {
     onSelect({ ...selection, importId: null });
     focusHeading();
+    void openImports.reload();
   };
 
   /** The bar under the list that adds a TODO. */

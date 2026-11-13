@@ -82,33 +82,12 @@ export const ScrollableContent = styled.div<{ $collapsed?: boolean }>`
    * 横の余白はパネル（PopupContainer の横 padding）が単独で持つ。ここで
    * スクロールバー用の帯を足すと、会話だけが右へ 5px 内側に寄り、パネル下端に
    * 固定した composer と行端が揃わなくなる（しかも畳んだ時だけ帯が消えるので、
-   * 開閉でずれ幅が変わる）。スクロールバーは 5px 幅・スクロール中だけ可視で、
-   * レイアウト幅を取らないオーバーレイ表示なので、帯は確保しない。
+   * 開閉でずれ幅が変わる）。スクロールバーは出さないので、帯は確保しない。
    */
   margin-bottom: ${(props) => (props.$collapsed ? '4px' : '0')};
   position: relative;
   z-index: 1;
-  scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
-  &::-webkit-scrollbar {
-    width: 5px;
-  }
-  &::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  &::-webkit-scrollbar-thumb {
-    background-color: transparent;
-    border-radius: 999px;
-  }
-  &[data-scrolling='true'] {
-    scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
-  }
-  &[data-scrolling='true']::-webkit-scrollbar-thumb {
-    background-color: rgba(255, 255, 255, 0.12);
-  }
-  &[data-scrolling='true']::-webkit-scrollbar-thumb:hover {
-    background-color: rgba(255, 255, 255, 0.18);
-  }
+  scrollbar-width: none;
   max-height: ${(props) => (props.$collapsed ? COLLAPSED_PREVIEW_MAX_HEIGHT_CSS : 'none')};
   overflow-y: ${(props) => (props.$collapsed ? 'hidden' : 'auto')};
   transition:

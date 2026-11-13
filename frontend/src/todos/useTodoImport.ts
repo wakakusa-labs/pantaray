@@ -91,16 +91,20 @@ export function useOpenTodoImports(scope: TodoScopeQuery): {
   reload: () => Promise<void>;
 } {
   const { scope: scopeKind, organization_id: organizationId } = scope;
+  const key = `${scopeKind}:${organizationId ?? ''}`;
   const read = useCallback(
-    () =>
-      importsBridge().listOpen({
+    async () => ({
+      key,
+      items: await importsBridge().listOpen({
         scope: scopeKind,
         ...(organizationId === undefined ? {} : { organization_id: organizationId }),
       }),
-    [scopeKind, organizationId]
+    }),
+    [key, scopeKind, organizationId]
   );
   const { data, reload } = useTodoRead(read, false);
-  return { items: data ?? [], reload };
+  // Another scope's imports, kept while this one's are read or failed, are not this scope's to open.
+  return { items: data?.key === key ? data.items : [], reload };
 }
 
 /**

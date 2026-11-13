@@ -180,6 +180,23 @@ test('a refusal keeps its reason and indexes; other failures and off-contract vi
   );
 });
 
+test('the open imports are read for the scope, and an off-contract row throws', async () => {
+  const opened = { import_id: IMPORT, request: 'Call the bank', started_at: '2026-11-04T03:00Z' };
+  const responses = [[opened], [{ ...opened, request: null }]];
+  await withImportBackend(
+    (count) => jsonResponse(200, responses[count - 1]),
+    async (imports, requests) => {
+      assert.deepEqual(
+        await imports.listOpen({ scope: 'organization', organization_id: 'org 1' }),
+        [opened]
+      );
+      assert.equal(requests[0].options.method, 'GET');
+      assert.equal(requests[0].url, `${BASE}?scope=organization&organization_id=org+1`);
+      await assert.rejects(imports.listOpen({ scope: 'all' }), /response is invalid/);
+    }
+  );
+});
+
 function importHandlers() {
   const handlers = new Map();
   const calls = [];
@@ -191,6 +208,7 @@ function importHandlers() {
     {
       todoImports: {
         start: record('start'),
+        listOpen: record('listOpen'),
         read: record('read'),
         write: record('write'),
         register: record('register'),
@@ -229,6 +247,8 @@ test('TODO import IPC validates the renderer payload before anything reaches the
     // Images alone start an import, and with a document.
     ['todoImports:start', { import_id: IMPORT, scope: 'all', images: [image] }],
     ['todoImports:start', { import_id: IMPORT, scope: 'all', files: [file], images: [image] }],
+    ['todoImports:listOpen', { scope: 'all' }],
+    ['todoImports:listOpen', { scope: 'organization', organization_id: 'org-1' }],
     ['todoImports:read', { import_id: IMPORT }],
     ['todoImports:write', { import_id: IMPORT, expected_revision: 1, draft: DRAFT }],
     ['todoImports:write', { import_id: IMPORT, expected_revision: 3, draft: { groups: [] } }],
@@ -257,6 +277,7 @@ test('TODO import IPC validates the renderer payload before anything reaches the
       { ...start, images: Array.from({ length: 33 }, () => image) },
       { ...start, user_id: 'someone-else' },
     ],
+    'todoImports:listOpen': [{}, { scope: 'organization' }, { scope: 'all', organization_id: 'x' }],
     'todoImports:read': [{}, { import_id: IMPORT, extra: 1 }],
     'todoImports:write': [
       { import_id: IMPORT, draft: DRAFT },

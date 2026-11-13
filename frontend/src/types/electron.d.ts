@@ -81,6 +81,7 @@ import type {
   TodoWriteResult,
 } from '../../electron/src/todos/todoContracts';
 import type {
+  OpenTodoImport,
   TodoImportRefRequest,
   TodoImportRegisterRequest,
   TodoImportResult,
@@ -314,6 +315,8 @@ declare global {
       todoImports?: {
         /** Opens the import and starts the Action that drafts it; resending `import_id` returns it. */
         start: (request: TodoImportStartRequest) => Promise<TodoImportResult>;
+        /** The imports neither registered nor canceled, newest first: those started in the scope, or every one for `all`. */
+        listOpen: (query: TodoScopeQuery) => Promise<OpenTodoImport[]>;
         read: (request: TodoImportRefRequest) => Promise<TodoImportResult>;
         /** Replaces the whole draft; refused as `stale_revision` once it changed since. */
         write: (request: TodoImportWriteRequest) => Promise<TodoImportResult>;

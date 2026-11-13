@@ -201,6 +201,7 @@ test('Only the main window uses the chat and the TODO list', () => {
     'todos:addProgressRecord',
     'todos:deleteProgressRecord',
     'todoImports:start',
+    'todoImports:listOpen',
     'todoImports:read',
     'todoImports:write',
     'todoImports:register',

@@ -12,12 +12,16 @@ import {
   TodoImportStartRequestSchema,
   TodoImportWriteRequestSchema,
 } from '../../todos/todoImportContracts';
+import { TodoScopeQuerySchema } from '../../todos/todoContracts';
 import { parseInput } from '../schemas/error';
 
 export function registerTodoImportHandlers(ctx: MainContext, registrar: IpcRegistrar): void {
   // The renderer names the import with `import_id`, so a resend starts nothing new.
   registrar.handle('todoImports:start', async (_event, request) =>
     ctx.todoImports.start(parseInput(TodoImportStartRequestSchema, 'todoImports:start', request))
+  );
+  registrar.handle('todoImports:listOpen', async (_event, query) =>
+    ctx.todoImports.listOpen(parseInput(TodoScopeQuerySchema, 'todoImports:listOpen', query))
   );
   registrar.handle('todoImports:read', async (_event, request) =>
     ctx.todoImports.read(parseInput(TodoImportRefRequestSchema, 'todoImports:read', request))

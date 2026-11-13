@@ -7,9 +7,9 @@ A refusal is a `TodoImportRefused` body; none of them names a TODO's text.
 
 from __future__ import annotations
 
-from typing import Final
+from typing import Annotated, Final
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 
 from pantaray_agents.auth_http import get_current_user_id_from_token
@@ -28,6 +28,7 @@ from pantaray_agents.local_runtime.todos.imports.model import (
 )
 from pantaray_agents.local_runtime.todos.imports.register import register_todo_import
 from pantaray_agents.local_runtime.todos.imports.start import (
+    list_open_todo_imports,
     read_todo_import_action_id,
     start_todo_import,
 )
@@ -37,6 +38,7 @@ from pantaray_agents.local_runtime.todos.imports.store import (
     write_todo_import_draft,
 )
 from pantaray_agents.schema.todo_imports import (
+    OpenTodoImportView,
     TodoImportDraftRequest,
     TodoImportHttpView,
     TodoImportRefusalReason,
@@ -45,6 +47,7 @@ from pantaray_agents.schema.todo_imports import (
     TodoImportStartRequest,
     todo_import_http_view,
 )
+from pantaray_agents.schema.todos import TodoScopeQuery
 from pantaray_agents.security.storage_paths import is_valid_image_storage_path
 
 router = APIRouter(
@@ -155,6 +158,30 @@ def post_todo_import(
     if isinstance(started, DraftIssue):
         return _refused(started.reason, started)
     return todo_import_http_view(started.view, action_id=started.action_id)
+
+
+@router.get(
+    "/{user_id}/todo-imports",
+    response_model=tuple[OpenTodoImportView, ...],
+    description=(
+        "The imports neither registered nor canceled, newest first: those "
+        "started in the scope, or every one for `all`."
+    ),
+)
+def get_open_todo_imports(
+    user_id: str,
+    query: Annotated[TodoScopeQuery, Query()],
+    resolved_user_id: str = Depends(get_current_user_id_from_token),
+) -> tuple[OpenTodoImportView, ...]:
+    _require_path_user(user_id, resolved_user_id)
+    return tuple(
+        OpenTodoImportView(
+            import_id=opened.import_id,
+            request=opened.request,
+            started_at=opened.started_at,
+        )
+        for opened in list_open_todo_imports(user_id=user_id, scope=query.todo_scope())
+    )
 
 
 @router.get(

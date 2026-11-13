@@ -120,6 +120,9 @@ export const TODO_MESSAGES = defineMessages({
     'todo.import.issue.project_name_taken': 'A project of this name is in another organization.',
     'todo.import.issue.invalid_text': 'Write each TODO on one line.',
     'todo.import.issue.too_many_todos': 'Too many TODOs to add at once.',
+    'todo.openImports.label': 'Imports in progress',
+    'todo.openImports.state': 'Drafting',
+    'todo.openImports.open': 'Open the draft: {text}',
   },
   ja: {
     'todo.check': '完了: {text}',
@@ -240,5 +243,8 @@ export const TODO_MESSAGES = defineMessages({
     'todo.import.issue.project_name_taken': '同じ名前のプロジェクトが別の組織にあります。',
     'todo.import.issue.invalid_text': 'TODO は 1 行ずつ書いてください。',
     'todo.import.issue.too_many_todos': 'TODO が多すぎて、一度に登録できません。',
+    'todo.openImports.label': '途中の取り込み',
+    'todo.openImports.state': '下書き中',
+    'todo.openImports.open': '下書きを開く: {text}',
   },
 });

@@ -6,6 +6,7 @@ import type {
 } from '../../electron/src/actions/actionContracts';
 import type { TodoScopeQuery } from '../../electron/src/todos/todoContracts';
 import type {
+  OpenTodoImport,
   TodoImportDraft,
   TodoImportRefusal,
   TodoImportResult,
@@ -78,6 +79,28 @@ export function useTodoImportStart() {
   };
 
   return { start, problem };
+}
+
+/**
+ * The scope's open imports, newest first: those started in it, or every one for `all`. Read again
+ * when the TODOs change, as each start, registration and cancel moves their counter; a start's
+ * Action is created after that move, so the screen reads again once its start answered.
+ */
+export function useOpenTodoImports(scope: TodoScopeQuery): {
+  items: readonly OpenTodoImport[];
+  reload: () => Promise<void>;
+} {
+  const { scope: scopeKind, organization_id: organizationId } = scope;
+  const read = useCallback(
+    () =>
+      importsBridge().listOpen({
+        scope: scopeKind,
+        ...(organizationId === undefined ? {} : { organization_id: organizationId }),
+      }),
+    [scopeKind, organizationId]
+  );
+  const { data, reload } = useTodoRead(read, false);
+  return { items: data ?? [], reload };
 }
 
 /**

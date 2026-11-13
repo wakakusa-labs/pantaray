@@ -1,0 +1,62 @@
+/* The imports still being drafted: TODO rows' lines in grey, one button each, no box. */
+.todo-open-imports {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The TODO row's columns: the mark under the checks, the text, the state, the day. */
+.todo-open-import {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 96px 84px 24px;
+  box-sizing: border-box;
+  column-gap: 10px;
+  align-items: center;
+  width: 100%;
+  height: 40px;
+  padding: 0 6px 0 12px;
+  border: none;
+  border-bottom: 1px solid var(--fog-line);
+  background: transparent;
+  color: var(--fog-text-2);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.todo-open-import:hover {
+  background: var(--fog-mist);
+}
+
+.todo-open-import[aria-current='true'] {
+  background: var(--fog-mist-strong);
+}
+
+.todo-open-import:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.todo-open-import__mark {
+  color: var(--fog-text-3);
+}
+
+.todo-open-import__text {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.todo-open-import__state,
+.todo-open-import__day {
+  justify-self: end;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.todo-open-import__day {
+  color: var(--fog-text-3);
+  font-variant-numeric: tabular-nums;
+}

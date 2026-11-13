@@ -152,6 +152,7 @@ export const validInvokeChannels = [
   'todos:deleteProgressRecord',
   // A TODO import's draft (main window only)
   'todoImports:start',
+  'todoImports:listOpen',
   'todoImports:read',
   'todoImports:write',
   'todoImports:register',

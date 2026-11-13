@@ -23,24 +23,33 @@ from pantaray_agents.agents.action_agent.tools import (
 from pantaray_agents.local_runtime.todos.action_link import (
     read_todo_import_for_action,
 )
+from pantaray_agents.local_runtime.todos.clock import TodoClock
 from pantaray_agents.local_runtime.todos.db import (
     AllScope,
     NoOrganizationScope,
     OrganizationScope,
     TodoScope,
 )
-from pantaray_agents.local_runtime.todos.imports.model import TodoImportResult
+from pantaray_agents.local_runtime.todos.imports.model import (
+    OpenTodoImport,
+    TodoImportResult,
+)
 from pantaray_agents.local_runtime.todos.imports.register import register_todo_import
 from pantaray_agents.local_runtime.todos.imports.start import (
     TodoImportStarted,
+    list_open_todo_imports,
     start_todo_import,
     todo_import_message_id,
+)
+from pantaray_agents.local_runtime.todos.imports.store import (
+    cancel_todo_import,
+    open_todo_import,
 )
 from pantaray_agents.schema.agent.action_message import FileAttachmentInput
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.agent.image import ImageInput
 
-from .store_support import NOW, USER, seed_action
+from .store_support import NOW, TOKYO, USER, seed_action
 
 IMPORT = "import-1"
 
@@ -310,3 +319,56 @@ def test_a_registered_import_takes_no_more_writes(db: Path) -> None:
     refused = _write(2, _group(None, None, {"text": "Call the bank"}))
 
     assert (refused["status"], refused["reason"]) == ("refused", "registered")
+
+
+def test_the_open_imports_are_those_started_in_the_scope_newest_first(
+    db: Path,
+) -> None:
+    def start(import_id: str, scope: TodoScope, text: str, at: str) -> None:
+        started = start_todo_import(
+            user_id=USER,
+            import_id=import_id,
+            scope=scope,
+            text=text,
+            files=(),
+            images=(),
+            clock=TodoClock(now=at, zone=TOKYO),
+        )
+        assert isinstance(started, TodoImportStarted), started
+
+    in_a = OrganizationScope(organization_id="org-a")
+    start(
+        "all", AllScope(), "  Call the bank\r\nRenew the passport", "2026-11-04T01:00Z"
+    )
+    start("a", in_a, "Pay the invoice", "2026-11-04T02:00Z")
+    start("none", NoOrganizationScope(), "Book the dentist", "2026-11-04T03:00Z")
+    start("b", OrganizationScope(organization_id="org-b"), "Hire", "2026-11-04T04:00Z")
+    start("canceled", in_a, "Dropped", "2026-11-04T05:00Z")
+    start("registered", in_a, "Added", "2026-11-04T06:00Z")
+    cancel_todo_import(user_id=USER, import_id="canceled", clock=NOW)
+    registered = register_todo_import(
+        user_id=USER, import_id="registered", expected_revision=1, clock=NOW
+    )
+    assert isinstance(registered, TodoImportResult)
+    # A start that failed after the draft opened has no Action to reopen.
+    open_todo_import(user_id=USER, import_id="no-action", scope=in_a, clock=NOW)
+
+    def listed(scope: TodoScope) -> list[tuple[str, str]]:
+        return [
+            (opened.import_id, opened.request)
+            for opened in list_open_todo_imports(user_id=USER, scope=scope)
+        ]
+
+    assert listed(AllScope()) == [
+        ("b", "Hire"),
+        ("none", "Book the dentist"),
+        ("a", "Pay the invoice"),
+        ("all", "Call the bank"),
+    ]
+    assert listed(in_a) == [("a", "Pay the invoice")]
+    assert listed(NoOrganizationScope()) == [("none", "Book the dentist")]
+    assert list_open_todo_imports(user_id=USER, scope=in_a) == (
+        OpenTodoImport(
+            import_id="a", request="Pay the invoice", started_at="2026-11-04T02:00Z"
+        ),
+    )

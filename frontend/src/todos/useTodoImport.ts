@@ -88,6 +88,8 @@ export function useTodoImportStart() {
  */
 export function useOpenTodoImports(scope: TodoScopeQuery): {
   items: readonly OpenTodoImport[];
+  /** The last read failed: the rows shown may be out of date, or missing. */
+  error: boolean;
   reload: () => Promise<void>;
 } {
   const { scope: scopeKind, organization_id: organizationId } = scope;
@@ -102,9 +104,9 @@ export function useOpenTodoImports(scope: TodoScopeQuery): {
     }),
     [key, scopeKind, organizationId]
   );
-  const { data, reload } = useTodoRead(read, false);
+  const { data, error, reload } = useTodoRead(read, false);
   // Another scope's imports, kept while this one's are read or failed, are not this scope's to open.
-  return { items: data?.key === key ? data.items : [], reload };
+  return { items: data?.key === key ? data.items : [], error, reload };
 }
 
 /**

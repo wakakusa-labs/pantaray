@@ -211,6 +211,13 @@ export function TodoScreen({
       <>
         {/* What was read before the failure stays; the next change reads again. */}
         {todoList.error ? staleAlert : null}
+        {/* Without them a draft has no way back in, so their failure is told, unless the TODOs'
+            failure already says so; a change reads again. */}
+        {openImports.error && !todoList.error ? (
+          <p className="history-error" role="alert">
+            {t('todo.openImports.loadFailed')}
+          </p>
+        ) : null}
         {/* A disabled fieldset closes every control in it to the keyboard and the pointer. */}
         <fieldset
           className={

@@ -123,6 +123,7 @@ export const TODO_MESSAGES = defineMessages({
     'todo.openImports.label': 'Imports in progress',
     'todo.openImports.state': 'Drafting',
     'todo.openImports.open': 'Open the draft: {text}',
+    'todo.openImports.loadFailed': "Couldn't load the imports in progress.",
   },
   ja: {
     'todo.check': '完了: {text}',
@@ -246,5 +247,6 @@ export const TODO_MESSAGES = defineMessages({
     'todo.openImports.label': '途中の取り込み',
     'todo.openImports.state': '下書き中',
     'todo.openImports.open': '下書きを開く: {text}',
+    'todo.openImports.loadFailed': '途中の取り込みを読み込めませんでした。',
   },
 });

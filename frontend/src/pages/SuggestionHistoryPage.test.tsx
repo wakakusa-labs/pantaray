@@ -222,6 +222,7 @@ beforeEach(() => {
   });
   window.electron = {
     process: { platform: 'darwin' },
+    todoImports: { listOpen: vi.fn(async () => []) },
     history: {
       fetch: vi.fn(async () => ({
         data: ITEMS,

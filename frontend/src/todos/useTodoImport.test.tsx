@@ -132,4 +132,6 @@ it('shows no other scope’s open imports while the new scope’s are read or fa
   expect(result.current.items).toEqual([]);
   await act(() => result.current.reload());
   expect(result.current.items).toEqual([]);
+  // Told, so a missing row does not read as no import at all.
+  expect(result.current.error).toBe(true);
 });

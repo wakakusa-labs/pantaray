@@ -293,10 +293,13 @@ it('adds to the first project from today with no due, and an IME’s Enter sends
   expect(onSubmit).toHaveBeenLastCalledWith('p1', TODAY, '見積書を送る', null);
   expect(addField()).toHaveValue('');
 
-  // A TODO is one line: pasted lines are joined, and Shift+Enter adds as Enter does.
+  // A TODO is one line: pasted lines are joined, and Shift+Enter neither sends nor breaks it.
   fireEvent.change(addField(), { target: { value: '見積書を\n  送る\n' } });
   expect(addField()).toHaveValue('見積書を 送る ');
   await userEvent.type(addField(), '{Shift>}{Enter}{/Shift}');
+  expect(onSubmit).toHaveBeenCalledOnce();
+  expect(addField()).toHaveValue('見積書を 送る ');
+  await userEvent.type(addField(), '{Enter}');
   expect(onSubmit).toHaveBeenLastCalledWith('p1', TODAY, '見積書を 送る', null);
   expect(onImport).not.toHaveBeenCalled();
 });

@@ -107,14 +107,22 @@ class TodoListQuery(TodoProjectQuery):
 class TodoCreateRequest(_Request):
     """`client_todo_id` is the idempotency key; an omitted `starts_on` starts
     it today and `null` leaves it with no start. The text is one line, as the
-    core decides."""
+    core decides. `organization_id` puts a TODO with no project in that
+    organization; one with a project is in the project's, so not both."""
 
     client_todo_id: _Id
     project_id: _Id | None
+    organization_id: _Id | None
     # The pickup hands the text to an Action as its first message.
     text: Annotated[str, Field(max_length=ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS)]
     starts_on: dt.date | None = None
     due: TodoDueBody | None
+
+    @model_validator(mode="after")
+    def _one_place(self) -> Self:
+        if self.project_id is not None and self.organization_id is not None:
+            raise ValueError("project_id and organization_id are not given together")
+        return self
 
 
 class TodoCheckRequest(_Request):
@@ -161,6 +169,8 @@ class PendingDeletionRequestView(_View):
 class TodoView(_View):
     todo_id: str
     project_id: str | None
+    # Its own organization while it has no project; null with a project.
+    organization_id: str | None
     text: str
     author: TodoAuthor
     origin: Literal["written", "suggestion", "recurrence"]
@@ -205,6 +215,7 @@ def todo_view(
     return TodoView(
         todo_id=todo.todo_id,
         project_id=todo.project_id,
+        organization_id=todo.organization_id,
         text=todo.text,
         author=todo.author,
         origin=todo.origin.kind,

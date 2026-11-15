@@ -5,7 +5,7 @@ import { ComposerAlert, ComposerAttachments } from '@/components/agent-overlay/C
 import { ATTACHMENT_ACCEPT } from '@/components/agent-overlay/attachmentStaging';
 import { isImeKey } from '@/components/ui/imeKey';
 import { useI18n } from '@/context/useI18n';
-import type { TodoProjectSlot } from '@/todos/groupTodosByProject';
+import type { TodoPlace, TodoProjectSlot } from '@/todos/groupTodosByProject';
 import type { TodoImportAttachments } from '@/todos/useTodoImport';
 
 import type { TodoDue } from '../../../electron/src/todos/todoContracts';
@@ -19,9 +19,15 @@ import './todoAddBar.css';
 /** A TODO is one line, so lines pasted, or kept from an import, are joined. */
 const oneLine = (text: string) => text.replace(/[^\S\n]*\n\s*/g, ' ');
 
+/** One value per place: a project, or an organization's own no project, or none. */
+const slotKey = (slot: TodoPlace) =>
+  slot.projectId === null
+    ? `organization:${slot.organizationId ?? ''}`
+    : `project:${slot.projectId}`;
+
 /**
  * The bar under the list, in one of two modes that the toggle at its left end switches. Adding
- * takes the text as one TODO, on one line, with its project (while several are in view), start
+ * takes the text as one TODO, on one line, with its place (while several are in view), start
  * (today at first, or none) and due day (none at first). Importing hands text of any length and
  * documents and images attached, dropped or pasted to Pantaray, which drafts TODOs from them; a
  * file dropped or pasted while adding turns importing on. Enter sends; Shift+Enter and an IME's
@@ -37,12 +43,12 @@ export function TodoAddBar({
 }: {
   /** The backend's today. */
   today: string;
-  /** Empty in a scope with no project yet, which takes imports but no single TODO. */
+  /** Empty when the filter names a project the scope does not hold: imports, but no single TODO. */
   projects: readonly TodoProjectSlot[];
   /** The list on screen is not the one selected yet, so nothing is added to it. */
   disabled: boolean;
   onSubmit: (
-    projectId: string | null,
+    place: TodoPlace,
     startsOn: string | null,
     text: string,
     due: TodoDue | null
@@ -63,15 +69,15 @@ export function TodoAddBar({
     setText(next);
   };
   const [sending, setSending] = useState(false);
-  const [chosenProject, setChosenProject] = useState(projects[0]?.projectId ?? '');
+  const [chosenProject, setChosenProject] = useState(projects[0] ? slotKey(projects[0]) : '');
   // A TODO was sent where no project can take it.
   const [needsProject, setNeedsProject] = useState(false);
   const [due, setDue] = useState<string | null>(null);
   // 'today' is whichever day that is when the TODO is sent; a null date is no start.
   const [start, setStart] = useState<'today' | { date: string | null }>('today');
-  // A project gone from view falls back to the first one.
+  // A place gone from view falls back to the first one.
   const project: TodoProjectSlot | undefined =
-    projects.find((slot) => (slot.projectId ?? '') === chosenProject) ?? projects[0];
+    projects.find((slot) => slotKey(slot) === chosenProject) ?? projects[0];
   const startsOn = start === 'today' ? today : start.date;
   const dates = { start: startsOn, due };
   const filled = text.trim() !== '' || (importing && files.attachments.length > 0);
@@ -98,20 +104,23 @@ export function TodoAddBar({
 
   const send = async () => {
     if (!canSend) return;
-    if (!importing && project === undefined) {
+    // An import takes no place.
+    const place = importing ? null : project;
+    if (place === undefined) {
       setNeedsProject(true);
       return;
     }
     setSending(true);
     const sent = text;
-    const taken = importing
-      ? await onImport(sent, files.payload)
-      : await onSubmit(
-          project?.projectId ?? null,
-          startsOn,
-          sent.trim(),
-          due === null ? null : { date: due, repeat: 'none' }
-        );
+    const taken =
+      place === null
+        ? await onImport(sent, files.payload)
+        : await onSubmit(
+            { projectId: place.projectId, organizationId: place.organizationId },
+            startsOn,
+            sent.trim(),
+            due === null ? null : { date: due, repeat: 'none' }
+          );
     // Text typed while the send was answering is the next one, so only the sent text is cleared,
     // and an import stays on for newer text, which may have lines no TODO can take.
     if (taken) {
@@ -221,12 +230,20 @@ export function TodoAddBar({
                 <span className="todo-group__dot" aria-hidden="true" />
                 <select
                   aria-label={t('todo.add.project')}
-                  value={project?.projectId ?? ''}
+                  value={project ? slotKey(project) : ''}
                   onChange={(event) => setChosenProject(event.target.value)}
                 >
                   {projects.map((slot) => (
-                    <option key={slot.projectId ?? ''} value={slot.projectId ?? ''}>
-                      {slot.projectName ?? t('todo.noProject')}
+                    <option key={slotKey(slot)} value={slotKey(slot)}>
+                      {slot.projectName ??
+                        (slot.organization === null
+                          ? t('todo.noProject')
+                          : t('todo.noProjectIn', {
+                              organization:
+                                slot.organization.kind === 'organization'
+                                  ? slot.organization.name
+                                  : t('todo.rail.none'),
+                            }))}
                     </option>
                   ))}
                 </select>

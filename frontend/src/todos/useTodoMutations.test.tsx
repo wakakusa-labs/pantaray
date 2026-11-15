@@ -36,6 +36,8 @@ const wrapper = ({ children }: { children: ReactNode }) => (
   <UiLanguageProvider initialLanguage="ja">{children}</UiLanguageProvider>
 );
 const ok = { kind: 'ok', result: {} } as TodoWriteResult<TodoView>;
+const P1 = { projectId: 'p1', organizationId: null };
+const NOWHERE = { projectId: null, organizationId: null };
 
 it('holds a row pending while its write is in flight, and lets it go when the write fails', async () => {
   let answer: (result: unknown) => void = () => undefined;
@@ -84,20 +86,20 @@ it('resends an unanswered add with the same id, so the same line is added once',
   const due = { date: '2026-11-06', repeat: 'none' } as const;
   create.mockRejectedValueOnce(new Error('timeout'));
   await act(async () => {
-    expect(await result.current.create('p1', '2026-11-02', '見積書を送る', due)).toBe(false);
+    expect(await result.current.create(P1, '2026-11-02', '見積書を送る', due)).toBe(false);
   });
   expect(result.current.failure?.target).toEqual({ kind: 'add' });
 
   create.mockRejectedValueOnce(new Error('timeout'));
-  await act(() => result.current.create('p1', '2026-11-02', '見積書を送る', due));
+  await act(() => result.current.create(P1, '2026-11-02', '見積書を送る', due));
   // The same line with another due is another TODO: the backend would answer with the first.
   create.mockRejectedValueOnce(new Error('timeout'));
-  await act(() => result.current.create('p1', '2026-11-02', '見積書を送る', null));
+  await act(() => result.current.create(P1, '2026-11-02', '見積書を送る', null));
   create.mockResolvedValue(ok);
   await act(async () => {
-    expect(await result.current.create('p1', '2026-11-02', '見積書を送る', null)).toBe(true);
+    expect(await result.current.create(P1, '2026-11-02', '見積書を送る', null)).toBe(true);
   });
-  await act(() => result.current.create('p1', '2026-11-02', '見積書を送る', null));
+  await act(() => result.current.create(P1, '2026-11-02', '見積書を送る', null));
   const [first, second, otherDue, otherDueAgain, afterAnswer] = create.mock.calls.map(
     ([request]) => request.client_todo_id
   );
@@ -109,16 +111,30 @@ it('resends an unanswered add with the same id, so the same line is added once',
   expect(create.mock.calls[0][0]).toEqual({
     client_todo_id: first,
     project_id: 'p1',
+    organization_id: null,
     text: '見積書を送る',
     starts_on: '2026-11-02',
     due,
   });
 });
 
+it('adds to an organization’s own no project, apart from the same line in another', async () => {
+  const { result } = renderHook(() => useTodoMutations({ reloadList, reloadDeleted }), { wrapper });
+  create.mockRejectedValue(new Error('timeout'));
+  for (const organizationId of ['org-a', 'org-b'])
+    await act(() =>
+      result.current.create({ projectId: null, organizationId }, '2026-11-02', '請求書', null)
+    );
+  const [inA, inB] = create.mock.calls.map(([request]) => request);
+  expect(inA).toMatchObject({ project_id: null, organization_id: 'org-a' });
+  // An unanswered add is resent with its id only to the same place.
+  expect(inB.client_todo_id).not.toBe(inA.client_todo_id);
+});
+
 it('adds nothing for an empty line', async () => {
   const { result } = renderHook(() => useTodoMutations({ reloadList, reloadDeleted }), { wrapper });
   await act(async () => {
-    expect(await result.current.create(null, '2026-11-02', '   ', null)).toBe(false);
+    expect(await result.current.create(NOWHERE, '2026-11-02', '   ', null)).toBe(false);
   });
   expect(create).not.toHaveBeenCalled();
   expect(result.current.failure).toBeNull();

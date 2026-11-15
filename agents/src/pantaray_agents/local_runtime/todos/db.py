@@ -29,8 +29,8 @@ from pantaray_agents.local_runtime.todos.model import (
 )
 
 TODO_COLUMNS: Final = tuple(
-    """todo_id project_id text author origin_kind suggestion_id previous_todo_id
-    starts_on due_date due_repeat checked_by checked_at report_kind report_note
+    """todo_id project_id organization_id text author origin_kind suggestion_id
+    previous_todo_id starts_on due_date due_repeat checked_by checked_at report_kind report_note
     report_run_id report_at deletion_request_id deletion_request_reason
     deletion_requested_at deletion_request_state deleted_by deleted_at
     created_at""".split()
@@ -85,8 +85,9 @@ class NoProject:
 type TodoProjectFilter = AnyProject | OneProject | NoProject
 
 
-def todo_scope_sql(scope: TodoScope) -> tuple[str, dict[str, str]]:
-    """A condition on `todo.project_id`; the query binds `:user_id`."""
+def project_scope_sql(scope: TodoScope) -> tuple[str, dict[str, str]]:
+    """A condition on `todo.project_id` alone, for rows that belong to a
+    project; the query binds `:user_id`."""
 
     match scope:
         case AllScope():
@@ -99,12 +100,27 @@ def todo_scope_sql(scope: TodoScope) -> tuple[str, dict[str, str]]:
                 {"organization_id": organization_id},
             )
         case NoOrganizationScope():
-            # A TODO without a project has no organization either.
             return (
                 "NOT EXISTS (SELECT 1 FROM workspace_project_organizations AS link "
                 "WHERE link.user_id = :user_id AND link.project_id = todo.project_id)",
                 {},
             )
+        case _:
+            assert_never(scope)
+
+
+def todo_scope_sql(scope: TodoScope) -> tuple[str, dict[str, str]]:
+    """A condition on `todo.project_id` and `todo.organization_id`: a TODO is
+    in its project's organization, or in its own while it has no project."""
+
+    in_projects, params = project_scope_sql(scope)
+    match scope:
+        case AllScope():
+            return in_projects, params
+        case OrganizationScope():
+            return f"({in_projects} OR todo.organization_id = :organization_id)", params
+        case NoOrganizationScope():
+            return f"({in_projects} AND todo.organization_id IS NULL)", params
         case _:
             assert_never(scope)
 
@@ -127,6 +143,16 @@ def owns_project(
     row = connection.execute(
         "SELECT 1 FROM workspace_projects WHERE user_id = ? AND project_id = ?",
         (user_id, project_id),
+    ).fetchone()
+    return row is not None
+
+
+def owns_organization(
+    connection: sqlite3.Connection, *, user_id: str, organization_id: str
+) -> bool:
+    row = connection.execute(
+        "SELECT 1 FROM workspace_organizations WHERE user_id = ? AND organization_id = ?",
+        (user_id, organization_id),
     ).fetchone()
     return row is not None
 
@@ -174,6 +200,7 @@ def todo_params(todo: Todo) -> dict[str, str | None]:
     return {
         "todo_id": todo.todo_id,
         "project_id": todo.project_id,
+        "organization_id": todo.organization_id,
         "text": todo.text,
         "author": todo.author,
         "origin_kind": origin.kind,
@@ -206,6 +233,7 @@ def todo_from_row(row: sqlite3.Row) -> Todo:
     return Todo(
         todo_id=row["todo_id"],
         project_id=row["project_id"],
+        organization_id=row["organization_id"],
         text=row["text"],
         author=row["author"],
         origin=_origin(row),

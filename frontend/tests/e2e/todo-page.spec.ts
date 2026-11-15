@@ -62,6 +62,7 @@ function todo(todoId: string, projectId: string | null, text: string, extra: Par
   return {
     todo_id: todoId,
     project_id: projectId,
+    organization_id: null,
     text,
     author: 'user',
     origin: 'written',
@@ -240,10 +241,18 @@ async function openHome(page: Page, search = '', suggestion: OverlaySnapshot = S
       const noop = () => {};
       const shift = (date: string, days: number) =>
         new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
-      // The backend's scope: a TODO belongs to its project's organization.
-      const inScope = (projectId: string | null, query: TodoScopeQuery) => {
+      // The backend's scope: a TODO belongs to its project's organization, or to its own while it
+      // has no project.
+      const inScope = (
+        projectId: string | null,
+        query: TodoScopeQuery,
+        organizationId: string | null = null
+      ) => {
         if (query.scope === 'all') return true;
-        const ids = projects.find((p) => p.project_id === projectId)?.organization_ids ?? [];
+        const ids =
+          projectId === null
+            ? [organizationId].filter((id) => id !== null)
+            : (projects.find((p) => p.project_id === projectId)?.organization_ids ?? []);
         return query.scope === 'no_organization'
           ? ids.length === 0
           : ids.includes(query.organization_id!);
@@ -504,7 +513,9 @@ async function openHome(page: Page, search = '', suggestion: OverlaySnapshot = S
                 .sort((a, b) => checkedAt(b).localeCompare(checkedAt(a)));
               return {
                 today: TODAY,
-                items: [...open, ...checked].filter((item) => inScope(item.project_id, query)),
+                items: [...open, ...checked].filter((item) =>
+                  inScope(item.project_id, query, item.organization_id)
+                ),
               };
             },
             // Writes change the TODOs the next read returns, as the backend's do.
@@ -512,6 +523,7 @@ async function openHome(page: Page, search = '', suggestion: OverlaySnapshot = S
               const added: TodoView = {
                 todo_id: `t-added-${items.length}`,
                 project_id: request.project_id,
+                organization_id: request.organization_id,
                 text: request.text,
                 author: 'user',
                 origin: 'written',
@@ -678,6 +690,7 @@ async function openHome(page: Page, search = '', suggestion: OverlaySnapshot = S
                   items.push({
                     todo_id: todoId,
                     project_id: project?.project_id ?? null,
+                    organization_id: null,
                     text: line.text,
                     author: 'user',
                     origin: 'written',
@@ -801,7 +814,9 @@ test('the home lists every organization’s TODOs by project, with the rail and 
   );
   // One add bar under the list, into the first project in view until another is chosen.
   await expect(page.getByRole('textbox', { name: 'TODO を追加' })).toHaveCount(1);
-  await expect(page.getByRole('combobox', { name: 'プロジェクト' })).toHaveValue('estimate');
+  await expect(page.getByRole('combobox', { name: 'プロジェクト' })).toHaveValue(
+    'project:estimate'
+  );
   await expect(page.getByRole('button', { name: '今日から、期限なし' })).toBeVisible();
   // Every row is one line.
   const heights = await page
@@ -886,6 +901,25 @@ test('the rail scopes the list to one organization, and a project shows its TODO
   );
   await expect(groups(page).locator('h3')).toHaveText(['見積もり', '採用']);
   await capture(page, info, 'list-organization');
+
+  // The organization's own TODOs in no project are added from the bar and listed last.
+  const place = page.getByRole('combobox', { name: 'プロジェクト' });
+  await expect(place.getByRole('option')).toHaveText(['見積もり', '採用', 'プロジェクトなし']);
+  await place.selectOption({ label: 'プロジェクトなし' });
+  const field = page.getByRole('textbox', { name: 'TODO を追加' });
+  await field.fill('請求書の送り先をまとめる');
+  await capture(page, info, 'add-bar-no-project');
+  await field.press('Enter');
+  await expect(field).toHaveValue('');
+  await expect(groups(page).locator('h3')).toHaveText(['見積もり', '採用', 'プロジェクトなし']);
+  await expect(
+    rowOf(page.getByRole('region', { name: 'プロジェクトなし' }), '請求書の送り先をまとめる')
+  ).toBeVisible();
+  await capture(page, info, 'list-organization-no-project');
+  // It is not among the TODOs in no organization.
+  await railOf(page).getByRole('button', { name: '組織なし' }).click();
+  await expect(page.getByText('請求書の送り先をまとめる')).toHaveCount(0);
+  await railOf(page).getByRole('button', { name: 'Xer' }).click();
 
   await sidebarOf(page).getByRole('button', { name: '見積もり', exact: true }).click();
   await expect(page).toHaveURL(/#\/history\?scope=organization:xer&project=project:estimate$/);
@@ -1492,7 +1526,7 @@ test('a draft left for another organization is listed over its TODOs, and reopen
   await capture(page, info, 'open-import-reopened');
 });
 
-test('an organization with no project yet takes an import, though not a single TODO', async ({
+test('an organization with no project yet adds a TODO in no project, and takes an import', async ({
   page,
 }) => {
   await openHome(page);
@@ -1503,11 +1537,12 @@ test('an organization with no project yet takes an import, though not a single T
   await expect(page).toHaveURL(/scope=organization:labs/);
 
   const field = page.getByRole('textbox', { name: 'TODO を追加' });
+  // Its one place is its own no project, so there is nothing to choose.
+  await expect(page.getByRole('combobox', { name: 'プロジェクト' })).toHaveCount(0);
   await field.fill('見積書を送る');
   await field.press('Enter');
-  await expect(page.locator('.todo-add-bar').getByRole('alert')).toContainText(
-    'TODO を入れるプロジェクトがありません'
-  );
+  await expect(field).toHaveValue('');
+  await expect(groups(page).locator('.todo-group__head')).toHaveText([/^プロジェクトなし0 \/ 1$/]);
   await page.getByRole('button', { name: 'ファイルやテキストから取り込む' }).click();
   await field.fill('見積書を送る\n請求書を作る');
   await field.press('Enter');

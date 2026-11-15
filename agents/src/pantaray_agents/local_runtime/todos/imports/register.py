@@ -139,6 +139,7 @@ def _todo(draft: DraftTodo, *, project_id: str | None, now: str) -> Todo:
         author="user",
         origin=WrittenOrigin(),
         project_id=project_id,
+        organization_id=None,
         starts_on=None if draft.starts_on is None else draft.starts_on.isoformat(),
         due=None if draft.due is None else TodoDue(draft.due.isoformat(), "none"),
         now=now,

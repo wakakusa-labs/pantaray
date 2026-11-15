@@ -62,6 +62,7 @@ def _write(text: str, *, due: TodoDue | None = None) -> Todo:
         user_id=USER,
         client_todo_id=text,
         project_id=None,
+        organization_id=None,
         text=text,
         starts_on="2026-11-04",
         due=due,

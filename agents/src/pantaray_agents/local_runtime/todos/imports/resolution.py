@@ -169,6 +169,7 @@ def _is_todo_text(text: str) -> bool:
         author="user",
         origin=WrittenOrigin(),
         project_id=None,
+        organization_id=None,
         starts_on=None,
         due=None,
         now="",

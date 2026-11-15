@@ -95,11 +95,14 @@ export const TodoProgressQuerySchema = z
 /**
  * The body of `POST /todos`. `client_todo_id` is the idempotency key; an omitted `starts_on`
  * starts it today and `null` leaves it with no start. Whether the text is one non-blank line is the backend's to decide.
+ * `organization_id` puts a TODO with no project in that organization; one with a project is in
+ * the project's, and the backend refuses both at once.
  */
 export const TodoCreateRequestSchema = z
   .object({
     client_todo_id: TodoIdSchema,
     project_id: TodoIdSchema.nullable(),
+    organization_id: TodoIdSchema.nullable(),
     text: z
       .string()
       .refine(
@@ -198,6 +201,8 @@ const TodoViewSchema = z
   .object({
     todo_id: z.string(),
     project_id: z.string().nullable(),
+    // Its own organization while it has no project; null with a project.
+    organization_id: z.string().nullable(),
     text: z.string(),
     author: TodoAuthorSchema,
     origin: z.enum(['written', 'suggestion', 'recurrence']),
@@ -358,6 +363,7 @@ export const TODO_REFUSAL_CODES = [
   'TODO_CLIENT_ID_CONFLICT',
   'TODO_INVALID_TEXT',
   'PROJECT_NOT_FOUND',
+  'ORGANIZATION_NOT_FOUND',
   'TODO_GOAL_DEADLINE_BEFORE_SET',
   'TODO_PROGRESS_INVALID_TEXT',
   'TODO_PROGRESS_CLIENT_ID_CONFLICT',

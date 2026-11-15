@@ -28,6 +28,7 @@ def test_retention_erases_the_todo_with_its_conversation_unless_a_run_is_active(
             user_id=USER,
             client_todo_id=client_id,
             project_id=None,
+            organization_id=None,
             text=client_id,
             starts_on="2026-11-04",
             due=None,

@@ -12,6 +12,7 @@ PREVIOUS_WEEK = "2026-10-26"
 _BASE = Todo(
     todo_id="todo-1",
     project_id="project-1",
+    organization_id=None,
     text="Send the quote",
     author="user",
     origin=WrittenOrigin(),

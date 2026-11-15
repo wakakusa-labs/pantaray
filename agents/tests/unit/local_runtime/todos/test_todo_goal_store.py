@@ -9,6 +9,7 @@ from pantaray_agents.local_runtime.todos.db import (
     AllScope,
     AnyProject,
     OneProject,
+    OrganizationScope,
 )
 from pantaray_agents.local_runtime.todos.goal_store import (
     AlreadyRecorded,
@@ -32,6 +33,7 @@ from pantaray_agents.local_runtime.todos.reads import (
 from pantaray_agents.local_runtime.todos.writes import (
     create_todo_item,
     delete_purged_todo,
+    set_todo_check,
     update_todo,
 )
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings_deletion import (
@@ -48,6 +50,7 @@ def _todo(client_todo_id: str = "c-1") -> Todo:
         user_id=USER,
         client_todo_id=client_todo_id,
         project_id="project-1",
+        organization_id=None,
         text="Close the Acme deal",
         starts_on="2026-11-04",
         due=None,
@@ -328,3 +331,36 @@ def test_the_same_figure_from_the_same_steps_is_recorded_once(db: Path) -> None:
     )
     (goal,) = view.goals
     assert isinstance(goal, Measured) and goal.total == 30_000_001.0
+
+
+def test_an_organization_counts_its_projects_goals_and_its_own_checked_todos(
+    db: Path,
+) -> None:
+    _set_goal()
+    own = create_todo_item(
+        user_id=USER,
+        client_todo_id="c-2",
+        project_id=None,
+        organization_id="org-a",
+        text="Book a room",
+        starts_on="2026-11-04",
+        due=None,
+        clock=NOW,
+    )
+    assert isinstance(own, Todo)
+    set_todo_check(
+        user_id=USER, todo_id=own.todo_id, by="user", checked=True, clock=NOW
+    )
+
+    view = read_progress(
+        user_id=USER,
+        scope=OrganizationScope(organization_id="org-a"),
+        project=AnyProject(),
+        period="day",
+        on=None,
+        clock=NOW,
+    )
+
+    (goal,) = view.goals
+    assert not isinstance(goal, NoGoal) and goal.goal.project_id == "project-1"
+    assert [todo.text for row in view.rows for todo in row.checked] == ["Book a room"]

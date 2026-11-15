@@ -73,6 +73,9 @@ class TodoDeletion:
 class Todo:
     todo_id: TodoId
     project_id: str | None
+    # Its own organization, only while it has no project: a TODO in a project
+    # is in the project's organization.
+    organization_id: str | None
     text: str
     author: TodoAuthor
     origin: TodoOrigin

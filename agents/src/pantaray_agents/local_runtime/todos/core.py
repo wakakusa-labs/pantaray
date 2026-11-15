@@ -65,6 +65,7 @@ def create_todo(
     author: TodoAuthor,
     origin: TodoOrigin,
     project_id: str | None,
+    organization_id: str | None,
     starts_on: LocalDate | None,
     due: TodoDue | None,
     now: str,
@@ -78,6 +79,7 @@ def create_todo(
     return Todo(
         todo_id=todo_id,
         project_id=project_id,
+        organization_id=organization_id,
         text=line,
         author=author,
         origin=origin,
@@ -208,7 +210,7 @@ def delete_by_user(todo: Todo, *, now: str) -> Todo | Rejected[UserDeletionRejec
 
 
 def restore(todo: Todo, *, now: str) -> Todo | Rejected[RestoreRejection]:
-    """Back to its own project and start date."""
+    """Back to its own project, or organization, and start date."""
 
     if todo.deletion is None:
         return Rejected("not_deleted")

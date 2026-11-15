@@ -30,6 +30,7 @@ from pantaray_agents.local_runtime.todos.writes import (
     update_todo,
 )
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings_deletion import (
+    delete_workspace_organization,
     delete_workspace_project,
 )
 
@@ -41,6 +42,7 @@ def _create(
     *,
     text: str = "Send the quote",
     project_id: str | None = "project-1",
+    organization_id: str | None = None,
     starts_on: str = "2026-11-04",
     due: TodoDue | None = None,
     clock: TodoClock = NOW,
@@ -49,6 +51,7 @@ def _create(
         user_id=USER,
         client_todo_id=client_todo_id,
         project_id=project_id,
+        organization_id=organization_id,
         text=text,
         starts_on=starts_on,
         due=due,
@@ -83,6 +86,7 @@ def test_a_replayed_create_returns_the_same_todo_and_other_content_conflicts(
         user_id=USER,
         client_todo_id="client-1",
         project_id="project-1",
+        organization_id=None,
         text="Send the invoice",
         starts_on="2026-11-04",
         due=None,
@@ -92,6 +96,7 @@ def test_a_replayed_create_returns_the_same_todo_and_other_content_conflicts(
         user_id=USER,
         client_todo_id="client-2",
         project_id="someone-elses-project",
+        organization_id=None,
         text="Send the quote",
         starts_on="2026-11-04",
         due=None,
@@ -158,6 +163,40 @@ def test_an_organization_shows_the_todos_of_the_projects_it_has_now(
 
     assert _listed(scope=in_a) == []
     assert _listed(scope=in_b) == [("Send the quote", False)]
+
+
+def test_a_todo_with_no_project_is_in_its_own_organization_until_it_is_deleted(
+    db: Path,
+) -> None:
+    _create("client-1")
+    _create("client-2", text="Book a room", project_id=None, organization_id="org-a")
+    _create("client-3", text="Call home", project_id=None)
+    in_a = OrganizationScope(organization_id="org-a")
+    elsewhere = create_todo_item(
+        user_id=USER,
+        client_todo_id="client-4",
+        project_id=None,
+        organization_id="someone-elses-organization",
+        text="Send the quote",
+        starts_on="2026-11-04",
+        due=None,
+        clock=NOW,
+    )
+
+    assert _listed(scope=in_a) == [("Send the quote", False), ("Book a room", False)]
+    assert _listed(scope=in_a, project=NoProject()) == [("Book a room", False)]
+    assert _listed(scope=OrganizationScope(organization_id="org-b")) == []
+    assert _listed(scope=NoOrganizationScope()) == [("Call home", False)]
+    assert elsewhere == Rejected("organization_not_found")
+
+    delete_workspace_organization(
+        db_path=db, busy_timeout_ms=1_000, user_id=USER, organization_id="org-a"
+    )
+
+    assert _listed(scope=NoOrganizationScope(), project=NoProject()) == [
+        ("Book a room", False),
+        ("Call home", False),
+    ]
 
 
 def _at(second: int) -> TodoClock:

@@ -69,6 +69,7 @@ def _todo_id(client: TestClient) -> str:
         json={
             "client_todo_id": "c-1",
             "project_id": "project-1",
+            "organization_id": None,
             "text": "Close the Acme deal",
             "starts_on": "2026-11-04",
             "due": None,

@@ -24,6 +24,7 @@ from pantaray_agents.local_runtime.todos.db import (
     TodoProjectFilter,
     TodoScope,
     owns_project,
+    project_scope_sql,
     todo_db_connection,
     todo_project_sql,
     todo_scope_sql,
@@ -276,8 +277,12 @@ def read_progress(
     project_sql, project_params = todo_project_sql(project)
     params: dict[str, str] = {"user_id": user_id, **scope_params, **project_params}
     with todo_db_connection() as connection:
+        # A goal belongs to a project, so only the projects in scope count.
         goals = _read_goals(
-            connection, project=project, scope_sql=scope_sql, params=params
+            connection,
+            project=project,
+            scope_sql=project_scope_sql(scope)[0],
+            params=params,
         )
         # A local date is no earlier in UTC than the day before it.
         records_from = min(
@@ -328,7 +333,7 @@ def _read_goals(
             connection, user_id=params["user_id"], project_id=project.project_id
         )
         return {project.project_id: goal}
-    # Aliased as `todo` so the shared scope condition reads its project_id.
+    # Aliased as `todo` so the project scope condition reads its project_id.
     rows = connection.execute(
         f"SELECT {_GOAL_COLUMNS} FROM todo_goals AS todo "
         f"WHERE todo.user_id = :user_id AND {scope_sql} ORDER BY todo.set_at",

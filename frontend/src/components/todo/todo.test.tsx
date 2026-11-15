@@ -293,10 +293,13 @@ it('adds to the first project from today with no due, and an IME’s Enter sends
   expect(onSubmit).toHaveBeenLastCalledWith('p1', TODAY, '見積書を送る', null);
   expect(addField()).toHaveValue('');
 
-  // A TODO is one line: pasted lines are joined, and Shift+Enter adds as Enter does.
+  // A TODO is one line: pasted lines are joined, and Shift+Enter neither sends nor breaks it.
   fireEvent.change(addField(), { target: { value: '見積書を\n  送る\n' } });
   expect(addField()).toHaveValue('見積書を 送る ');
   await userEvent.type(addField(), '{Shift>}{Enter}{/Shift}');
+  expect(onSubmit).toHaveBeenCalledOnce();
+  expect(addField()).toHaveValue('見積書を 送る ');
+  await userEvent.type(addField(), '{Enter}');
   expect(onSubmit).toHaveBeenLastCalledWith('p1', TODAY, '見積書を 送る', null);
   expect(onImport).not.toHaveBeenCalled();
 });
@@ -331,14 +334,13 @@ it('imports text of several lines once its button turns importing on, then turns
   expect(screen.getByRole('button', { name: '添付' })).toBeVisible();
   expect(screen.queryByRole('combobox', { name: 'プロジェクト' })).toBeNull();
   expect(screen.queryByRole('button', { name: /期限/ })).toBeNull();
-  await userEvent.type(addField(), '見積書を送る{Enter}請求書を作る');
-  expect(onImport).not.toHaveBeenCalled();
+  await userEvent.type(addField(), '見積書を送る{Shift>}{Enter}{/Shift}請求書を作る');
   // Lines kept when importing goes off become one TODO's line.
   await userEvent.click(modeButton());
   expect(addField()).toHaveValue('見積書を送る 請求書を作る');
   await userEvent.click(modeButton());
   fireEvent.change(addField(), { target: { value: '見積書を送る\n請求書を作る' } });
-  await userEvent.type(addField(), '{Meta>}{Enter}{/Meta}');
+  await userEvent.type(addField(), '{Enter}');
   expect(onSubmit).not.toHaveBeenCalled();
   expect(onImport).toHaveBeenLastCalledWith('見積書を送る\n請求書を作る', {
     files: [],
@@ -433,7 +435,7 @@ it('in a scope with no project, imports but says a single TODO needs a project',
 
   await userEvent.click(modeButton());
   expect(screen.queryByRole('alert')).toBeNull();
-  await userEvent.type(addField(), '{Enter}請求書を作る{Meta>}{Enter}{/Meta}');
+  await userEvent.type(addField(), '{Shift>}{Enter}{/Shift}請求書を作る{Enter}');
   expect(onImport).toHaveBeenLastCalledWith('見積書を送る\n請求書を作る', {
     files: [],
     images: [],
@@ -463,7 +465,7 @@ it('adds no file while an import is starting', async () => {
     )
   );
   await userEvent.click(modeButton());
-  await userEvent.type(addField(), 'a{Enter}b{Meta>}{Enter}{/Meta}');
+  await userEvent.type(addField(), 'a{Shift>}{Enter}{/Shift}b{Enter}');
   expect(pendingImport).toHaveBeenCalledOnce();
   expect(modeButton()).toBeDisabled();
   const notes = new File(['# 議事録'], 'notes.md', { type: 'text/markdown' });
@@ -495,13 +497,13 @@ it('stays importing when lines typed while an import was starting are left', asy
     )
   );
   await userEvent.click(modeButton());
-  await userEvent.type(addField(), 'a{Enter}b{Meta>}{Enter}{/Meta}');
+  await userEvent.type(addField(), 'a{Shift>}{Enter}{/Shift}b{Enter}');
   fireEvent.change(addField(), { target: { value: 'c\nd' } });
   await act(async () => answer(true));
   // The newer lines are the next import's, not a TODO that would be refused for its lines.
   expect(addField()).toHaveValue('c\nd');
   expect(modeButton()).toHaveAttribute('aria-pressed', 'true');
-  await userEvent.type(addField(), '{Control>}{Enter}{/Control}');
+  await userEvent.type(addField(), '{Enter}');
   expect(pendingImport).toHaveBeenLastCalledWith('c\nd', { files: [], images: [] });
   expect(onSubmit).not.toHaveBeenCalled();
 });

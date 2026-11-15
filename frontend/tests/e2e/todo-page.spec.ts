@@ -1101,15 +1101,15 @@ test('a narrow window tells a failed answer to Pantaray’s deletion request in 
   await capture(page, info, 'narrow-deletion-failure');
 });
 
-test('進み具合 lays out the month, keeps its page in the address, and opens a day’s records', async ({
+test('進捗 lays out the month, keeps its page in the address, and opens a day’s records', async ({
   page,
 }, info) => {
   await openHome(page);
   const sidebar = sidebarOf(page);
   await sidebar.getByRole('button', { name: '見積もり', exact: true }).click();
-  await sidebar.getByRole('button', { name: '進み具合' }).click();
+  await sidebar.getByRole('button', { name: '進捗' }).click();
   await expect(page).toHaveURL(/#\/history\?project=project:estimate&view=progress$/);
-  await expect(sidebar.getByRole('button', { name: '進み具合' })).toHaveAttribute(
+  await expect(sidebar.getByRole('button', { name: '進捗' })).toHaveAttribute(
     'aria-current',
     'true'
   );
@@ -1118,7 +1118,7 @@ test('進み具合 lays out the month, keeps its page in the address, and opens 
     'aria-current',
     'true'
   );
-  const heading = page.getByRole('heading', { level: 1, name: '進み具合' });
+  const heading = page.getByRole('heading', { level: 1, name: '進捗' });
   await expect(heading).toBeVisible();
   await expect(page.locator('.todo-screen__range')).toHaveText('2026年11月');
   await expect(page.getByRole('button', { name: '今月へ' })).toHaveCount(0);
@@ -1141,10 +1141,10 @@ test('進み具合 lays out the month, keeps its page in the address, and opens 
   await capture(page, info, 'progress-month');
 
   // A day opens beside the calendar, in the conversation's place, and the sidebar folds away.
-  await page.getByRole('button', { name: '11月3日（火）、記録 1 件、完了した TODO 1 件' }).click();
+  await page.getByRole('button', { name: '11月3日（火）、実績 1 件、完了した TODO 1 件' }).click();
   await expect(page).toHaveURL(/view=progress&day=2026-11-03$/);
   const day = page.getByRole('region', { name: '11月3日（火）' });
-  await expect(day).toContainText('記録 1 件');
+  await expect(day).toContainText('実績 1 件');
   await expect(day).toContainText('丸和商事から受注');
   await expect(day).toContainText('名刺 40 枚を入れておく');
   await expect(sidebarOf(page)).toHaveCount(0);
@@ -1152,7 +1152,7 @@ test('進み具合 lays out the month, keeps its page in the address, and opens 
   await capture(page, info, 'progress-day');
 
   // The record's conversation opens as any conversation does, and back returns to the day.
-  await day.getByRole('button', { name: 'この記録の会話を開く: 丸和商事から受注' }).click();
+  await day.getByRole('button', { name: 'この実績の会話を開く: 丸和商事から受注' }).click();
   await expect(page).toHaveURL(/#\/history\?item=action:action-resubmit$/);
   await page.goBack();
   await expect(page).toHaveURL(/view=progress&day=2026-11-03$/);
@@ -1181,13 +1181,13 @@ test('進み具合 lays out the month, keeps its page in the address, and opens 
   const months = page.getByRole('group', { name: '2026年' }).getByRole('button');
   await expect(months).toHaveCount(12);
   await capture(page, info, 'progress-year');
-  await page.getByRole('button', { name: '2026年10月、記録 2 件、完了した TODO 0 件' }).click();
+  await page.getByRole('button', { name: '2026年10月、実績 2 件、完了した TODO 0 件' }).click();
   await expect(page).toHaveURL(/view=progress&on=2026-10-01$/);
   await expect(page.locator('.todo-screen__range')).toHaveText('2026年10月');
 
   // Every organization's progress, with each goal there is.
   await sidebar.getByRole('button', { name: 'すべての TODO' }).click();
-  await sidebar.getByRole('button', { name: '進み具合' }).click();
+  await sidebar.getByRole('button', { name: '進捗' }).click();
   await expect(page).toHaveURL(/#\/history\?view=progress$/);
   await expect(page.locator('.todo-progress__lead')).toContainText(
     '今週は、プロダクトが 1 本、見積もりが 1 件進みました。完了した TODO は 2 件です。'
@@ -1236,7 +1236,7 @@ test('a project’s goal is set from its menu or from its progress, opening on t
 
   // The progress of a project without a goal offers to set one.
   await sidebar.getByRole('button', { name: '採用', exact: true }).click();
-  await sidebar.getByRole('button', { name: '進み具合' }).click();
+  await sidebar.getByRole('button', { name: '進捗' }).click();
   const goal = page.getByRole('region', { name: '採用の目標' });
   await expect(goal).toContainText('まだ目標がありません。');
   await goal.getByRole('button', { name: '目標を設定' }).click();
@@ -1250,8 +1250,8 @@ test('a project’s goal is set from its menu or from its progress, opening on t
   // Its 「目標を設定」 is gone with the goal set, so focus goes to the page's heading.
   await expect(goal).toContainText('面接 5 回');
   await expect(goal).toContainText('12/25 まで');
-  await expect(goal).toContainText('まだ記録がありません。');
-  await expect(page.getByRole('heading', { level: 1, name: '進み具合' })).toBeFocused();
+  await expect(goal).toContainText('まだ実績がありません。');
+  await expect(page.getByRole('heading', { level: 1, name: '進捗' })).toBeFocused();
 });
 
 test('beside a conversation the sidebar folds away and the rows keep their one line', async ({

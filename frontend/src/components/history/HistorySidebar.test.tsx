@@ -220,7 +220,7 @@ it('上から検索、プロジェクト、チャット、作業の順に並べ�
   expect(mocks.startCreatingProject).toHaveBeenCalledWith(true);
 });
 
-it('TODO の一覧では、見ている範囲の名前、すべての TODO、進み具合、プロジェクト、削除した TODO だけを並べる', () => {
+it('TODO の一覧では、見ている範囲の名前、すべての TODO、進捗、プロジェクト、削除した TODO だけを並べる', () => {
   mocks.todoUx = true;
   mocks.workspace = WORKSPACE;
   window.electron = {} as unknown as Window['electron'];

@@ -57,7 +57,7 @@ function GoalTrack({
   );
 }
 
-/** 「単位が「件」の記録 2 件は、合計に入れていません。」, naming each unit once. */
+/** 「単位が「件」の実績 2 件は、合計に入れていません。」, naming each unit once. */
 function otherUnitSentence(i18n: ProgressI18n, records: readonly ProgressRecordView[]) {
   const units = [...new Set(records.map((record) => record.unit))]
     .map((unit) => i18n.t('todoProgress.unitQuoted', { unit }))

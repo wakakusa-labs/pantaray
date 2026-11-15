@@ -57,14 +57,21 @@ export function ProgressDayPane({
       <header className="todo-progress-day__head">
         <span className="todo-progress-day__crumb">{t('todoProgress.title')}</span>
         <h2 id={headingId}>{formatDay(i18n, row.start)}</h2>
-        <p className="todo-progress-day__facts">
-          <span>
-            {t('todoProgress.day.recordCount', { records: recordCount(i18n, records.length) })}
-          </span>
-          <span>
-            {t('todoProgress.day.checkedCount', { todos: todoCount(i18n, row.checked.length) })}
-          </span>
-        </p>
+        {/* Only what the day has; an empty day says so below. */}
+        {records.length > 0 || row.checked.length > 0 ? (
+          <p className="todo-progress-day__facts">
+            {records.length > 0 ? (
+              <span>
+                {t('todoProgress.day.recordCount', { records: recordCount(i18n, records.length) })}
+              </span>
+            ) : null}
+            {row.checked.length > 0 ? (
+              <span>
+                {t('todoProgress.day.checkedCount', { todos: todoCount(i18n, row.checked.length) })}
+              </span>
+            ) : null}
+          </p>
+        ) : null}
       </header>
       <div className="todo-progress-day__body">
         {records.length === 0 && row.checked.length === 0 ? (

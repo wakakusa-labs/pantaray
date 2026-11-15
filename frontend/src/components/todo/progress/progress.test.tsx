@@ -165,7 +165,7 @@ it('leads with the week holding today on the current page, and the one goal with
   expect(row).toHaveTextContent('30,000,000 円');
   expect(row).toHaveTextContent('期限から逆算した今の位置 11%');
   expect(row).toHaveTextContent('10%');
-  expect(row).toHaveTextContent('単位が「枚」の記録 1 件は、合計に入れていません。');
+  expect(row).toHaveTextContent('単位が「枚」の実績 1 件は、合計に入れていません。');
   // The 40 枚 is nowhere in the total.
   expect(row).not.toHaveTextContent('30,000,040');
   expect(row.querySelector('.todo-progress-goal__late')).toBeNull();
@@ -257,13 +257,13 @@ it('leads with the whole month or year on any other page, never with the weeks s
 
 it('shows no number for a goal without records, and offers a goal to a project without one', () => {
   renderView(page({ goals: [{ kind: 'no_records', goal: GOAL, other_unit_record_ids: [] }] }));
-  expect(goalRow()).toHaveTextContent('まだ記録がありません。');
+  expect(goalRow()).toHaveTextContent('まだ実績がありません。');
   expect(goalRow()).not.toHaveTextContent('%');
-  expect(lead()).toHaveTextContent('売上 300,000,000 円の目標には、まだ記録がありません。');
+  expect(lead()).toHaveTextContent('売上 300,000,000 円の目標には、まだ実績がありません。');
 
   renderView(page({ goals: [{ kind: 'no_records', goal: GOAL, other_unit_record_ids: ['r4'] }] }));
-  expect(goalRow()).toHaveTextContent('まだ「円」の記録がありません。');
-  expect(goalRow()).toHaveTextContent('単位が「枚」の記録 1 件は、合計に入れていません。');
+  expect(goalRow()).toHaveTextContent('まだ「円」の実績がありません。');
+  expect(goalRow()).toHaveTextContent('単位が「枚」の実績 1 件は、合計に入れていません。');
 
   const handlers = renderView(page({ goals: [{ kind: 'no_goal', project_id: 'p-sales' }] }));
   expect(goalRow()).toHaveTextContent('まだ目標がありません。');
@@ -283,7 +283,7 @@ it('tells each pace without a number it does not have', () => {
       ],
     })
   );
-  expect(goalRow()).toHaveTextContent('記録がまだ少ないので、届く時期は出していません。');
+  expect(goalRow()).toHaveTextContent('実績がまだ少ないので、届く時期は出していません。');
   expect(lead()).not.toHaveTextContent('このペースなら');
 
   renderView(
@@ -308,7 +308,7 @@ it('tells each pace without a number it does not have', () => {
 it('gives each day up to today its records by project and unit, and its checked TODOs', async () => {
   const handlers = renderView(page(), '2026-11-05');
   const thursday = dayCell(/^11月5日（木）/);
-  expect(thursday).toHaveAccessibleName('11月5日（木）、記録 3 件、完了した TODO 0 件');
+  expect(thursday).toHaveAccessibleName('11月5日（木）、実績 3 件、完了した TODO 0 件');
   expect(thursday).toHaveAttribute('aria-pressed', 'true');
   // r1 and r2 add up; 採用's 人 stays its own line.
   expect(thursday).toHaveTextContent('販路開拓 25,000,000 円');
@@ -363,7 +363,7 @@ it('lays out the year as its months, each opening its calendar', async () => {
   );
   const months = within(screen.getByRole('group', { name: '2026年' })).getAllByRole('button');
   expect(months).toHaveLength(12);
-  expect(months[10]).toHaveAccessibleName('2026年11月、記録 3 件、完了した TODO 2 件');
+  expect(months[10]).toHaveAccessibleName('2026年11月、実績 3 件、完了した TODO 2 件');
   expect(months[10]).toHaveTextContent('11月販路開拓 25,000,000 円採用 2 人✓ 2');
   await userEvent.click(months[11]);
   expect(handlers.onSelectMonth).toHaveBeenCalledWith('2026-12-01');
@@ -394,7 +394,9 @@ it('opens a day onto its records, the conversation behind an AI record, and the 
   const [thursday] = page().rows.filter((row) => row.start === '2026-11-05');
   const handlers = renderDay(thursday, new Set(['r1']));
   const pane = screen.getByRole('region', { name: '11月5日（木）' });
-  expect(pane).toHaveTextContent('記録 3 件完了した TODO 0 件');
+  expect(pane).toHaveTextContent('実績 3 件');
+  // A count of none is not shown; the day has no checked TODO.
+  expect(pane).not.toHaveTextContent('完了した TODO 0 件');
   const [byUser, byAi, other] = within(pane).getAllByRole('listitem');
   expect(byUser).toHaveTextContent('丸和商事から受注10,000,000 円販路開拓');
   expect(within(byUser).queryByRole('button', { name: /会話を開く/ })).toBeNull();
@@ -402,7 +404,7 @@ it('opens a day onto its records, the conversation behind an AI record, and the 
   expect(other).toHaveTextContent('採用');
 
   await userEvent.click(
-    within(byAi).getByRole('button', { name: 'この記録の会話を開く: 北星から受注' })
+    within(byAi).getByRole('button', { name: 'この実績の会話を開く: 北星から受注' })
   );
   expect(handlers.onOpenEvidence).toHaveBeenCalledWith('action-1');
   await userEvent.click(within(byAi).getByRole('button', { name: '削除: 北星から受注' }));

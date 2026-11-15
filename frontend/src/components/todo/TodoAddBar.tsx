@@ -24,7 +24,8 @@ const oneLine = (text: string) => text.replace(/[^\S\n]*\n\s*/g, ' ');
  * takes the text as one TODO, on one line, with its project (while several are in view), start
  * (today at first, or none) and due day (none at first). Importing hands text of any length and
  * documents and images attached, dropped or pasted to Pantaray, which drafts TODOs from them; a
- * file dropped or pasted while adding turns importing on. An IME's Enter does not send. The text
+ * file dropped or pasted while adding turns importing on. Adding sends on Enter; importing takes
+ * Enter as a new line, as a memo does, and sends on ⌘/Ctrl+Enter. An IME's Enter does not send. The text
  * empties once it was taken, and a started import turns back to adding; the choices stay.
  */
 export function TodoAddBar({
@@ -160,8 +161,8 @@ export function TodoAddBar({
         }}
         onKeyDown={(event) => {
           if (event.key !== 'Enter' || isImeKey(event)) return;
-          // Shift+Enter starts a new line of an import; a TODO has one line.
-          if (importing && event.shiftKey) return;
+          // An import's text runs over lines, so only ⌘/Ctrl+Enter sends it; a TODO has one line.
+          if (importing && !event.metaKey && !event.ctrlKey) return;
           event.preventDefault();
           void send();
         }}

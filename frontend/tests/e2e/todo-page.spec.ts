@@ -1355,7 +1355,7 @@ test('lines pasted into the bar open a draft beside the list, which registers wh
   await expect(page.getByRole('combobox', { name: 'プロジェクト' })).toHaveCount(0);
   await field.fill('見積書を再提出する\n値引きの条件をまとめる');
   await capture(page, info, 'add-bar-import-mode');
-  await field.press('Enter');
+  await field.press('ControlOrMeta+Enter');
 
   const pane = page.locator('.todo-screen__import');
   await expect(pane.getByRole('heading', { level: 1, name: 'TODO の取り込み' })).toBeVisible();
@@ -1466,7 +1466,7 @@ test('a draft left for another organization is listed over its TODOs, and reopen
   await page.getByRole('button', { name: 'ファイルやテキストから取り込む' }).click();
   const field = page.getByRole('textbox', { name: 'TODO を追加' });
   await field.fill('見積書を再提出する\n値引きの条件をまとめる');
-  await field.press('Enter');
+  await field.press('ControlOrMeta+Enter');
   const pane = page.locator('.todo-screen__import');
   await expect(pane.getByRole('heading', { level: 1, name: 'TODO の取り込み' })).toBeVisible();
   const row = page.getByRole('button', { name: '下書きを開く: 見積書を再提出する' });
@@ -1510,7 +1510,7 @@ test('an organization with no project yet takes an import, though not a single T
   );
   await page.getByRole('button', { name: 'ファイルやテキストから取り込む' }).click();
   await field.fill('見積書を送る\n請求書を作る');
-  await field.press('Enter');
+  await field.press('ControlOrMeta+Enter');
   await expect(page.locator('.todo-screen__import')).toBeVisible();
   expect((await importStarts(page)).at(-1)).toEqual({
     import_id: expect.any(String),

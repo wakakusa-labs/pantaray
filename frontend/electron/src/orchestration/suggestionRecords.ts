@@ -13,13 +13,20 @@ export type SuggestionRecord = {
 // itself) has no body, contract or files; a persisted read supplies them without touching its
 // state.
 // A reply's Action never streams through the suggestion's events either, so only a read may
-// bring it to a suggestion that was not accepted.
+// bring it to a suggestion that was not accepted. A read also has the TODO as it stands now, which
+// the user may have changed in the list since the events told it.
 function fillFromPersisted(live: OverlaySnapshot, persisted: OverlaySnapshot): OverlaySnapshot {
   const actionId =
     live.actionId === null && live.reactionState !== 'accepted'
       ? persisted.actionId
       : live.actionId;
-  if (live.suggestionText && live.interactionContract !== null && actionId === live.actionId) {
+  if (
+    live.suggestionText &&
+    live.interactionContract !== null &&
+    actionId === live.actionId &&
+    live.todo?.text === persisted.todo?.text &&
+    live.todo?.state === persisted.todo?.state
+  ) {
     return live;
   }
   return {
@@ -27,6 +34,7 @@ function fillFromPersisted(live: OverlaySnapshot, persisted: OverlaySnapshot): O
     suggestionText: live.suggestionText || persisted.suggestionText,
     interactionContract: live.interactionContract ?? persisted.interactionContract,
     artifacts: persisted.artifacts,
+    todo: persisted.todo,
     actionId,
   };
 }

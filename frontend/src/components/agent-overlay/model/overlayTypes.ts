@@ -4,6 +4,7 @@ import type {
   OrchestrationServerEvent,
   SuggestionInteractionContract,
 } from '@/types/websocket';
+import type { SuggestionTodoView } from '../../../../electron/src/orchestration/eventContracts';
 
 export type OverlayPhase = 'suggestion' | 'action' | null;
 export type OverlayRequestState = 'idle' | 'requesting' | 'accepted_pending_start';
@@ -69,6 +70,7 @@ export type OverlaySnapshot = {
   dismissReason: string | null;
   /** Files the Suggestion made, relative to its folder. */
   artifacts: string[];
+  todo: SuggestionTodoView | null;
   actionPhase: 'idle' | 'requesting' | 'accepted_pending_start' | 'processing' | 'terminal';
   actionStatus: 'idle' | 'processing' | 'success' | 'error' | 'canceled' | 'timeout' | null;
   actionErrorCode: string | null;
@@ -112,6 +114,8 @@ export type AgentOverlayState = {
   dismissReason: string | null;
   /** Files the Suggestion made, relative to its folder; main's record supplies them. */
   artifacts: readonly string[];
+  /** The TODO the Suggestion became; main's record supplies it. */
+  todo: SuggestionTodoView | null;
   actionStatusState: OverlayActionStatusState | null;
   actionErrorCode: string | null;
   actionFailureStage: string | null;

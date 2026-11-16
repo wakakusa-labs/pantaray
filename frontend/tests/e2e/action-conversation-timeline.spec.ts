@@ -307,13 +307,10 @@ for (const language of ['ja', 'en'] as const) {
     const initialBackground = await backgroundStyle(page);
     const badge = page.getByText(language === 'ja' ? '承認済み' : 'Approved', { exact: true });
     await expect(badge).toHaveCount(0);
-    const instructionLabel =
-      language === 'ja' ? '追加の指示（任意）' : 'Additional instructions (optional)';
     const comment = language === 'ja' ? '変更のリスクも教えて' : 'Include the risks.';
-    await page.getByRole('textbox', { name: instructionLabel }).fill(comment);
-    await page
-      .getByRole('button', { name: language === 'ja' ? '承認' : 'Accept', exact: true })
-      .click();
+    const reply = page.getByRole('textbox', { name: language === 'ja' ? 'メッセージ' : 'Message' });
+    await reply.fill(comment);
+    await reply.press('Enter');
     await expect(page.locator('html')).toHaveAttribute('data-accepted', /suggestion-1/);
     expect(JSON.parse((await page.locator('html').getAttribute('data-accepted'))!)).toMatchObject({
       suggestionId: 'suggestion-1',

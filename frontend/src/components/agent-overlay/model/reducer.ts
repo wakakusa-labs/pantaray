@@ -72,6 +72,7 @@ export function createInitialAgentOverlayState(): AgentOverlayState {
     reactionTimestamp: null,
     dismissReason: null,
     artifacts: [],
+    todo: null,
     actionStatusState: null,
     actionErrorCode: null,
     actionFailureStage: null,
@@ -161,6 +162,7 @@ export function reduceAgentOverlayState(
         currentCommandId: commandId,
         lastSequence: snapshot.lastSequence,
         artifacts: snapshot.artifacts,
+        todo: snapshot.todo,
       };
 
       const incomingRank = getSnapshotPhaseRank(phase, terminalStatus);

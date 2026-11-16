@@ -41,6 +41,11 @@ export type ActionErrorStage =
 
 export type ProcessKind = 'suggestion' | 'action';
 export type SuggestionInteractionContract = 'action_offer' | 'message_only';
+/** A shown Suggestion's TODO; `state`, the list's label, is null once an Action carries it. */
+export type SuggestionTodoView = {
+  text: string;
+  state: 'waiting' | 'partial' | 'done' | null;
+};
 export type ActionTerminalStatus = 'success' | 'error' | 'canceled' | 'timeout';
 export type ActionDisplayStatus = 'idle' | 'processing' | ActionTerminalStatus;
 
@@ -269,6 +274,8 @@ export type ProcessCompletedSuggestionEvent = OrchestrationEventWithMeta<
     interaction_contract?: SuggestionInteractionContract | null;
     /** Absent on events persisted before Suggestions could make files. */
     artifacts?: string[];
+    /** Null for a run that showed nothing, or when the TODO list is off. */
+    todo: SuggestionTodoView | null;
   },
   SuggestionLiveMeta
 >;

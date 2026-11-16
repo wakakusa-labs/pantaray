@@ -30,6 +30,7 @@ from pantaray_agents.local_runtime.storage.migrations.connection import (
     configure_connection,
 )
 from pantaray_agents.orchestration.common.errors import error_from_payload
+from pantaray_agents.orchestration.overlay.suggestion_todo import read_suggestion_todo
 from pantaray_agents.orchestration.ws.background_task import spawn_ws_background_task
 from pantaray_agents.orchestration.ws.error_meta import build_suggestion_error_meta
 from pantaray_agents.orchestration.ws.suggestion_stream.events import (
@@ -45,6 +46,7 @@ from pantaray_agents.orchestration.ws.suggestion_stream.types import (
     SuggestionTerminalRow,
 )
 from pantaray_agents.schema.agent.base import ErrorSeverity, ErrorType
+from pantaray_agents.schema.overlay_bootstrap import SuggestionTodoView
 from pantaray_agents.utils.public_error import public_ws_error
 
 logger = logging.getLogger(__name__)
@@ -319,6 +321,7 @@ class SuggestionRelayMixin(
             else None
         )
 
+        todo = None
         if status_val != "success":
             error_payload = _parse_suggestion_error(row.get("error"))
             if error_payload is not None:
@@ -341,6 +344,11 @@ class SuggestionRelayMixin(
                 answer,
                 kind="suggestion",
             )
+            todo = await asyncio.to_thread(
+                read_suggestion_todo,
+                user_id=str(self.user_id),
+                suggestion_id=suggestion_id,
+            )
 
         await self._complete_relayed_suggestion(
             process_id,
@@ -349,6 +357,7 @@ class SuggestionRelayMixin(
             has_suggestion=has_suggestion,
             interaction_contract=interaction_contract,
             artifacts=row.get("artifacts_json", ()),
+            todo=todo,
         )
 
     async def _complete_relayed_suggestion(
@@ -360,6 +369,7 @@ class SuggestionRelayMixin(
         has_suggestion: bool | None = None,
         interaction_contract: str | None = None,
         artifacts: Sequence[str] = (),
+        todo: SuggestionTodoView | None = None,
     ) -> None:
         self._release_suggestion_process(process_id)
         await self._emit_process_completed(
@@ -370,6 +380,7 @@ class SuggestionRelayMixin(
             kind="suggestion",
             interaction_contract=interaction_contract,
             artifacts=artifacts,
+            todo=todo,
         )
 
 

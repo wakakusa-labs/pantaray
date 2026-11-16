@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 from pathlib import Path
 from typing import cast
@@ -27,6 +28,7 @@ from pantaray_agents.orchestration.common.normalization import (
     normalize_lower_string,
     normalize_string,
 )
+from pantaray_agents.orchestration.overlay.suggestion_todo import read_suggestion_todo
 from pantaray_agents.orchestration.session.live_action_processes import (
     LiveActionProcessKey,
 )
@@ -35,6 +37,7 @@ from pantaray_agents.schema.overlay_bootstrap import (
     OverlayBootstrapResponse,
     OverlayLiveResumeModel,
     OverlaySnapshotModel,
+    SuggestionTodoView,
 )
 from pantaray_agents.schema.repositories.repository import DBRow
 
@@ -149,6 +152,7 @@ def _build_snapshot(
     *,
     suggestion_row: DBRow,
     folded: FoldedSuggestionState,
+    todo: SuggestionTodoView | None,
 ) -> OverlaySnapshotModel:
     suggestion_id = folded.suggestion_id
     reaction = parse_stored_suggestion_user_reaction(folded.user_reaction)
@@ -188,6 +192,7 @@ def _build_snapshot(
         reactionTimestamp=_derive_reaction_timestamp_from_fold(folded),
         dismissReason=normalize_string(suggestion_row.get("dismiss_reason")),
         artifacts=suggestion_row["artifacts_json"],
+        todo=todo,
         actionPhase=action_phase,  # type: ignore[arg-type]
         actionStatus=action_status,
         actionFailureCode=action_failure_code,
@@ -260,6 +265,11 @@ class OverlayBootstrapService:
         snapshot = _build_snapshot(
             suggestion_row=suggestion_row,
             folded=folded,
+            todo=await asyncio.to_thread(
+                read_suggestion_todo,
+                user_id=str(user_id),
+                suggestion_id=str(suggestion_id),
+            ),
         )
         live_resume = _build_live_resume(
             live_action_key=live_action_key,

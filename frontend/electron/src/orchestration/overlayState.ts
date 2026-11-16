@@ -96,6 +96,7 @@ export function createOverlaySnapshot(
     reactionTimestamp: null,
     dismissReason: null,
     artifacts: [],
+    todo: null,
     actionPhase: 'idle',
     actionStatus: null,
     actionErrorCode: null,
@@ -278,6 +279,7 @@ export function applyOverlayServerEvent(
           artifacts: isArtifactList(event.data.artifacts)
             ? event.data.artifacts
             : current.artifacts,
+          todo: event.data.todo,
           updatedAt: nextUpdatedAt,
           lastSequence: nextSequence,
           isLive: false,

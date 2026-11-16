@@ -45,8 +45,11 @@ export function createTaskDraftBridge(owner = 'user-1') {
       const listeners = new Set<(change: TaskDraftChange) => void>();
       const subscriber = {
         id,
-        send: (_channel: string, change: TaskDraftChange) =>
-          listeners.forEach((listener) => listener(structuredClone(change))),
+        // IPC delivers main's events after the renderer's current handler, never inside it.
+        send: (_channel: string, change: TaskDraftChange) => {
+          const sent = structuredClone(change);
+          queueMicrotask(() => listeners.forEach((listener) => listener(structuredClone(sent))));
+        },
       };
       type Work = TaskDraftChange['work'];
       return {

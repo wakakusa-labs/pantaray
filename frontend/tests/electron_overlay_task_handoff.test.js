@@ -110,6 +110,27 @@ test('a suggestion no Action has taken yet is selected the same way, then the pa
   ]);
 });
 
+test('a TODO the panel added opens on the list, loaded or loading, then the panel closes', async () => {
+  const steps = [];
+  await createHandoff(steps, { mainWindow: createMainWindow(steps) })({
+    kind: 'todo',
+    id: 'todo 1',
+  });
+  const loadingSteps = [];
+  await createHandoff(loadingSteps, {
+    mainWindow: createMainWindow(loadingSteps, { loading: true }),
+  })({ kind: 'todo', id: 'todo 1' });
+
+  assert.deepEqual(steps, [
+    ['history:showItem', { item: 'todo:todo 1' }],
+    'restore',
+    'show',
+    'focus',
+    ['hide', 'sug-1'],
+  ]);
+  assert.deepEqual(loadingSteps[0], ['loadURL', 'file:///tmp/index.html#/history?todo=todo%201']);
+});
+
 test("a suggestion file's chip opens the suggestion with that file, loaded or loading", async () => {
   const steps = [];
   await createHandoff(steps, { mainWindow: createMainWindow(steps) })({

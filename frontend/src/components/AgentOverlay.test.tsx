@@ -962,111 +962,6 @@ describe('AgentOverlay broader E2E', () => {
     });
   });
 
-  it('uses the standalone response identity for retained replay and fences a reset', async () => {
-    const firstMessageId = '00000000-0000-4000-8000-000000000003';
-    const secondMessageId = '00000000-0000-4000-8000-000000000004';
-    vi.spyOn(crypto, 'randomUUID')
-      .mockReturnValueOnce(firstMessageId)
-      .mockReturnValueOnce(secondMessageId);
-    let resolveFirst!: (response: ActionMessageSubmitResult) => void;
-    let resolveSecond!: (response: ActionMessageSubmitResult) => void;
-    submitMessage
-      .mockReturnValueOnce(
-        new Promise<ActionMessageSubmitResult>((resolve) => {
-          resolveFirst = resolve;
-        })
-      )
-      .mockReturnValueOnce(
-        new Promise<ActionMessageSubmitResult>((resolve) => {
-          resolveSecond = resolve;
-        })
-      );
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
-      bottom: 200,
-      height: 200,
-      left: 0,
-      right: 380,
-      top: 0,
-      width: 380,
-      x: 0,
-      y: 0,
-      toJSON: () => ({}),
-    });
-    const computedStyleSpy = vi.spyOn(window, 'getComputedStyle').mockReturnValue({
-      borderBottomWidth: '0px',
-      borderTopWidth: '0px',
-      fontSize: '16px',
-      marginBottom: '0px',
-      marginTop: '0px',
-      paddingBottom: '0px',
-      paddingTop: '0px',
-    } as CSSStyleDeclaration);
-    render(
-      <UiLanguageProvider initialLanguage="en">
-        <button type="button">Outside focus</button>
-        <AgentOverlay entryMode="standalone" />
-      </UiLanguageProvider>
-    );
-
-    const firstComposer = screen.getByLabelText('Message');
-    expect(firstComposer).toHaveFocus();
-    await waitFor(() => {
-      expect(observeOverlaySize).toHaveBeenCalled();
-      // header + 会話本文 + composer の 3 ブロック（各 200px モック）+ action バッファ 32px。
-      expect(resizeOverlay).toHaveBeenCalledWith(632, { settled: true });
-    });
-    computedStyleSpy.mockRestore();
-    const outsideFocus = screen.getByRole('button', { name: 'Outside focus' });
-    outsideFocus.focus();
-    act(() => focusComposerListener?.());
-    expect(firstComposer).toHaveFocus();
-    fireEvent.change(firstComposer, { target: { value: 'Start here' } });
-    fireEvent.click(screen.getByRole('button', { name: /permissions: Ask every time/ }));
-    fireEvent.click(screen.getByRole('menuitemradio', { name: /Auto-approve/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-    expect(submitMessage.mock.calls[0][0].target).toEqual({
-      kind: 'new',
-      approval_mode: 'always_allow',
-    });
-    expect(screen.queryByRole('button', { name: 'Send' })).toBeNull();
-    outsideFocus.focus();
-
-    retainedConversationUpdate = withUserMessage(
-      createConversationUpdate(null, true, 'standalone-action'),
-      firstMessageId,
-      'Start here',
-      'pending'
-    );
-    await act(async () => conversationListener?.(retainedConversationUpdate!));
-    expect(screen.getByText('Sending')).toBeInTheDocument();
-    expect(screen.queryByText('Pending')).toBeNull();
-
-    await act(async () => resolveFirst(createSubmittedResult('standalone-action', firstMessageId)));
-    expect(await screen.findByText('Pending')).toBeInTheDocument();
-    expect(outsideFocus).toHaveFocus();
-    expect(screen.getByLabelText('Message')).toBeInTheDocument();
-
-    retainedConversationUpdate = null;
-    await act(async () => conversationListener?.({ kind: 'reset' }));
-    const resetComposer = screen.getByLabelText('Message');
-    fireEvent.change(resetComposer, { target: { value: 'Discard after reset' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-    expect(submitMessage.mock.calls[1][0].target).toEqual({
-      kind: 'new',
-      approval_mode: 'prompt_each_time',
-    });
-
-    await act(async () => conversationListener?.({ kind: 'reset' }));
-    expect(screen.queryByText('Discard after reset')).toBeNull();
-    expect(screen.getByLabelText('Message')).toHaveValue('');
-    await act(async () =>
-      resolveSecond(createSubmittedResult('standalone-action', secondMessageId))
-    );
-
-    expect(screen.queryByText('Sent, updating')).toBeNull();
-    expect(screen.getByLabelText('Message')).toHaveValue('');
-  });
-
   it('keeps displayed answers but uses the live process for Stop and failure feedback without a page', async () => {
     render(
       <UiLanguageProvider initialLanguage="en">
@@ -1742,22 +1637,16 @@ describe('AgentOverlay broader E2E', () => {
       expect(hideOverlay).not.toHaveBeenCalled();
     });
 
-    it('keeps the task a new-task panel or a reply starts in that panel', async () => {
+    it('keeps the task a reply starts in that panel', async () => {
       const messageId = '00000000-0000-4000-8000-0000000000a1';
       vi.spyOn(crypto, 'randomUUID').mockReturnValue(messageId);
       submitMessage.mockResolvedValue(createStartedResult('act-new', messageId));
-      renderPanel({ entryMode: 'standalone' });
-      await screen.findByRole('button', { name: /permissions: Ask every time/ });
-      fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Tidy the notes' } });
-      await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Send' })));
-      cleanup();
-
       renderPanel();
       await act(async () => snapshotListener?.(createCommentOnlySnapshot()));
       fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Do it then' } });
       await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Send' })));
 
-      expect(submitMessage).toHaveBeenCalledTimes(2);
+      expect(submitMessage).toHaveBeenCalledOnce();
       expect(openTask).not.toHaveBeenCalled();
       expect(hideOverlay).not.toHaveBeenCalled();
     });
@@ -2951,49 +2840,6 @@ describe('AgentOverlay broader E2E', () => {
     expect(within(fresh).getByRole('button', { name: 'Resume' })).toBeEnabled();
   });
 
-  it('sends the chosen initial permissions and retains them on a transport retry', async () => {
-    submitMessage.mockRejectedValue(new Error('response lost'));
-    render(
-      <UiLanguageProvider initialLanguage="en">
-        <AgentOverlay entryMode="standalone" />
-      </UiLanguageProvider>
-    );
-    fireEvent.click(await screen.findByRole('button', { name: /permissions: Ask every time/ }));
-    fireEvent.click(screen.getByRole('menuitemradio', { name: /Auto-approve/ }));
-    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Run the command' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-    const retry = await screen.findByRole('button', { name: 'Retry sending' });
-    const request = submitMessage.mock.calls[0][0];
-    expect(request.target).toEqual({ kind: 'new', approval_mode: 'always_allow' });
-    await act(async () => fireEvent.click(retry));
-    expect(submitMessage.mock.calls[1][0]).toEqual(request);
-  });
-  it('recovers initial permission loading without losing the draft or submitting unknown consent', async () => {
-    submitMessage.mockResolvedValue(createStartedResult('new-action', 'message-id'));
-    getWorkspaceEditCommandPreference
-      .mockRejectedValueOnce(new Error('connection interrupted'))
-      .mockResolvedValue(defaultPermissions);
-    render(
-      <UiLanguageProvider initialLanguage="en">
-        <AgentOverlay entryMode="standalone" />
-      </UiLanguageProvider>
-    );
-    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Keep this draft' } });
-    const retry = await screen.findByRole('button', { name: 'Retry loading permissions' });
-    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
-    fireEvent.submit(screen.getByLabelText('Message').closest('form')!);
-    expect(submitMessage).not.toHaveBeenCalled();
-    retry.focus();
-    fireEvent.click(retry);
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled());
-    expect(screen.getByLabelText('Message')).toHaveValue('Keep this draft');
-    expect(screen.getByRole('button', { name: /permissions: Ask every time/ })).toHaveFocus();
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-    expect(submitMessage.mock.calls[0][0].target).toEqual({
-      kind: 'new',
-      approval_mode: 'prompt_each_time',
-    });
-  });
   it('blocks existing sends and resumes after an ambiguous permission downgrade until re-read', async () => {
     getActionApprovalMode.mockResolvedValue({ approval_mode: 'always_allow' });
     setActionApprovalMode.mockRejectedValue(new Error('save response lost'));

@@ -91,6 +91,8 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.replyFailed': 'Your reply could not be sent. Send it again.',
     'overlay.openInMainWindow': 'Open in main window',
     'overlay.openTaskFailed': 'Could not open this task in the main window.',
+    'overlay.todo.organization': 'Organization',
+    'overlay.todo.openFailed': 'The TODO was added, but the main window could not be opened.',
     'overlay.openSuggestionFailed': 'Could not open this suggestion in the main window.',
     'overlay.supplement.label': 'Additional instructions (optional)',
     'overlay.supplement.placeholder':
@@ -237,6 +239,8 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.replyFailed': '返信を送れませんでした。もう一度送ってください。',
     'overlay.openInMainWindow': 'メイン画面で開く',
     'overlay.openTaskFailed': 'メイン画面でこの作業を開けませんでした。',
+    'overlay.todo.organization': '組織',
+    'overlay.todo.openFailed': 'TODO は追加しました。メイン画面は開けませんでした。',
     'overlay.openSuggestionFailed': 'メイン画面でこの提案を開けませんでした。',
     'overlay.supplement.label': '追加の指示（任意）',
     'overlay.supplement.placeholder': '承認の条件や、見送る理由を書く（任意）',

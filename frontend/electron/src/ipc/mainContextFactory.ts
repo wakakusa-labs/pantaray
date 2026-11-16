@@ -219,9 +219,13 @@ export function buildMainContext(params: {
         }
       },
       showTask: async ({ kind, id, file }) => {
-        // The same `?item=` and `&file=` the renderer reads (historySelection).
+        // The same `?todo=`, or `?item=` and `&file=`, the renderer reads (todoSelection,
+        // historySelection).
         const fileQuery = file === undefined ? '' : `&file=${encodeURIComponent(file)}`;
-        const route = `/history?item=${kind}:${encodeURIComponent(id)}${fileQuery}`;
+        const route =
+          kind === 'todo'
+            ? `/history?todo=${encodeURIComponent(id)}`
+            : `/history?item=${kind}:${encodeURIComponent(id)}${fileQuery}`;
         const mainWindow = params.getMainWindow();
         if (mainWindow && !mainWindow.isDestroyed()) {
           // A loaded page selects it in place: a load would drop its chat and task drafts. A page

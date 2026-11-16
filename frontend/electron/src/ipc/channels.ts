@@ -135,7 +135,7 @@ export const validInvokeChannels = [
   'chat:listItems',
   'chat:retryTurn',
   'chat:getTurnState',
-  // The TODO list and its progress (main window only)
+  // The TODO list and its progress (main window only, but the panel adds one)
   'todos:list',
   'todos:create',
   'todos:setCheck',

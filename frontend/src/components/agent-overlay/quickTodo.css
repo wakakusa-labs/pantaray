@@ -1,0 +1,158 @@
+/* The Option+Space panel's TODO composer: the text, then one row of choices on the overlay's
+   glass. The pickers are framed so they read as controls; the dates are an unframed icon. */
+
+.quick-todo__field {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  /* One line at first, growing to eight before it scrolls; the form's frame shows its focus. */
+  max-height: calc(8lh + 8px);
+  field-sizing: content;
+  padding: 4px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  resize: none;
+}
+
+.quick-todo__field::placeholder {
+  color: var(--fog-text-3);
+}
+
+.quick-todo__picker,
+.quick-todo__dates {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  height: 32px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* Long names are cut short here, and shown whole in the list. Both pickers naming none, the dates
+   and send fit one row of the 400px panel. */
+.quick-todo__picker {
+  max-width: 144px;
+  border: 1px solid var(--control-border);
+}
+
+:is(.quick-todo__picker, .quick-todo__dates):is(:hover, [aria-expanded='true']) {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+:is(.quick-todo__picker, .quick-todo__dates):focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.7);
+  outline-offset: 2px;
+}
+
+.quick-todo__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* An organization's icon, or its initial on a grey tile. */
+.quick-todo__mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  background: var(--fog-text-3);
+  color: var(--app-background);
+  font-size: 11px;
+  font-weight: var(--weight-semibold);
+  object-fit: cover;
+}
+
+.quick-todo__dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--fog-text-3);
+}
+
+.quick-todo__icon,
+.quick-todo__caret,
+.quick-todo__dates > svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--text-secondary);
+}
+
+.quick-todo__caret {
+  width: 10px;
+  height: 10px;
+}
+
+/* A picker's choices, and the calendar, hang under their button and never over the text: the
+   window grows to hold them while they are open. */
+.quick-todo__menu {
+  position-area: block-end span-inline-end;
+  box-sizing: border-box;
+  min-width: anchor-size(width);
+  max-width: 240px;
+  margin: 6px 0;
+  padding: 4px;
+  border: 1px solid var(--control-border);
+  border-radius: 10px;
+  background: var(--fog-popover);
+  box-shadow: var(--shadow-popover);
+}
+
+.quick-todo__menu,
+.quick-todo .todo-date-picker {
+  position-try-fallbacks: flip-inline;
+}
+
+.quick-todo__menu:popover-open {
+  display: grid;
+  gap: 2px;
+}
+
+.quick-todo__menu button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fog-text-2);
+  font: inherit;
+  font-size: 14px;
+  text-align: start;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.quick-todo__menu button[aria-checked='true'] {
+  color: var(--fog-text);
+  font-weight: var(--weight-semibold);
+}
+
+.quick-todo__menu button:is(:hover, :focus-visible) {
+  outline: none;
+  background: var(--fog-mist-strong);
+  color: var(--fog-text);
+}
+
+.quick-todo__menu button:focus-visible {
+  box-shadow: var(--focus-ring);
+}

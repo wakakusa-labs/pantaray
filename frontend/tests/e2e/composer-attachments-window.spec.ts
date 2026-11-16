@@ -16,9 +16,9 @@ function findFiles(root: string, name: string): string[] {
 test('a document picked in the composer reaches the Action workspace when sent', async ({}, testInfo) => {
   const { harness, stop } = await launchElectronE2E();
   try {
-    const { app, page, localArtifactRoot } = harness;
+    const { page, localArtifactRoot } = harness;
     await page.waitForURL(/#\/history$/);
-    // The overlay opens only once the local runtime is up.
+    // A task starts only once the local runtime is up.
     await expect
       .poll(() =>
         page.evaluate(() =>
@@ -29,20 +29,17 @@ test('a document picked in the composer reaches the Action workspace when sent',
         )
       )
       .toBe('ready');
-    await page.evaluate(() => window.electron!.history!.openNewConversation());
-    await expect
-      .poll(() => app.windows().some((w) => w.url().includes('mode=standalone')))
-      .toBe(true);
-    const overlay = app.windows().find((w) => w.url().includes('mode=standalone'))!;
-    const input = overlay.getByRole('textbox', { name: 'メッセージ', exact: true });
+    // The main window's new task: the Option+Space panel adds a TODO, which carries no file.
+    await page.evaluate(() => (window.location.hash = '#/history?item=new'));
+    const input = page.getByRole('textbox', { name: 'メッセージ', exact: true });
     await expect(input).toBeVisible();
 
-    await overlay.locator('.overlay-composer input[type="file"]').setInputFiles({
+    await page.locator('.overlay-composer input[type="file"]').setInputFiles({
       name: '議事録.pdf',
       mimeType: 'application/pdf',
       buffer: PDF_BYTES,
     });
-    await expect(overlay.getByRole('button', { name: '議事録.pdf を削除' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '議事録.pdf を削除' })).toBeVisible();
     const stagingRoot = path.join(localArtifactRoot, 'generated', 'attachments');
     expect(
       fs.readdirSync(stagingRoot, { recursive: true }).some((p) => String(p).endsWith('.pdf'))
@@ -50,7 +47,7 @@ test('a document picked in the composer reaches the Action workspace when sent',
 
     await input.fill('この議事録を読んで');
     await input.press('Enter');
-    const sent = overlay.getByRole('article', { name: 'あなた' });
+    const sent = page.getByRole('article', { name: 'あなた' });
     await expect(sent.getByRole('list', { name: '添付ファイル 1 件' })).toContainText('議事録.pdf');
     await expect(input).toHaveValue('');
 

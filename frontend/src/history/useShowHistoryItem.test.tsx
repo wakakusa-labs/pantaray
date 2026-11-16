@@ -64,6 +64,23 @@ it('selects the work main names on History, in place, keeping what the window ho
   expect(draft).toHaveValue('half-written message');
 });
 
+it('opens a TODO a panel added on the list, in place', () => {
+  render(
+    <MemoryRouter initialEntries={['/history?scope=none']}>
+      <MainWindow />
+    </MemoryRouter>
+  );
+  const draft = screen.getByRole('textbox', { name: 'draft' });
+
+  act(() => showItem?.({ item: 'todo:todo 1' }));
+
+  // In every organization's list, where the TODO is whichever one it went to.
+  expect(screen.getByRole('status', { name: 'location' })).toHaveTextContent(
+    /^\/history\?todo=todo%201$/
+  );
+  expect(screen.getByRole('textbox', { name: 'draft' })).toBe(draft);
+});
+
 it('ignores a request that does not name a work', () => {
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
   render(
@@ -77,6 +94,7 @@ it('ignores a request that does not name a work', () => {
     { item: 'action:' },
     { item: 'action: act-1' },
     { item: 'conversation:act-1' },
+    { item: 'todo: todo-1' },
     { actionId: 'act-1' },
     'action:act-1',
     null,

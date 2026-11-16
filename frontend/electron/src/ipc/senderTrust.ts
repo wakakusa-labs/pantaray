@@ -61,6 +61,9 @@ const MAIN_AND_OVERLAY_CHANNELS = new Set<IpcChannel>([
   'history:readItem',
   // Written by main, so a window without focus still copies.
   'clipboard:writeText',
+  // The Option+Space panel hands work over as a TODO; the list's reads and every other TODO
+  // write stay main-only.
+  'todos:create',
 ]);
 
 const OVERLAY_ONLY_CHANNELS = new Set<IpcChannel>([

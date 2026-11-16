@@ -6,6 +6,7 @@ import { ATTACHMENT_ACCEPT } from '@/components/agent-overlay/attachmentStaging'
 import { isImeKey } from '@/components/ui/imeKey';
 import { useI18n } from '@/context/useI18n';
 import type { TodoPlace, TodoProjectSlot } from '@/todos/groupTodosByProject';
+import { oneLine } from '@/todos/todoText';
 import type { TodoImportAttachments } from '@/todos/useTodoImport';
 
 import type { TodoDue } from '../../../electron/src/todos/todoContracts';
@@ -15,9 +16,6 @@ import { useAddBarFiles } from './useAddBarFiles';
 
 import './todo.css';
 import './todoAddBar.css';
-
-/** A TODO is one line, so lines pasted, or kept from an import, are joined. */
-const oneLine = (text: string) => text.replace(/[^\S\n]*\n\s*/g, ' ');
 
 /** One value per place: a project, or an organization's own no project, or none. */
 const slotKey = (slot: TodoPlace) =>

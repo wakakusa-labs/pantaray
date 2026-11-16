@@ -177,13 +177,6 @@ test('offer: a reply continues the work, with no decision buttons or mode menu',
   });
 });
 
-test('user-started Action opens the regular composer immediately', async ({ page }, info) => {
-  await page.goto(`${baseUrl}notification.html?mode=standalone`);
-  await expect(page.getByRole('textbox', { name: 'メッセージ', exact: true })).toBeFocused();
-  await expect(page.getByRole('button', { name: 'ファイルを追加' })).toBeVisible();
-  await capture(page, info, 'standalone-unchanged');
-});
-
 test('narrow English layout and reduced motion keep the controls reachable', async ({
   page,
 }, info) => {
@@ -293,12 +286,13 @@ test('continuation: list floats above, filters, closes, and sends the reference'
   });
 });
 
-test('new conversation: small window opens the list below; none registered offers Add', async ({
+test('a reply in a small window opens the list below; none registered offers Add', async ({
   page,
 }, info) => {
-  await page.goto(`${baseUrl}notification.html?mode=standalone`);
+  await page.goto(`${baseUrl}notification.html`);
+  await showSuggestion(page, 'message_only');
   const input = page.getByRole('textbox', { name: 'メッセージ', exact: true });
-  await expect(input).toBeFocused();
+  await input.click();
   await page.evaluate(() => (document.documentElement.dataset.noProjects = 'true'));
   await page.keyboard.type('一行目');
   await page.keyboard.press('Shift+Enter');

@@ -27,7 +27,7 @@ import type { ComposerState } from './useOverlayComposerController';
  *
  * 高さは中身が決める。本文欄が伸びれば枠も上へ伸び、操作の行は常に下端に残る。
  */
-const ComposerForm = styled.form`
+export const ComposerForm = styled.form`
   /* Also the tones of the quote popover opened from inside this form. */
   --composer-surface: rgba(10, 14, 20, 0.34);
   --composer-border: var(--border-color);
@@ -56,7 +56,7 @@ const ComposerForm = styled.form`
  * 枠の下端に残る操作の行。追加と権限が左に並び、送信だけが反対の端へ寄る。
  * 決定ボタンの並びは送信の円より幅を取るので、狭い枠では次の行の右端へ折り返す。
  */
-const ComposerActions = styled.div`
+export const ComposerActions = styled.div`
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -120,7 +120,7 @@ export const ComposerIconButton = styled.button`
  * 動いているものの停止か、直前に止めたものの再開）が、位置も大きさも変えない。
  * 押せない間は不透明度だけを落とす。
  */
-const ComposerPrimaryButton = styled.button`
+export const ComposerPrimaryButton = styled.button`
   display: inline-flex;
   align-items: center;
   justify-content: center;

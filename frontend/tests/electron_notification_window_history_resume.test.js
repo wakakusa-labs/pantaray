@@ -893,7 +893,7 @@ test('visible history overlay also suppresses main restore for activate points i
   assert.equal(instances.length, 1);
   instances[0].windowEvents.emit('ready-to-show');
 
-  assert.equal(notificationWindow.isVisibleOverlayAtPoint({ x: 1000, y: 60 }), true);
+  assert.equal(notificationWindow.isVisibleOverlayAtPoint({ x: 1100, y: 60 }), true);
 });
 
 test('middle-row overlays are centered and keep that center until the user acts in them; top-row ones grow downward', async () => {
@@ -917,9 +917,9 @@ test('middle-row overlays are centered and keep that center until the user acts 
   notificationWindow.openStandaloneConversationOverlay('standalone:2');
   const [suggestion, history, typed, clicked] = instances;
 
-  assert.deepEqual(suggestion.getBounds(), { x: 900, y: 20, width: 520, height: 120 });
+  assert.deepEqual(suggestion.getBounds(), { x: 1020, y: 20, width: 400, height: 120 });
   for (const win of [typed, clicked, history]) {
-    assert.deepEqual(win.getBounds(), { x: 460, y: 390, width: 520, height: 120 });
+    assert.deepEqual(win.getBounds(), { x: 520, y: 390, width: 400, height: 120 });
   }
 
   resize(suggestion, 400);
@@ -927,17 +927,17 @@ test('middle-row overlays are centered and keep that center until the user acts 
 
   // Content loading in keeps the window centered, up to the screen edges.
   for (const height of [401, 120, 401]) resize(history, height);
-  assert.deepEqual(history.getBounds(), { x: 460, y: 250, width: 520, height: 401 });
+  assert.deepEqual(history.getBounds(), { x: 520, y: 250, width: 400, height: 401 });
   resize(history, 2000);
-  assert.deepEqual(history.getBounds(), { x: 460, y: 8, width: 520, height: 884 });
+  assert.deepEqual(history.getBounds(), { x: 520, y: 8, width: 400, height: 884 });
 
   // After the user's first key or click, the window grows downward from its top.
   typed.webContentsEvents.emit('before-input-event', {}, { key: '@' });
   resize(typed, 320);
-  assert.deepEqual(typed.getBounds(), { x: 460, y: 390, width: 520, height: 320 });
+  assert.deepEqual(typed.getBounds(), { x: 520, y: 390, width: 400, height: 320 });
   handlers.onOverlayInteraction({ sender: clicked.webContents });
   resize(clicked, 320);
-  assert.deepEqual(clicked.getBounds(), { x: 460, y: 390, width: 520, height: 320 });
+  assert.deepEqual(clicked.getBounds(), { x: 520, y: 390, width: 400, height: 320 });
 });
 
 test('macOS overlays have no hidden title bar, whose clicks would activate the app', () => {
@@ -1338,10 +1338,10 @@ test('each kind of overlay opens in the cell chosen for it, read when the window
   const position = (win) => ({ x: win.getBounds().x, y: win.getBounds().y });
   assert.deepEqual(instances.map(position), [
     { x: 20, y: 772 },
-    { x: 972, y: 53 },
-    { x: 798, y: 772 },
+    { x: 1092, y: 53 },
+    { x: 858, y: 772 },
     // The second History window stacks upward over the first, which is still loading.
-    { x: 798, y: 772 - 132 },
+    { x: 858, y: 772 - 132 },
   ]);
 
   // A Suggestion arriving stacks upward over the one shown in its cell only; a moved setting
@@ -1354,7 +1354,7 @@ test('each kind of overlay opens in the cell chosen for it, read when the window
   placements = { ...placements, started: { row: 1, column: 0 } };
   notificationWindow.openStandaloneConversationOverlay('standalone:2');
   assert.deepEqual(position(instances[5]), { x: 20, y: 413 });
-  assert.deepEqual(position(instances[1]), { x: 972, y: 53 });
+  assert.deepEqual(position(instances[1]), { x: 1092, y: 53 });
 });
 
 test('a bottom-row overlay grows upward from where it is and stays on screen', () => {
@@ -1375,19 +1375,19 @@ test('a bottom-row overlay grows upward from where it is and stays on screen', (
   const workAreaBottom = 33 + 879;
 
   resize(typed, 300);
-  assert.deepEqual(typed.getBounds(), { x: 496, y: 772 + 120 - 300, width: 520, height: 300 });
+  assert.deepEqual(typed.getBounds(), { x: 556, y: 772 + 120 - 300, width: 400, height: 300 });
   // The user's first key does not turn it downward, off the bottom of the screen.
   typed.webContentsEvents.emit('before-input-event', {}, { key: 'a' });
   handlers.onOverlayInteraction({ sender: typed.webContents });
   resize(typed, 400);
   assert.equal(typed.getBounds().y + typed.getBounds().height, 892);
   resize(typed, 2000);
-  assert.deepEqual(typed.getBounds(), { x: 496, y: 33 + 8, width: 520, height: 879 - 16 });
+  assert.deepEqual(typed.getBounds(), { x: 556, y: 33 + 8, width: 400, height: 879 - 16 });
 
   // Dragged elsewhere, it keeps its new bottom edge.
   typed.setBounds({ y: 200, height: 300 });
   resize(typed, 200);
-  assert.deepEqual(typed.getBounds(), { x: 496, y: 300, width: 520, height: 200 });
+  assert.deepEqual(typed.getBounds(), { x: 556, y: 300, width: 400, height: 200 });
 
   resize(suggestion, 500);
   assert.equal(suggestion.getBounds().y + suggestion.getBounds().height, 892);
@@ -1415,28 +1415,28 @@ test('a closed Suggestion reopened from History opens in the History cell; a vis
   const [suggestion] = instances;
   suggestion.windowEvents.emit('ready-to-show');
   resize(suggestion, 300);
-  assert.deepEqual(suggestion.getBounds(), { x: 972, y: 53, width: 520, height: 300 });
+  assert.deepEqual(suggestion.getBounds(), { x: 1092, y: 53, width: 400, height: 300 });
 
   // Visible: History brings it forward where the user already sees it.
   handlers.onHistoryOpenOverlay({}, { suggestionId: 'S1' });
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(suggestion.getBounds(), { x: 972, y: 53, width: 520, height: 300 });
+  assert.deepEqual(suggestion.getBounds(), { x: 1092, y: 53, width: 400, height: 300 });
 
   // Closed, then reopened from History: bottom-left, keeping its height, growing upward.
   notificationWindow.hideOverlay('S1');
   handlers.onHistoryOpenOverlay({}, { suggestionId: 'S1' });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(instances.length, 1);
-  assert.deepEqual(suggestion.getBounds(), { x: 20, y: 892 - 300, width: 520, height: 300 });
+  assert.deepEqual(suggestion.getBounds(), { x: 20, y: 892 - 300, width: 400, height: 300 });
   resize(suggestion, 400);
   assert.equal(suggestion.getBounds().y + suggestion.getBounds().height, 892);
 
   // The same through an Action of that Suggestion opened from the History list or chat.
   notificationWindow.hideOverlay('S1');
-  suggestion.setBounds({ x: 972, y: 53 });
+  suggestion.setBounds({ x: 1092, y: 53 });
   suggestion.webContentsEvents.emit('did-finish-load');
   assert.equal(notificationWindow.openStandaloneConversationOverlay('S1', 'A1'), 'focused');
-  assert.deepEqual(suggestion.getBounds(), { x: 20, y: 892 - 400, width: 520, height: 400 });
+  assert.deepEqual(suggestion.getBounds(), { x: 20, y: 892 - 400, width: 400, height: 400 });
 });
 
 test('by default Suggestions and History windows share the top-right stack without covering each other', async () => {
@@ -1458,24 +1458,24 @@ test('by default Suggestions and History windows share the top-right stack witho
   await openFromHistory('S2');
   notificationWindow.openStandaloneConversationOverlay('conversation:A1', 'A1');
   const [suggestion, started, history, conversation] = instances;
-  assert.deepEqual(position(suggestion), { x: 900, y: 20 });
-  assert.deepEqual(position(started), { x: 460, y: 390 });
-  assert.deepEqual(position(history), { x: 900, y: 152 });
+  assert.deepEqual(position(suggestion), { x: 1020, y: 20 });
+  assert.deepEqual(position(started), { x: 520, y: 390 });
+  assert.deepEqual(position(history), { x: 1020, y: 152 });
 
   // A window still loading already holds its slot, so the next one takes the following slot.
-  assert.deepEqual(position(conversation), { x: 900, y: 284 });
+  assert.deepEqual(position(conversation), { x: 1020, y: 284 });
   for (const win of instances) win.windowEvents.emit('ready-to-show');
   notificationWindow.showNotification('S3');
-  assert.deepEqual(position(instances[4]), { x: 900, y: 20 + 3 * 132 });
+  assert.deepEqual(position(instances[4]), { x: 1020, y: 20 + 3 * 132 });
   instances[4].windowEvents.emit('ready-to-show');
 
   // A closed Suggestion reopened from History takes the lowest free slot of the corner.
   notificationWindow.hideOverlay('S1');
   notificationWindow.hideOverlay('S3');
   notificationWindow.showNotification('S4');
-  assert.deepEqual(position(instances[5]), { x: 900, y: 20 });
+  assert.deepEqual(position(instances[5]), { x: 1020, y: 20 });
   await openFromHistory('S1');
-  assert.deepEqual(position(suggestion), { x: 900, y: 20 + 3 * 132 });
+  assert.deepEqual(position(suggestion), { x: 1020, y: 20 + 3 * 132 });
 });
 
 test('a window opening in a shared cell takes the slot a closed one freed, not one still in use', async () => {
@@ -1494,9 +1494,9 @@ test('a window opening in a shared cell takes the slot a closed one freed, not o
   for (const win of instances) win.windowEvents.emit('ready-to-show');
   const [first, middle, last] = instances;
   assert.deepEqual([first, middle, last].map(position), [
-    { x: 900, y: 20 },
-    { x: 900, y: 152 },
-    { x: 900, y: 284 },
+    { x: 1020, y: 20 },
+    { x: 1020, y: 152 },
+    { x: 1020, y: 284 },
   ]);
 
   // Closing the middle one frees its slot; the closed first one reopened from History takes
@@ -1505,10 +1505,10 @@ test('a window opening in a shared cell takes the slot a closed one freed, not o
   notificationWindow.hideOverlay('S2');
   handlers.onHistoryOpenOverlay({}, { suggestionId: 'S1' });
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(position(first), { x: 900, y: 20 });
+  assert.deepEqual(position(first), { x: 1020, y: 20 });
   notificationWindow.showNotification('S4');
-  assert.deepEqual(position(instances[3]), { x: 900, y: 152 });
+  assert.deepEqual(position(instances[3]), { x: 1020, y: 152 });
   // A window still loading holds its slot too.
   notificationWindow.openStandaloneConversationOverlay('conversation:A1', 'A1');
-  assert.deepEqual(position(instances[4]), { x: 900, y: 416 });
+  assert.deepEqual(position(instances[4]), { x: 1020, y: 416 });
 });

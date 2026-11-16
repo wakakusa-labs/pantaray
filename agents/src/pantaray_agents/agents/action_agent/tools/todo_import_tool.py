@@ -45,10 +45,6 @@ TODO_DRAFT_REFUSALS: Final[dict[TodoDraftRefusal, str]] = {
         "The group at group_index names an organization this import's scope does "
         "not allow."
     ),
-    "project_required": (
-        "The group at group_index is in an organization but has no project; only "
-        "TODOs in no organization may have no project."
-    ),
     "project_name_taken": (
         "The project of the group at group_index is already a project of another "
         "organization, or another group puts the same new project in a different "
@@ -121,7 +117,8 @@ _DRAFT_SCHEMA: Final[dict[str, JSONValue]] = {
                                 "keep_duplicate": {
                                     "type": "boolean",
                                     "description": (
-                                        "Register it even though the project "
+                                        "Register it even though the group's "
+                                        "project, or with none its organization, "
                                         "already has an open TODO of this text."
                                     ),
                                 },

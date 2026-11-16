@@ -122,7 +122,7 @@ _IN_A = OrganizationScope(organization_id="org-a")
         (_IN_A, [_group("C", "New", "t")], "organization_outside_scope"),
         (_IN_A, [_group(None, "Bee", "t")], "project_name_taken"),
         (_IN_A, [_group(None, "Loose", "t")], "project_name_taken"),
-        (_IN_A, [_group(None, None, "t")], "project_required"),
+        (_IN_A, [_group(None, None, "t")], None),
         (OrganizationScope("org-gone"), [], "organization_not_found"),
         (NoOrganizationScope(), [_group(None, "Loose", "t")], None),
         (NoOrganizationScope(), [_group(None, None, "t")], None),
@@ -133,7 +133,8 @@ _IN_A = OrganizationScope(organization_id="org-a")
         ),
         (NoOrganizationScope(), [_group(None, "One", "t")], "project_name_taken"),
         (AllScope(), [_group("C", "New", "t"), _group("B", "Bee", "t")], None),
-        (AllScope(), [_group("A", None, "t")], "project_required"),
+        (AllScope(), [_group("A", None, "t")], None),
+        (NoOrganizationScope(), [_group("A", None, "t")], "organization_outside_scope"),
         (AllScope(), [_group(None, "One", "t")], "project_name_taken"),
         (AllScope(), [_group("C", "One", "t")], "project_name_taken"),
         (
@@ -209,6 +210,46 @@ def test_an_open_todo_is_a_duplicate_only_in_its_own_place(db: Path) -> None:
     assert isinstance(result, TodoImportResult)
     assert (len(result.todo_ids), result.skipped_duplicates) == (1, 0)
     assert [line.duplicate for line in same_place.groups[0].todos] == [True]
+
+
+def test_a_group_with_an_organization_and_no_project_registers_in_it(
+    db: Path,
+) -> None:
+    execute(
+        db,
+        f"""
+        INSERT INTO todo_items(todo_id, user_id, organization_id, text, author,
+          origin_kind, created_at) VALUES ('seed-a', '{USER}', 'org-a',
+          'Send the invoice', 'user', 'written', '{T}');
+        """,
+    )
+    everywhere = _drafted(
+        AllScope(),
+        _group("A", None, "Send the invoice", "Renew the lease"),
+        _group("D", None, "Hire"),
+        _group("D", None, "Hire"),
+    )
+    # A group naming no organization sits in the scope's.
+    in_a = _drafted(_IN_A, _group(None, None, "Plan"))
+
+    marks = [[line.duplicate for line in group.todos] for group in everywhere.groups]
+    result = _register(everywhere)
+    _register(in_a)
+
+    assert marks == [[True, False], [False], [True]]
+    assert isinstance(result, TodoImportResult)
+    assert (len(result.organization_ids), result.project_ids) == (1, ())
+    assert (len(result.todo_ids), result.skipped_duplicates) == (2, 2)
+    with closing(sqlite3.connect(db)) as connection:
+        rows = connection.execute(
+            "SELECT text, project_id, organization_id FROM todo_items "
+            "WHERE todo_id NOT LIKE 'seed-%' ORDER BY text"
+        ).fetchall()
+    assert rows == [
+        ("Hire", None, result.organization_ids[0]),
+        ("Plan", None, "org-a"),
+        ("Renew the lease", None, "org-a"),
+    ]
 
 
 def test_a_write_is_refused_on_a_stale_revision_or_an_issue_and_changes_nothing(

@@ -86,7 +86,7 @@ class DraftLineView(_View):
     text: str
     due: dt.date | None
     starts_on: dt.date | None
-    # The project already has an open TODO of this text, or an earlier line does.
+    # Its place already has an open TODO of this text, or an earlier line does.
     duplicate: bool
     keep_duplicate: bool
 

@@ -15,7 +15,8 @@ type TodoAuthor = Literal["user", "ai"]
 
 @dataclass(frozen=True, slots=True)
 class WrittenOrigin:
-    # What the user attached when writing it, for the Action that works on it.
+    # What the user attached when writing it, held until the Action that works
+    # on it takes them in its first message.
     # Only a written TODO holds any, so a weekly instance, which is a
     # `RecurrenceOrigin`, never claims files the first Action already took.
     files: tuple[FileAttachmentInput, ...] = ()

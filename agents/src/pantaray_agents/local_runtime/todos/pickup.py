@@ -1,9 +1,10 @@
 """Start the work of every TODO that is ready for it, through `submit_action_message`.
 
-Nothing is written on the TODO: the Action's first message id derives from the
-TODO id, so `UNIQUE (user_id, initial_user_message_id)` keeps one Action per
-TODO however often, or however concurrently, a pass runs. A submit that fails
-leaves the TODO without an Action, so the next pass tries it again.
+The TODO does not record its Action: the Action's first message id derives
+from the TODO id, so `UNIQUE (user_id, initial_user_message_id)` keeps one
+Action per TODO however often, or however concurrently, a pass runs. A submit
+that fails leaves the TODO without an Action, so the next pass tries it again.
+The only write on the TODO lets go of the attachments its Action took.
 """
 
 from __future__ import annotations
@@ -40,6 +41,7 @@ from pantaray_agents.local_runtime.todos.model import Todo, WrittenOrigin
 from pantaray_agents.local_runtime.todos.reads import (
     read_pickup_candidates,
 )
+from pantaray_agents.local_runtime.todos.writes import release_todo_attachments
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings import (
     list_workspace_settings,
 )
@@ -84,6 +86,28 @@ def pick_up_todos(*, user_id: str) -> None:
             )
             continue
         logger.info("TODO picked up: todo_id=%s target=%s", todo.todo_id, target.kind)
+        if command.message.files or command.message.images:
+            _release_attachments(user_id, todo)
+
+
+def _release_attachments(user_id: str, todo: Todo) -> None:
+    """The Action owns the attachments from its first message on, so the TODO
+    lets them go: started again, after that conversation was deleted with the
+    TODO and the TODO restored, it sends its text alone.
+
+    Released only after the submit commits, so a failed submit keeps them for
+    the next pass. A release that fails leaves a TODO whose Action exists, so
+    nothing sends them again unless that conversation is deleted.
+    """
+
+    try:
+        release_todo_attachments(user_id=user_id, todo_id=todo.todo_id)
+    except sqlite3.Error as exc:
+        logger.warning(
+            "TODO attachments not released: todo_id=%s error=%s",
+            todo.todo_id,
+            type(exc).__name__,
+        )
 
 
 def _command(

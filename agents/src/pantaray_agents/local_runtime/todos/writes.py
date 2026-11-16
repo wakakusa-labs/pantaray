@@ -277,6 +277,20 @@ def update_todo[R: str](
     return result
 
 
+def release_todo_attachments(*, user_id: str, todo_id: TodoId) -> None:
+    """Drop a written TODO's attachments once its Action has taken them."""
+
+    update_todo(
+        user_id=user_id,
+        todo_id=todo_id,
+        step=lambda todo: (
+            replace(todo, origin=WrittenOrigin())
+            if isinstance(todo.origin, WrittenOrigin)
+            else todo
+        ),
+    )
+
+
 def delete_purged_todo(*, user_id: str, todo: Todo) -> bool:
     """Remove the row, unless its deletion changed since it was read; whether
     it was removed."""

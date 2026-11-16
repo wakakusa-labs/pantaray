@@ -831,7 +831,10 @@ describe('AgentOverlay broader E2E', () => {
     fireEvent.click(retry);
     await screen.findByRole('button', { name: 'Retry sending' });
     expect(submitMessage.mock.calls[1][0]).toEqual(exactRequest);
-    expect(input).toHaveValue('Keep my message');
+    // The test bridge runs main's clearForSend inside this click, before the composer counts
+    // itself as sending, so the field is empty until the read of the settled draft lands, a
+    // render after the retry button returns.
+    await waitFor(() => expect(input).toHaveValue('Keep my message'));
     submitMessage.mockResolvedValueOnce(
       createSubmittedResult('act-1', exactRequest.message.message_id)
     );

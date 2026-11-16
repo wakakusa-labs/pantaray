@@ -56,6 +56,18 @@ test.beforeEach(async ({ page }) => {
             } };
           },
         },
+        actions: {
+          attachFile: async ({ bytes, name }: { bytes: ArrayBuffer; name: string }) => ({
+            attachmentId: '0f8fad5b-d9cb-469f-a165-70867728950e',
+            name,
+            byteSize: bytes.byteLength,
+          }),
+          attachImage: async () => ({
+            kind: 'stored',
+            storagePath: 'user-1/2026-11-16/3f2b9a8e-1c4d-4e5f-8a6b-7c8d9e0f1a2b.png',
+          }),
+          discardAttachment: async (request: unknown) => record('discarded', request),
+        },
         agentOverlay: {
           onSnapshot: () => noop,
           resize: (height: number) =>
@@ -197,4 +209,59 @@ test('long names are cut short, and the dates and send stay on the one row', asy
   const frame = (await page.locator('form.quick-todo').boundingBox())!;
   expect(boxes[3].x + boxes[3].width).toBeLessThanOrEqual(frame.x + frame.width);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(400);
+});
+
+test('files and images go with the TODO, and the row stays one line under their chips', async ({
+  page,
+}) => {
+  await expect.poll(() => windowHeight(page)).toBeGreaterThan(0);
+  const closed = await windowHeight(page);
+  await page.getByRole('button', { name: /^組織/ }).click();
+  await page.getByRole('menuitemradio', { name: 'Wakakusa Holdings International' }).click();
+  await page.getByRole('button', { name: /^プロジェクト/ }).click();
+  await page.getByRole('menuitemradio', { name: /ランディングページ/ }).click();
+  await page.locator('input[type="file"]').setInputFiles([
+    {
+      name: '第3四半期の営業報告書_最終版.pdf',
+      mimeType: 'application/pdf',
+      buffer: Buffer.from('%PDF-1.7'),
+    },
+    { name: 'shot.png', mimeType: 'image/png', buffer: Buffer.from([137, 80, 78, 71]) },
+  ]);
+  const chips = page.getByRole('list', { name: '添付 2 件' });
+  await expect(chips).toBeVisible();
+  // The window grows to hold the chips above the row.
+  await expect.poll(() => windowHeight(page)).toBeGreaterThan(closed);
+
+  const row = [
+    page.getByRole('button', { name: 'ファイルを追加' }),
+    page.getByRole('button', { name: /^組織/ }),
+    page.getByRole('button', { name: /^プロジェクト/ }),
+    page.getByRole('button', { name: '今日から、期限なし' }),
+    page.getByRole('button', { name: '送信' }),
+  ];
+  const boxes = await Promise.all(row.map(async (item) => (await item.boundingBox())!));
+  for (const box of boxes)
+    expect(Math.round(box.y + box.height / 2)).toBe(Math.round(boxes[0].y + boxes[0].height / 2));
+  const frame = (await page.locator('form.quick-todo').boundingBox())!;
+  expect(boxes[4].x + boxes[4].width).toBeLessThanOrEqual(frame.x + frame.width);
+  expect((await chips.boundingBox())!.y).toBeLessThan(boxes[0].y);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(400);
+
+  await page.getByRole('textbox', { name: 'メッセージ' }).fill('報告書の要点をまとめる');
+  await page.getByRole('button', { name: '送信' }).click();
+  expect(await recorded(page, 'created')).toMatchObject({
+    files: [
+      {
+        attachment_id: '0f8fad5b-d9cb-469f-a165-70867728950e',
+        name: '第3四半期の営業報告書_最終版.pdf',
+        byte_size: 8,
+      },
+    ],
+    images: [
+      { kind: 'image', storage_path: 'user-1/2026-11-16/3f2b9a8e-1c4d-4e5f-8a6b-7c8d9e0f1a2b.png' },
+    ],
+  });
+  // Sent, the files are the TODO's: nothing is discarded.
+  await expect(page.locator('html')).not.toHaveAttribute('data-discarded');
 });

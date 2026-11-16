@@ -41,7 +41,7 @@
 }
 
 /* One row always: long names make the pickers give way and are cut short (the list shows them
-   whole), while the dates and send keep their size. */
+   whole), while ＋, the dates and send keep their size. */
 .quick-todo .quick-todo__row {
   flex-wrap: nowrap;
   /* Else the form's grid track widens to the names' full length. */
@@ -54,6 +54,7 @@
   border: 1px solid var(--control-border);
 }
 
+.quick-todo__attach,
 .quick-todo__dates,
 .quick-todo__row > [type='submit'] {
   flex: none;

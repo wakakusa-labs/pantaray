@@ -8,7 +8,12 @@
 
 import { z } from 'zod';
 
-import { ActionWireContractError } from '../actions/actionContracts';
+import {
+  ACTION_MESSAGE_MAX_IMAGES,
+  ActionFileAttachmentsSchema,
+  ActionWireContractError,
+  ImageReferenceSchema,
+} from '../actions/actionContracts';
 
 /** `_Id` (`schema/todos.py`). */
 const TODO_ID_MAX_CODEPOINTS = 128;
@@ -111,6 +116,9 @@ export const TodoCreateRequestSchema = z
       ),
     starts_on: LocalDateSchema.nullable().optional(),
     due: TodoDueSchema.nullable(),
+    // What the Action composer would send with the text; the pickup hands them to the Action.
+    files: ActionFileAttachmentsSchema.optional(),
+    images: z.array(ImageReferenceSchema).max(ACTION_MESSAGE_MAX_IMAGES).optional(),
   })
   .strict();
 
@@ -364,6 +372,7 @@ export const TODO_REFUSAL_CODES = [
   'TODO_INVALID_TEXT',
   'PROJECT_NOT_FOUND',
   'ORGANIZATION_NOT_FOUND',
+  'TODO_ATTACHMENT_UNAVAILABLE',
   'TODO_GOAL_DEADLINE_BEFORE_SET',
   'TODO_PROGRESS_INVALID_TEXT',
   'TODO_PROGRESS_CLIENT_ID_CONFLICT',

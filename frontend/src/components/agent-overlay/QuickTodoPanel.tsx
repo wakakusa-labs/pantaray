@@ -1,4 +1,4 @@
-import { ArrowUp, Building2, CalendarDays } from 'lucide-react';
+import { ArrowUp, Building2, CalendarDays, Plus } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 import { TodoDateRangePicker } from '@/components/todo/TodoDateRangePicker';
@@ -13,9 +13,26 @@ import { oneLine } from '@/todos/todoText';
 import type { WorkspaceSettings } from '../../../electron/src/settings/workspaceSettingsFetch';
 import type { TodoView, TodoWriteResult } from '../../../electron/src/todos/todoContracts';
 import AgentOverlayShell from './AgentOverlayShell';
-import { ComposerAlert } from './ComposerAttachments';
-import { ComposerActions, ComposerForm, ComposerPrimaryButton } from './OverlayComposer';
+import { ComposerAlert, ComposerAttachments } from './ComposerAttachments';
+import {
+  ComposerActions,
+  ComposerForm,
+  ComposerIconButton,
+  ComposerPrimaryButton,
+} from './OverlayComposer';
 import { QuickTodoPicker } from './QuickTodoPicker';
+import {
+  ATTACHMENT_ACCEPT,
+  addStagedAttachments,
+  attachmentKey,
+  attachmentPayload,
+  canAttachMore,
+  discardDocuments,
+  pastedFiles,
+  stageFiles,
+  type AttachmentFailure,
+  type ComposerAttachment,
+} from './attachmentStaging';
 import { useAgentOverlayController } from './useAgentOverlayController';
 import { useOverlayHeaderDrag } from './useOverlayHeaderDrag';
 import { useStandaloneComposerFocus } from './useStandaloneComposerFocus';
@@ -76,13 +93,23 @@ function localToday() {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
+type Attachments = {
+  items: readonly ComposerAttachment[];
+  /** Attach round trips still running; sending waits for them. */
+  inFlight: number;
+  failure: AttachmentFailure | null;
+};
+
+const NO_ATTACHMENTS: Attachments = { items: [], inFlight: 0, failure: null };
+
 /**
- * The Option+Space panel: work handed over as a TODO. The text, then one row with its
- * organization, its project (the organization's, or none), its start (today at first) and due
- * day (none at first), and send. A TODO is one line, as in the main window's add bar: pasted
- * lines are joined, Shift+Enter does nothing, and Enter sends unless an IME takes it. A TODO that
- * starts today is picked up at once, so the main window comes forward on it and the panel closes;
- * one that starts later, or has no start, is added and the panel closes.
+ * The Option+Space panel: work handed over as a TODO. The text, its files and images, then one
+ * row with ＋ to attach, its organization, its project (the organization's, or none), its start
+ * (today at first) and due day (none at first), and send. A TODO is one line, as in the main
+ * window's add bar: pasted lines are joined, Shift+Enter does nothing, and Enter sends unless an
+ * IME takes it. A TODO that starts today is picked up at once, so the main window comes forward
+ * on it and the panel closes; one that starts later, or has no start, is added and the panel
+ * closes. The TODO holds its attachments until the Action that works on it takes them.
  */
 export function QuickTodoPanel() {
   const ctrl = useAgentOverlayController(true);
@@ -90,6 +117,7 @@ export function QuickTodoPanel() {
   const { state, setContentReady, onClose, openTask } = ctrl;
   const { t, language } = useI18n();
   const fieldRef = useRef<HTMLTextAreaElement>(null);
+  const attachInputRef = useRef<HTMLInputElement>(null);
   useStandaloneComposerFocus(true, fieldRef);
   useEffect(() => setContentReady(true), [setContentReady]);
 
@@ -121,20 +149,61 @@ export function QuickTodoPanel() {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [failure, setFailure] = useState<MessageKey | null>(null);
+  const [attachments, setAttachments] = useState(NO_ATTACHMENTS);
+  const actions = window.electron?.actions;
   // A send whose answer never came may have added the TODO, so sending the same again reuses its
   // `client_todo_id` and the backend returns that TODO instead of adding a second one.
   const unansweredRef = useRef<{ key: string; clientTodoId: string } | null>(null);
+  // The staged files of each send whose answer never came, by its `client_todo_id`: a TODO that
+  // was added may hold them, so they are never discarded from here.
+  const heldFilesRef = useRef(new Map<string, readonly string[]>());
   const line = text.trim();
-  const canSend = !sending && line !== '';
+  const canSend = !sending && attachments.inFlight === 0 && line !== '';
+
+  const discard = (items: readonly ComposerAttachment[]) =>
+    discardDocuments(
+      actions,
+      items.filter(
+        (item) =>
+          ![...heldFilesRef.current.values()].some((held) => held.includes(attachmentKey(item)))
+      )
+    );
+
+  const attachFiles = async (picked: readonly File[]) => {
+    if (!actions || sending || picked.length === 0) return;
+    setAttachments((current) => ({ ...current, inFlight: current.inFlight + 1 }));
+    const { accepted, failure: refused } = await stageFiles(actions, picked, attachments.items);
+    setAttachments((current) => {
+      const added = addStagedAttachments(actions, current.items, accepted, refused);
+      return { items: added.attachments, inFlight: current.inFlight - 1, failure: added.failure };
+    });
+  };
+
+  const removeAttachment = (removed: ComposerAttachment) => {
+    discard([removed]);
+    setAttachments((current) => ({
+      ...current,
+      items: current.items.filter((item) => attachmentKey(item) !== attachmentKey(removed)),
+      failure: null,
+    }));
+  };
+
+  // Closing destroys the panel's window, so its unsent files go too, but those a lost send held.
+  const close = () => {
+    discard(attachments.items);
+    onClose();
+  };
 
   const send = async () => {
     if (!canSend) return;
+    const sentFiles = attachments.items.filter((item) => item.kind === 'file').map(attachmentKey);
     const body = {
       project_id: place.projectId,
       organization_id: place.projectId === null ? place.organizationId : null,
       text: line,
       ...(start === 'today' ? {} : { starts_on: start.date }),
       due: due === null ? null : { date: due, repeat: 'none' as const },
+      ...(attachments.items.length > 0 ? attachmentPayload(attachments.items) : {}),
     };
     const key = JSON.stringify(body);
     const clientTodoId =
@@ -149,10 +218,13 @@ export function QuickTodoPanel() {
       result = await todos.create({ client_todo_id: clientTodoId, ...body });
     } catch (error) {
       console.error('Failed to add the TODO:', error);
+      heldFilesRef.current.set(clientTodoId, sentFiles);
       setFailure('todo.error.generic');
       setSending(false);
       return;
     }
+    // This TODO's outcome is known now: added with these files, or refused without them.
+    heldFilesRef.current.delete(clientTodoId);
     unansweredRef.current = null;
     setSending(false);
     if (result.kind === 'refused') {
@@ -161,6 +233,8 @@ export function QuickTodoPanel() {
     }
     saveLastPlace(place);
     setText('');
+    // The TODO holds them now.
+    setAttachments(NO_ATTACHMENTS);
     const { todo_id, state: todoState } = result.result;
     if (todoState.kind === 'not_started' && todoState.reason !== 'starting') onClose();
     else openTask({ kind: 'todo', id: todo_id });
@@ -172,6 +246,11 @@ export function QuickTodoPanel() {
       onSubmit={(event) => {
         event.preventDefault();
         void send();
+      }}
+      onDragOver={(event) => event.preventDefault()}
+      onDrop={(event) => {
+        event.preventDefault();
+        void attachFiles(Array.from(event.dataTransfer.files));
       }}
     >
       <textarea
@@ -191,6 +270,20 @@ export function QuickTodoPanel() {
           event.preventDefault();
           if (!event.shiftKey) void send();
         }}
+        onPaste={(event) => {
+          const files = pastedFiles(event.clipboardData);
+          if (sending || files.length === 0) return;
+          // Taking the files means the field must not also insert their names.
+          event.preventDefault();
+          void attachFiles(files);
+        }}
+      />
+      <ComposerAttachments
+        attachments={attachments.items}
+        failure={attachments.failure}
+        readOnly={sending}
+        focusAfterLastRemoved={fieldRef}
+        onRemove={removeAttachment}
       />
       {settings === 'failed' ? (
         <ComposerAlert role="alert">{t('overlay.composer.mention.loadFailed')}</ComposerAlert>
@@ -200,6 +293,29 @@ export function QuickTodoPanel() {
         <ComposerAlert role="alert">{t('overlay.todo.openFailed')}</ComposerAlert>
       ) : null}
       <ComposerActions className="quick-todo__row">
+        <input
+          ref={attachInputRef}
+          type="file"
+          hidden
+          multiple
+          accept={ATTACHMENT_ACCEPT}
+          onChange={(event) => {
+            const files = Array.from(event.target.files ?? []);
+            // Reset so picking the same file again still fires a change event.
+            event.target.value = '';
+            void attachFiles(files);
+          }}
+        />
+        <ComposerIconButton
+          type="button"
+          className="quick-todo__attach"
+          disabled={sending || !canAttachMore(attachments.items)}
+          aria-label={t('overlay.composer.attach')}
+          data-tooltip={t('overlay.composer.attach')}
+          onClick={() => attachInputRef.current?.click()}
+        >
+          <Plus strokeWidth={1.75} aria-hidden="true" />
+        </ComposerIconButton>
         <QuickTodoPicker
           label={t('overlay.todo.organization')}
           mark={
@@ -284,7 +400,7 @@ export function QuickTodoPanel() {
       showBusyIndicator={false}
       composer={composer}
       onToggleExpand={ctrl.onToggleExpand}
-      onClose={onClose}
+      onClose={close}
       onHeaderPointerDown={headerDrag.onHeaderPointerDown}
       onHeaderPointerMove={headerDrag.onHeaderPointerMove}
       onHeaderPointerUp={headerDrag.onHeaderPointerUp}

@@ -35,17 +35,37 @@ const STARTING = { kind: 'ok', result: todo({ kind: 'not_started', reason: 'star
 const create = vi.fn<(request: TodoCreateRequest) => Promise<TodoWriteResult<TodoView>>>();
 const openTask = vi.fn();
 const hide = vi.fn();
+// Each document staged gets the next id, as Electron main gives each a fresh one.
+const FILE_IDS = [
+  '0f8fad5b-d9cb-469f-a165-70867728950e',
+  '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+] as const;
+const IMAGE_PATH = 'user-1/2026-11-17/3f2b9a8e-1c4d-4e5f-8a6b-7c8d9e0f1a2b.png';
+const attachFile = vi.fn();
+const attachImage = vi.fn();
+const discardAttachment = vi.fn();
 
 beforeEach(() => {
   create.mockReset().mockResolvedValue(STARTING);
   openTask.mockReset().mockResolvedValue(undefined);
   hide.mockReset();
+  let staged = 0;
+  attachFile
+    .mockReset()
+    .mockImplementation(async ({ bytes, name }: { bytes: ArrayBuffer; name: string }) => ({
+      attachmentId: FILE_IDS[staged++],
+      name,
+      byteSize: bytes.byteLength,
+    }));
+  attachImage.mockReset().mockResolvedValue({ kind: 'stored', storagePath: IMAGE_PATH });
+  discardAttachment.mockReset().mockResolvedValue(undefined);
   Object.defineProperty(window, 'electron', {
     configurable: true,
     value: {
       ipcRenderer: { on: () => () => {} },
       workspaceSettings: { get: async () => SETTINGS },
       todos: { create },
+      actions: { attachFile, attachImage, discardAttachment },
       agentOverlay: { onSnapshot: () => () => {}, resize: vi.fn(), hide, openTask },
       orchestration: { onEvent: () => () => {}, onStatus: () => () => {} },
     },
@@ -78,7 +98,6 @@ it('adds the TODO in the project picked, one line, and opens a TODO starting tod
   const field = await renderPanel();
   expect(field).toHaveFocus();
   expect(screen.queryByRole('button', { name: /permissions/ })).toBeNull();
-  expect(screen.queryByRole('button', { name: 'Add files' })).toBeNull();
   pick('Organization', 'Xer');
   pick('Project', 'Sales deck');
 
@@ -150,4 +169,59 @@ it('resends an unanswered TODO under the same id, keeps a refused one, and says 
   expect(screen.getByRole('alert')).toHaveTextContent(
     'The TODO was added, but the main window could not be opened.'
   );
+});
+
+const attach = async (...files: File[]) => {
+  const input = document.querySelector<HTMLInputElement>('input[type="file"]')!;
+  await act(async () => fireEvent.change(input, { target: { files } }));
+};
+const notes = (name = 'notes.txt') => new File(['Meeting notes'], name, { type: 'text/plain' });
+const sentFile = (index: number, name = 'notes.txt') => ({
+  attachment_id: FILE_IDS[index],
+  name,
+  byte_size: 13,
+});
+
+it('sends the files and images attached with the TODO, which then holds them', async () => {
+  const field = await renderPanel();
+  await attach(
+    notes(),
+    new File([new Uint8Array([137, 80, 78, 71])], 'shot.png', { type: 'image/png' })
+  );
+  expect(screen.getByRole('list', { name: 'Attachments, 2' })).toBeInTheDocument();
+  fireEvent.change(field, { target: { value: 'Summarize the notes' } });
+  await act(async () => fireEvent.keyDown(field, { key: 'Enter' }));
+
+  expect(create.mock.lastCall?.[0]).toMatchObject({
+    text: 'Summarize the notes',
+    files: [sentFile(0)],
+    images: [{ kind: 'image', storage_path: IMAGE_PATH }],
+  });
+  expect(screen.queryByRole('list', { name: /Attachments/ })).toBeNull();
+  expect(discardAttachment).not.toHaveBeenCalled();
+});
+
+it('keeps the files of a send whose answer never came, and discards the rest when removed or closed', async () => {
+  vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  create
+    .mockRejectedValueOnce(new Error('response lost'))
+    .mockResolvedValueOnce({ kind: 'refused', code: 'TODO_ATTACHMENT_UNAVAILABLE' });
+  const field = await renderPanel();
+  fireEvent.change(field, { target: { value: 'Summarize the notes' } });
+  await attach(notes());
+  await act(async () => fireEvent.keyDown(field, { key: 'Enter' }));
+  await attach(notes('plan.md'));
+  // The attachments are part of the TODO, so another one is a new TODO.
+  await act(async () => fireEvent.keyDown(field, { key: 'Enter' }));
+  const [lost, changed] = create.mock.calls.map(([request]) => request);
+  expect(changed.client_todo_id).not.toBe(lost.client_todo_id);
+  expect(changed.files).toEqual([sentFile(0), sentFile(1, 'plan.md')]);
+  expect(screen.getByRole('alert')).toHaveTextContent("That didn't work. Please try again.");
+
+  // The lost send may have added a TODO that holds notes.txt.
+  fireEvent.click(screen.getByRole('button', { name: 'Remove notes.txt' }));
+  expect(discardAttachment).not.toHaveBeenCalled();
+  fireEvent.mouseDown(screen.getByRole('button', { name: 'Hide Notification' }));
+  expect(discardAttachment).toHaveBeenCalledExactlyOnceWith({ attachmentId: FILE_IDS[1] });
+  expect(hide).toHaveBeenCalledOnce();
 });

@@ -32,14 +32,28 @@ import {
   ComposerSubmissionStatus,
   OverlayComposer,
 } from './agent-overlay/OverlayComposer';
+import { QuickTodoPanel } from './agent-overlay/QuickTodoPanel';
 type AgentOverlayProps = {
   entryMode?: 'overlay' | 'standalone';
-  /** Existing Action this standalone Overlay continues, or null for a new conversation. */
+  /** Existing Action this standalone Overlay continues, or null for the panel that adds a TODO. */
   initialActionId?: string | null;
 };
+/** A suggestion's panel, an Action's, or (standalone with no Action) the one that adds a TODO. */
 const AgentOverlay: React.FC<AgentOverlayProps> = ({
   entryMode = 'overlay',
   initialActionId = null,
+}) =>
+  entryMode === 'standalone' && initialActionId === null ? (
+    <QuickTodoPanel />
+  ) : (
+    <ConversationOverlay entryMode={entryMode} initialActionId={initialActionId} />
+  );
+const ConversationOverlay = ({
+  entryMode,
+  initialActionId,
+}: {
+  entryMode: 'overlay' | 'standalone';
+  initialActionId: string | null;
 }) => {
   const ctrl = useAgentOverlayController(entryMode === 'standalone');
   const headerDrag = useOverlayHeaderDrag();
@@ -326,12 +340,11 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
   const canStartConversation =
     composer.initialActionId === null &&
     visiblePages === null &&
-    (entryMode === 'standalone' ||
-      (repliesToSuggestion &&
-        Boolean(state.suggestionId) &&
-        state.isSuggestionStreamFinished &&
-        state.currentActionId === null &&
-        state.requestState === 'idle'));
+    repliesToSuggestion &&
+    Boolean(state.suggestionId) &&
+    state.isSuggestionStreamFinished &&
+    state.currentActionId === null &&
+    state.requestState === 'idle';
   const canCompose = Boolean(
     actions &&
     composer.submission === null &&

@@ -31,12 +31,12 @@ export const ActionApprovalModeUpdateSchema = z
   .strict();
 
 /**
- * The work a panel hands to the main window: an Action, or a suggestion no Action took up yet,
- * with one of the suggestion's files to preview when its chip was pressed.
+ * The work a panel hands to the main window: an Action, a suggestion no Action took up yet, with
+ * one of the suggestion's files to preview when its chip was pressed, or a TODO the panel added.
  */
 export const OverlayOpenTaskRequestSchema = z
   .object({
-    kind: z.enum(['action', 'suggestion']),
+    kind: z.enum(['action', 'suggestion', 'todo']),
     id: CanonicalIdentitySchema,
     file: z.string().min(1).max(MAX_PATH_LENGTH).optional(),
   })

@@ -1,8 +1,8 @@
 /**
  * todos:* IPC handlers: the main window's TODO list and its progress.
  *
- * Sender trust keeps every `todos:*` channel main-only, as for the chat: an Overlay never
- * reads or writes the TODOs.
+ * Sender trust keeps every `todos:*` channel main-only, as for the chat, but `todos:create`: the
+ * Option+Space panel adds a TODO too. An Overlay never reads the TODOs.
  */
 
 import type { MainContext } from '../context';

@@ -174,8 +174,9 @@ test('Only the Overlay asks main to open the workspace settings page', () => {
   );
 });
 
-// Design 8: the chat belongs to the main window; the Overlay keeps its own Action path.
-test('Only the main window uses the chat and the TODO list', () => {
+// Design 8: the chat belongs to the main window; the Overlay keeps its own Action path. The
+// Option+Space panel adds a TODO, but the list stays the main window's.
+test('Only the main window uses the chat and the TODO list; a panel adds a TODO', () => {
   const { mainEvent, security } = createSecurityHarness();
   const overlayEvent = createSender('http://127.0.0.1:3001/notification.html', 2);
   security.registerWindow('overlay', overlayEvent.sender);
@@ -187,7 +188,6 @@ test('Only the main window uses the chat and the TODO list', () => {
     'chat:getTurnState',
     // The TODO list is the main window's too.
     'todos:list',
-    'todos:create',
     'todos:setCheck',
     'todos:setDue',
     'todos:setStart',
@@ -214,6 +214,8 @@ test('Only the main window uses the chat and the TODO list', () => {
         error instanceof IpcSenderRejectedError && error.code === 'channel_not_allowed_for_window'
     );
   }
+  assert.equal(security.authorize('todos:create', mainEvent), 'main');
+  assert.equal(security.authorize('todos:create', overlayEvent), 'overlay');
 });
 
 test('Only the main window asks macOS for recording permissions or opens their panes', () => {

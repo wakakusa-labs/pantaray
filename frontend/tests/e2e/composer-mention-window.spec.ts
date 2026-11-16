@@ -31,7 +31,18 @@ test('opening and closing the project list never moves the composer on screen', 
         )
       )
       .toBe('created');
-    await page.evaluate(() => window.electron!.history!.openNewConversation());
+    // A task started in the main window opens in its own small window (the Option+Space panel
+    // adds a TODO instead).
+    await page.evaluate(() => (window.location.hash = '#/history?item=new'));
+    const started = page.getByRole('textbox', { name: 'メッセージ', exact: true });
+    await started.fill('最初の依頼');
+    await started.press('Enter');
+    await page.waitForURL(/item=action:/);
+    const actionId = decodeURIComponent(/item=action:([^&]+)/.exec(page.url())![1]);
+    await page.evaluate(
+      (id) => window.electron!.history!.openConversation({ actionId: id }),
+      actionId
+    );
     await expect
       .poll(() => app.windows().some((w) => w.url().includes('mode=standalone')))
       .toBe(true);
@@ -39,7 +50,7 @@ test('opening and closing the project list never moves the composer on screen', 
     const input = overlay.getByRole('textbox', { name: 'メッセージ', exact: true });
     const listbox = overlay.getByRole('listbox', { name: 'プロジェクト' });
     await expect(input).toBeVisible();
-    await overlay.waitForTimeout(500);
+    await overlay.waitForTimeout(1000);
 
     const check = async (placement: 'above' | 'below') => {
       const before = await measure(overlay);
@@ -66,8 +77,8 @@ test('opening and closing the project list never moves the composer on screen', 
       expect(closed.frameTop).toBe(before.frameTop);
     };
 
-    // A new conversation is a small window: the list opens below and the window grows downward.
-    await input.fill('最初の依頼');
+    // One short exchange is a small window: the list opens below and the window grows downward.
+    await input.fill('次の依頼');
     await check('below');
 
     // Sending starts a real conversation; its tall message leaves room above, so the list floats
@@ -75,7 +86,9 @@ test('opening and closing the project list never moves the composer on screen', 
     const lines = Array.from({ length: 12 }, (_, index) => `${index + 1}. 確認したいこと`);
     await input.fill(lines.join('\n'));
     await input.press('Enter');
-    await expect(overlay.getByLabel('あなた')).toContainText('12. 確認したいこと');
+    await expect(
+      overlay.getByLabel('あなた').filter({ hasText: '12. 確認したいこと' })
+    ).toBeVisible();
     await expect(input).toHaveValue('');
     await expect(input).not.toHaveAttribute('readonly', '');
     await overlay.waitForTimeout(1000);

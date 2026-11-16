@@ -73,6 +73,8 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     suggestionId: string | null;
   } | null>(null);
   const manualResizeRef = useRef<boolean>(false);
+  // The panel's open popovers (its pickers), which hang below it outside the measured layout.
+  const openPopoversRef = useRef(new Set<HTMLElement>());
   const isActionPhaseRef = useRef<boolean>(false);
   const [contentReady, setContentReady] = useState(false);
   const contentReadyRef = useRef(false);
@@ -157,7 +159,18 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     const containerPad =
       px(cs.paddingTop) + px(cs.paddingBottom) + px(cs.borderTopWidth) + px(cs.borderBottomWidth);
 
-    const needed = Math.ceil(containerPad + headerH + composerH + scrollNeeded);
+    // An open popover hangs over the window below the panel: the window holds it while it is open.
+    const popoverBottom = Math.max(
+      0,
+      ...Array.from(
+        openPopoversRef.current,
+        (popover) =>
+          popover.getBoundingClientRect().bottom + px(window.getComputedStyle(popover).marginBottom)
+      )
+    );
+    const needed = Math.ceil(
+      Math.max(containerPad + headerH + composerH + scrollNeeded, popoverBottom)
+    );
     if (!needed) return;
 
     const mode = isActionPhaseRef.current ? 'action' : 'suggestion';
@@ -287,9 +300,27 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
       observer.observe(target);
     }
 
+    // `toggle` does not bubble, so the panel listens in the capture phase. A <details> toggles
+    // too, but it lies inside the measured layout.
+    const container = containerRef.current;
+    const onToggle = (event: Event) => {
+      const popover = event.target as HTMLElement;
+      if (popover.popover === null) return;
+      if ((event as ToggleEvent).newState === 'open') {
+        openPopoversRef.current.add(popover);
+        observer.observe(popover);
+      } else {
+        openPopoversRef.current.delete(popover);
+        observer.unobserve(popover);
+      }
+      scheduleMeasure();
+    };
+    container?.addEventListener('toggle', onToggle, true);
+
     scheduleMeasure();
 
     return () => {
+      container?.removeEventListener('toggle', onToggle, true);
       observer.disconnect();
       if (rafId !== null) {
         window.cancelAnimationFrame(rafId);

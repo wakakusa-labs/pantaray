@@ -1,5 +1,5 @@
 // The TODO list, its progress and its imports, for the main window: main refuses these channels
-// from an Overlay.
+// from an Overlay, but `create`, which the Option+Space panel uses too.
 function createTodosApi({ ipcRenderer }) {
   return {
     todos: {

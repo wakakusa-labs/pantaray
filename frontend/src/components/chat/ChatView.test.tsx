@@ -357,7 +357,7 @@ it('shows messages and cards, with a work’s status on its latest card only', a
     'ファイルを追加',
     '送信',
     'メイン画面で新しい作業',
-    '小さく TODO を追加',
+    '小さな画面で TODO を追加',
     'プロジェクトを追加',
   ]) {
     expectTooltipIsName(screen.getByRole('button', { name }));

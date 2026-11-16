@@ -289,7 +289,7 @@ export function getWelcomeSuggestionText(lang: UiLanguage, accelerator: string |
     const how = shortcut ? ` ${shortcut} か「TODO を追加」` : '「TODO を追加」';
     return [
       'まずはあなたの仕事を理解するところから始めます。お役に立てそうなことが見つかったら、こちらから提案します。',
-      `それまでも、任せたい仕事があればいつでも${how}から渡してください。`,
+      `それまでも、任せたい仕事があればいつでも${how}から頼んでください。`,
     ].join('\n\n');
   }
   const how = shortcut ? `press ${shortcut} or use Add a TODO` : 'use Add a TODO';

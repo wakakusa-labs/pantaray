@@ -100,11 +100,11 @@ test('the welcome names the shortcut the user has, or only the button', () => {
   assert.equal(
     getWelcomeSuggestionText('ja', 'Option+Space'),
     'まずはあなたの仕事を理解するところから始めます。お役に立てそうなことが見つかったら、こちらから提案します。\n\n' +
-      'それまでも、任せたい仕事があればいつでも ⌥Space か「TODO を追加」から渡してください。'
+      'それまでも、任せたい仕事があればいつでも ⌥Space か「TODO を追加」から頼んでください。'
   );
   assert.match(
     getWelcomeSuggestionText('ja', null),
-    /いつでも「TODO を追加」から渡してください。$/
+    /いつでも「TODO を追加」から頼んでください。$/
   );
   assert.match(
     getWelcomeSuggestionText('en', 'Option+Space'),

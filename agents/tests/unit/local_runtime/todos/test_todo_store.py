@@ -183,7 +183,11 @@ def test_a_todo_with_no_project_is_in_its_own_organization_until_it_is_deleted(
         clock=NOW,
     )
 
-    assert _listed(scope=in_a) == [("Send the quote", False), ("Book a room", False)]
+    # Added at the same time, so their order is not the point.
+    assert sorted(_listed(scope=in_a)) == [
+        ("Book a room", False),
+        ("Send the quote", False),
+    ]
     assert _listed(scope=in_a, project=NoProject()) == [("Book a room", False)]
     assert _listed(scope=OrganizationScope(organization_id="org-b")) == []
     assert _listed(scope=NoOrganizationScope()) == [("Call home", False)]
@@ -193,7 +197,7 @@ def test_a_todo_with_no_project_is_in_its_own_organization_until_it_is_deleted(
         db_path=db, busy_timeout_ms=1_000, user_id=USER, organization_id="org-a"
     )
 
-    assert _listed(scope=NoOrganizationScope(), project=NoProject()) == [
+    assert sorted(_listed(scope=NoOrganizationScope(), project=NoProject())) == [
         ("Book a room", False),
         ("Call home", False),
     ]

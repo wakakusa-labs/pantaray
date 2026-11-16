@@ -181,7 +181,7 @@ def load_workspace(connection: sqlite3.Connection, *, user_id: str) -> Workspace
     # Design limit: every open TODO's text is read to mark duplicates; read
     # only the draft's projects when a read exceeds 50 ms.
     open_todos = connection.execute(
-        "SELECT project_id, text FROM todo_items "
+        "SELECT project_id, organization_id, text FROM todo_items "
         "WHERE user_id = ? AND checked_at IS NULL AND deleted_at IS NULL",
         (user_id,),
     ).fetchall()
@@ -198,7 +198,7 @@ def load_workspace(connection: sqlite3.Connection, *, user_id: str) -> Workspace
             )
             for project in settings.projects
         },
-        open_todos=frozenset((row[0], row[1]) for row in open_todos),
+        open_todos=frozenset(((row[0], row[1]), row[2]) for row in open_todos),
     )
 
 

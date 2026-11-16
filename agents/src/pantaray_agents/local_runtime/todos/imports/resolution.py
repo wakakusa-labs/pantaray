@@ -32,7 +32,9 @@ from pantaray_agents.local_runtime.todos.imports.model import (
 from pantaray_agents.local_runtime.todos.model import WrittenOrigin
 
 type _Organization = ExistingOrganization | NewOrganization | None
-type _ProjectKey = str | NewProject | None
+# Where a TODO sits, as `todo_items` stores it: its project, by id or, while
+# new, by name; with no project, its own organization (None for none).
+type _Place = tuple[str | NewProject, None] | tuple[None, str | NewOrganization | None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,8 +43,8 @@ class Workspace:
 
     organization_ids: Mapping[str, str]
     projects: Mapping[str, ExistingProject]
-    # (project_id, text) of every open TODO; a None project is "no project".
-    open_todos: frozenset[tuple[_ProjectKey, str]]
+    # The place and text of every open TODO.
+    open_todos: frozenset[tuple[_Place, str]]
 
 
 def resolve_draft(
@@ -51,10 +53,10 @@ def resolve_draft(
     """The draft against the workspace, and its first issue if it has one."""
 
     scope_organization = _scope_organization(scope, workspace)
-    # Texts already in each project, by the project's identity: the workspace's
-    # open TODOs, then each draft line as it is read, so a later line repeating
-    # an earlier one, in this group or another for the same project, is marked.
-    seen: set[tuple[_ProjectKey, str]] = set(workspace.open_todos)
+    # Texts already in each place: the workspace's open TODOs, then each draft
+    # line as it is read, so a later line repeating an earlier one, in this
+    # group or another for the same place, is marked.
+    seen: set[tuple[_Place, str]] = set(workspace.open_todos)
     groups = tuple(
         _resolve_group(group, scope_organization, workspace, seen)
         for group in draft.groups
@@ -91,7 +93,7 @@ def _resolve_group(
     group: DraftGroup,
     scope_organization: ExistingOrganization | None,
     workspace: Workspace,
-    seen: set[tuple[_ProjectKey, str]],
+    seen: set[tuple[_Place, str]],
 ) -> ResolvedGroup:
     organization: _Organization
     if scope_organization is not None and group.organization in (
@@ -113,16 +115,27 @@ def _resolve_group(
         if group.project is None
         else workspace.projects.get(group.project) or NewProject(group.project)
     )
-    # A new project is known by its name, an existing one by its id.
-    project_key = (
-        project.project_id if isinstance(project, ExistingProject) else project
-    )
+    place = _place(organization, project)
     lines: list[TodoLine] = []
     for todo in group.todos:
-        key = (project_key, todo.text.strip())
+        key = (place, todo.text.strip())
         lines.append(TodoLine(todo=todo, duplicate=key in seen))
         seen.add(key)
     return ResolvedGroup(organization=organization, project=project, todos=tuple(lines))
+
+
+def _place(
+    organization: _Organization, project: ExistingProject | NewProject | None
+) -> _Place:
+    match project:
+        case ExistingProject(project_id=project_id):
+            return (project_id, None)
+        case NewProject():
+            return (project, None)
+        case None:
+            if isinstance(organization, ExistingOrganization):
+                return (None, organization.organization_id)
+            return (None, organization)
 
 
 def _group_issue(

@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { forwardRef, useImperativeHandle, useState } from 'react';
+import { forwardRef, useImperativeHandle, useState, type ReactNode } from 'react';
 import { MemoryRouter, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
@@ -58,14 +58,17 @@ vi.mock('@/components/task/TaskWorkspace', () => ({
     title,
     initialPreview,
     onAddProject,
+    pageControls,
   }: {
     actionId: string;
     title: string;
     initialPreview: TaskPreview | null;
     onAddProject: () => void;
+    pageControls?: ReactNode;
   }) => (
     <section aria-label={`action ${actionId}`}>
       <h1>{title}</h1>
+      {pageControls}
       {initialPreview ? <p>preview {initialPreview.file.path}</p> : null}
       <UserItem item={SENT_NAMING_SUGGESTION} />
       <button type="button" onClick={onAddProject}>
@@ -78,14 +81,20 @@ vi.mock('@/components/task/SuggestionTaskPane', () => ({
   SuggestionTaskPane: ({
     suggestionId,
     title,
+    requestedFile,
     onStarted,
+    pageControls,
   }: {
     suggestionId: string;
     title: string;
+    requestedFile: string | null;
     onStarted: (actionId: string, preview: TaskPreview | null) => void;
+    pageControls?: ReactNode;
   }) => (
     <section aria-label={`suggestion ${suggestionId}`}>
       <h1>{title}</h1>
+      {requestedFile ? <p>requested {requestedFile}</p> : null}
+      {pageControls}
       <button type="button" onClick={() => onStarted('A9', null)}>
         accept
       </button>
@@ -630,6 +639,61 @@ it("opens a TODO's conversation beside the list: its Action, its suggestion, or 
   expect(location()).toHaveTextContent(/^\/history$/);
   expect(screen.getByRole('heading', { level: 1, name: 'すべての TODO' })).toHaveFocus();
   expect(screen.getByRole('complementary', SIDEBAR)).toBeVisible();
+});
+
+it("expands a TODO's conversation into the list's place, shrinks it back, and closes it", async () => {
+  renderPage(['/history?scope=organization:O1']);
+  await userEvent.click(await screen.findByRole('button', { name: /^TODO T1/ }));
+  const listTitle = screen.getByRole('heading', { level: 1, name: 'すべての TODO' });
+  await userEvent.click(screen.getByRole('button', { name: '拡大' }));
+  expect(location()).toHaveTextContent('/history?scope=organization:O1&todo=T1&expanded=1');
+  expect(screen.getByRole('region', { name: 'action A5' })).toBeInTheDocument();
+  expect(listTitle).not.toBeVisible();
+  // The same button turns over, so the focus stays on it.
+  expect(screen.getByRole('button', { name: '縮小' })).toHaveFocus();
+
+  await userEvent.click(screen.getByRole('button', { name: '縮小' }));
+  expect(location()).toHaveTextContent(/^\/history\?scope=organization:O1&todo=T1$/);
+  expect(listTitle).toBeVisible();
+  expect(screen.getByRole('button', { name: /^TODO T1/ })).toHaveAttribute('aria-current', 'true');
+
+  await userEvent.click(screen.getByRole('button', { name: '拡大' }));
+  await userEvent.click(screen.getByRole('button', { name: '会話を閉じる' }));
+  expect(location()).toHaveTextContent(/^\/history\?scope=organization:O1$/);
+  expect(screen.queryByRole('region', { name: 'action A5' })).toBeNull();
+  expect(screen.getByRole('heading', { level: 1, name: 'すべての TODO' })).toHaveFocus();
+});
+
+it("shows a TODO's work, however it is named, as that TODO's conversation expanded", async () => {
+  // An Overlay's 「メイン画面で開く」 names the work, which is T1's.
+  renderPage(['/history?item=action:A5']);
+  expect(await screen.findByRole('button', { name: '縮小' })).toBeInTheDocument();
+  expect(location()).toHaveTextContent(/^\/history\?todo=T1&expanded=1$/);
+  expect(
+    within(screen.getByRole('region', { name: 'action A5' })).getByRole('heading', {
+      name: 'TODO T1',
+    })
+  ).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: '縮小' }));
+  expect(screen.getByRole('button', { name: /^TODO T1/ })).toHaveAttribute('aria-current', 'true');
+  cleanup();
+
+  // A file an Overlay chip asked for opens in the TODO's pane, then leaves the address.
+  renderPage(['/history?item=suggestion:S5&file=drafts%2Freply.md']);
+  const suggestion = await screen.findByRole('region', { name: 'suggestion S5' });
+  await waitFor(() => expect(location()).toHaveTextContent(/^\/history\?todo=T3&expanded=1$/));
+  expect(suggestion).toHaveTextContent('requested drafts/reply.md');
+});
+
+it('closes a conversation that is no TODO’s to the TODO list, keeping the scope', async () => {
+  renderPage(['/history?item=action:OLD&scope=organization:O1']);
+  const pane = screen.getByRole('region', { name: 'action OLD' });
+  // Being no TODO's, it has no list to shrink beside.
+  await screen.findByRole('button', { name: '見積もり' });
+  expect(within(pane).queryByRole('button', { name: '縮小' })).toBeNull();
+  await userEvent.click(within(pane).getByRole('button', { name: '会話を閉じる' }));
+  expect(location()).toHaveTextContent(/^\/history\?scope=organization:O1$/);
+  expect(screen.getByRole('heading', { level: 1, name: 'すべての TODO' })).toHaveFocus();
 });
 
 it('the sidebar lists the scope’s projects, and one selects its TODOs within the scope', async () => {

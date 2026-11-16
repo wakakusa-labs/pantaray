@@ -45,7 +45,7 @@ export function TodoImportPane({
   importId,
   today,
   showOrganizations,
-  closeButton,
+  pageControls,
   onAddProject,
   onRegistered,
   onCanceled,
@@ -55,7 +55,7 @@ export function TodoImportPane({
   today: string;
   /** Every organization is in view, so the draft may create organizations and names them. */
   showOrganizations: boolean;
-  closeButton: ReactNode;
+  pageControls: ReactNode;
   onAddProject: () => void;
   /** The import created this many TODOs. */
   onRegistered: (count: number) => void;
@@ -79,7 +79,7 @@ export function TodoImportPane({
       <section className="todo-conversation-none" aria-labelledby={titleId}>
         <header className="action-task__header">
           <h1 id={titleId}>{title}</h1>
-          <div className="action-task__header-actions">{closeButton}</div>
+          <div className="action-task__header-actions">{pageControls}</div>
         </header>
         <p
           className="todo-conversation-none__text"
@@ -199,7 +199,7 @@ export function TodoImportPane({
       actionId={view.action_id}
       title={title}
       onAddProject={onAddProject}
-      closeButton={closeButton}
+      pageControls={pageControls}
       renderUnderConversation={renderDraft}
     />
   );

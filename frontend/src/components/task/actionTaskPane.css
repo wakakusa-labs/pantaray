@@ -96,14 +96,15 @@
   box-shadow: var(--focus-ring);
 }
 
-/* A close button, set apart from the actions before it by a short line. The line is drawn
-   outside the button so its hover face stays the same as its neighbours'. */
-.action-task__close:not(:first-child) {
+/* The page's controls (expand, shrink, close), set apart from the actions before them by a short
+   line. The line is drawn outside the button so its hover face stays the same as its
+   neighbours'. */
+.action-task__page-control:not(:first-child, .action-task__page-control + *) {
   position: relative;
   margin-left: 13px;
 }
 
-.action-task__close:not(:first-child)::before {
+.action-task__page-control:not(:first-child, .action-task__page-control + *)::before {
   content: '';
   position: absolute;
   top: 8px;

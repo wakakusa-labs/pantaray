@@ -1396,6 +1396,51 @@ test('beside a conversation the sidebar folds away and the rows keep their one l
   await expect(sidebarOf(page)).toBeVisible();
 });
 
+test('the conversation expands into the list’s place, shrinks back beside it, and closes', async ({
+  page,
+}, info) => {
+  await openHome(page);
+  await page.getByRole('button', { name: /^リリースノートの下書きを書く/ }).click();
+  const pane = page.getByRole('region', { name: 'リリースノートの下書きを書く' });
+  // The pane listens for its Action's updates once it is shown.
+  await expect(pane.getByRole('button', { name: '拡大' })).toBeVisible();
+  await page.evaluate(
+    (detail) => window.dispatchEvent(new CustomEvent('test:conversation', { detail })),
+    actionFromSuggestion('action-notes')
+  );
+  await expect(pane.getByText('10 月分の変更点を下書きにまとめました。')).toBeVisible();
+  await capture(page, info, 'beside-list-controls');
+
+  const listTitle = page.getByRole('heading', { level: 1, name: 'すべての TODO' });
+  await pane.getByRole('button', { name: '拡大' }).click();
+  await expect(page).toHaveURL(/#\/history\?todo=t-notes&expanded=1$/);
+  await expect(listTitle).toBeHidden();
+  // The same conversation, not opened again, across the screen; its header clears the toggle.
+  await expect(pane.getByText('10 月分の変更点を下書きにまとめました。')).toBeVisible();
+  const screenBox = (await page.locator('.todo-screen').boundingBox())!;
+  const paneBox = (await page.locator('.todo-screen__conversation').boundingBox())!;
+  expect(paneBox.width).toBe(screenBox.width);
+  const toggle = (await page.getByRole('button', { name: 'サイドバーを表示' }).boundingBox())!;
+  const header = (await pane.locator('header').first().boundingBox())!;
+  expect(header.x).toBeGreaterThanOrEqual(toggle.x + toggle.width);
+  await expect(pane.getByRole('button', { name: '縮小' })).toBeFocused();
+  expect(await hasNoSideScroll(page)).toBe(true);
+  await capture(page, info, 'expanded');
+
+  await pane.getByRole('button', { name: '縮小' }).click();
+  await expect(page).toHaveURL(/#\/history\?todo=t-notes$/);
+  await expect(listTitle).toBeVisible();
+  await expect(page.getByRole('button', { name: /^リリースノートの下書きを書く/ })).toHaveAttribute(
+    'aria-current',
+    'true'
+  );
+
+  await pane.getByRole('button', { name: '拡大' }).click();
+  await pane.getByRole('button', { name: '会話を閉じる' }).click();
+  await expect(page).toHaveURL(/#\/history$/);
+  await expect(listTitle).toBeFocused();
+});
+
 test('the rail’s ＋ adds an organization with its image shrunk to a small icon, and shows it', async ({
   page,
 }, info) => {

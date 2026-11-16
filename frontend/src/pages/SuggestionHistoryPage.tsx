@@ -1,4 +1,4 @@
-import { PanelLeft } from 'lucide-react';
+import { PanelLeft, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useLocation, useNavigate, useOutletContext } from 'react-router-dom';
@@ -17,6 +17,7 @@ import type { LayoutOutletContext } from '@/components/Layout';
 import { OrganizationDialog } from '@/components/todo/OrganizationDialog';
 import { ORGANIZATION_ADD_BUTTON_ID } from '@/components/todo/OrganizationRail';
 import { NewTaskPane } from '@/components/task/NewTaskPane';
+import { PageControlButton } from '@/components/task/PageControlButton';
 import { SuggestionTaskPane } from '@/components/task/SuggestionTaskPane';
 import { TaskWorkspace } from '@/components/task/TaskWorkspace';
 import type { TaskPreview } from '@/components/task/taskFiles';
@@ -42,8 +43,8 @@ import {
 import { TODO_UX_ENABLED } from '@/todos/todoUxFeature';
 import { useTodoList } from '@/todos/useTodoList';
 
-import type { TodoScopeQuery } from '../../electron/src/todos/todoContracts';
-import { TodoScreen } from './TodoScreen';
+import type { TodoScopeQuery, TodoView } from '../../electron/src/todos/todoContracts';
+import { TODO_SCREEN_TITLE_ID, TodoScreen } from './TodoScreen';
 import './suggestionHistoryPage.css';
 
 // A task the loaded list does not hold yet (still loading, filtered out, or older than its pages).
@@ -68,6 +69,14 @@ function itemSearch(item: HistorySelection, scope: TodoScopeQuery) {
   const scopeQuery = todoSelectionSearch({ ...DEFAULT_TODO_SELECTION, scope }).slice(1);
   const query = historySelectionSearch(item);
   return scopeQuery ? `${query}&${scopeQuery}` : query;
+}
+
+/** The work a TODO's conversation is, or null while it has none. */
+function todoWork(todo: TodoView): HistorySelection | null {
+  const { conversation } = todo;
+  if (conversation.kind === 'action') return `action:${conversation.action_id}`;
+  if (conversation.kind === 'suggestion') return `suggestion:${conversation.suggestion_id}`;
+  return null;
 }
 
 /** Which TODO list the sidebar marks current. */
@@ -115,7 +124,9 @@ function isSidebarShortcut(event: KeyboardEvent, isMac: boolean): boolean {
  * or, once the sidebar's chat or another conversation is chosen (`?item=`), that one alone, as
  * History always showed it. Without the TODO list (`TODO_UX_ENABLED`) it is History as it was
  * before: the chat unless another conversation is chosen. What is shown is the URL's query, so it
- * survives a reload and the back button returns to it. A toggle in the title bar row (and ⌘B /
+ * survives a reload and the back button returns to it. A conversation that is a TODO's, however it
+ * was named (an Overlay's 「メイン画面で開く」, a link, a work named in a message), is shown as that
+ * TODO's, expanded, so it shrinks back beside the list. A toggle in the title bar row (and ⌘B /
  * Ctrl+B) hides the sidebar so the main area widens.
  */
 const SuggestionHistoryPage = () => {
@@ -127,23 +138,32 @@ const SuggestionHistoryPage = () => {
   const navigate = useNavigate();
   const { publishOrganizations, creatingOrganization, onCreatingOrganizationChange } =
     useOutletContext<LayoutOutletContext>();
-  const selection =
+  const namedSelection =
     TODO_UX_ENABLED && !new URLSearchParams(location.search).has(ITEM_PARAM)
       ? null
       : parseHistorySelection(location.search);
-  const todoSelection = parseTodoSelection(location.search);
-  const { scope } = todoSelection;
-  const todoList = useTodoList(scope, ANY_PROJECT, todoSelection.sort);
+  const namedTodoSelection = parseTodoSelection(location.search);
+  const { scope, sort } = namedTodoSelection;
+  const todoList = useTodoList(scope, ANY_PROJECT, sort);
   // The read keeps its last page while another scope or order is read, and only the latest
   // query's answer lands, so a page that arrived since the query last changed is that query's.
-  const listQuery = todoSelectionSearch({
-    ...DEFAULT_TODO_SELECTION,
-    scope,
-    sort: todoSelection.sort,
-  });
+  const listQuery = todoSelectionSearch({ ...DEFAULT_TODO_SELECTION, scope, sort });
   const [listReadFor, setListReadFor] = useState({ page: todoList.page, query: listQuery });
   if (listReadFor.page !== todoList.page) setListReadFor({ page: todoList.page, query: listQuery });
   const listShowsSelection = todoList.page !== null && listReadFor.query === listQuery;
+  // Whether a work is a TODO's conversation is known once the list in view is read.
+  const namesWork =
+    namedSelection !== null && namedSelection !== 'chat' && namedSelection !== 'new';
+  const ownerKnown = !TODO_UX_ENABLED || !namesWork || listShowsSelection || todoList.error;
+  const ownerTodoId =
+    TODO_UX_ENABLED && namesWork && listShowsSelection
+      ? (todoList.page?.items.find((todo) => todoWork(todo) === namedSelection)?.todo_id ?? null)
+      : null;
+  const selection = ownerTodoId === null ? namedSelection : null;
+  const todoSelection: TodoSelection =
+    ownerTodoId === null
+      ? namedTodoSelection
+      : { ...DEFAULT_TODO_SELECTION, scope, sort, todoId: ownerTodoId, expanded: true };
   const { settings } = workspace;
 
   // The rail's organizations are the ones this visit read.
@@ -320,13 +340,37 @@ const SuggestionHistoryPage = () => {
   useEffect(() => {
     if (projectRequested) navigate({ search: '' }, { replace: true });
   }, [projectRequested, navigate]);
-  // A file an Overlay chip asked for is handed to the pane, then dropped from the address, so the
-  // same chip pressed again asks once more.
+  // The address comes to name what is shown: a TODO's conversation as that TODO's, and a file an
+  // Overlay chip asked for only once the pane took it, so the same chip pressed again asks once
+  // more. The file waits while the work's TODO is not known, for that TODO's pane to take it.
   const requestedFile = parseRequestedFile(location.search);
+  const shownSearch =
+    !ownerKnown || (ownerTodoId === null && requestedFile === null)
+      ? null
+      : selection === null
+        ? todoSelectionSearch(todoSelection)
+        : itemSearch(selection, scope);
   useEffect(() => {
-    if (requestedFile !== null && selection !== null)
-      navigate({ search: itemSearch(selection, scope) }, { replace: true });
-  }, [requestedFile, selection, scope, navigate]);
+    if (shownSearch !== null) navigate({ search: shownSearch }, { replace: true });
+  }, [shownSearch, navigate]);
+
+  // A conversation alone closes to the TODO list, whose title then takes the focus.
+  const listFocusPending = useRef(false);
+  useEffect(() => {
+    if (selection !== null || !listFocusPending.current) return;
+    listFocusPending.current = false;
+    document.getElementById(TODO_SCREEN_TITLE_ID)?.focus();
+  }, [selection]);
+  const closeToList = TODO_UX_ENABLED ? (
+    <PageControlButton
+      label={t('todo.conversation.close')}
+      icon={X}
+      onClick={() => {
+        listFocusPending.current = true;
+        selectTodos({ ...DEFAULT_TODO_SELECTION, scope, sort });
+      }}
+    />
+  ) : undefined;
 
   const renderDetail = (selection: HistorySelection) => {
     if (selection === 'chat')
@@ -359,6 +403,7 @@ const SuggestionHistoryPage = () => {
           title={title}
           initialPreview={handedPreview?.actionId === id ? handedPreview.preview : null}
           onAddProject={addProject}
+          pageControls={closeToList}
         />
       );
     return (
@@ -372,6 +417,7 @@ const SuggestionHistoryPage = () => {
           if (preview) setHandedPreview({ from: selection, actionId, preview });
         }}
         onAddProject={addProject}
+        pageControls={closeToList}
       />
     );
   };
@@ -413,6 +459,7 @@ const SuggestionHistoryPage = () => {
           onOpenWork={select}
           onAddProject={addProject}
           onWorkspaceChanged={workspace.reload}
+          requestedFile={requestedFile}
         />
       ) : (
         <div className="history-detail">

@@ -19,16 +19,16 @@ let running = false;
 vi.mock('@/components/task/ActionTaskPane', () => ({
   ActionTaskPane: ({
     title,
-    closeButton,
+    pageControls,
     renderUnderConversation,
   }: {
     title: string;
-    closeButton: ReactNode;
+    pageControls: ReactNode;
     renderUnderConversation: (running: boolean) => ReactNode;
   }) => (
     <section>
       <h1>{title}</h1>
-      {closeButton}
+      {pageControls}
       {renderUnderConversation(running)}
     </section>
   ),
@@ -118,7 +118,7 @@ function renderPane() {
         importId="import-1"
         today="2026-11-12"
         showOrganizations
-        closeButton={null}
+        pageControls={null}
         onAddProject={() => undefined}
         {...handlers}
       />

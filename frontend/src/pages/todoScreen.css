@@ -21,11 +21,16 @@
   margin: 0;
 }
 
+/* An expanded conversation takes the list's place: the list waits, hidden, as it was left. */
+.todo-screen__list[hidden] {
+  display: none;
+}
+
 /* Beside a conversation the list takes what the conversation's column leaves, until a file
    opens beside the conversation and needs the room. The rule between them sets the fixed side's
    width (useTodoPaneWidth); until it is moved, these defaults stand. */
 @media (min-width: 1101px) {
-  .todo-screen
+  .todo-screen--with-pane
     > .todo-screen__conversation:not(:has(.action-task--split, .suggestion-task--split)) {
     flex: 0 0 var(--todo-pane-width, clamp(420px, 40%, 560px));
   }

@@ -245,7 +245,8 @@ it('answers Pantaray’s deletion request under the conversation, and waits whil
         deletionFailure={null}
         onAnswerDeletion={onAnswerDeletion}
         onAddProject={vi.fn()}
-        closeButton={null}
+        requestedFile={null}
+        pageControls={null}
       />
     );
   const { rerender } = render(pane(false));

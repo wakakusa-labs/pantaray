@@ -239,6 +239,7 @@ def _create_todo(
         user_id="user-1",
         client_todo_id=text,
         project_id=project_id,
+        organization_id=None,
         text=text,
         starts_on=starts_on,
         due=due,

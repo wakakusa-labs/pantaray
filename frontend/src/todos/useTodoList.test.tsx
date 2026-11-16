@@ -134,6 +134,7 @@ it('reads again when a new WS session starts, since changes made while disconnec
 const todo = (done: boolean): TodoView => ({
   todo_id: 't1',
   project_id: null,
+  organization_id: null,
   text: 't1',
   author: 'user',
   origin: 'written',

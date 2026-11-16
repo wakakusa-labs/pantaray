@@ -162,6 +162,7 @@ function todo(todoId: string, projectId: string | null, extra: Partial<TodoView>
   return {
     todo_id: todoId,
     project_id: projectId,
+    organization_id: null,
     text: `TODO ${todoId}`,
     author: 'user',
     origin: 'written',

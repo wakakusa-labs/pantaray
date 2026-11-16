@@ -22,6 +22,7 @@ from pantaray_agents.local_runtime.todos.core import CheckSet, Rejected
 from pantaray_agents.local_runtime.todos.db import (
     TODO_COLUMNS,
     TODO_SELECT,
+    owns_organization,
     owns_project,
     project_id_named,
     read_todo_row,
@@ -51,7 +52,9 @@ _UPDATE_SQL: Final = (
     + " WHERE user_id = :user_id AND todo_id = :todo_id"
 )
 
-type CreateItemRejection = Literal["project_not_found", "client_todo_conflict"]
+type CreateItemRejection = Literal[
+    "project_not_found", "organization_not_found", "client_todo_conflict"
+]
 
 _NAMESPACE_SUGGESTION_TODO: Final = uuid.uuid5(
     uuid.NAMESPACE_URL, "pantaray:suggestion_todo:v1"
@@ -63,12 +66,16 @@ def create_todo_item(
     user_id: str,
     client_todo_id: str,
     project_id: str | None,
+    organization_id: str | None,
     text: str,
     starts_on: LocalDate | None,
     due: TodoDue | None,
     clock: TodoClock,
 ) -> Todo | Rejected[core.CreateRejection | CreateItemRejection]:
-    """The user's new TODO; the same `client_todo_id` again returns it."""
+    """The user's new TODO; the same `client_todo_id` again returns it.
+
+    `organization_id` is its own organization, so it is None with a project.
+    """
 
     created = core.create_todo(
         todo_id=str(uuid.uuid4()),
@@ -76,6 +83,7 @@ def create_todo_item(
         author="user",
         origin=WrittenOrigin(),
         project_id=project_id,
+        organization_id=organization_id,
         starts_on=starts_on,
         due=due,
         now=clock.now,
@@ -92,7 +100,7 @@ def create_todo_item(
         if row is not None:
             existing = todo_from_row(row)
             # Compared as stored now: a replay that arrives after the TODO's
-            # project, start or due changed is refused rather than undoing it.
+            # place, start or due changed is refused rather than undoing it.
             if _request(existing) != _request(created):
                 return Rejected("client_todo_conflict")
             return existing
@@ -100,6 +108,10 @@ def create_todo_item(
             connection, user_id=user_id, project_id=project_id
         ):
             return Rejected("project_not_found")
+        if organization_id is not None and not owns_organization(
+            connection, user_id=user_id, organization_id=organization_id
+        ):
+            return Rejected("organization_not_found")
         ensure_user_row(connection, user_id=user_id, timestamp=clock.now)
         insert_todo(
             connection, user_id=user_id, todo=created, client_todo_id=client_todo_id
@@ -141,6 +153,7 @@ def build_suggestion_todo(
         author="ai",
         origin=SuggestionOrigin(suggestion_id=suggestion_id),
         project_id=None,
+        organization_id=None,
         starts_on=clock.today,
         due=None,
         now=clock.now,
@@ -253,8 +266,10 @@ def delete_purged_todo(*, user_id: str, todo: Todo) -> None:
         )
 
 
-def _request(todo: Todo) -> tuple[str, str | None, str | None, TodoDue | None]:
-    return (todo.text, todo.starts_on, todo.project_id, todo.due)
+def _request(
+    todo: Todo,
+) -> tuple[str, str | None, str | None, str | None, TodoDue | None]:
+    return (todo.text, todo.starts_on, todo.project_id, todo.organization_id, todo.due)
 
 
 def _update(connection: sqlite3.Connection, *, user_id: str, todo: Todo) -> None:

@@ -190,6 +190,27 @@ def test_a_read_marks_new_names_and_open_todos_already_in_the_project(
     assert view.issue is None
 
 
+def test_an_open_todo_is_a_duplicate_only_in_its_own_place(db: Path) -> None:
+    execute(
+        db,
+        f"""
+        INSERT INTO todo_items(todo_id, user_id, organization_id, text, author,
+          origin_kind, created_at) VALUES ('seed-a', '{USER}', 'org-a',
+          'Send the invoice', 'user', 'written', '{T}');
+        """,
+    )
+
+    elsewhere = _drafted(AllScope(), _group(None, None, "Send the invoice"))
+    result = _register(elsewhere)
+    same_place = _drafted(AllScope(), _group(None, None, "Send the invoice"))
+
+    # The open one is A's own, so no organization and no project takes the line.
+    assert [line.duplicate for line in elsewhere.groups[0].todos] == [False]
+    assert isinstance(result, TodoImportResult)
+    assert (len(result.todo_ids), result.skipped_duplicates) == (1, 0)
+    assert [line.duplicate for line in same_place.groups[0].todos] == [True]
+
+
 def test_a_write_is_refused_on_a_stale_revision_or_an_issue_and_changes_nothing(
     db: Path,
 ) -> None:

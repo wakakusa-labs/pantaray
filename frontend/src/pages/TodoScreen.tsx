@@ -146,7 +146,8 @@ export function TodoScreen({
   }, [importId]);
   const selectedProjectId =
     selection.project.project === 'project' ? (selection.project.project_id ?? null) : null;
-  // One project in view is one list under its name; with several, the groups name them.
+  // One project in view is one list under its name; with several, the groups name them. No
+  // project across all organizations is a group for each organization.
   const oneProject = selection.project.project !== 'any';
   const title = !showingList
     ? t('todo.nav.deleted')
@@ -227,17 +228,15 @@ export function TodoScreen({
             onOpen={(id) => onSelect({ ...selection, todoId: null, importId: id })}
           />
           {groups.length === 0 ? (
-            <p className="todo-screen__empty">
-              {projects.length === 0 ? t('todo.page.noProjects') : t('todo.page.empty')}
-            </p>
-          ) : oneProject ? (
+            <p className="todo-screen__empty">{t('todo.page.empty')}</p>
+          ) : oneProject && groups.length === 1 ? (
             <ul className="todo-list" aria-labelledby="todo-screen-title">
               {renderRows(groups[0].items, page.today)}
             </ul>
           ) : (
             groups.map((group) => (
               <TodoProjectGroup
-                key={group.projectId ?? ''}
+                key={group.projectId ?? `organization:${group.organizationId ?? ''}`}
                 projectName={group.projectName}
                 organizationName={
                   group.organization === null

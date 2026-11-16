@@ -70,6 +70,11 @@ _REJECTIONS: Final[dict[str, tuple[int, str, ErrorType]]] = {
         "PROJECT_NOT_FOUND",
         ErrorType.VALIDATION_ERROR,
     ),
+    "organization_not_found": (
+        status.HTTP_404_NOT_FOUND,
+        "ORGANIZATION_NOT_FOUND",
+        ErrorType.VALIDATION_ERROR,
+    ),
     "client_todo_conflict": (
         status.HTTP_409_CONFLICT,
         "TODO_CLIENT_ID_CONFLICT",
@@ -202,6 +207,7 @@ def post_todo(
         user_id=user_id,
         client_todo_id=body.client_todo_id,
         project_id=body.project_id,
+        organization_id=body.organization_id,
         text=body.text,
         starts_on=starts_on,
         due=None if body.due is None else body.due.due(),

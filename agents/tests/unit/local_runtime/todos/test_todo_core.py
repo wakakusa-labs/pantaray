@@ -48,6 +48,7 @@ def _create(text: str) -> object:
         author="user",
         origin=WrittenOrigin(),
         project_id=None,
+        organization_id=None,
         starts_on="2026-11-05",
         due=None,
         now=NOW,

@@ -22,6 +22,7 @@ const ja = (ui: ReactNode) => <UiLanguageProvider initialLanguage="ja">{ui}</UiL
 const makeTodo = (overrides: Partial<TodoView> = {}): TodoView => ({
   todo_id: 'todo-1',
   project_id: 'project-1',
+  organization_id: null,
   text: '見積書を送る',
   author: 'user',
   origin: 'written',
@@ -263,10 +264,13 @@ it('answers Pantaray’s deletion request under the conversation, and waits whil
   }
 });
 
+// An organization's page: its project, then its TODOs in no project.
 const PROJECTS = [
-  { projectId: 'p1', projectName: '見積もり', organization: null },
-  { projectId: null, projectName: null, organization: null },
+  { projectId: 'p1', organizationId: null, projectName: '見積もり', organization: null },
+  { projectId: null, organizationId: 'org-1', projectName: null, organization: null },
 ];
+const IN_P1 = { projectId: 'p1', organizationId: null };
+const NO_PROJECT = { projectId: null, organizationId: 'org-1' };
 const addField = () => screen.getByRole('textbox', { name: 'TODO を追加' });
 const onImport = vi.fn(async () => true);
 
@@ -290,7 +294,7 @@ it('adds to the first project from today with no due, and an IME’s Enter sends
   fireEvent.keyDown(addField(), { key: 'Enter', keyCode: 229 });
   expect(onSubmit).not.toHaveBeenCalled();
   await userEvent.type(addField(), '{Enter}');
-  expect(onSubmit).toHaveBeenLastCalledWith('p1', TODAY, '見積書を送る', null);
+  expect(onSubmit).toHaveBeenLastCalledWith(IN_P1, TODAY, '見積書を送る', null);
   expect(addField()).toHaveValue('');
 
   // A TODO is one line: pasted lines are joined, and Shift+Enter neither sends nor breaks it.
@@ -300,7 +304,7 @@ it('adds to the first project from today with no due, and an IME’s Enter sends
   expect(onSubmit).toHaveBeenCalledOnce();
   expect(addField()).toHaveValue('見積書を 送る ');
   await userEvent.type(addField(), '{Enter}');
-  expect(onSubmit).toHaveBeenLastCalledWith('p1', TODAY, '見積書を 送る', null);
+  expect(onSubmit).toHaveBeenLastCalledWith(IN_P1, TODAY, '見積書を 送る', null);
   expect(onImport).not.toHaveBeenCalled();
 });
 
@@ -569,7 +573,7 @@ it('adds with the start just picked when a click outside the panel sends', async
   toggleEvent(dates, 'toggle', 'closed');
   await act(async () => undefined);
   expect(onSubmit).toHaveBeenCalledOnce();
-  expect(onSubmit).toHaveBeenLastCalledWith('p1', '2026-11-09', '請求書', null);
+  expect(onSubmit).toHaveBeenLastCalledWith(IN_P1, '2026-11-09', '請求書', null);
 });
 
 it('adds to the project and the dates chosen, shown short beside the calendar icon', async () => {
@@ -588,7 +592,10 @@ it('adds to the project and the dates chosen, shown short beside the calendar ic
   const dates = screen.getByRole('button', { name: '今日から、期限なし' });
   expect(dates).toHaveTextContent(/^$/);
   expectTooltipIsName(dates);
-  await userEvent.selectOptions(screen.getByRole('combobox', { name: 'プロジェクト' }), '');
+  await userEvent.selectOptions(
+    screen.getByRole('combobox', { name: 'プロジェクト' }),
+    'プロジェクトなし'
+  );
   const picker = toggle(dates, 'open');
   fireEvent.click(day(picker, '11月9日'));
   fireEvent.click(day(picker, '11月12日'));
@@ -596,7 +603,7 @@ it('adds to the project and the dates chosen, shown short beside the calendar ic
   expect(dates).toHaveTextContent(/^11\/9 → 11\/12$/);
   await userEvent.type(addField(), '請求書');
   await userEvent.click(screen.getByRole('button', { name: '追加' }));
-  expect(onSubmit).toHaveBeenLastCalledWith(null, '2026-11-09', '請求書', {
+  expect(onSubmit).toHaveBeenLastCalledWith(NO_PROJECT, '2026-11-09', '請求書', {
     date: '2026-11-12',
     repeat: 'none',
   });
@@ -605,7 +612,7 @@ it('adds to the project and the dates chosen, shown short beside the calendar ic
   fireEvent.click(toggle(dates, 'open').getByRole('button', { name: '開始を未定にする' }));
   expect(dates).toHaveTextContent(/^未定 → 11\/12$/);
   await userEvent.type(addField(), '見積書{Enter}');
-  expect(onSubmit).toHaveBeenLastCalledWith(null, null, '見積書', {
+  expect(onSubmit).toHaveBeenLastCalledWith(NO_PROJECT, null, '見積書', {
     date: '2026-11-12',
     repeat: 'none',
   });
@@ -615,6 +622,45 @@ it('adds to the project and the dates chosen, shown short beside the calendar ic
 
   rerender(bar(PROJECTS.slice(0, 1)));
   expect(screen.queryByRole('combobox', { name: 'プロジェクト' })).toBeNull();
+});
+
+it('names each organization’s no project while all organizations are in view', async () => {
+  const onSubmit = vi.fn(async () => true);
+  const xer = { kind: 'organization' as const, name: 'Xer' };
+  render(
+    ja(
+      <TodoAddBar
+        today={TODAY}
+        projects={[
+          { projectId: 'p1', organizationId: null, projectName: '見積もり', organization: xer },
+          { projectId: null, organizationId: 'org-1', projectName: null, organization: xer },
+          {
+            projectId: null,
+            organizationId: null,
+            projectName: null,
+            organization: { kind: 'none' },
+          },
+        ]}
+        disabled={false}
+        onSubmit={onSubmit}
+        onImport={onImport}
+      />
+    )
+  );
+  const select = screen.getByRole('combobox', { name: 'プロジェクト' });
+  expect(
+    within(select)
+      .getAllByRole('option')
+      .map((option) => option.textContent)
+  ).toEqual(['見積もり', 'プロジェクトなし（Xer）', 'プロジェクトなし（組織なし）']);
+  await userEvent.selectOptions(select, 'プロジェクトなし（組織なし）');
+  await userEvent.type(addField(), '請求書{Enter}');
+  expect(onSubmit).toHaveBeenLastCalledWith(
+    { projectId: null, organizationId: null },
+    TODAY,
+    '請求書',
+    null
+  );
 });
 
 it('counts a group’s done TODOs and names its organization after it when one is given', () => {

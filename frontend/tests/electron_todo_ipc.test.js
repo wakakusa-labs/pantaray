@@ -11,6 +11,7 @@ const BASE = 'http://127.0.0.1:61131/v1/agents/users/user%201/todos';
 const OPEN_TODO = {
   todo_id: 'todo-1',
   project_id: null,
+  organization_id: 'org-1',
   text: 'Send the estimate',
   author: 'user',
   origin: 'written',
@@ -113,6 +114,7 @@ test('every route reaches its backend path with the token, and each response var
       const create = {
         client_todo_id: 'c-1',
         project_id: null,
+        organization_id: 'org-1',
         text: 'Send the estimate',
         starts_on: '2026-11-04',
         due: null,
@@ -189,6 +191,7 @@ test('a refusal keeps its error code; other failures and off-contract responses 
   const create = {
     client_todo_id: 'c',
     project_id: 'p',
+    organization_id: null,
     text: 't',
     starts_on: '2026-11-02',
     due: null,
@@ -476,6 +479,7 @@ test('TODO IPC validates the renderer payload before anything reaches the backen
     'todos:create': {
       client_todo_id: 'c-1',
       project_id: null,
+      organization_id: null,
       text: ' two\nlines ',
       starts_on: null,
       due: { date: '2026-11-06', repeat: 'none' },
@@ -524,6 +528,7 @@ test('TODO IPC validates the renderer payload before anything reaches the backen
       { ...valid['todos:create'], text: 'x'.repeat(32_001) },
       { ...valid['todos:create'], due: { date: '2026-11-06', repeat: 'daily' } },
       { ...valid['todos:create'], project_id: undefined },
+      { ...valid['todos:create'], organization_id: undefined },
     ],
     'todos:setCheck': [{ todo_id: 't-1', checked: 'true' }, { checked: true }],
     'todos:setDue': [{ todo_id: 't-1' }, { todo_id: 't-1', due: { date: '2026-11-06' } }],

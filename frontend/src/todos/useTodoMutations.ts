@@ -8,6 +8,7 @@ import type {
   TodoRefusalCode,
   TodoWriteResult,
 } from '../../electron/src/todos/todoContracts';
+import type { TodoPlace } from './groupTodosByProject';
 import type { TodosBridge } from './useTodoRead';
 
 /**
@@ -30,6 +31,7 @@ const REFUSAL_MESSAGES: Partial<Record<TodoRefusalCode, MessageKey>> = {
   TODO_BUSY: 'todo.error.busy',
   TODO_RESTORE_EXPIRED: 'todo.error.restoreExpired',
   PROJECT_NOT_FOUND: 'todo.error.projectNotFound',
+  ORGANIZATION_NOT_FOUND: 'todo.error.organizationNotFound',
 };
 
 export const todoRefusalMessage = (code: TodoRefusalCode): MessageKey =>
@@ -37,8 +39,8 @@ export const todoRefusalMessage = (code: TodoRefusalCode): MessageKey =>
 
 type Outcome = 'ok' | 'refused' | 'unknown';
 
-const addKey = (projectId: string | null, startsOn: string | null) =>
-  `${startsOn ?? ''}\n${projectId ?? ''}`;
+const addKey = ({ projectId, organizationId }: TodoPlace, startsOn: string | null) =>
+  `${startsOn ?? ''}\n${projectId ?? ''}\n${organizationId ?? ''}`;
 
 /** A row's dates to write: the start, the due day, or both; what is left out stays. */
 export type TodoDatesChange =
@@ -113,14 +115,14 @@ export function useTodoMutations({ reloadList, reloadDeleted }: TodoReloads) {
 
   /** Resolves true once the added TODO has been read into the list, which empties the add field. */
   const create = async (
-    projectId: string | null,
+    place: TodoPlace,
     startsOn: string | null,
     text: string,
     due: TodoDue | null
   ): Promise<boolean> => {
     // Enter on an empty field adds nothing and tells nothing.
     if (!text.trim()) return false;
-    const key = addKey(projectId, startsOn);
+    const key = addKey(place, startsOn);
     const unanswered = unansweredAddsRef.current.get(key);
     const dueKey = due ? `${due.date}:${due.repeat}` : null;
     const clientTodoId =
@@ -131,7 +133,8 @@ export function useTodoMutations({ reloadList, reloadDeleted }: TodoReloads) {
     const outcome = await send({ kind: 'add' }, (todos) =>
       todos.create({
         client_todo_id: clientTodoId,
-        project_id: projectId,
+        project_id: place.projectId,
+        organization_id: place.organizationId,
         text,
         starts_on: startsOn,
         due,

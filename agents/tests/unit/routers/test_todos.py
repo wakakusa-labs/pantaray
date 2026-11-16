@@ -100,6 +100,7 @@ def _create(
     body: dict[str, object] = {
         "client_todo_id": client_todo_id,
         "project_id": "project-1",
+        "organization_id": None,
         "text": "Send the quote",
         "due": None,
         **fields,
@@ -153,6 +154,11 @@ def test_a_replayed_create_returns_the_same_todo_and_a_changed_one_conflicts(
     ("fields", "status_code", "error_code"),
     [
         ({"project_id": "missing"}, 404, "PROJECT_NOT_FOUND"),
+        (
+            {"project_id": None, "organization_id": "missing"},
+            404,
+            "ORGANIZATION_NOT_FOUND",
+        ),
         ({"text": "two\nlines"}, 422, "TODO_INVALID_TEXT"),
         ({"text": "   "}, 422, "TODO_INVALID_TEXT"),
     ],
@@ -166,10 +172,12 @@ def test_a_create_the_store_refuses_names_why(
     assert _error_code(response) == error_code
 
 
-def test_a_repeat_without_a_date_or_an_unknown_scope_is_an_input_error(
+def test_a_repeat_without_a_date_two_places_or_an_unknown_scope_is_an_input_error(
     client: TestClient,
 ) -> None:
     assert _create(client, due={"repeat": "weekly"}).status_code == 422
+    # A project's TODO is in the project's organization, never in another.
+    assert _create(client, organization_id="org-a").status_code == 422
     for params in (
         {"scope": "organization", "project": "any"},
         {"scope": "all", "project": "any", "organization_id": "org-a"},

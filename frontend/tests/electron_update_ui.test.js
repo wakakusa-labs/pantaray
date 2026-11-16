@@ -29,7 +29,7 @@ test('macOS tray icon visual follows recording enabled state, including degraded
   assert.equal(getTrayStatusVisual({ kind: 'paused', screenshotsEnabled: false }), 'idle');
 });
 
-test('tray new conversation action delegates to the overlay owner', () => {
+test('tray add-a-TODO entry opens the add-a-TODO panel', () => {
   let trayMenu = null;
   let openCalls = 0;
   const updateUi = createUpdateUiManager({
@@ -50,23 +50,23 @@ test('tray new conversation action delegates to the overlay owner', () => {
     }),
     getMainWindow: () => null,
     getGlobalShortcutAccelerator: () => 'Option+Space',
-    openNewConversationOverlay: () => {
+    openAddTodoPanel: () => {
       openCalls += 1;
     },
     setTrayStatusVisual: () => {},
   });
 
   updateUi.rebuildTrayMenu();
-  const newConversationItem = trayMenu.template.find((item) => item.label === 'New task');
-  newConversationItem.click();
+  const addTodoItem = trayMenu.template.find((item) => item.label === 'Add a TODO');
+  addTodoItem.click();
 
   assert.equal(openCalls, 1);
   // The tray only displays the shortcut; globalShortcutController stays the sole registrar.
-  assert.equal(newConversationItem.accelerator, 'Option+Space');
-  assert.equal(newConversationItem.registerAccelerator, false);
+  assert.equal(addTodoItem.accelerator, 'Option+Space');
+  assert.equal(addTodoItem.registerAccelerator, false);
 });
 
-test('tray new conversation entry omits the shortcut while none is active', () => {
+test('tray add-a-TODO entry omits the shortcut while none is active', () => {
   let trayMenu = null;
   const updateUi = createUpdateUiManager({
     app: { getVersion: () => '0.0.0' },
@@ -86,14 +86,14 @@ test('tray new conversation entry omits the shortcut while none is active', () =
     }),
     getMainWindow: () => null,
     getGlobalShortcutAccelerator: () => null,
-    openNewConversationOverlay: () => {},
+    openAddTodoPanel: () => {},
     setTrayStatusVisual: () => {},
   });
 
   updateUi.rebuildTrayMenu();
-  const newConversationItem = trayMenu.template.find((item) => item.label === 'New task');
+  const addTodoItem = trayMenu.template.find((item) => item.label === 'Add a TODO');
 
-  assert.ok(!('accelerator' in newConversationItem));
+  assert.ok(!('accelerator' in addTodoItem));
 });
 
 test('macOS tray keeps enabled color and degraded details until recording is paused', async () => {

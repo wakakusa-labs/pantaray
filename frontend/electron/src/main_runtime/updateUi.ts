@@ -44,7 +44,7 @@ type UpdateUiManagerDeps = {
   consumeManualUpdateCheckPending: () => boolean;
   getTray: () => Tray | null;
   getMainWindow: () => BrowserWindow | null;
-  openNewConversationOverlay: () => void;
+  openAddTodoPanel: () => void;
   /** Accelerator to display next to the tray entry; null while no global shortcut is active. */
   getGlobalShortcutAccelerator: () => string | null;
   getCaptureStatusSnapshot: () => Promise<CaptureStatusSnapshot | null>;
@@ -231,7 +231,7 @@ export function createUpdateUiManager(deps: UpdateUiManagerDeps) {
       const text = getTrayMenuCopy(deps.getUiLanguage());
       const captureStatusText = text.captureStatus(captureStatusSnapshot);
       const screenshotsEnabled = Boolean(captureStatusSnapshot?.screenshotsEnabled);
-      const newConversationAccelerator = deps.getGlobalShortcutAccelerator();
+      const addTodoAccelerator = deps.getGlobalShortcutAccelerator();
 
       const template: MenuItemConstructorOptions[] = [
         {
@@ -248,11 +248,11 @@ export function createUpdateUiManager(deps: UpdateUiManagerDeps) {
           : []),
         { type: 'separator' },
         {
-          label: text.newConversation,
-          click: deps.openNewConversationOverlay,
+          label: text.addTodo,
+          click: deps.openAddTodoPanel,
           // Display only: the global shortcut stays registered by globalShortcutController.
-          ...(newConversationAccelerator
-            ? { accelerator: newConversationAccelerator, registerAccelerator: false }
+          ...(addTodoAccelerator
+            ? { accelerator: addTodoAccelerator, registerAccelerator: false }
             : {}),
         },
         {

@@ -18,7 +18,7 @@ export type UpdateMenuCopy = {
 };
 
 export type TrayMenuCopy = {
-  newConversation: string;
+  addTodo: string;
   openWindow: string;
   startScreenshots: string;
   stopScreenshots: string;
@@ -190,7 +190,7 @@ function getTrayCaptureStatusCopy(
 export function getTrayMenuCopy(lang: UiLanguage): TrayMenuCopy {
   return lang === 'ja'
     ? {
-        newConversation: '新しい作業',
+        addTodo: 'TODO を追加',
         openWindow: 'ウィンドウを開く',
         startScreenshots: '操作の記録を再開',
         stopScreenshots: '操作の記録を一時停止',
@@ -202,7 +202,7 @@ export function getTrayMenuCopy(lang: UiLanguage): TrayMenuCopy {
         },
       }
     : {
-        newConversation: 'New task',
+        addTodo: 'Add a TODO',
         openWindow: 'Open window',
         startScreenshots: 'Resume activity recording',
         stopScreenshots: 'Pause activity recording',

@@ -41,8 +41,8 @@ type ActionTaskPaneProps = {
    * user to confirm; it is told whether a run is going (or waits on an approval).
    */
   renderUnderConversation?: (running: boolean) => ReactNode;
-  /** Closes the pane, last in its header; for the page that opened the pane beside a list. */
-  closeButton?: ReactNode;
+  /** The page's controls for the pane (expand, shrink, close), last in its header. */
+  pageControls?: ReactNode;
   /** Where the composer waits while the pane is not shown. */
 };
 
@@ -57,7 +57,7 @@ export function ActionTaskPane({
   onAddProject,
   renderFileChips,
   renderUnderConversation,
-  closeButton,
+  pageControls,
 }: ActionTaskPaneProps) {
   const { t } = useI18n();
   const titleId = useId();
@@ -203,7 +203,7 @@ export function ActionTaskPane({
               {t('history.openSmallFailed')}
             </p>
           ) : null}
-          {closeButton}
+          {pageControls}
         </div>
       </header>
       {preview}

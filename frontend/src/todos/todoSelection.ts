@@ -33,6 +33,8 @@ export type TodoSelection = {
   progressDay: string | null;
   /** The TODO whose conversation is open beside the list. */
   todoId: string | null;
+  /** That conversation takes the list's place, full width; only with a TODO selected. */
+  expanded: boolean;
   /** The import whose draft is open beside the list, in place of a TODO's conversation. */
   importId: string | null;
 };
@@ -46,6 +48,7 @@ export const DEFAULT_TODO_SELECTION: TodoSelection = {
   progressOn: null,
   progressDay: null,
   todoId: null,
+  expanded: false,
   importId: null,
 };
 
@@ -57,6 +60,8 @@ const SPAN_PARAM = 'span';
 const ON_PARAM = 'on';
 const DAY_PARAM = 'day';
 const TODO_PARAM = 'todo';
+const EXPANDED_PARAM = 'expanded';
+const EXPANDED = '1';
 const IMPORT_PARAM = 'import';
 /** The value for TODOs in no organization, and for TODOs in no project. */
 const NONE = 'none';
@@ -104,6 +109,7 @@ export function parseTodoSelection(search: string): TodoSelection {
   const view = params.get(VIEW_PARAM);
   const span = params.get(SPAN_PARAM);
   const sort = params.get(SORT_PARAM);
+  const todoId = canonicalId(params.get(TODO_PARAM));
   return {
     scope: parseScope(params.get(SCOPE_PARAM)),
     project: parseProject(params.get(PROJECT_PARAM)),
@@ -113,7 +119,8 @@ export function parseTodoSelection(search: string): TodoSelection {
       SPANS.find((candidate) => candidate === span) ?? DEFAULT_TODO_SELECTION.progressSpan,
     progressOn: localDate(params.get(ON_PARAM)),
     progressDay: localDate(params.get(DAY_PARAM)),
-    todoId: canonicalId(params.get(TODO_PARAM)),
+    todoId,
+    expanded: todoId !== null && params.get(EXPANDED_PARAM) === EXPANDED,
     importId: canonicalId(params.get(IMPORT_PARAM)),
   };
 }
@@ -145,6 +152,7 @@ export function todoSelectionSearch(selection: TodoSelection): string {
   if (selection.progressDay !== null) entries.push(`${DAY_PARAM}=${selection.progressDay}`);
   if (selection.todoId !== null) {
     entries.push(`${TODO_PARAM}=${encodeURIComponent(selection.todoId)}`);
+    if (selection.expanded) entries.push(`${EXPANDED_PARAM}=${EXPANDED}`);
   }
   if (selection.importId !== null) {
     entries.push(`${IMPORT_PARAM}=${encodeURIComponent(selection.importId)}`);

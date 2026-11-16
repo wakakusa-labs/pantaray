@@ -23,6 +23,7 @@ it('round-trips every part of a selection, ids with reserved characters included
       progressOn: '2025-03-01',
       progressDay: '2025-03-04',
       todoId: 'todo #1',
+      expanded: true,
       importId: 'import 1',
     },
     {
@@ -34,6 +35,7 @@ it('round-trips every part of a selection, ids with reserved characters included
       progressOn: null,
       progressDay: null,
       todoId: null,
+      expanded: false,
       importId: null,
     },
   ];
@@ -41,7 +43,7 @@ it('round-trips every part of a selection, ids with reserved characters included
     expect(parseTodoSelection(todoSelectionSearch(selection))).toEqual(selection);
   }
   expect(todoSelectionSearch(selections[0])).toBe(
-    '?scope=organization:org%201%26x%3Dy&project=project:p%3A1%2F2&sort=due&view=progress&span=year&on=2025-03-01&day=2025-03-04&todo=todo%20%231&import=import%201'
+    '?scope=organization:org%201%26x%3Dy&project=project:p%3A1%2F2&sort=due&view=progress&span=year&on=2025-03-01&day=2025-03-04&todo=todo%20%231&expanded=1&import=import%201'
   );
 });
 
@@ -61,8 +63,18 @@ it('falls back to the default for each malformed value', () => {
     '?day=2026-11-31',
     '?todo=',
     '?todo=%20t1',
+    // Expanded is a selected TODO's, and only `1` says so.
+    '?expanded=1',
+    '?todo=%20t1&expanded=1',
     '?import=',
   ]) {
     expect(parseTodoSelection(search), search).toEqual(DEFAULT_TODO_SELECTION);
+  }
+});
+
+it('reads only `expanded=1` as the selected TODO expanded', () => {
+  expect(parseTodoSelection('?todo=t1&expanded=1').expanded).toBe(true);
+  for (const value of ['0', 'true', '']) {
+    expect(parseTodoSelection(`?todo=t1&expanded=${value}`).expanded, value).toBe(false);
   }
 });

@@ -8,10 +8,10 @@ import { useI18n } from '@/context/useI18n';
 import type { TodoView } from '../../../electron/src/todos/todoContracts';
 
 /**
- * A TODO's conversation beside the list: its Action, its suggestion while no Action answers it
+ * A TODO's conversation beside the list, or in its place: its Action, its suggestion while no Action answers it
  * yet, or a short note while it has neither. Under it, Pantaray's pending request to delete the
  * TODO, which only the user's 「消す」 carries out. The conversation itself is the task panes' to
- * hold; the list's close button sits at the end of whichever header it has.
+ * hold; the page's controls (expand or shrink, close) sit at the end of whichever header it has.
  */
 export function TodoConversationPane({
   todo,
@@ -19,7 +19,9 @@ export function TodoConversationPane({
   deletionFailure,
   onAnswerDeletion,
   onAddProject,
-  closeButton,
+  requestedFile,
+  handedPreview,
+  pageControls,
 }: {
   todo: TodoView;
   /** A write on the TODO is waiting for its answer; the request's buttons wait with it. */
@@ -28,12 +30,22 @@ export function TodoConversationPane({
   deletionFailure: ReactNode;
   onAnswerDeletion: (requestId: string, answer: 'approve' | 'keep') => void;
   onAddProject: () => void;
-  closeButton: ReactNode;
+  /** One of its suggestion's files to preview, asked for by an Overlay chip. */
+  requestedFile: string | null;
+  /** The file a suggestion had open, handed to the Action that took its place. */
+  handedPreview: { actionId: string; preview: TaskPreview } | null;
+  pageControls: ReactNode;
 }) {
   const request = todo.deletion_request;
   return (
     <>
-      <Conversation todo={todo} onAddProject={onAddProject} closeButton={closeButton} />
+      <Conversation
+        todo={todo}
+        onAddProject={onAddProject}
+        requestedFile={requestedFile}
+        handedPreview={handedPreview}
+        pageControls={pageControls}
+      />
       {request ? (
         <DeletionRequest
           reason={request.reason}
@@ -88,11 +100,15 @@ function DeletionRequest({
 function Conversation({
   todo,
   onAddProject,
-  closeButton,
+  requestedFile,
+  handedPreview,
+  pageControls,
 }: {
   todo: TodoView;
   onAddProject: () => void;
-  closeButton: ReactNode;
+  requestedFile: string | null;
+  handedPreview: { actionId: string; preview: TaskPreview } | null;
+  pageControls: ReactNode;
 }) {
   const { t } = useI18n();
   const titleId = useId();
@@ -109,9 +125,15 @@ function Conversation({
         key={actionId}
         actionId={actionId}
         title={todo.text}
-        initialPreview={started?.actionId === actionId ? started.preview : null}
+        initialPreview={
+          started?.actionId === actionId
+            ? started.preview
+            : handedPreview?.actionId === actionId
+              ? handedPreview.preview
+              : null
+        }
         onAddProject={onAddProject}
-        closeButton={closeButton}
+        pageControls={pageControls}
       />
     );
   if (conversation.kind === 'suggestion')
@@ -120,17 +142,17 @@ function Conversation({
         key={conversation.suggestion_id}
         suggestionId={conversation.suggestion_id}
         title={todo.text}
-        requestedFile={null}
+        requestedFile={requestedFile}
         onStarted={(id, preview) => setStarted({ actionId: id, preview })}
         onAddProject={onAddProject}
-        closeButton={closeButton}
+        pageControls={pageControls}
       />
     );
   return (
     <section className="todo-conversation-none" aria-labelledby={titleId}>
       <header className="action-task__header">
         <h1 id={titleId}>{todo.text}</h1>
-        <div className="action-task__header-actions">{closeButton}</div>
+        <div className="action-task__header-actions">{pageControls}</div>
       </header>
       <p className="todo-conversation-none__text">{t('todo.conversation.none')}</p>
     </section>

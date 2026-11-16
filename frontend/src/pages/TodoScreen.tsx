@@ -1,8 +1,9 @@
-import { X } from 'lucide-react';
+import { Maximize2, Minimize2, X } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { AiConnectionNotice } from '@/components/AiConnectionNotice';
 import { OpenWorkContext } from '@/components/action-conversation/sentMessageRefs';
+import { PageControlButton } from '@/components/task/PageControlButton';
 import type { WorkspaceProjects } from '@/components/history/HistoryProjects';
 import { ProjectFolders } from '@/components/history/ProjectFolders';
 import { DeletedTodoRow } from '@/components/todo/DeletedTodoRow';
@@ -15,6 +16,7 @@ import { TodoProjectGroup } from '@/components/todo/TodoProjectGroup';
 import { TodoRow } from '@/components/todo/TodoRow';
 import { useTodoPaneWidth } from '@/components/todo/useTodoPaneWidth';
 import { useI18n } from '@/context/useI18n';
+import type { TaskPreview } from '@/components/task/taskFiles';
 import type { HistorySelection } from '@/history/historySelection';
 import type { WorkspaceSettings } from '@/pages/settings/components/workspaceSettingsModel';
 import { workspacePendingKey } from '@/pages/settings/useWorkspaceSettingsController';
@@ -44,20 +46,8 @@ function FailureLine({ failure }: { failure: TodoMutationFailure }) {
   );
 }
 
-/** The pane's close, last in its header. */
-function CloseButton({ label, onClose }: { label: string; onClose: () => void }) {
-  return (
-    <button
-      type="button"
-      className="action-task__icon-button action-task__close"
-      aria-label={label}
-      data-tooltip={label}
-      onClick={onClose}
-    >
-      <X size={17} strokeWidth={1.8} aria-hidden="true" />
-    </button>
-  );
-}
+/** The list's title, which takes focus once a pane closes; the page focuses it too. */
+export const TODO_SCREEN_TITLE_ID = 'todo-screen-title';
 
 /** Why an import did not start, told under the add bar. */
 const startProblemMessage = (problem: TodoImportProblem) =>
@@ -75,7 +65,8 @@ type ProjectFolderActions = Pick<
  * The home page's TODO list: every TODO in view, by project while several projects are in view
  * and as one list for one project (or their progress, or the deleted TODOs), with the folders of
  * the one project in view under its header, and beside the list the conversation of the TODO
- * selected, or the draft of an import started from the add bar. What is shown is the page's URL;
+ * selected, or the draft of an import started from the add bar. The conversation expands into the
+ * list's place and shrinks back beside it, the same pane all along. What is shown is the page's URL;
  * this reads and writes the TODOs through the TODO hooks and draws them with the TODO parts.
  */
 export function TodoScreen({
@@ -89,6 +80,8 @@ export function TodoScreen({
   onOpenWork,
   onAddProject,
   onWorkspaceChanged,
+  requestedFile,
+  handedPreview,
 }: {
   selection: TodoSelection;
   /** Every project's TODOs in the scope, read by the page, whose sidebar counts them too. */
@@ -108,6 +101,10 @@ export function TodoScreen({
   onAddProject: () => void;
   /** An import created organizations or projects: the workspace is read again. */
   onWorkspaceChanged: () => void;
+  /** A file of the selected TODO's suggestion an Overlay chip asked to preview. */
+  requestedFile: string | null;
+  /** The file a suggestion had open, handed to the Action that took its place. */
+  handedPreview: { actionId: string; preview: TaskPreview } | null;
 }) {
   const { t } = useI18n();
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -141,6 +138,8 @@ export function TodoScreen({
       ? (page?.items.find((todo) => todo.todo_id === selection.todoId) ?? null)
       : null;
   const paneOpen = selectedTodo !== null || importId !== null;
+  // The conversation takes the list's place, the same pane, so it is not mounted again.
+  const expanded = selection.expanded && selectedTodo !== null;
   useEffect(() => {
     if (importId !== null) importPaneRef.current?.focus();
   }, [importId]);
@@ -158,8 +157,17 @@ export function TodoScreen({
         ? t('todo.noProject')
         : t('todo.nav.all');
 
-  // Focus returns to the list: the conversation's close button goes away once used.
-  const focusHeading = () => headingRef.current?.focus();
+  // Focus returns to the list: the pane's close button goes away once used. An expanded
+  // conversation's list is drawn again first, so the heading takes it once it is there.
+  const headingFocusPending = useRef(false);
+  useEffect(() => {
+    if (!headingFocusPending.current || !headingRef.current) return;
+    headingFocusPending.current = false;
+    headingRef.current.focus();
+  });
+  const focusHeading = () => {
+    headingFocusPending.current = true;
+  };
   /** A read that failed after one landed: what is shown may be out of date. */
   const staleAlert = (
     <p className="history-error" role="alert">
@@ -368,16 +376,25 @@ export function TodoScreen({
   return (
     <div
       ref={setScreenElement}
-      className={paneOpen ? 'todo-screen todo-screen--with-pane' : 'todo-screen'}
+      className={
+        expanded
+          ? 'todo-screen todo-screen--expanded'
+          : paneOpen
+            ? 'todo-screen todo-screen--with-pane'
+            : 'todo-screen'
+      }
       style={paneWidth.style}
     >
+      {/* Hidden while the conversation is expanded, as it was left: its scroll and its add bar's
+          text are there again on shrinking. */}
       <section
         ref={setListElement}
         className="todo-screen__list"
-        aria-labelledby="todo-screen-title"
+        aria-labelledby={TODO_SCREEN_TITLE_ID}
+        hidden={expanded}
       >
         <header className="history-pane-header todo-screen__header">
-          <h1 id="todo-screen-title" ref={headingRef} tabIndex={-1}>
+          <h1 id={TODO_SCREEN_TITLE_ID} ref={headingRef} tabIndex={-1}>
             {title}
           </h1>
           {showingList ? renderSummary() : null}
@@ -430,7 +447,7 @@ export function TodoScreen({
         </div>
         {showingList ? renderAddBar() : null}
       </section>
-      {paneOpen ? (
+      {paneOpen && !expanded ? (
         <div
           className="todo-screen__rule"
           aria-label={t('todo.pane.resize')}
@@ -458,7 +475,9 @@ export function TodoScreen({
                 void todoList.reload();
               }}
               onCanceled={closeImport}
-              closeButton={<CloseButton label={t('todo.import.close')} onClose={closeImport} />}
+              pageControls={
+                <PageControlButton label={t('todo.import.close')} icon={X} onClick={closeImport} />
+              }
             />
           </OpenWorkContext.Provider>
         </div>
@@ -476,14 +495,25 @@ export function TodoScreen({
                 void mutations.answerDeletion(selectedTodo.todo_id, requestId, answer)
               }
               onAddProject={onAddProject}
-              closeButton={
-                <CloseButton
-                  label={t('todo.conversation.close')}
-                  onClose={() => {
-                    onSelect({ ...selection, todoId: null });
-                    focusHeading();
-                  }}
-                />
+              requestedFile={requestedFile}
+              handedPreview={handedPreview}
+              pageControls={
+                <>
+                  {/* One button that turns over, so the focus stays on it. */}
+                  <PageControlButton
+                    label={t(expanded ? 'todo.conversation.shrink' : 'todo.conversation.expand')}
+                    icon={expanded ? Minimize2 : Maximize2}
+                    onClick={() => onSelect({ ...selection, expanded: !expanded })}
+                  />
+                  <PageControlButton
+                    label={t('todo.conversation.close')}
+                    icon={X}
+                    onClick={() => {
+                      onSelect({ ...selection, todoId: null, expanded: false });
+                      focusHeading();
+                    }}
+                  />
+                </>
               }
             />
           </OpenWorkContext.Provider>

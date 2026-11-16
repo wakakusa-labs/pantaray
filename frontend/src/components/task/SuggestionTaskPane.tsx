@@ -54,8 +54,8 @@ type SuggestionTaskPaneProps = {
   onStarted: (actionId: string, preview: TaskPreview | null) => void;
   /** The composer's @-mention "Add project" option. */
   onAddProject: () => void;
-  /** Closes the pane, last in its header; for the page that opened the pane beside a list. */
-  closeButton?: ReactNode;
+  /** The page's controls for the pane (expand, shrink, close), last in its header. */
+  pageControls?: ReactNode;
 };
 
 /**
@@ -69,7 +69,7 @@ export function SuggestionTaskPane({
   requestedFile,
   onStarted,
   onAddProject,
-  closeButton,
+  pageControls,
 }: SuggestionTaskPaneProps) {
   const { language, t } = useI18n();
   const copy = COPY[language];
@@ -180,7 +180,7 @@ export function SuggestionTaskPane({
               {copy.openSmallFailed}
             </p>
           ) : null}
-          {closeButton}
+          {pageControls}
         </div>
       </header>
       {previewFile ? (

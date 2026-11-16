@@ -25,10 +25,7 @@ import { useActionApprovalDecisionController } from './agent-overlay/useActionAp
 import { useActionApprovalMode } from './agent-overlay/useActionApprovalMode';
 import { actionStopTarget, useActionStop } from './agent-overlay/useActionStop';
 import { useCompletionViewed } from './agent-overlay/useCompletionViewed';
-import { SuggestionInputDisclosure } from './agent-overlay/SuggestionInputDisclosure';
 import { useStandaloneComposerFocus } from './agent-overlay/useStandaloneComposerFocus';
-import { SuggestionDecisionButtons } from './agent-overlay/SuggestionDecisionButtons';
-import { useClearReasonOnDismissal } from './agent-overlay/useClearReasonOnDismissal';
 import {
   ComposerStopButton,
   ComposerSubmissionRow,
@@ -82,7 +79,6 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
     requestResume,
     changeDraft,
     quoting,
-    clearMessage,
     hasMessage: hasWords,
     attachFiles,
     removeAttachment,
@@ -193,6 +189,11 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
     isSuggestionAccepted:
       approvedSuggestion !== null ||
       (state.interactionContract === 'action_offer' && state.reactionState === 'accepted'),
+    // How the TODO stands shows until a reply carries the work on; the conversation shows it then.
+    todo: state.todo && {
+      text: state.todo.text,
+      state: currentView?.action || state.reactionState === 'accepted' ? null : state.todo.state,
+    },
     dismissal:
       state.interactionContract === 'action_offer' && state.reactionState === 'rejected'
         ? { reason: state.dismissReason }
@@ -292,13 +293,13 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
       setComposer((current) => visiblePages.reduce(reconcileCanonicalSubmission, current));
   }, [visiblePages, setComposer]);
   const conversationCopy = useConversationCopy(actions, currentView?.action?.action_id ?? null);
-  // An unanswered offer's composer holds 承認 / 見送る; while one is under way both stay, disabled.
-  const offersDecision =
+  // A reply to an unanswered offer goes the way the TODO list sends it: it accepts the offer, with
+  // the reply as what to do next, and so continues the work it began.
+  const repliesToOffer =
     state.interactionContract === 'action_offer' &&
     state.reactionState === null &&
     Boolean(state.suggestionId) &&
     Boolean(state.suggestionText);
-  const canDecide = offersDecision && !state.decisionLocked;
   const showBusyIndicator =
     approvalUiState === 'hidden' &&
     (lifecycle
@@ -331,10 +332,6 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
         state.isSuggestionStreamFinished &&
         state.currentActionId === null &&
         state.requestState === 'idle'));
-  // A reply to a message-only suggestion opens on request. A dismissed offer opened here shows the
-  // composer at once, to ask for something else.
-  const startsReply = entryMode === 'overlay' && canStartConversation;
-  const answersDismissal = startsReply && state.reactionState === 'rejected';
   const canCompose = Boolean(
     actions &&
     composer.submission === null &&
@@ -445,75 +442,53 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
       stopState={stopState}
     />
   ) : null;
-  const canAcceptSuggestion =
-    permissionsReady && composer.attachmentsInFlight === 0 && !supplementInvalid;
+  const canSend =
+    !composer.submission &&
+    hasWords &&
+    composer.attachmentsInFlight === 0 &&
+    permissionsReady &&
+    (!repliesToOffer || (!state.decisionLocked && !supplementInvalid));
   const sendDraft = () => {
-    if (permissionsReady)
-      submitDraft(
-        visiblePages,
-        canStartConversation,
-        stopProcessId,
-        state.lastSequence,
-        approvalMode.mode,
-        entryMode === 'overlay' && repliesToSuggestion ? state.suggestionId : null
-      );
-  };
-  const clearReasonOnDismissal = useClearReasonOnDismissal(
-    state.suggestionId,
-    state.reactionState === 'rejected',
-    supplement,
-    clearMessage
-  );
-  // 見送る takes only words, as the reason: attachments wait for a message of their own.
-  const canDismissSuggestion =
-    composer.attachments.length === 0 && composer.attachmentsInFlight === 0 && !supplementInvalid;
-  const acceptSuggestion = () => {
-    if (!canDecide || !canAcceptSuggestion || approvalMode.mode === null) return;
-    ctrl.onAccept({
-      supplement,
-      supplementProjectRefs: supplementRefs.project_refs,
-      supplementWorkRefs: supplementRefs.work_refs,
-      approvalMode: approvalMode.mode,
-      images,
-      files,
-    });
+    if (!canSend || approvalMode.mode === null) return;
+    if (repliesToOffer) {
+      ctrl.onAccept({
+        supplement,
+        supplementProjectRefs: supplementRefs.project_refs,
+        supplementWorkRefs: supplementRefs.work_refs,
+        approvalMode: approvalMode.mode,
+        images,
+        files,
+      });
+      return;
+    }
+    submitDraft(
+      visiblePages,
+      canStartConversation,
+      stopProcessId,
+      state.lastSequence,
+      approvalMode.mode,
+      entryMode === 'overlay' && repliesToSuggestion ? state.suggestionId : null
+    );
   };
   const composerContent =
     toolOutputLoader &&
     (!operationalError || composer.submission) &&
-    (canCompose || offersDecision || composer.submission) ? (
+    (canCompose || repliesToOffer || composer.submission) ? (
       <OverlayComposer
         approvalMode={approvalMode}
+        hideApprovalMode={entryMode === 'overlay'}
+        placeholder={entryMode === 'overlay' ? t('overlay.composer.replyPlaceholder') : undefined}
         draft={composer.draft}
         mentions={composer.mentions}
         quoting={{ ...quoting, sourceRef: ctrl.contentInnerRef }}
         submissionControls={submissionControls}
-        retryAcceptance={offersDecision && ctrl.acceptFailed}
+        retryAcceptance={repliesToOffer && ctrl.acceptFailed}
         attachments={composer.attachments}
         attachmentFailure={composer.attachmentFailure}
-        validationFailed={offersDecision ? supplementInvalid : composer.validationFailed}
+        validationFailed={repliesToOffer ? supplementInvalid : composer.validationFailed}
         canAttach={canAttach}
-        action={
-          offersDecision
-            ? {
-                decision: (
-                  <SuggestionDecisionButtons
-                    canDismiss={canDecide && canDismissSuggestion}
-                    canAccept={canDecide && canAcceptSuggestion}
-                    onDismiss={() => {
-                      clearReasonOnDismissal(supplement);
-                      ctrl.onReject(supplement);
-                    }}
-                    onAccept={acceptSuggestion}
-                  />
-                ),
-                canDismiss: true,
-              }
-            : composerAction
-        }
-        canSend={
-          !composer.submission && hasWords && composer.attachmentsInFlight === 0 && permissionsReady
-        }
+        action={composerAction}
+        canSend={canSend}
         resumeFailed={composer.resume?.state === 'failed'}
         stopState={stopState}
         sendSuperseded={composer.failureKind === 'superseded'}
@@ -547,17 +522,9 @@ const AgentOverlay: React.FC<AgentOverlayProps> = ({
       actionText={operationalError}
       conversationContent={conversationContent}
       composer={
-        startsReply && !answersDismissal && composerContent ? (
-          <SuggestionInputDisclosure
-            key={state.suggestionId}
-            label={t('overlay.composer.open')}
-            inputRef={standaloneComposerRef}
-          >
-            {composerContent}
-          </SuggestionInputDisclosure>
-        ) : offersDecision && ctrl.acceptFailed ? (
+        repliesToOffer && ctrl.acceptFailed ? (
           <>
-            <p role="alert">{t('overlay.acceptFailed')}</p>
+            <p role="alert">{t('overlay.replyFailed')}</p>
             {composerContent}
           </>
         ) : (

@@ -176,6 +176,10 @@ const ScreenReaderOnly = styled.label`
 
 type OverlayComposerProps = {
   approvalMode: ActionApprovalModeControl;
+  /** The mode read is used as it is: its menu shows only to retry a read that failed. */
+  hideApprovalMode?: boolean;
+  /** The words shown in the empty field, in place of the default for `action`. */
+  placeholder?: string;
   draft: string;
   mentions: readonly ComposerMention[];
   /** Quotes picked from the conversation above; absent where there is no conversation. */
@@ -307,6 +311,8 @@ export function ComposerSubmissionStatus({
 
 export function OverlayComposer({
   approvalMode,
+  hideApprovalMode = false,
+  placeholder,
   draft,
   mentions,
   quoting,
@@ -335,6 +341,16 @@ export function OverlayComposer({
   const attachInputRef = useRef<HTMLInputElement>(null);
   const isReadOnly = retryAcceptance || Boolean(submissionControls);
   const decides = typeof action === 'object';
+  const sendButton = (
+    <ComposerPrimaryButton
+      type="submit"
+      disabled={!canSend}
+      aria-label={t('overlay.composer.send')}
+      data-tooltip={t('overlay.composer.send')}
+    >
+      <ArrowUp strokeWidth={2.25} aria-hidden />
+    </ComposerPrimaryButton>
+  );
 
   return (
     <ComposerForm
@@ -361,13 +377,16 @@ export function OverlayComposer({
         value={draft}
         mentions={mentions}
         readOnly={isReadOnly}
-        placeholder={t(
-          !decides
-            ? 'overlay.composer.placeholder'
-            : action.canDismiss
-              ? 'overlay.supplement.placeholder'
-              : 'overlay.supplement.placeholderAcceptOnly'
-        )}
+        placeholder={
+          placeholder ??
+          t(
+            !decides
+              ? 'overlay.composer.placeholder'
+              : action.canDismiss
+                ? 'overlay.supplement.placeholder'
+                : 'overlay.supplement.placeholderAcceptOnly'
+          )
+        }
         invalid={validationFailed}
         describedBy={validationFailed ? MESSAGE_ERROR_ID : undefined}
         onChange={onDraftChange}
@@ -407,11 +426,14 @@ export function OverlayComposer({
       ) : null}
       {submissionControls ??
         (retryAcceptance ? (
-          typeof action === 'object' && (
-            <ComposerActions>
+          // A failed acceptance is retried as it was sent: nothing can be added to it.
+          <ComposerActions>
+            {typeof action === 'object' ? (
               <ComposerDecision>{action.decision}</ComposerDecision>
-            </ComposerActions>
-          )
+            ) : (
+              sendButton
+            )}
+          </ComposerActions>
         ) : (
           <ComposerActions>
             <input
@@ -436,18 +458,13 @@ export function OverlayComposer({
             >
               <Plus strokeWidth={1.75} aria-hidden />
             </ComposerIconButton>
-            <ApprovalModeMenu approvalMode={approvalMode} />
+            {hideApprovalMode && approvalMode.errorKey === null ? null : (
+              <ApprovalModeMenu approvalMode={approvalMode} />
+            )}
             {typeof action === 'object' ? (
               <ComposerDecision>{action.decision}</ComposerDecision>
             ) : action === 'send' ? (
-              <ComposerPrimaryButton
-                type="submit"
-                disabled={!canSend}
-                aria-label={t('overlay.composer.send')}
-                data-tooltip={t('overlay.composer.send')}
-              >
-                <ArrowUp strokeWidth={2.25} aria-hidden />
-              </ComposerPrimaryButton>
+              sendButton
             ) : action === 'stop' ? (
               <ComposerStopButton onStop={onStop} stopping={stopState === 'stopping'} />
             ) : (

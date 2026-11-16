@@ -4,12 +4,19 @@ from pathlib import Path
 
 import pytest
 
+from pantaray_agents.orchestration.overlay import bootstrap
 from pantaray_agents.orchestration.overlay.bootstrap import (
     OverlayBootstrapInvariantError,
     OverlayBootstrapMissingEventLogError,
     OverlayBootstrapService,
 )
 from pantaray_agents.schema.repositories.repository import RepositoryResult
+
+
+@pytest.fixture(autouse=True)
+def _no_todo_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    # These Suggestions have no TODO; the TODO's own read is tested with the store.
+    monkeypatch.setattr(bootstrap, "read_suggestion_todo", lambda **_: None)
 
 
 class _SuggestionRepo:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from pantaray_agents.local_runtime.runtime.runtime_env import (
@@ -8,6 +9,13 @@ from pantaray_agents.local_runtime.runtime.runtime_env import (
 from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
     resolve_suggestion_artifacts_root,
 )
+from pantaray_agents.orchestration.overlay import bootstrap
+
+
+@pytest.fixture(autouse=True)
+def _no_todo_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    # These Suggestions have no TODO; the TODO's own read is tested with the store.
+    monkeypatch.setattr(bootstrap, "read_suggestion_todo", lambda **_: None)
 
 
 class _Repo:

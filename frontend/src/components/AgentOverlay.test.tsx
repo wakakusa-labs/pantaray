@@ -31,6 +31,7 @@ function createPendingSnapshot(): OverlaySnapshotPayload {
       reactionTimestamp: '2026-03-08T00:00:00Z',
       dismissReason: null,
       artifacts: [],
+      todo: null,
       actionPhase: 'processing',
       actionStatus: 'processing',
       actionErrorCode: null,
@@ -56,6 +57,7 @@ function createResumedSnapshot(): OverlaySnapshotPayload {
       reactionTimestamp: '2026-03-08T00:00:00Z',
       dismissReason: null,
       artifacts: [],
+      todo: null,
       actionPhase: 'processing',
       actionStatus: 'processing',
       actionErrorCode: null,
@@ -81,6 +83,7 @@ function createCommentOnlySnapshot(): OverlaySnapshotPayload {
       reactionTimestamp: null,
       dismissReason: null,
       artifacts: [],
+      todo: null,
       actionPhase: 'idle',
       actionStatus: null,
       actionErrorCode: null,
@@ -691,12 +694,12 @@ describe('AgentOverlay broader E2E', () => {
   });
 
   it('keeps the open approval mode menu out of the subtree the overlay measures', async () => {
+    // A task window: the suggestion popup shows no approval mode menu.
     render(
       <UiLanguageProvider initialLanguage="en">
-        <AgentOverlay />
+        <AgentOverlay entryMode="standalone" initialActionId="act-1" />
       </UiLanguageProvider>
     );
-    await act(async () => snapshotListener?.(createResumedSnapshot()));
     await act(async () => conversationListener?.(createConversationUpdate(null, true)));
     fireEvent.click(screen.getByRole('button', { name: 'Expand' }));
 
@@ -713,12 +716,12 @@ describe('AgentOverlay broader E2E', () => {
   });
 
   it('keeps every composer control inside the input box, in reading order', async () => {
+    // A task window: the suggestion popup shows no approval mode menu.
     render(
       <UiLanguageProvider initialLanguage="en">
-        <AgentOverlay />
+        <AgentOverlay entryMode="standalone" initialActionId="act-1" />
       </UiLanguageProvider>
     );
-    await act(async () => snapshotListener?.(createResumedSnapshot()));
     await act(async () => conversationListener?.(createConversationUpdate(null, true)));
     fireEvent.click(screen.getByRole('button', { name: 'Expand' }));
 
@@ -1380,9 +1383,10 @@ describe('AgentOverlay broader E2E', () => {
 
     expect(screen.getByText('Just a comment, nothing to approve')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
-    expect(screen.queryByRole('textbox', { name: 'Message' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Reply to this suggestion' }));
-    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveFocus();
+    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveAttribute(
+      'placeholder',
+      'Reply'
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Expand' }));
     const composer = screen.getByLabelText('Message');
 
@@ -1451,10 +1455,7 @@ describe('AgentOverlay broader E2E', () => {
     expect(screen.queryByText('Just a comment, nothing to approve')).toBeNull();
   });
 
-  it('closes the panel once a dismissal is recorded; the composer of a dismissed suggestion replies to it', async () => {
-    const messageId = '00000000-0000-4000-8000-000000000043';
-    vi.spyOn(crypto, 'randomUUID').mockReturnValueOnce(messageId);
-    submitMessage.mockResolvedValueOnce(createStartedResult('act-after-dismissal', messageId));
+  it('continues an unanswered offer with the reply, under its TODO and how it stands', async () => {
     render(
       <UiLanguageProvider initialLanguage="en">
         <AgentOverlay />
@@ -1464,166 +1465,41 @@ describe('AgentOverlay broader E2E', () => {
     Object.assign(offer.snapshot, {
       suggestionId: 'sug-offer',
       interactionContract: 'action_offer',
-      suggestionText: 'Draft the invoice?',
+      suggestionText: 'The deck is drafted. Shall I add the charts?',
+      todo: { text: 'Draft the deck', state: 'waiting' },
     });
     await act(async () => snapshotListener?.(offer));
-    // The offer's composer answers with its decisions, in place of the send button.
-    expect(screen.queryByRole('button', { name: 'Send' })).toBeNull();
-    expect(
-      screen.getByRole('button', { name: 'Accept' }).closest('form.overlay-composer')
-    ).not.toBeNull();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Dismiss suggestion' }));
-    expect(sendOrchestration).toHaveBeenCalledWith({
-      event: 'dismiss_suggestion',
-      data: { suggestion_id: 'sug-offer' },
-    });
-    // The panel waits for the dismissal to be recorded; one that fails stays to be decided again.
-    expect(hideOverlay).not.toHaveBeenCalled();
-    await act(async () =>
-      eventListener?.({
-        event: 'suggestion_reaction_committed',
-        data: {
-          suggestion_id: 'sug-offer',
-          reaction: 'rejected',
-          committed_at: '2026-03-08T00:00:01Z',
-        },
-        meta: { suggestion_id: 'sug-offer' },
-        sequence: 4,
-      })
-    );
-
-    // A decided suggestion keeps no panel.
-    expect(hideOverlay).toHaveBeenCalledTimes(1);
-
-    // Nothing written yet: the dismissal stands, and the composer waits for words.
+    expect(screen.getByRole('heading', { level: 1, name: 'Draft the deck' })).toBeInTheDocument();
+    expect(screen.getByText('Your reply')).toBeInTheDocument();
+    // There is nothing to decide: the reply is the answer, sent as the TODO list sends it.
     expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Dismiss suggestion' })).toBeNull();
-    expect(screen.getByText('Draft the invoice?')).toBeInTheDocument();
-    const composer = screen.getByRole('textbox', { name: 'Message' });
-    expect(composer).toHaveAttribute('placeholder', 'Send a message');
+    expect(screen.queryByRole('button', { name: /permissions/ })).toBeNull();
+    const field = screen.getByRole('textbox', { name: 'Message' });
+    expect(field).toHaveAttribute('placeholder', 'Reply');
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
-    expect(submitMessage).not.toHaveBeenCalled();
-    expect(sendOrchestration).toHaveBeenCalledTimes(1);
+    fireEvent.change(field, { target: { value: ' Add the charts ' } });
+    await act(async () => fireEvent.keyDown(field, { key: 'Enter' }));
 
-    fireEvent.change(composer, { target: { value: 'Only the summary, please' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-    expect(submitMessage).toHaveBeenCalledWith({
-      target: {
-        kind: 'new',
-        approval_mode: 'prompt_each_time',
-        reply_to_suggestion_id: 'sug-offer',
-      },
-      message: {
-        version: 1,
-        message_id: messageId,
-        content: 'Only the summary, please',
-        images: [],
-        language: 'en',
-        project_refs: [],
-        work_refs: [],
-        files: [],
-      },
-    });
-    expect(acceptAction).not.toHaveBeenCalled();
-  });
-
-  it('dismisses with the words as the reason, closes the panel once recorded, and starts nothing', async () => {
-    render(
-      <UiLanguageProvider initialLanguage="en">
-        <AgentOverlay />
-      </UiLanguageProvider>
-    );
-    const offer = createCommentOnlySnapshot();
-    Object.assign(offer.snapshot, {
+    expect(acceptAction).toHaveBeenCalledExactlyOnceWith({
       suggestionId: 'sug-offer',
-      interactionContract: 'action_offer',
+      commandId: null,
+      supplement: 'Add the charts',
+      supplementProjectRefs: [],
+      supplementWorkRefs: [],
+      approvalMode: 'prompt_each_time',
+      images: [],
+      files: [],
     });
-    await act(async () => snapshotListener?.(offer));
-    const field = screen.getByRole('textbox', { name: 'Additional instructions (optional)' });
-    expect(field).toHaveAttribute(
-      'placeholder',
-      "Conditions to approve with, or why you're passing (optional)"
-    );
-    fireEvent.change(field, { target: { value: 'Only the summary, please' } });
-
-    // Enter decides nothing; only the buttons do.
-    fireEvent.keyDown(field, { key: 'Enter' });
-    expect(acceptAction).not.toHaveBeenCalled();
+    expect(submitMessage).not.toHaveBeenCalled();
     expect(sendOrchestration).not.toHaveBeenCalled();
-    expect(field).toHaveValue('Only the summary, please');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Dismiss suggestion' }));
-    expect(sendOrchestration).toHaveBeenCalledWith({
-      event: 'dismiss_suggestion',
-      data: { suggestion_id: 'sug-offer', reason: 'Only the summary, please' },
-    });
-    expect(screen.getByRole('button', { name: 'Accept' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Dismiss suggestion' })).toBeDisabled();
-    expect(hideOverlay).not.toHaveBeenCalled();
-    await act(async () =>
-      eventListener?.({
-        event: 'suggestion_reaction_committed',
-        data: {
-          suggestion_id: 'sug-offer',
-          reaction: 'rejected',
-          committed_at: '2026-03-08T00:00:01Z',
-          reason: 'Only the summary, please',
-        },
-        meta: { suggestion_id: 'sug-offer' },
-        sequence: 4,
-      })
-    );
-
-    expect(screen.getByRole('article', { name: 'Your reason for dismissing' })).toHaveTextContent(
-      'Only the summary, please'
-    );
-    expect(screen.getByText('Dismissed')).toBeInTheDocument();
-    // The reason was recorded, not sent: the composer is empty, and no run started.
-    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('');
-    expect(submitMessage).not.toHaveBeenCalled();
-    expect(acceptAction).not.toHaveBeenCalled();
-    expect(sendOrchestration).toHaveBeenCalledTimes(1);
-    expect(hideOverlay).toHaveBeenCalledTimes(1);
-  });
-
-  it('keeps the panel when a dismissal with words is not recorded', async () => {
-    render(
-      <UiLanguageProvider initialLanguage="en">
-        <AgentOverlay />
-      </UiLanguageProvider>
-    );
-    const offer = createCommentOnlySnapshot();
-    Object.assign(offer.snapshot, {
-      suggestionId: 'sug-offer',
-      interactionContract: 'action_offer',
-    });
-    await act(async () => snapshotListener?.(offer));
-    const field = screen.getByRole('textbox', { name: 'Additional instructions (optional)' });
-    fireEvent.change(field, { target: { value: 'Too long to read' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Dismiss suggestion' }));
-    await act(async () =>
-      eventListener?.({
-        event: 'error',
-        data: {
-          error_type: 'internal_error',
-          error_code: 'WS_DEPENDENCY_UNAVAILABLE',
-          error_message: 'Failed to persist suggestion state.',
-          severity: 'error',
-        },
-        meta: {
-          kind: 'suggestion',
-          suggestion_id: 'sug-offer',
-          stage: 'dismiss',
-          error_code: 'WS_DEPENDENCY_UNAVAILABLE',
-        },
-        sequence: 4,
-      })
-    );
-
-    expect(hideOverlay).not.toHaveBeenCalled();
-    expect(screen.queryByText('Dismissed')).toBeNull();
-    expect(field).toHaveValue('Too long to read');
+    // Once the reply carries the work on, its conversation tells how it stands.
+    const accepted = createPendingSnapshot();
+    Object.assign(accepted.snapshot, { suggestionId: 'sug-offer', todo: offer.snapshot.todo });
+    await act(async () => snapshotListener?.(accepted));
+    expect(screen.getByRole('heading', { level: 1, name: 'Draft the deck' })).toBeInTheDocument();
+    expect(screen.queryByText('Your reply')).toBeNull();
   });
 
   it('stays open when the suggestion it shows is dismissed in the main window', async () => {
@@ -1695,6 +1571,12 @@ describe('AgentOverlay broader E2E', () => {
     submitMessage.mockResolvedValueOnce({ kind: 'reply_exists', actionId: 'act-existing' });
     fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Also this' } });
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Send' })));
+    // A dismissed offer is replied to in a new conversation that opens with it.
+    expect(submitMessage.mock.calls[0][0].target).toEqual({
+      kind: 'new',
+      approval_mode: 'prompt_each_time',
+      reply_to_suggestion_id: 'sug-comment',
+    });
 
     // That conversation opens, and the draft waits to be sent into it.
     await act(async () =>
@@ -1703,7 +1585,7 @@ describe('AgentOverlay broader E2E', () => {
     expect(screen.getByText('canonical final output')).toBeInTheDocument();
     const composer = screen.getByRole('textbox', { name: 'Message' });
     expect(composer).toHaveValue('Also this');
-    expect(composer).toHaveAttribute('placeholder', 'Send a message');
+    expect(composer).toHaveAttribute('placeholder', 'Reply');
     submitMessage.mockResolvedValueOnce(createSubmittedResult('act-existing', 'follow-up'));
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     expect(submitMessage.mock.calls[1][0].target).toEqual({
@@ -1728,7 +1610,7 @@ describe('AgentOverlay broader E2E', () => {
     await act(async () => snapshotListener?.(dismissed));
     expect(screen.getByRole('textbox', { name: 'Message' })).toHaveAttribute(
       'placeholder',
-      'Send a message'
+      'Reply'
     );
 
     const replied = structuredClone(dismissed);
@@ -1742,12 +1624,12 @@ describe('AgentOverlay broader E2E', () => {
     expect(screen.getByText('canonical final output')).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Message' })).toHaveAttribute(
       'placeholder',
-      'Send a message'
+      'Reply'
     );
     expect(submitMessage).not.toHaveBeenCalled();
   });
 
-  it('approves with images and consent, blocks pending uploads and invalid instructions, and preserves a failed request', async () => {
+  it('replies to an offer with images once they are stored and the words fit, and retries a failed reply as sent', async () => {
     render(
       <UiLanguageProvider initialLanguage="en">
         <AgentOverlay />
@@ -1756,13 +1638,11 @@ describe('AgentOverlay broader E2E', () => {
     const snapshot = createCommentOnlySnapshot();
     snapshot.snapshot.interactionContract = 'action_offer';
     await act(async () => snapshotListener?.(snapshot));
-    const input = screen.getByRole('textbox', { name: 'Additional instructions (optional)' });
+    const input = screen.getByRole('textbox', { name: 'Message' });
     fireEvent.change(input, { target: { value: '😀'.repeat(8_001) } });
-    expect(screen.getByRole('button', { name: 'Accept' })).toBeDisabled();
-    expect(screen.getByRole('alert')).toHaveTextContent('8,000');
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+    expect(screen.getByRole('alert')).toHaveTextContent('Enter a valid message.');
     fireEvent.change(input, { target: { value: '  Use this image  ' } });
-    fireEvent.click(screen.getByRole('button', { name: /permissions: Ask every time/ }));
-    fireEvent.click(screen.getByRole('menuitemradio', { name: /Auto-approve/ }));
     let finishUpload!: (result: ActionImageAttachResult) => void;
     attachImage.mockReturnValueOnce(
       new Promise((resolve) => {
@@ -1772,28 +1652,28 @@ describe('AgentOverlay broader E2E', () => {
     fireEvent.change(document.querySelector('input[type="file"]')!, {
       target: { files: [new File(['png'], 'image.png', { type: 'image/png' })] },
     });
-    expect(screen.getByRole('button', { name: 'Accept' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(acceptAction).not.toHaveBeenCalled();
     const storagePath = 'user-1/2026-09-11/11111111-1111-4111-8111-111111111111.png';
     // prettier-ignore
     await act(async () => finishUpload({ kind: 'attached', storagePath, mimeType: 'image/png', byteSize: 3, sha256: 'abc', widthPx: 1, heightPx: 1 }));
     acceptAction.mockRejectedValueOnce(new Error('Disconnected'));
-    fireEvent.click(screen.getByRole('button', { name: 'Accept' }));
-    await screen.findByText('Could not confirm this action. Try approving again.');
-    const restored = screen.getByRole('textbox', { name: 'Additional instructions (optional)' });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await screen.findByText('Your reply could not be sent. Send it again.');
+    const restored = screen.getByRole('textbox', { name: 'Message' });
     expect(restored).toHaveValue('  Use this image  ');
     expect(screen.getByRole('img', { name: 'Attached image 1 of 1' })).toBeInTheDocument();
     expect(restored).toHaveAttribute('readonly');
     expect(screen.queryByRole('button', { name: 'Add files' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Accept' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     expect(acceptAction).toHaveBeenLastCalledWith({
       suggestionId: 'sug-comment',
       commandId: null,
       supplement: 'Use this image',
       supplementProjectRefs: [],
       supplementWorkRefs: [],
-      approvalMode: 'always_allow',
+      approvalMode: 'prompt_each_time',
       images: [{ kind: 'image', storage_path: storagePath }],
       files: [],
     });
@@ -1828,18 +1708,11 @@ describe('AgentOverlay broader E2E', () => {
         reactionState: 'rejected',
         isLive: false,
       });
-      const phases = [
-        { snapshot: offer(), shown: () => screen.getByRole('button', { name: 'Accept' }) },
-        {
-          snapshot: createCommentOnlySnapshot(),
-          shown: () => screen.getByRole('button', { name: 'Reply to this suggestion' }),
-        },
-        { snapshot: dismissed, shown: () => screen.getByRole('textbox', { name: 'Message' }) },
-      ];
-      for (const { snapshot, shown } of phases) {
+      const phases = [offer(), createCommentOnlySnapshot(), dismissed];
+      for (const snapshot of phases) {
         renderPanel();
         await act(async () => snapshotListener?.(snapshot));
-        expect(shown()).toBeInTheDocument();
+        expect(screen.getByRole('textbox', { name: 'Message' })).toBeInTheDocument();
         fireEvent.click(openInMain()!);
         cleanup();
       }
@@ -1856,7 +1729,8 @@ describe('AgentOverlay broader E2E', () => {
     it('keeps an approved suggestion in the panel, which then offers to move its Action', async () => {
       renderPanel();
       await act(async () => snapshotListener?.(offer()));
-      await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Accept' })));
+      fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Go ahead' } });
+      await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Send' })));
       // prettier-ignore
       await emit({ event: 'process_started', data: { kind: 'action', process_id: 'run-9', suggestion_id: 'sug-comment', action_id: 'act-1', command_id: 'cmd-9', accepted_at: '2026-10-10T00:00:01Z', started_at: '2026-10-10T00:00:02Z' }, meta: { ...actionMeta, process_id: 'run-9', action_id: 'act-1' }, sequence: 5 } as OrchestrationServerEvent);
       await act(async () => conversationListener?.(createConversationUpdate(null, true)));
@@ -1880,7 +1754,6 @@ describe('AgentOverlay broader E2E', () => {
 
       renderPanel();
       await act(async () => snapshotListener?.(createCommentOnlySnapshot()));
-      fireEvent.click(screen.getByRole('button', { name: 'Reply to this suggestion' }));
       fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Do it then' } });
       await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Send' })));
 
@@ -1919,7 +1792,7 @@ describe('AgentOverlay broader E2E', () => {
     });
   });
 
-  it('keeps a reply open on snapshot refresh and collapses it for the next Suggestion', async () => {
+  it('keeps a reply on snapshot refresh and starts the next Suggestion empty', async () => {
     render(
       <UiLanguageProvider initialLanguage="en">
         <AgentOverlay />
@@ -1927,7 +1800,6 @@ describe('AgentOverlay broader E2E', () => {
     );
     const snapshot = createCommentOnlySnapshot();
     await act(async () => snapshotListener?.(snapshot));
-    fireEvent.click(screen.getByRole('button', { name: 'Reply to this suggestion' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), {
       target: { value: 'Keep this reply' },
     });
@@ -1942,8 +1814,6 @@ describe('AgentOverlay broader E2E', () => {
     await waitFor(() => expect(attachImage).toHaveBeenCalled());
     snapshot.snapshot.suggestionId = 'sug-next';
     await act(async () => snapshotListener?.(snapshot));
-    expect(screen.queryByRole('textbox', { name: 'Message' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Reply to this suggestion' }));
     // prettier-ignore
     await act(async () => finishUpload({ kind: 'attached', storagePath: 'user-1/2026-09-11/11111111-1111-4111-8111-111111111111.png', mimeType: 'image/png', byteSize: 3, sha256: 'abc', widthPx: 1, heightPx: 1 }));
     expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('');
@@ -2598,7 +2468,7 @@ describe('AgentOverlay broader E2E', () => {
     expect(screen.getByRole('list', { name: 'Attachments, 9' })).toBeVisible();
   });
 
-  it('carries an attached document with the approval', async () => {
+  it('carries an attached document with the reply to an offer', async () => {
     render(
       <UiLanguageProvider initialLanguage="en">
         <AgentOverlay />
@@ -2613,8 +2483,9 @@ describe('AgentOverlay broader E2E', () => {
       });
     });
     await screen.findByRole('button', { name: 'Remove brief.docx' });
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Use the brief' } });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Accept' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     expect(acceptAction).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -2642,7 +2513,6 @@ describe('AgentOverlay broader E2E', () => {
     );
     const snapshot = createCommentOnlySnapshot();
     await act(async () => snapshotListener?.(snapshot));
-    fireEvent.click(screen.getByRole('button', { name: 'Reply to this suggestion' }));
     await act(async () => {
       fireEvent.change(document.querySelector('input[type="file"]')!, {
         target: { files: [documentFile('notes.pdf')] },
@@ -2658,7 +2528,6 @@ describe('AgentOverlay broader E2E', () => {
     await waitFor(() => expect(kept()?.attachments).toMatchObject([{ name: 'notes.pdf' }]));
 
     // A document still being staged when the composer is replaced is discarded when it lands.
-    fireEvent.click(screen.getByRole('button', { name: 'Reply to this suggestion' }));
     let finishAttach!: (result: unknown) => void;
     attachFile.mockReturnValueOnce(new Promise((resolve) => (finishAttach = resolve)));
     fireEvent.change(document.querySelector('input[type="file"]')!, {
@@ -2681,7 +2550,6 @@ describe('AgentOverlay broader E2E', () => {
     );
     const snapshot = createCommentOnlySnapshot();
     await act(async () => snapshotListener?.(snapshot));
-    fireEvent.click(screen.getByRole('button', { name: 'Reply to this suggestion' }));
     await act(async () => {
       fireEvent.change(document.querySelector('input[type="file"]')!, {
         target: { files: [documentFile('notes.pdf')] },
@@ -3131,10 +2999,9 @@ describe('AgentOverlay broader E2E', () => {
     setActionApprovalMode.mockRejectedValue(new Error('save response lost'));
     render(
       <UiLanguageProvider initialLanguage="en">
-        <AgentOverlay />
+        <AgentOverlay entryMode="standalone" initialActionId="act-1" />
       </UiLanguageProvider>
     );
-    await act(async () => snapshotListener?.(createResumedSnapshot()));
     await act(async () => conversationListener?.(createStoppedUpdate()));
     fireEvent.click(screen.getByRole('button', { name: 'Expand' }));
     fireEvent.click(await screen.findByRole('button', { name: /permissions: Auto-approve/ }));

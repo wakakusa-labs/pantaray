@@ -27,8 +27,6 @@ export type AgentOverlayController = {
   onClose: () => void;
   onAccept: (options: SuggestionAcceptance) => void;
   acceptFailed: boolean;
-  /** 見送る, with the composer's words as the reason, or null when there are none. */
-  onReject: (reason: string | null) => void;
   /** Shows this panel's Action or suggestion in the main window, which then closes the panel. */
   openTask: (work: OverlayOpenTaskRequest) => void;
   /** The main window could not be shown with this panel's task. */
@@ -74,8 +72,6 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
   const [openTaskFailedFor, setOpenTaskFailedFor] = useState<{
     suggestionId: string | null;
   } | null>(null);
-  // A suggestion dismissed here, whose panel closes once the dismissal is recorded.
-  const closeAfterDismissalRef = useRef<string | null>(null);
   const manualResizeRef = useRef<boolean>(false);
   const isActionPhaseRef = useRef<boolean>(false);
   const [contentReady, setContentReady] = useState(false);
@@ -340,31 +336,6 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     }
   }, [measureAndResize]);
 
-  // A suggestion dismissed here keeps no panel, reason or not; a dismissal that is not recorded
-  // keeps it. One opened already dismissed is not closed: only dismissing here closes it.
-  useEffect(() => {
-    const dismissed = closeAfterDismissalRef.current;
-    if (dismissed === null) return;
-    if (dismissed === state.suggestionId && state.reactionState !== 'rejected') return;
-    closeAfterDismissalRef.current = null;
-    if (dismissed === state.suggestionId) window.electron?.agentOverlay?.hide();
-  }, [state.suggestionId, state.reactionState]);
-
-  const onReject = useCallback((reason: string | null) => {
-    if (decisionLockedRef.current) return;
-    if (interactionContractRef.current !== 'action_offer') return;
-    if (reactionStateRef.current !== null) return;
-    dispatch({ type: 'SET_DECISION_LOCKED', value: true });
-    const sid = suggestionIdRef.current;
-    if (sid) {
-      closeAfterDismissalRef.current = sid;
-      window.electron?.orchestration?.send({
-        event: 'dismiss_suggestion',
-        data: reason === null ? { suggestion_id: sid } : { suggestion_id: sid, reason },
-      });
-    }
-  }, []);
-
   const onAccept = useCallback(async (options: SuggestionAcceptance) => {
     if (decisionLockedRef.current) return;
     if (interactionContractRef.current !== 'action_offer') return;
@@ -419,7 +390,6 @@ export function useAgentOverlayController(isStandalone: boolean): AgentOverlayCo
     onClose,
     onAccept,
     acceptFailed: failedSuggestionId !== null && failedSuggestionId === state.suggestionId,
-    onReject,
     openTask,
     openTaskFailed:
       openTaskFailedFor !== null && openTaskFailedFor.suggestionId === state.suggestionId,

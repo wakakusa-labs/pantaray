@@ -6,6 +6,7 @@ import type {
   OrchestrationServerEvent,
   OrchestrationStatus,
   SuggestionInteractionContract,
+  SuggestionTodoView,
   UiLanguage,
 } from './eventContracts';
 
@@ -50,6 +51,7 @@ export type OverlaySnapshot = {
   dismissReason: string | null;
   /** Files the Suggestion made, relative to its artifact folder, in display order. */
   artifacts: string[];
+  todo: SuggestionTodoView | null;
   actionPhase: OverlayActionPhase;
   actionStatus: OverlayActionStatus | null;
   actionErrorCode: string | null;

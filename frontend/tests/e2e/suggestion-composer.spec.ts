@@ -21,7 +21,7 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await vite?.close();
 });
-test.use({ viewport: { width: 520, height: 800 }, locale: 'ja-JP', deviceScaleFactor: 2 });
+test.use({ viewport: { width: 400, height: 800 }, locale: 'ja-JP', deviceScaleFactor: 2 });
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -117,6 +117,7 @@ async function showSuggestion(
     suggestionText: kind === 'message_only'
       ? '午後の打ち合わせ、前回のメモに気になる点が残っていました。\n\n決めたいことを先に整理しておくと、話を進めやすそうです。'
       : '午後の打ち合わせに向けて、前回のメモから未決事項をまとめておきましょうか。',
+    todo: { text: '打ち合わせの準備', state: kind === 'message_only' ? 'done' : 'waiting' },
     reactionState: null, reactionTimestamp: null, actionPhase: 'idle', actionStatus: null,
     actionErrorCode: null, actionFailureStage: null, actionFailureMessagePublic: null,
     processId: null, actionId: null, updatedAt: '2026-09-11T00:00:00Z', lastSequence: 1, isLive: true,
@@ -138,21 +139,15 @@ async function capture(page: Page, info: TestInfo, name: string) {
   await panel.screenshot({ path: info.outputPath(`${name}.png`), omitBackground: true });
 }
 
-test('comment: quiet entry, keyboard reveal, resize and reply', async ({ page }, info) => {
+test('comment: the reply field is open under the TODO and sends a reply', async ({
+  page,
+}, info) => {
   await page.goto(`${baseUrl}notification.html`);
   await showSuggestion(page, 'message_only');
-  await expect(page.getByRole('textbox')).toHaveCount(0);
-  const reply = page.getByRole('button', { name: 'この提案に返信' });
-  await capture(page, info, 'comment-collapsed');
-  const initialHeight = (await page.locator('[data-overlay-panel]').boundingBox())!.height;
-  await reply.focus();
-  await page.keyboard.press('Enter');
+  await expect(page.getByRole('heading', { level: 1, name: '打ち合わせの準備' })).toBeVisible();
   const input = page.getByRole('textbox', { name: 'メッセージ', exact: true });
-  await expect(input).toBeFocused();
-  await capture(page, info, 'comment-expanded');
-  expect((await page.locator('[data-overlay-panel]').boundingBox())!.height).toBeGreaterThan(
-    initialHeight
-  );
+  await expect(input).toHaveAttribute('placeholder', '返信を入力');
+  await capture(page, info, 'comment');
   await input.fill('決めたいことを3つに整理して');
   await input.press('Enter');
   const request = JSON.parse((await page.locator('html').getAttribute('data-submitted'))!);
@@ -160,38 +155,22 @@ test('comment: quiet entry, keyboard reveal, resize and reply', async ({ page },
   expect(request.message.content).toBe('決めたいことを3つに整理して');
 });
 
-test('offer: decisions in the composer and fresh suggestion reset', async ({ page }, info) => {
+test('offer: a reply continues the work, with no decision buttons or mode menu', async ({
+  page,
+}, info) => {
   await page.goto(`${baseUrl}notification.html`);
   await showSuggestion(page, 'action_offer');
-  const input = page.getByRole('textbox', { name: '追加の指示（任意）' });
-  const accept = page.getByRole('button', { name: '承認', exact: true });
-  const dismiss = page.getByRole('button', { name: '見送る', exact: true });
-  await expect(input).toBeVisible();
-  await expect(page.getByRole('button', { name: '送信', exact: true })).toHaveCount(0);
+  await expect(page.getByText('返事待ち')).toBeVisible();
+  const input = page.getByRole('textbox', { name: 'メッセージ', exact: true });
+  await expect(page.getByRole('button', { name: '承認', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '見送る', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /権限/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'ファイルを追加' })).toBeVisible();
   await capture(page, info, 'offer');
   await input.fill('未決事項だけを、箇条書きでまとめて');
-  // Enter decides nothing.
   await input.press('Enter');
-  await expect(page.locator('html')).not.toHaveAttribute('data-accepted', /.+/);
-  await expect(page.getByRole('button', { name: 'ファイルを追加' })).toBeVisible();
-  await page.getByRole('button', { name: /ファイル編集・コマンド実行の権限/ }).click();
-  await page.getByRole('menuitemradio', { name: /自動承認/ }).click();
-  await capture(page, info, 'offer-written');
-  // 見送る then 承認, side by side at the composer's bottom-right, where the send button is.
-  const composerBox = (await page.locator('.overlay-composer').boundingBox())!;
-  const acceptBox = (await accept.boundingBox())!;
-  const dismissBox = (await dismiss.boundingBox())!;
-  expect(acceptBox.y + acceptBox.height).toBeLessThanOrEqual(composerBox.y + composerBox.height);
-  expect(Math.abs(acceptBox.y - dismissBox.y)).toBeLessThan(2);
-  expect(acceptBox.x).toBeGreaterThan(dismissBox.x + dismissBox.width);
-  expect(composerBox.x + composerBox.width - acceptBox.x - acceptBox.width).toBeLessThan(16);
-  await showSuggestion(page, 'action_offer', 'suggestion-2');
-  await expect(input).toHaveValue('');
-  await expect(page.getByRole('button', { name: /権限: 毎回確認/ })).toBeVisible();
-  await input.fill('未決事項だけを、箇条書きでまとめて');
-  await accept.click();
   expect(JSON.parse((await page.locator('html').getAttribute('data-accepted'))!)).toMatchObject({
-    suggestionId: 'suggestion-2',
+    suggestionId: 'suggestion-1',
     supplement: '未決事項だけを、箇条書きでまとめて',
     approvalMode: 'prompt_each_time',
     images: [],
@@ -201,7 +180,6 @@ test('offer: decisions in the composer and fresh suggestion reset', async ({ pag
 test('user-started Action opens the regular composer immediately', async ({ page }, info) => {
   await page.goto(`${baseUrl}notification.html?mode=standalone`);
   await expect(page.getByRole('textbox', { name: 'メッセージ', exact: true })).toBeFocused();
-  await expect(page.getByRole('button', { name: 'この提案に返信' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'ファイルを追加' })).toBeVisible();
   await capture(page, info, 'standalone-unchanged');
 });
@@ -214,13 +192,10 @@ test('narrow English layout and reduced motion keep the controls reachable', asy
   await page.addInitScript(() => localStorage.setItem('pantaray_ui_language', 'en'));
   await page.goto(`${baseUrl}notification.html`);
   await showSuggestion(page, 'action_offer');
-  const input = page.getByRole('textbox', { name: 'Additional instructions (optional)' });
+  const input = page.getByRole('textbox', { name: 'Message', exact: true });
   await input.focus();
   await expect(input).toBeFocused();
-  await expect(page.getByRole('button', { name: 'Accept', exact: true })).toBeInViewport();
-  await expect(
-    page.getByRole('button', { name: 'Dismiss suggestion', exact: true })
-  ).toBeInViewport();
+  await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeInViewport();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(360);
   await capture(page, info, 'offer-narrow-reduced-motion');
 });
@@ -338,10 +313,10 @@ test('new conversation: small window opens the list below; none registered offer
   await expect(input).toBeFocused();
 });
 
-test('suggestion reply and approval supplement carry picked projects', async ({ page }, info) => {
+test('replies to a comment and to an offer carry picked projects', async ({ page }, info) => {
   await page.goto(`${baseUrl}notification.html`);
   await showSuggestion(page, 'message_only');
-  await page.getByRole('button', { name: 'この提案に返信' }).click();
+  await page.getByRole('textbox').click();
   await page.keyboard.type('@');
   const listbox = page.getByRole('listbox', { name: 'プロジェクト' });
   await expectPlacement(page.getByRole('textbox'), listbox, 'below');
@@ -355,11 +330,11 @@ test('suggestion reply and approval supplement carry picked projects', async ({ 
 
   await page.goto(`${baseUrl}notification.html`);
   await showSuggestion(page, 'action_offer');
-  await page.getByRole('textbox', { name: '追加の指示（任意）' }).click();
+  await page.getByRole('textbox').click();
   await page.keyboard.type('  @北極');
   await page.keyboard.press('Tab');
   await page.keyboard.type('だけ');
-  await page.getByRole('button', { name: '承認', exact: true }).click();
+  await page.keyboard.press('Enter');
   expect(await recorded(page, 'accepted')).toMatchObject({
     supplement: '北極星アプリ だけ',
     supplementProjectRefs: [{ project_id: 'project-2', start: 0, end: 6 }],

@@ -137,6 +137,8 @@ async def test_the_list_survives_save_relay_and_bootstrap(
     )
     assert saved.error is None
 
+    # The relay and the bootstrap read the Suggestion's TODO from the runtime DB.
+    monkeypatch.setenv("LOCAL_DB_PATH", str(db_path))
     monkeypatch.setattr(deps, "is_mock_mode", lambda: False)
     monkeypatch.setattr(
         suggestion_job_timing, "SUGGESTION_JOB_POLL_INTERVAL_SECONDS", 0.01

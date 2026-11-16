@@ -1433,6 +1433,7 @@ function persistedSnapshot(overrides = {}) {
     reactionTimestamp: null,
     dismissReason: null,
     artifacts: [],
+    todo: null,
     actionPhase: 'idle',
     actionStatus: null,
     actionErrorCode: null,
@@ -1588,6 +1589,26 @@ test('a same-sequence read fills the body of a suggestion accepted in a History 
   assert.equal(read.commandId, accepted.commandId);
   assert.deepEqual(harness.manager.getOverlaySnapshot('sug-1'), read);
   assert.deepEqual(suggestionSnapshotsSentToMain(harness).at(-1), read);
+});
+
+test('a read gives a suggestion the events delivered its TODO as it stands now', () => {
+  const harness = createManagerHarness();
+  harness.manager.ensureConnected();
+  const meta = { suggestion_id: 'sug-1', process_id: 'proc-s1', kind: 'suggestion' };
+  const hooks = harness.getWsHooks();
+  // prettier-ignore
+  hooks.forwardEventToRenderers({ event: 'suggestion_chunk', sequence: 4, data: { content: 'Draft the reply' }, meta });
+  // prettier-ignore
+  hooks.forwardEventToRenderers({ event: 'process_completed', sequence: 5, data: { kind: 'suggestion', process_id: 'proc-s1', status: 'success', suggestion_id: 'sug-1', interaction_contract: 'action_offer', artifacts: [], todo: { text: 'Reply', state: 'waiting' } }, meta });
+  assert.equal(harness.manager.getOverlaySnapshot('sug-1').todo.state, 'waiting');
+
+  // The user checked it in the TODO list; a panel opened afterwards reads it done.
+  const done = { text: 'Reply', state: 'done' };
+  const read = harness.manager.adoptSuggestionSnapshot(
+    persistedSnapshot({ lastSequence: 5, todo: done })
+  );
+  assert.deepEqual(read.todo, done);
+  assert.equal(read.suggestionText, 'Draft the reply');
 });
 
 test('an older read still fills the body of an accepted suggestion the events never carry', async () => {

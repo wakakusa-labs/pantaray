@@ -18,7 +18,7 @@ from starlette.websockets import WebSocketState
 
 import pantaray_agents.dependencies as deps
 from pantaray_agents.orchestration.session.store import InMemorySessionStore
-from pantaray_agents.orchestration.ws import suggestion_job_timing
+from pantaray_agents.orchestration.ws import suggestion_job_timing, suggestion_relay
 from pantaray_agents.orchestration.ws.handler import WSOrchestrationHandler
 from pantaray_agents.orchestration.ws.suggestion_relay import LiveSuggestionProcess
 from pantaray_agents.repositories.suggestion_runtime_results import (
@@ -59,6 +59,7 @@ async def test_suggestion_chunk_is_emitted_iff_success_has_suggestion_and_answer
     expect_chunk: bool,
 ) -> None:
     monkeypatch.setattr(deps, "is_mock_mode", lambda: False)
+    monkeypatch.setattr(suggestion_relay, "read_suggestion_todo", lambda **_: None)
 
     monkeypatch.setattr(
         suggestion_job_timing,

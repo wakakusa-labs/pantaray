@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 OverlayActionPhase = Literal[
     "idle",
@@ -16,6 +16,15 @@ OverlayActionPhase = Literal[
 OverlayReactionState = Literal["accepted", "rejected"] | None
 SuggestionInteractionContract = Literal["action_offer", "message_only"] | None
 LiveResumeKind = Literal["none", "suggestion", "action"]
+
+
+class SuggestionTodoView(BaseModel):
+    """A shown Suggestion's TODO; ``state`` is null once an Action carries it."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    text: str
+    state: Literal["waiting", "partial", "done"] | None
 
 
 class OverlaySnapshotModel(BaseModel):
@@ -38,6 +47,9 @@ class OverlaySnapshotModel(BaseModel):
     )
     artifacts: list[str] = Field(
         description="Files the Suggestion made, relative to its artifact folder"
+    )
+    todo: SuggestionTodoView | None = Field(
+        description="The TODO the Suggestion became; null when it has none"
     )
     actionPhase: OverlayActionPhase = Field(description="Overlay action phase")
     actionStatus: str | None = Field(default=None, description="Durable action status")

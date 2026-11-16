@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from typing import Literal
 
 from pantaray_agents.schema.events import OutboundEvent
+from pantaray_agents.schema.overlay_bootstrap import SuggestionTodoView
 from pantaray_agents.schema.websocket.server_messages import (
     CompletionChunkMessage,
     ProcessCompletedMessage,
@@ -78,6 +79,7 @@ class SuggestionStreamEventsMixin:
         kind: Literal["suggestion"],
         interaction_contract: str | None = None,
         artifacts: Sequence[str] = (),
+        todo: SuggestionTodoView | None = None,
     ) -> bool:
         sent = await self._send(
             OutboundEvent.PROCESS_COMPLETED.value,
@@ -88,6 +90,7 @@ class SuggestionStreamEventsMixin:
                 suggestion_id=suggestion_id,
                 interaction_contract=interaction_contract,
                 artifacts=list(artifacts),
+                todo=todo,
                 status=status,
             ),
             process_id=process_id,

@@ -24,6 +24,7 @@ export function applySuggestionId(
     interactionContract: null,
     dismissReason: null,
     artifacts: [],
+    todo: null,
     historyExpandOverride: null,
     knownProcessIds: new Set<string>(),
     knownActionIds: new Set<string>(),

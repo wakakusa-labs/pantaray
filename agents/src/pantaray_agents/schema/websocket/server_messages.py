@@ -8,6 +8,7 @@ from ..agent.base import AgentError, JSONValue
 from ..agent.suggestion import (
     SuggestionInteractionContract,
 )
+from ..overlay_bootstrap import SuggestionTodoView
 
 type ErrorPayload = dict[str, JSONValue]
 
@@ -252,6 +253,9 @@ class ProcessCompletedMessage(BaseModel):
             "Files the Suggestion made, relative to its artifact folder; empty "
             "unless it succeeded with files"
         ),
+    )
+    todo: SuggestionTodoView | None = Field(
+        description="The TODO a shown Suggestion became; null for any other run"
     )
     status: str = Field(description="Suggestion 処理ステータス")
 

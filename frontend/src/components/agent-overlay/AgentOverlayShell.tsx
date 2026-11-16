@@ -8,7 +8,9 @@ import { splitWorkKey } from '@/history/historySelection';
 import { useCopyWorkLink } from '@/history/useCopyWorkLink';
 import type { WorkRefKind } from '@/history/workRefLink';
 import type { OverlayOpenTaskRequest } from '../../../electron/src/ipc/schemas/overlay';
+import type { SuggestionTodoView } from '../../../electron/src/orchestration/eventContracts';
 import { PopupContainer } from './OverlayBackground';
+import { COLORS } from './Styled';
 import HeaderRow, { HeaderButtonGroup } from './HeaderBar';
 import { ApprovalPanel as ApprovalPanelView } from './ApprovalPanel';
 import type { ApprovalDecision } from './approvalDisplayModel';
@@ -49,6 +51,49 @@ const SuggestionDecisionStatus = styled.span`
   color: var(--text-secondary);
   font-size: var(--text-meta-size);
 `;
+
+/** The suggestion's TODO, named above its text; how it stands follows, small and quiet. */
+const TodoHeading = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+
+  h1 {
+    margin: 0;
+    color: ${COLORS.text};
+    font-size: 15px;
+    font-weight: var(--weight-semibold);
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+  }
+`;
+
+const TodoState = styled.span<{ $waiting: boolean }>`
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: var(--text-meta-size);
+  white-space: nowrap;
+
+  /* Waiting on the user's reply: the one state that asks for something. */
+  &::before {
+    content: '';
+    display: ${(props) => (props.$waiting ? 'block' : 'none')};
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+`;
+
+const TODO_STATE_LABEL = {
+  waiting: 'todo.state.waiting',
+  partial: 'todo.state.partial',
+  done: 'todo.state.done',
+} as const;
 
 const SCROLL_INDICATOR_HIDE_DELAY_MS = 700;
 
@@ -106,6 +151,8 @@ type AgentOverlayShellProps = {
   suggestionText: string;
   isSuggestionStreamFinished: boolean;
   isSuggestionAccepted?: boolean;
+  /** The TODO the suggestion became; `state` is null while it is not shown. */
+  todo?: SuggestionTodoView | null;
   /** A dismissed offer, with the reason the user gave, if any. */
   dismissal?: { reason: string | null } | null;
   /** The suggestion's files, until an Action takes the suggestion over. */
@@ -189,6 +236,7 @@ const AgentOverlayShell = ({
   suggestionText,
   isSuggestionStreamFinished,
   isSuggestionAccepted = false,
+  todo = null,
   dismissal = null,
   artifacts = [],
   actionText,
@@ -372,6 +420,16 @@ const AgentOverlayShell = ({
           data-overlay-scroll="true"
         >
           <ContentInner ref={contentInnerRef}>
+            {todo ? (
+              <TodoHeading>
+                <h1>{todo.text}</h1>
+                {todo.state ? (
+                  <TodoState $waiting={todo.state === 'waiting'}>
+                    {t(TODO_STATE_LABEL[todo.state])}
+                  </TodoState>
+                ) : null}
+              </TodoHeading>
+            ) : null}
             {typeof content === 'string' && content.trim().length > 0 ? (
               <ContentWrapper>
                 <NotificationContent>

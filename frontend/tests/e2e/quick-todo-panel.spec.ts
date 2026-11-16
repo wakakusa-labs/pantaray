@@ -78,10 +78,15 @@ const windowHeight = async (page: Page) =>
 /** The window grows to hold what opened under the panel, with no sideways scroll. */
 async function expectWindowHolds(page: Page, popover: Locator, closed: number) {
   await expect(popover).toBeVisible();
-  const box = (await popover.boundingBox())!;
-  expect(box.y).toBeGreaterThan((await page.locator('form.quick-todo').boundingBox())!.y);
-  await expect.poll(() => windowHeight(page)).toBeGreaterThanOrEqual(box.y + box.height);
-  expect(await windowHeight(page)).toBeGreaterThan(closed);
+  // Polled: the calendar lays out its days once it is open.
+  const form = (await page.locator('form.quick-todo').boundingBox())!;
+  await expect
+    .poll(async () => {
+      const box = (await popover.boundingBox())!;
+      const height = await windowHeight(page);
+      return box.y > form.y && height >= box.y + box.height && height > closed;
+    })
+    .toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(400);
 }
 

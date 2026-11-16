@@ -154,7 +154,7 @@ def _group_issue(
         return "organization_outside_scope"
     project = resolved.project
     if project is None:
-        return None if organization is None else "project_required"
+        return None
     if isinstance(project, ExistingProject):
         inside = (
             not project.organization_ids

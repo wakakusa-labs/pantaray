@@ -121,7 +121,13 @@ def _write_groups(
             if line.duplicate and not line.todo.keep_duplicate:
                 skipped += 1
                 continue
-            todo = _todo(line.todo, project_id=project_id, now=now)
+            todo = _todo(
+                line.todo,
+                project_id=project_id,
+                # A TODO in a project is in the project's organizations.
+                organization_id=organization_id if project_id is None else None,
+                now=now,
+            )
             insert_todo(connection, user_id=user_id, todo=todo, client_todo_id=None)
             todo_ids.append(todo.todo_id)
     return TodoImportResult(
@@ -132,14 +138,16 @@ def _write_groups(
     )
 
 
-def _todo(draft: DraftTodo, *, project_id: str | None, now: str) -> Todo:
+def _todo(
+    draft: DraftTodo, *, project_id: str | None, organization_id: str | None, now: str
+) -> Todo:
     created = core.create_todo(
         todo_id=str(uuid.uuid4()),
         text=draft.text,
         author="user",
         origin=WrittenOrigin(),
         project_id=project_id,
-        organization_id=None,
+        organization_id=organization_id,
         starts_on=None if draft.starts_on is None else draft.starts_on.isoformat(),
         due=None if draft.due is None else TodoDue(draft.due.isoformat(), "none"),
         now=now,

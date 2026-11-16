@@ -117,7 +117,6 @@ export const TODO_MESSAGES = defineMessages({
     'todo.import.issue.organization_not_found': 'The organization in view was deleted.',
     'todo.import.issue.organization_outside_scope':
       'The draft names an organization this view cannot add to.',
-    'todo.import.issue.project_required': 'TODOs in an organization need a project.',
     'todo.import.issue.project_name_taken': 'A project of this name is in another organization.',
     'todo.import.issue.invalid_text': 'Write each TODO on one line.',
     'todo.import.issue.too_many_todos': 'Too many TODOs to add at once.',
@@ -241,7 +240,6 @@ export const TODO_MESSAGES = defineMessages({
     'todo.import.issue.organization_not_found': 'この画面の組織は削除されました。',
     'todo.import.issue.organization_outside_scope':
       'この画面からは追加できない組織が下書きにあります。',
-    'todo.import.issue.project_required': '組織の中の TODO にはプロジェクトが要ります。',
     'todo.import.issue.project_name_taken': '同じ名前のプロジェクトが別の組織にあります。',
     'todo.import.issue.invalid_text': 'TODO は 1 行ずつ書いてください。',
     'todo.import.issue.too_many_todos': 'TODO が多すぎて、一度に登録できません。',

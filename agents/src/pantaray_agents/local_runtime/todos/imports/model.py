@@ -38,7 +38,7 @@ class DraftTodo(_Stored):
     due: dt.date | None = None
     # Unset by default, so an import does not start all its TODOs at once.
     starts_on: dt.date | None = None
-    # Register it even when the project already has an open TODO of this text.
+    # Register it even when its place already has an open TODO of this text.
     keep_duplicate: bool = False
 
 
@@ -93,15 +93,16 @@ class NewProject:
 @dataclass(frozen=True, slots=True)
 class TodoLine:
     todo: DraftTodo
-    # The project already has an open TODO of this text, or an earlier line of
-    # the draft puts one there.
+    # Its place (the project, or with none the organization) already has an
+    # open TODO of this text, or an earlier line of the draft puts one there.
     duplicate: bool
 
 
 @dataclass(frozen=True, slots=True)
 class ResolvedGroup:
-    # The organization the group's project is in: in an organization's scope,
-    # that organization even when the group names none.
+    # The organization of the group's project, or with no project the TODOs'
+    # own: in an organization's scope, that organization even when the group
+    # names none.
     organization: ExistingOrganization | NewOrganization | None
     project: ExistingProject | NewProject | None
     todos: tuple[TodoLine, ...]
@@ -112,9 +113,6 @@ type DraftIssueReason = Literal[
     "organization_not_found",
     # The group names an organization the scope does not allow.
     "organization_outside_scope",
-    # A group in an organization has no project; a TODO without a project has
-    # no organization.
-    "project_required",
     # The project's name belongs to a project outside the group's organization,
     # or two groups put one new project in different organizations.
     "project_name_taken",

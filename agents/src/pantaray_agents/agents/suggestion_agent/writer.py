@@ -35,6 +35,29 @@ SUGGESTION_WRITER_PROMPT_NAME = "suggestion/suggestion_writer"
 SUGGESTION_WRITER_STAGE = "suggestion_writer"
 WRITE_SUGGESTION_TOOL_NAME = "write_suggestion"
 _KIND_LABELS = {"action_offer": "offer", "message_only": "advice"}
+# Per contract: the TODO states the writer may choose, then the descriptions of
+# `todo_state` and `todo_note`. An offer's question is the offer itself, so only
+# a notice can wait on the user's answer.
+_TODO_STATE_FIELDS: Mapping[
+    SuggestionInteractionContract, tuple[tuple[SuggestionTodoOutcome, ...], str, str]
+] = {
+    "action_offer": (
+        ("done", "partial", "continue"),
+        "Where that work stands once the user has the message: done when "
+        "nothing is left to do, partial when Pantaray made part of it and the "
+        "rest is the user's, continue when Pantaray would carry on with the rest.",
+        "For partial or continue, one short line on where the work stands; null "
+        "when done.",
+    ),
+    "message_only": (
+        ("done", "needs_user"),
+        "needs_user when the message asks the user for an answer the work is "
+        "waiting on; done when it leaves nothing to answer, including a "
+        "recommendation the user acts on themselves.",
+        "For needs_user, one short line naming the answer the work waits on; "
+        "null when done.",
+    ),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,7 +80,6 @@ class _WrittenOutput(BaseModel):
 
     message: str
     todo: str | None = None
-    # Only an offer's tool asks for these.
     todo_state: SuggestionTodoOutcome | None = None
     todo_note: str | None = None
 
@@ -101,38 +123,26 @@ def build_writer_request(
 def writer_tool(
     contract: SuggestionInteractionContract, *, with_todo: bool
 ) -> LlmToolDefinition:
-    """The writer's one tool; only an offer says where its work stands."""
+    """The writer's one tool; with the TODO list on, it says where the work stands."""
 
-    offer = contract == "action_offer"
     properties: dict[str, object] = {
         "message": {"type": "string", "description": "The message to the user."},
     }
     if not with_todo:
         return _tool(properties, "Submit the message.")
+    states, state_description, note_description = _TODO_STATE_FIELDS[contract]
     properties |= {
         "todo": {
             "type": "string",
             "description": "The TODO line.",
         },
-    }
-    if offer:
-        properties["todo_state"] = {
+        "todo_state": {
             "type": "string",
-            "enum": ["done", "partial", "continue"],
-            "description": (
-                "Where that work stands once the user has the message: done when "
-                "nothing is left to do, partial when Pantaray made part of it and "
-                "the rest is the user's, continue when Pantaray would carry on "
-                "with the rest."
-            ),
-        }
-        properties["todo_note"] = {
-            "type": ["string", "null"],
-            "description": (
-                "For partial or continue, one short line on where the work "
-                "stands; null when done."
-            ),
-        }
+            "enum": list(states),
+            "description": state_description,
+        },
+        "todo_note": {"type": ["string", "null"], "description": note_description},
+    }
     return _tool(properties, "Submit the message and its TODO.")
 
 
@@ -177,13 +187,9 @@ def parse_written_suggestion(
         return WrittenSuggestion(answer, None)
     if output.todo is None:
         raise ValueError("todo is required")
-    # Delivering a notice is its whole work, so its TODO opens done; the user
-    # unchecks it to keep it open.
-    state: SuggestionTodoOutcome | None = (
-        "done" if contract == "message_only" else output.todo_state
-    )
-    if state is None:
-        raise ValueError("todo_state is required for an offer")
+    state = output.todo_state
+    if state is None or state not in _TODO_STATE_FIELDS[contract][0]:
+        raise ValueError(f"todo_state {state} is not one for {contract}")
     if state == "done":
         # A finished TODO shows no note, so one the model added is not kept.
         return WrittenSuggestion(

@@ -19,8 +19,9 @@ from .base import AgentRequest, AgentResponse, JSONValue, StatusType
 type SuggestionPayload = dict[str, JSONValue]
 type SuggestionInteractionContract = Literal["action_offer", "message_only"]
 # Where the Suggestion's work stands when its TODO is written: finished, made in
-# part with the rest left to the user, or for Pantaray to carry on with.
-type SuggestionTodoOutcome = Literal["done", "partial", "continue"]
+# part with the rest left to the user, for Pantaray to carry on with, or waiting
+# on the user's answer to a notice.
+type SuggestionTodoOutcome = Literal["done", "partial", "continue", "needs_user"]
 
 # File chips one notice can show; a run that names more is refused, not trimmed.
 SUGGESTION_ARTIFACTS_MAX_COUNT = 20
@@ -85,14 +86,14 @@ class SuggestionTodo(BaseModel):
 
     text: str = Field(description="The TODO list's line for the Suggestion's work")
     outcome: SuggestionTodoOutcome
-    # The line shown beside a partial or continuing TODO; a done TODO has none.
+    # The line shown beside an unfinished TODO; a done TODO has none.
     note: str | None
 
     @model_validator(mode="after")
     def _note_follows_outcome(self) -> Self:
         if (self.outcome == "done") != (self.note is None):
             raise ValueError(
-                "note is required for a partial or continuing TODO and null when done"
+                "note is required for an unfinished TODO and null when done"
             )
         return self
 

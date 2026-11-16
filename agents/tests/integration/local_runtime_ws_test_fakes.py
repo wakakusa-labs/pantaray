@@ -63,16 +63,17 @@ def keep_decision(contract: str, key_point: str) -> dict[str, object]:
 
 
 def writer_reply(contract: str, message: str) -> dict[str, object]:
-    """The writer's tool call: the message and its TODO, which an offer continues."""
+    """The writer's tool call: the message and its TODO, which an offer continues
+    and a notice leaves done."""
 
-    offer = {"todo_state": "continue", "todo_note": "Not started yet."}
+    state = (
+        {"todo_state": "continue", "todo_note": "Not started yet."}
+        if contract == "action_offer"
+        else {"todo_state": "done", "todo_note": None}
+    )
     return {
         "tool_id": "write_suggestion",
-        "args": {
-            "message": message,
-            "todo": "Follow up",
-            **(offer if contract == "action_offer" else {}),
-        },
+        "args": {"message": message, "todo": "Follow up", **state},
     }
 
 

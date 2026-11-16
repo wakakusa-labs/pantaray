@@ -11,6 +11,7 @@ from tests.unit.agents.suggestion_agent.prompt_support import (
     MAKE_CONFIG,
     NUDGE_CONFIG,
     serve_lens_runs,
+    writer_call,
 )
 
 from pantaray_agents.agents.artifact_react import ReactLoopStep
@@ -211,7 +212,8 @@ async def test_without_files_the_decision_stands_or_is_dropped(
 async def test_the_files_made_reach_the_agent_response(
     suggestion_agent, mock_llm_client, tmp_path: Path
 ) -> None:
-    serve_lens_runs(mock_llm_client, SUBMIT)
+    # The make stage turns the offer into a notice, which the writer then writes.
+    serve_lens_runs(mock_llm_client, SUBMIT, writer_call("Hi", "message_only"))
     name, arguments = _finish()
     mock_llm_client.queued_responses[-2] = {"tool_id": name, "args": arguments}
     # The fixture's artifact folder, as the make stage left it.

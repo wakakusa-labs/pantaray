@@ -17,6 +17,7 @@ from pantaray_agents.mock.mock_llm_client import MockLLMClient
 from pantaray_agents.schema.agent.base import StatusType
 from pantaray_agents.schema.agent.suggestion import (
     SuggestionAgentRequest,
+    SuggestionInteractionContract,
     SuggestionTodo,
 )
 
@@ -116,29 +117,26 @@ async def test_the_published_answer_comes_from_the_writer(
 
 
 @pytest.mark.asyncio
-async def test_advice_opens_its_todo_done_without_asking_the_writer(
+async def test_advice_that_asks_the_user_waits_on_their_answer(
     suggestion_agent: SuggestionAgent,
     mock_llm_client: MockLLMClient,
 ) -> None:
     advice = {**_decision(), "interaction_contract": "message_only"}
-    serve_lens_runs(
-        mock_llm_client, advice, writer_call(WRITTEN, "message_only", todo=TODO_LINE)
+    asked = writer_call(
+        WRITTEN,
+        "message_only",
+        todo=TODO_LINE,
+        todo_state="needs_user",
+        todo_note="返信日が金曜でよいか",
     )
-    offered: list[set[str]] = []
-    generate = suggestion_agent._generate_llm_tool_call
+    serve_lens_runs(mock_llm_client, advice, asked)
 
-    async def spy(**kwargs: object):
-        tools = kwargs["tools"]
-        if tools[0].name == "write_suggestion":
-            offered.append(set(tools[0].parameters["properties"]))
-        return await generate(**kwargs)
-
-    suggestion_agent._generate_llm_tool_call = spy
     response = await suggestion_agent.process(_request())
 
     assert response.status == StatusType.SUCCESS
-    assert response.todo == SuggestionTodo(text=TODO_LINE, outcome="done", note=None)
-    assert offered == [{"message", "todo"}]
+    assert response.todo == SuggestionTodo(
+        text=TODO_LINE, outcome="needs_user", note="返信日が金曜でよいか"
+    )
 
 
 @pytest.mark.asyncio
@@ -184,6 +182,36 @@ def test_an_offers_todo_state_needs_a_note_unless_done(
         return
     written = parse_written_suggestion(arguments, "action_offer", with_todo=True)
     assert written.todo == expected
+
+
+@pytest.mark.parametrize(
+    ("contract", "state"),
+    [
+        # An offer's own question is the offer; it never waits on a reply.
+        ("action_offer", "needs_user"),
+        # A notice hands nothing over for Pantaray to carry on.
+        ("message_only", "continue"),
+        ("message_only", "partial"),
+        ("message_only", None),
+    ],
+)
+def test_a_todo_state_outside_the_contracts_choices_is_refused(
+    contract: SuggestionInteractionContract, state: str | None
+) -> None:
+    arguments = {"message": "m", "todo": "t", "todo_state": state, "todo_note": "n"}
+    with pytest.raises(ValueError, match="todo_state"):
+        parse_written_suggestion(arguments, contract, with_todo=True)
+
+
+def test_advice_waiting_on_the_user_needs_a_note() -> None:
+    arguments = {
+        "message": "m",
+        "todo": "t",
+        "todo_state": "needs_user",
+        "todo_note": " ",
+    }
+    with pytest.raises(ValueError, match="todo_note"):
+        parse_written_suggestion(arguments, "message_only", with_todo=True)
 
 
 @pytest.mark.asyncio

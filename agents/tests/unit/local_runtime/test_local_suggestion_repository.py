@@ -1003,6 +1003,23 @@ async def test_a_message_only_suggestion_is_an_ai_todo_already_done(
 
 
 @pytest.mark.asyncio
+async def test_a_notice_asking_the_user_waits_on_their_reply(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    todo = SuggestionTodo(text="Reply to A", outcome="needs_user", note="Is Friday ok?")
+    response = _message_only_response(answer="Is Friday ok?").model_copy(
+        update={"todo": todo}
+    )
+    await _save_with_todo(tmp_path, monkeypatch, response)
+
+    entry = read_todo(user_id=USER_ID, todo_id=suggestion_todo_id(SUGGESTION_ID))
+    assert entry is not None
+    assert display_state(entry.todo, entry.conversation, "2026-11-02") == Waiting(
+        reason="reply", note="Is Friday ok?"
+    )
+
+
+@pytest.mark.asyncio
 async def test_a_project_name_that_is_not_exactly_a_project_leaves_the_todo_without_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

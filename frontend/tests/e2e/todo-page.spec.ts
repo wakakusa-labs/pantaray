@@ -1271,9 +1271,13 @@ test('進捗 lays out the month, keeps its page in the address, and opens a day�
   expect(await hasNoSideScroll(page)).toBe(true);
   await capture(page, info, 'progress-day');
 
-  // The record's conversation opens as any conversation does, and back returns to the day.
+  // The record's conversation is its TODO's, so it opens as that TODO's, expanded; the address
+  // is replaced, so back returns to the day.
   await day.getByRole('button', { name: 'この実績の会話を開く: 丸和商事から受注' }).click();
-  await expect(page).toHaveURL(/#\/history\?item=action:action-resubmit$/);
+  await expect(page).toHaveURL(/#\/history\?todo=t-resubmit&expanded=1$/);
+  await expect(
+    page.getByRole('region', { name: '見積書を再提出する' }).getByRole('button', { name: '縮小' })
+  ).toBeVisible();
   await page.goBack();
   await expect(page).toHaveURL(/view=progress&day=2026-11-03$/);
   await expect(day).toBeVisible();

@@ -16,6 +16,7 @@ import { TodoProjectGroup } from '@/components/todo/TodoProjectGroup';
 import { TodoRow } from '@/components/todo/TodoRow';
 import { useTodoPaneWidth } from '@/components/todo/useTodoPaneWidth';
 import { useI18n } from '@/context/useI18n';
+import type { TaskPreview } from '@/components/task/taskFiles';
 import type { HistorySelection } from '@/history/historySelection';
 import type { WorkspaceSettings } from '@/pages/settings/components/workspaceSettingsModel';
 import { workspacePendingKey } from '@/pages/settings/useWorkspaceSettingsController';
@@ -80,6 +81,7 @@ export function TodoScreen({
   onAddProject,
   onWorkspaceChanged,
   requestedFile,
+  handedPreview,
 }: {
   selection: TodoSelection;
   /** Every project's TODOs in the scope, read by the page, whose sidebar counts them too. */
@@ -101,6 +103,8 @@ export function TodoScreen({
   onWorkspaceChanged: () => void;
   /** A file of the selected TODO's suggestion an Overlay chip asked to preview. */
   requestedFile: string | null;
+  /** The file a suggestion had open, handed to the Action that took its place. */
+  handedPreview: { actionId: string; preview: TaskPreview } | null;
 }) {
   const { t } = useI18n();
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -492,6 +496,7 @@ export function TodoScreen({
               }
               onAddProject={onAddProject}
               requestedFile={requestedFile}
+              handedPreview={handedPreview}
               pageControls={
                 <>
                   {/* One button that turns over, so the focus stays on it. */}

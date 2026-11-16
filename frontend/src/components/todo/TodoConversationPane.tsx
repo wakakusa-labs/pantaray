@@ -20,6 +20,7 @@ export function TodoConversationPane({
   onAnswerDeletion,
   onAddProject,
   requestedFile,
+  handedPreview,
   pageControls,
 }: {
   todo: TodoView;
@@ -31,6 +32,8 @@ export function TodoConversationPane({
   onAddProject: () => void;
   /** One of its suggestion's files to preview, asked for by an Overlay chip. */
   requestedFile: string | null;
+  /** The file a suggestion had open, handed to the Action that took its place. */
+  handedPreview: { actionId: string; preview: TaskPreview } | null;
   pageControls: ReactNode;
 }) {
   const request = todo.deletion_request;
@@ -40,6 +43,7 @@ export function TodoConversationPane({
         todo={todo}
         onAddProject={onAddProject}
         requestedFile={requestedFile}
+        handedPreview={handedPreview}
         pageControls={pageControls}
       />
       {request ? (
@@ -97,11 +101,13 @@ function Conversation({
   todo,
   onAddProject,
   requestedFile,
+  handedPreview,
   pageControls,
 }: {
   todo: TodoView;
   onAddProject: () => void;
   requestedFile: string | null;
+  handedPreview: { actionId: string; preview: TaskPreview } | null;
   pageControls: ReactNode;
 }) {
   const { t } = useI18n();
@@ -119,7 +125,13 @@ function Conversation({
         key={actionId}
         actionId={actionId}
         title={todo.text}
-        initialPreview={started?.actionId === actionId ? started.preview : null}
+        initialPreview={
+          started?.actionId === actionId
+            ? started.preview
+            : handedPreview?.actionId === actionId
+              ? handedPreview.preview
+              : null
+        }
         onAddProject={onAddProject}
         pageControls={pageControls}
       />

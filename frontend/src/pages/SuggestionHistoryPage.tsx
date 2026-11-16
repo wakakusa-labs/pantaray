@@ -231,21 +231,27 @@ const SuggestionHistoryPage = () => {
   }, [isMac, toggleSidebar]);
   const sidebarToggleLabel = t(sidebarHidden ? 'history.sidebar.show' : 'history.sidebar.hide');
 
-  // The file open beside a suggestion stays open in the Action that takes the pane over from it.
-  // It is handed over once: the suggestion it came from is spared only until the Action is shown,
-  // and showing anything else drops it, however the address changed, so the Action shown again
-  // later opens as the user left it.
+  // The file open beside a suggestion stays open in the Action that takes the pane over from it,
+  // alone or as its TODO's conversation. It is handed over once: the suggestion it came from is
+  // spared only until the Action is shown, and showing anything else drops it, however the
+  // address changed, so the Action shown again later opens as the user left it.
   const [handedPreview, setHandedPreview] = useState<{
     from: HistorySelection | null;
     actionId: string;
     preview: TaskPreview;
   } | null>(null);
+  const selectedTodo =
+    selection === null && todoSelection.todoId !== null
+      ? todoList.page?.items.find((todo) => todo.todo_id === todoSelection.todoId)
+      : undefined;
+  // The work on screen: the one alone, or the selected TODO's conversation.
+  const shownWork = selection ?? (selectedTodo ? todoWork(selectedTodo) : null);
   if (handedPreview) {
     const handedTo = `action:${handedPreview.actionId}`;
-    if (selection === handedTo && handedPreview.from !== null)
+    if (shownWork === handedTo && handedPreview.from !== null)
       setHandedPreview({ ...handedPreview, from: null });
     // The TODO list is never where the file came from.
-    else if (selection !== handedTo && (selection === null || selection !== handedPreview.from))
+    else if (shownWork !== handedTo && (shownWork === null || shownWork !== handedPreview.from))
       setHandedPreview(null);
   }
   const select = (next: HistorySelection, options?: { replace: true }) => {
@@ -460,6 +466,7 @@ const SuggestionHistoryPage = () => {
           onAddProject={addProject}
           onWorkspaceChanged={workspace.reload}
           requestedFile={requestedFile}
+          handedPreview={handedPreview}
         />
       ) : (
         <div className="history-detail">

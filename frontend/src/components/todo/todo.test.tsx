@@ -246,6 +246,7 @@ it('answers Pantaray’s deletion request under the conversation, and waits whil
         onAnswerDeletion={onAnswerDeletion}
         onAddProject={vi.fn()}
         requestedFile={null}
+        handedPreview={null}
         pageControls={null}
       />
     );

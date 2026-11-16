@@ -685,6 +685,27 @@ it("shows a TODO's work, however it is named, as that TODO's conversation expand
   expect(suggestion).toHaveTextContent('requested drafts/reply.md');
 });
 
+it("keeps a file a started suggestion had open in its Action, shown as its TODO's", async () => {
+  // The suggestion's Action is T5's conversation: the file chip asks for the suggestion, whose
+  // pane finds the Action and hands the file over.
+  list.mockImplementation(async () => ({
+    ...PAGE,
+    items: [...PAGE.items, todo('T5', 'P1', { conversation: { kind: 'action', action_id: 'A9' } })],
+  }));
+  renderPage(['/history?item=suggestion:S1&file=drafts%2Freply.md']);
+  await screen.findByRole('button', { name: '見積もり' });
+  await userEvent.click(screen.getByRole('button', { name: 'reply with a file open' }));
+  await waitFor(() => expect(location()).toHaveTextContent(/^\/history\?todo=T5&expanded=1$/));
+  expect(screen.getByRole('region', { name: 'action A9' })).toHaveTextContent(
+    'preview drafts/reply.md'
+  );
+
+  // Closed, it is dropped: the Action opens again as the user left it.
+  await userEvent.click(screen.getByRole('button', { name: '会話を閉じる' }));
+  await userEvent.click(screen.getByRole('button', { name: /^TODO T5/ }));
+  expect(screen.getByRole('region', { name: 'action A9' })).not.toHaveTextContent('preview');
+});
+
 it('closes a conversation that is no TODO’s to the TODO list, keeping the scope', async () => {
   renderPage(['/history?item=action:OLD&scope=organization:O1']);
   const pane = screen.getByRole('region', { name: 'action OLD' });

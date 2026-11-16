@@ -86,7 +86,9 @@ test('opening and closing the project list never moves the composer on screen', 
     const lines = Array.from({ length: 12 }, (_, index) => `${index + 1}. 確認したいこと`);
     await input.fill(lines.join('\n'));
     await input.press('Enter');
-    await expect(overlay.getByLabel('あなた')).toContainText('12. 確認したいこと');
+    await expect(
+      overlay.getByLabel('あなた').filter({ hasText: '12. 確認したいこと' })
+    ).toBeVisible();
     await expect(input).toHaveValue('');
     await expect(input).not.toHaveAttribute('readonly', '');
     await overlay.waitForTimeout(1000);

@@ -29,13 +29,17 @@ test.beforeEach(async ({ page }) => {
             read_access_scope: 'workspace',
             organizations: [
               { organization_id: 'xer', display_name: 'Xer', icon_data_url: null },
-              { organization_id: 'wk', display_name: 'Wakakusa', icon_data_url: null },
+              {
+                organization_id: 'wk',
+                display_name: 'Wakakusa Holdings International',
+                icon_data_url: null,
+              },
             ],
             // prettier-ignore
             projects: [
               { project_id: 'pantaray', display_name: 'Pantaray', sort_order: 0, organization_ids: ['xer'] },
               { project_id: 'sales', display_name: '営業資料', sort_order: 1, organization_ids: ['xer'] },
-              { project_id: 'site', display_name: 'pantaray.app', sort_order: 2, organization_ids: ['wk'] },
+              { project_id: 'site', display_name: 'pantaray.app のランディングページ改修', sort_order: 2, organization_ids: ['wk'] },
             ],
             folders: [],
           }),
@@ -165,4 +169,27 @@ test('dates are picked on the calendar under the panel, and a later TODO just cl
   });
   expect(await recorded(page, 'hidden')).toBe(true);
   await expect(page.locator('html')).not.toHaveAttribute('data-opened');
+});
+
+test('long names are cut short, and the dates and send stay on the one row', async ({ page }) => {
+  await page.getByRole('button', { name: /^組織/ }).click();
+  await page.getByRole('menuitemradio', { name: 'Wakakusa Holdings International' }).click();
+  await page.getByRole('button', { name: /^プロジェクト/ }).click();
+  await page.getByRole('menuitemradio', { name: /ランディングページ/ }).click();
+  await page.getByRole('button', { name: '今日から、期限なし' }).click();
+  const picker = page.getByRole('dialog', { name: '開始日と期限' });
+  await picker.getByRole('button', { name: '2026年11月18日(水)' }).click();
+  await picker.getByRole('button', { name: '2026年11月20日(金)' }).click();
+  const row = [
+    page.getByRole('button', { name: /^組織/ }),
+    page.getByRole('button', { name: /^プロジェクト/ }),
+    page.getByRole('button', { name: '水 11/18から、期限 金 11/20' }),
+    page.getByRole('button', { name: '送信' }),
+  ];
+  const boxes = await Promise.all(row.map(async (item) => (await item.boundingBox())!));
+  for (const box of boxes)
+    expect(Math.round(box.y + box.height / 2)).toBe(Math.round(boxes[0].y + boxes[0].height / 2));
+  const frame = (await page.locator('form.quick-todo').boundingBox())!;
+  expect(boxes[3].x + boxes[3].width).toBeLessThanOrEqual(frame.x + frame.width);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(400);
 });

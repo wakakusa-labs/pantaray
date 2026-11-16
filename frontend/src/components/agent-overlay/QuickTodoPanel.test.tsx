@@ -83,7 +83,9 @@ it('adds the TODO in the project picked, one line, and opens a TODO starting tod
   pick('Project', 'Sales deck');
 
   fireEvent.change(field, { target: { value: 'Draft the agenda\n  from the last notes ' } });
-  fireEvent.keyDown(field, { key: 'Enter', shiftKey: true });
+  // Pasted lines are joined as they land, and Shift+Enter adds no line.
+  expect(field).toHaveValue('Draft the agenda from the last notes ');
+  expect(fireEvent.keyDown(field, { key: 'Enter', shiftKey: true })).toBe(false);
   fireEvent.keyDown(field, { key: 'Enter', isComposing: true });
   expect(create).not.toHaveBeenCalled();
   await act(async () => fireEvent.keyDown(field, { key: 'Enter' }));

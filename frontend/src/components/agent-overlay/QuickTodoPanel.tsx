@@ -79,10 +79,10 @@ function localToday() {
 /**
  * The Option+Space panel: work handed over as a TODO. The text, then one row with its
  * organization, its project (the organization's, or none), its start (today at first) and due
- * day (none at first), and send. Enter sends; Shift+Enter and an IME's Enter do not. A TODO is
- * one line, so the lines written are joined. A TODO that starts today is picked up at once, so the
- * main window comes forward on it and the panel closes; one that starts later, or has no start,
- * is added and the panel closes.
+ * day (none at first), and send. A TODO is one line, as in the main window's add bar: pasted
+ * lines are joined, Shift+Enter does nothing, and Enter sends unless an IME takes it. A TODO that
+ * starts today is picked up at once, so the main window comes forward on it and the panel closes;
+ * one that starts later, or has no start, is added and the panel closes.
  */
 export function QuickTodoPanel() {
   const ctrl = useAgentOverlayController(true);
@@ -124,7 +124,7 @@ export function QuickTodoPanel() {
   // A send whose answer never came may have added the TODO, so sending the same again reuses its
   // `client_todo_id` and the backend returns that TODO instead of adding a second one.
   const unansweredRef = useRef<{ key: string; clientTodoId: string } | null>(null);
-  const line = oneLine(text).trim();
+  const line = text.trim();
   const canSend = !sending && line !== '';
 
   const send = async () => {
@@ -183,13 +183,13 @@ export function QuickTodoPanel() {
         value={text}
         readOnly={sending}
         onChange={(event) => {
-          setText(event.target.value);
+          setText(oneLine(event.target.value));
           setFailure(null);
         }}
         onKeyDown={(event) => {
-          if (event.key !== 'Enter' || event.shiftKey || isImeKey(event)) return;
+          if (event.key !== 'Enter' || isImeKey(event)) return;
           event.preventDefault();
-          void send();
+          if (!event.shiftKey) void send();
         }}
       />
       {settings === 'failed' ? (
@@ -199,7 +199,7 @@ export function QuickTodoPanel() {
       {ctrl.openTaskFailed ? (
         <ComposerAlert role="alert">{t('overlay.todo.openFailed')}</ComposerAlert>
       ) : null}
-      <ComposerActions>
+      <ComposerActions className="quick-todo__row">
         <QuickTodoPicker
           label={t('overlay.todo.organization')}
           mark={

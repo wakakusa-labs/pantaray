@@ -225,3 +225,20 @@ it('keeps the files of a send whose answer never came, and discards the rest whe
   expect(discardAttachment).toHaveBeenCalledExactlyOnceWith({ attachmentId: FILE_IDS[1] });
   expect(hide).toHaveBeenCalledOnce();
 });
+
+it('never discards the files of a send still waiting for its answer when the panel closes', async () => {
+  let answer: (result: TodoWriteResult<TodoView>) => void = () => undefined;
+  create.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)));
+  const field = await renderPanel();
+  fireEvent.change(field, { target: { value: 'Summarize the notes' } });
+  await attach(notes());
+  await act(async () => fireEvent.keyDown(field, { key: 'Enter' }));
+
+  // The TODO may be saved holding the file, so closing leaves it staged.
+  fireEvent.mouseDown(screen.getByRole('button', { name: 'Hide Notification' }));
+  await act(async () => answer(STARTING));
+
+  expect(create.mock.lastCall?.[0].files).toEqual([sentFile(0)]);
+  expect(hide).toHaveBeenCalled();
+  expect(discardAttachment).not.toHaveBeenCalled();
+});

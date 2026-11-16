@@ -154,8 +154,9 @@ export function QuickTodoPanel() {
   // A send whose answer never came may have added the TODO, so sending the same again reuses its
   // `client_todo_id` and the backend returns that TODO instead of adding a second one.
   const unansweredRef = useRef<{ key: string; clientTodoId: string } | null>(null);
-  // The staged files of each send whose answer never came, by its `client_todo_id`: a TODO that
-  // was added may hold them, so they are never discarded from here.
+  // The staged files of each send whose answer has not come, by its `client_todo_id`: a TODO
+  // that was added may hold them, so they are never discarded from here. A send holds its files
+  // from the moment it starts, so closing the panel meanwhile leaves them staged.
   const heldFilesRef = useRef(new Map<string, readonly string[]>());
   const line = text.trim();
   const canSend = !sending && attachments.inFlight === 0 && line !== '';
@@ -209,6 +210,7 @@ export function QuickTodoPanel() {
     const clientTodoId =
       unansweredRef.current?.key === key ? unansweredRef.current.clientTodoId : crypto.randomUUID();
     unansweredRef.current = { key, clientTodoId };
+    heldFilesRef.current.set(clientTodoId, sentFiles);
     setSending(true);
     setFailure(null);
     let result: TodoWriteResult<TodoView>;
@@ -218,7 +220,6 @@ export function QuickTodoPanel() {
       result = await todos.create({ client_todo_id: clientTodoId, ...body });
     } catch (error) {
       console.error('Failed to add the TODO:', error);
-      heldFilesRef.current.set(clientTodoId, sentFiles);
       setFailure('todo.error.generic');
       setSending(false);
       return;

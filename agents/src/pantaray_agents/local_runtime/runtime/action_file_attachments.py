@@ -163,6 +163,42 @@ def _prepare_office_renderer(storage_base: Path) -> None:
     ).start()
 
 
+def require_staged_attachments(
+    *, artifact_root: Path, user_id: str, files: tuple[FileAttachmentInput, ...]
+) -> None:
+    """Check each file is staged for ``user_id`` as a plain file of its size.
+
+    Raises:
+        ActionFileAttachmentUnavailableError: a staged file cannot be used.
+    """
+
+    for attachment in files:
+        _check_staged_file(
+            artifact_root=artifact_root,
+            staging_relative=f"{STAGED_ATTACHMENT_DIRECTORY}/{user_id}",
+            attachment=attachment,
+        )
+
+
+def discard_staged_attachments(
+    *, artifact_root: Path, user_id: str, files: tuple[FileAttachmentInput, ...]
+) -> None:
+    """Remove the staged files no Action took; one an Action took is gone already."""
+
+    staging_fd = open_directory_descriptor(
+        root_path=artifact_root,
+        relative_path=f"{STAGED_ATTACHMENT_DIRECTORY}/{user_id}",
+    )
+    try:
+        for attachment in files:
+            try:
+                os.unlink(_staged_name(attachment), dir_fd=staging_fd)
+            except FileNotFoundError:
+                continue
+    finally:
+        os.close(staging_fd)
+
+
 def _staged_name(attachment: FileAttachmentInput) -> str:
     return f"{attachment.attachment_id}{attachment.extension}"
 
@@ -276,4 +312,6 @@ __all__ = [
     "ActionFileAttachmentLinks",
     "ActionFileAttachmentUnavailableError",
     "STAGED_ATTACHMENT_DIRECTORY",
+    "discard_staged_attachments",
+    "require_staged_attachments",
 ]

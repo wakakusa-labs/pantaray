@@ -10,7 +10,14 @@ import datetime as dt
 from typing import Annotated, Literal, Self, assert_never
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    field_validator,
+    model_validator,
+)
 
 from pantaray_agents.local_runtime.todos.core import DELETED_TODO_RETENTION
 from pantaray_agents.local_runtime.todos.db import (
@@ -40,7 +47,11 @@ from pantaray_agents.local_runtime.todos.model import (
 from pantaray_agents.local_runtime.todos.reads import TodoListSort
 from pantaray_agents.schema.agent.action_message import (
     ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS,
+    FileAttachmentInput,
+    bounded_files,
+    bounded_images,
 )
+from pantaray_agents.schema.agent.image import ImageInput
 from pantaray_agents.utils.timestamps import parse_iso8601_utc
 
 type _Id = Annotated[str, Field(min_length=1, max_length=128)]
@@ -117,6 +128,13 @@ class TodoCreateRequest(_Request):
     text: Annotated[str, Field(max_length=ACTION_MESSAGE_CONTENT_MAX_CODEPOINTS)]
     starts_on: dt.date | None = None
     due: TodoDueBody | None
+    # Staged files and stored images, as the Action composer sends them; the
+    # pickup hands them to the Action with the text.
+    files: tuple[FileAttachmentInput, ...] = ()
+    images: tuple[ImageInput, ...] = ()
+
+    _bound_files = field_validator("files", mode="before")(bounded_files)
+    _bound_images = field_validator("images", mode="before")(bounded_images)
 
     @model_validator(mode="after")
     def _one_place(self) -> Self:

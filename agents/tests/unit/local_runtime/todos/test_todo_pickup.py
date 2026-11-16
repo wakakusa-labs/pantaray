@@ -10,6 +10,9 @@ from pathlib import Path
 
 import pytest
 
+from pantaray_agents.local_runtime.action_conversation.history_deletion import (
+    delete_history_item,
+)
 from pantaray_agents.local_runtime.agent_state import LocalSuggestionRepository
 from pantaray_agents.local_runtime.agent_state import (
     suggestion_repository as suggestion_repository_module,
@@ -31,13 +34,20 @@ from pantaray_agents.local_runtime.todos.display import (
     Waiting,
     display_state,
 )
-from pantaray_agents.local_runtime.todos.model import ActionConversation, Todo
+from pantaray_agents.local_runtime.todos.model import (
+    ActionConversation,
+    Todo,
+    WrittenOrigin,
+)
 from pantaray_agents.local_runtime.todos.reads import read_todo, read_todo_revision
 from pantaray_agents.local_runtime.todos.writes import (
     create_todo_item,
     set_todo_check,
     suggestion_todo_id,
     update_todo,
+)
+from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
+    resolve_action_storage_paths,
 )
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings import (
     create_workspace_folder,
@@ -50,7 +60,15 @@ from pantaray_agents.schema.agent.suggestion import (
     SuggestionTodo,
 )
 
-from .store_support import NOW, USER, T, execute
+from .store_support import (
+    IMAGE,
+    NOW,
+    USER,
+    T,
+    execute,
+    stage_file,
+    staged_path,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -161,6 +179,80 @@ def test_a_written_todo_starts_one_action_with_its_text_and_project(
         "todo_id": loose.todo_id,
         "project": None,
     }
+
+
+def test_a_written_todo_hands_its_attachments_to_the_actions_first_message(
+    db: Path, tmp_path: Path
+) -> None:
+    artifacts = tmp_path / "artifacts"
+    file = stage_file(artifacts)
+    created = create_todo_item(
+        user_id=USER,
+        client_todo_id="attached",
+        project_id=None,
+        organization_id=None,
+        text="Summarize the notes",
+        starts_on="2026-11-04",
+        due=None,
+        clock=NOW,
+        files=(file,),
+        images=(IMAGE,),
+    )
+    assert isinstance(created, Todo)
+
+    pickup.pick_up_todos(user_id=USER)
+
+    [row] = _actions(db)
+    message = json.loads(row["user_message_json"])
+    assert message["files"] == [file.model_dump()]
+    assert message["images"] == [IMAGE.model_dump()]
+    with closing(sqlite3.connect(db)) as connection:
+        [(action_id,)] = connection.execute("SELECT action_id FROM agent_actions")
+    workspace = resolve_action_storage_paths(
+        db_path=db, user_id=USER, action_id=action_id
+    ).workspace
+    assert (workspace / file.workspace_path).read_bytes() == b"Meeting notes"
+    assert not staged_path(artifacts, file).exists()
+    # The Action owns them now: the TODO no longer holds them.
+    entry = read_todo(user_id=USER, todo_id=created.todo_id)
+    assert entry is not None and entry.todo.origin == WrittenOrigin()
+
+    # Deleted with its conversation, then restored, the TODO starts again with
+    # its text alone instead of failing on files that were already taken.
+    update_todo(
+        user_id=USER,
+        todo_id=created.todo_id,
+        step=lambda todo: core.delete_by_user(todo, now=NOW.now),
+    )
+    execute(
+        db,
+        "UPDATE agent_actions SET status = 'success'; "
+        "UPDATE processes SET status = 'completed'; "
+        "UPDATE jobs SET status = 'completed';",
+    )
+    delete_history_item(
+        db_path=db,
+        busy_timeout_ms=1_000,
+        artifact_root=artifacts,
+        user_id=USER,
+        kind="conversation",
+        item_id=action_id,
+    )
+    update_todo(
+        user_id=USER,
+        todo_id=created.todo_id,
+        step=lambda todo: core.restore(todo, now=NOW.now),
+    )
+
+    pickup.pick_up_todos(user_id=USER)
+
+    [restarted] = _actions(db)
+    message = json.loads(restarted["user_message_json"])
+    assert (message["content"], message["files"], message["images"]) == (
+        "Summarize the notes",
+        [],
+        [],
+    )
 
 
 def test_an_ai_todo_continues_as_pantaray_and_asks_before_every_step(

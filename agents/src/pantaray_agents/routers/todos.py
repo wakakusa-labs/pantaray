@@ -80,6 +80,11 @@ _REJECTIONS: Final[dict[str, tuple[int, str, ErrorType]]] = {
         "TODO_CLIENT_ID_CONFLICT",
         ErrorType.CONFLICT_ERROR,
     ),
+    "attachment_unavailable": (
+        status.HTTP_422_UNPROCESSABLE_CONTENT,
+        "TODO_ATTACHMENT_UNAVAILABLE",
+        ErrorType.VALIDATION_ERROR,
+    ),
     "deleted": (status.HTTP_409_CONFLICT, "TODO_DELETED", ErrorType.CONFLICT_ERROR),
     "stale_request": (
         status.HTTP_409_CONFLICT,
@@ -187,8 +192,10 @@ def get_todo_list(
     "/{user_id}/todos",
     response_model=TodoView,
     description=(
-        "Write the user's TODO. Resending the same `client_todo_id` with the "
-        "same TODO returns it; with a different one, 409."
+        "Write the user's TODO, with the files and images attached to it. "
+        "Resending the same `client_todo_id` with the same TODO returns it; "
+        "with a different one, 409. An attachment that is not staged for the "
+        "user, or not in the user's image scope, is 422."
     ),
 )
 def post_todo(
@@ -212,6 +219,8 @@ def post_todo(
         starts_on=starts_on,
         due=None if body.due is None else body.due.due(),
         clock=clock,
+        files=body.files,
+        images=body.images,
     )
     if isinstance(created, Rejected):
         _fail(created.reason)

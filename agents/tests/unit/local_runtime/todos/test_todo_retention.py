@@ -14,7 +14,16 @@ from pantaray_agents.local_runtime.todos.writes import (
     update_todo,
 )
 
-from .store_support import NOW, USER, count, execute, seed_action, seed_suggestion
+from .store_support import (
+    NOW,
+    USER,
+    count,
+    execute,
+    seed_action,
+    seed_suggestion,
+    stage_file,
+    staged_path,
+)
 
 AFTER_RETENTION = "2026-12-04T03:00:00.000Z"
 
@@ -81,3 +90,36 @@ def test_retention_erases_the_todo_with_its_conversation_unless_a_run_is_active(
 
     assert count(db, "SELECT COUNT(*) FROM todo_items") == 0
     assert count(db, "SELECT COUNT(*) FROM agent_actions") == 0
+
+
+def test_retention_removes_the_staged_files_no_action_took(
+    db: Path, tmp_path: Path
+) -> None:
+    artifacts = tmp_path / "artifacts"
+    kept = stage_file(artifacts)
+    taken = stage_file(artifacts, "7c9e6679-7425-40de-944b-e07fc1f90ae7", "plan.md")
+    for client_id, file in (("kept", kept), ("taken", taken)):
+        created = create_todo_item(
+            user_id=USER,
+            client_todo_id=client_id,
+            project_id=None,
+            organization_id=None,
+            text=client_id,
+            starts_on=None,
+            due=None,
+            clock=NOW,
+            files=(file,),
+        )
+        assert isinstance(created, Todo)
+        update_todo(
+            user_id=USER,
+            todo_id=created.todo_id,
+            step=lambda todo: core.delete_by_user(todo, now=NOW.now),
+        )
+    # An Action already took this one into its workspace.
+    staged_path(artifacts, taken).unlink()
+
+    purge_expired_todos(user_id=USER, now=AFTER_RETENTION)
+
+    assert count(db, "SELECT COUNT(*) FROM todo_items") == 0
+    assert not staged_path(artifacts, kept).exists()

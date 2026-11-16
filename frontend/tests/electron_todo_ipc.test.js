@@ -483,6 +483,10 @@ test('TODO IPC validates the renderer payload before anything reaches the backen
       text: ' two\nlines ',
       starts_on: null,
       due: { date: '2026-11-06', repeat: 'none' },
+      files: [
+        { attachment_id: '0f8fad5b-d9cb-469f-a165-70867728950e', name: 'a.pdf', byte_size: 5 },
+      ],
+      images: [{ kind: 'image', storage_path: 'user-1/2026-11-17/a.png' }],
     },
     'todos:setCheck': { todo_id: 't-1', checked: false },
     'todos:setDue': { todo_id: 't-1', due: null },
@@ -529,6 +533,11 @@ test('TODO IPC validates the renderer payload before anything reaches the backen
       { ...valid['todos:create'], due: { date: '2026-11-06', repeat: 'daily' } },
       { ...valid['todos:create'], project_id: undefined },
       { ...valid['todos:create'], organization_id: undefined },
+      {
+        ...valid['todos:create'],
+        files: [{ attachment_id: 'not-a-uuid', name: 'a.pdf', byte_size: 5 }],
+      },
+      { ...valid['todos:create'], images: [{ storage_path: 'user-1/2026-11-17/a.png' }] },
     ],
     'todos:setCheck': [{ todo_id: 't-1', checked: 'true' }, { checked: true }],
     'todos:setDue': [{ todo_id: 't-1' }, { todo_id: 't-1', due: { date: '2026-11-06' } }],

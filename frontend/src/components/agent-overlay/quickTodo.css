@@ -41,19 +41,28 @@
 }
 
 /* One row always: long names make the pickers give way and are cut short (the list shows them
-   whole), while the dates and send keep their size. */
+   whole), while ＋, the dates and send keep their size. */
 .quick-todo .quick-todo__row {
   flex-wrap: nowrap;
   /* Else the form's grid track widens to the names' full length. */
   min-width: 0;
 }
 
+/* Tighter than the dates, so that with ＋ in the row 組織なし and プロジェクトなし still fit at 400px. */
 .quick-todo__picker {
   flex: 0 1 auto;
+  gap: 2px;
   max-width: 144px;
+  padding: 0 2px;
   border: 1px solid var(--control-border);
 }
 
+/* The composer's ＋, narrowed to the dates' width; its target stays 28 × 32. */
+.quick-todo .quick-todo__row > .quick-todo__attach {
+  width: 28px;
+}
+
+.quick-todo__attach,
 .quick-todo__dates,
 .quick-todo__row > [type='submit'] {
   flex: none;

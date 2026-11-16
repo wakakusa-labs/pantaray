@@ -16,6 +16,7 @@ import {
 } from './composerMentions';
 import { useWorkRefConversion } from './useWorkRefConversion';
 import { WorkChipToggle } from './WorkChipToggle';
+import { pastedFiles } from './attachmentStaging';
 import {
   MENTION_PANEL_ROOM_PX,
   ProjectMentionList,
@@ -101,23 +102,6 @@ type MentionSession = Readonly<{
   placement: MentionPlacement;
   catalog: Catalog;
 }>;
-
-/**
- * The files a paste attaches, or none when it pastes text. Copied text can carry a file along
- * (Quick Look adds the document it shows), and then the text is what was meant. A file copied
- * in Finder carries only its name as text, so that paste attaches the file.
- */
-function pastedFiles(data: DataTransfer): File[] {
-  const files = Array.from(data.files);
-  const text = data.getData('text/plain').trim();
-  if (files.length === 0 || text === '') return files;
-  const names = new Set(files.map((file) => file.name));
-  // Each line a pasted file's name, or a path ending in it.
-  const namesOnly = text
-    .split(/\s*[\r\n]+\s*/)
-    .every((line) => names.has(line.slice(line.lastIndexOf('/') + 1)));
-  return namesOnly ? files : [];
-}
 
 // Showing waits out a pointer passing over a chip; hiding waits out its way from chip to pill.
 const CHIP_PILL_SHOW_DELAY_MS = 200;

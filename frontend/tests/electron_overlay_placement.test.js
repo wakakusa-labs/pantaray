@@ -8,7 +8,10 @@ const {
   DEFAULT_OVERLAY_PLACEMENTS,
   createOverlayPlacementStore,
 } = require('../electron/dist/settings/overlayPlacement.js');
-const { resolveOverlayPlacement } = require('../electron/dist/windows/overlayPlacement.js');
+const {
+  OVERLAY_WIDTH_PX,
+  resolveOverlayPlacement,
+} = require('../electron/dist/windows/overlayPlacement.js');
 
 function tempDir(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-overlay-placement-'));
@@ -118,7 +121,7 @@ test('the default cells reproduce the earlier placements: centered tasks, a top-
   // Earlier: tasks centered on the work area, Suggestions top-right at a 20 px margin stacking
   // by 132 px. Windows reopened from History now default to that same top-right stack.
   assert.deepEqual(resolveOverlayPlacement(MAC_WORK_AREA, DEFAULT_OVERLAY_PLACEMENTS.started, 0), {
-    x: Math.round(MAC_WORK_AREA.x + (MAC_WORK_AREA.width - 520) / 2),
+    x: Math.round(MAC_WORK_AREA.x + (MAC_WORK_AREA.width - OVERLAY_WIDTH_PX) / 2),
     y: Math.round(MAC_WORK_AREA.y + (MAC_WORK_AREA.height - 120) / 2),
     anchor: 'center',
   });
@@ -127,7 +130,7 @@ test('the default cells reproduce the earlier placements: centered tasks, a top-
   const maxRows = Math.floor((900 - 40) / 132);
   for (const index of [0, 1, 2, maxRows - 1, maxRows, 40]) {
     assert.deepEqual(resolveOverlayPlacement(workArea, DEFAULT_OVERLAY_PLACEMENTS.suggestion, index), {
-      x: 1440 - 520 - 20,
+      x: 1440 - OVERLAY_WIDTH_PX - 20,
       y: 20 + Math.min(index, maxRows - 1) * 132,
       anchor: 'top',
     });
@@ -139,7 +142,7 @@ test('each cell aligns to its margin at the edges and centers on its column insi
     resolveOverlayPlacement(MAC_WORK_AREA, { row, column }, index);
   const xs = [0, 1, 2, 3, 4].map((column) => at(0, column).x);
   // Columns 1 and 3 center on 1512 * 3/10 and 1512 * 7/10.
-  assert.deepEqual(xs, [20, 194, 496, 798, 972]);
+  assert.deepEqual(xs, [20, 254, 556, 858, 1092]);
   assert.deepEqual(
     [0, 1, 2].map((row) => at(row, 0)),
     [
@@ -164,6 +167,6 @@ test('a narrow work area keeps the inner columns inside its margins', () => {
   const narrow = { x: 100, y: 0, width: 700, height: 500 };
   for (const column of [0, 1, 2, 3, 4]) {
     const { x } = resolveOverlayPlacement(narrow, { row: 1, column }, 0);
-    assert.ok(x >= 120 && x + 520 <= 780, `column ${column} at ${x}`);
+    assert.ok(x >= 120 && x + OVERLAY_WIDTH_PX <= 780, `column ${column} at ${x}`);
   }
 });

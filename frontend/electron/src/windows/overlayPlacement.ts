@@ -4,7 +4,7 @@ import {
   type OverlayCell,
 } from '../ipc/schemas/overlayPlacement';
 
-export const OVERLAY_WIDTH_PX = 520;
+export const OVERLAY_WIDTH_PX = 400;
 export const OVERLAY_INITIAL_HEIGHT_PX = 120;
 const SCREEN_MARGIN_PX = 20;
 // Stacked Suggestions are offset by their initial height plus this gap.

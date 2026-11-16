@@ -668,7 +668,8 @@ it("shows a TODO's work, however it is named, as that TODO's conversation expand
   // An Overlay's 「メイン画面で開く」 names the work, which is T1's.
   renderPage(['/history?item=action:A5']);
   expect(await screen.findByRole('button', { name: '縮小' })).toBeInTheDocument();
-  expect(location()).toHaveTextContent(/^\/history\?todo=T1&expanded=1$/);
+  // The address is replaced after the expanded conversation first shows.
+  await waitFor(() => expect(location()).toHaveTextContent(/^\/history\?todo=T1&expanded=1$/));
   expect(
     within(screen.getByRole('region', { name: 'action A5' })).getByRole('heading', {
       name: 'TODO T1',

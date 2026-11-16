@@ -36,7 +36,7 @@ from pantaray_agents.local_runtime.todos.display import (
     StartWritten,
     pickup_target,
 )
-from pantaray_agents.local_runtime.todos.model import Todo
+from pantaray_agents.local_runtime.todos.model import Todo, WrittenOrigin
 from pantaray_agents.local_runtime.todos.reads import (
     read_pickup_candidates,
 )
@@ -92,13 +92,23 @@ def _command(
     message_id = todo_message_id(todo.todo_id)
     match target:
         case StartWritten():
-            # The user wrote this TODO, so its text is their message.
+            # The user wrote this TODO, so its text and attachments are their
+            # message. A weekly instance of it has none.
+            written = (
+                todo.origin
+                if isinstance(todo.origin, WrittenOrigin)
+                else WrittenOrigin()
+            )
             return SubmitActionMessageCommand(
                 user_id=user_id,
                 origin="user",
                 target=NewActionTarget(),
                 message=ActionUserMessageInput(
-                    message_id=message_id, content=todo.text, todo_handoff=handoff
+                    message_id=message_id,
+                    content=todo.text,
+                    images=written.images,
+                    files=written.files,
+                    todo_handoff=handoff,
                 ),
             )
         case ContinueAiTodo():

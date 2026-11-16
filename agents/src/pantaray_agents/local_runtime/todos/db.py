@@ -8,6 +8,8 @@ from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from typing import Final, Literal, assert_never, cast
 
+from pydantic import BaseModel, ConfigDict
+
 from pantaray_agents.local_runtime.runtime.runtime_env import (
     read_local_runtime_db_config,
 )
@@ -27,14 +29,27 @@ from pantaray_agents.local_runtime.todos.model import (
     TodoOrigin,
     WrittenOrigin,
 )
+from pantaray_agents.schema.agent.action_message import FileAttachmentInput
+from pantaray_agents.schema.agent.image import ImageInput
 
 TODO_COLUMNS: Final = tuple(
     """todo_id project_id organization_id text author origin_kind suggestion_id
     previous_todo_id starts_on due_date due_repeat checked_by checked_at report_kind report_note
     report_run_id report_at deletion_request_id deletion_request_reason
     deletion_requested_at deletion_request_state deleted_by deleted_at
-    created_at""".split()
+    created_at attachments_json""".split()
 )
+
+
+class _StoredAttachments(BaseModel):
+    """`todo_items.attachments_json`: a written TODO's attachments."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    files: tuple[FileAttachmentInput, ...]
+    images: tuple[ImageInput, ...]
+
+
 TODO_SELECT: Final = ", ".join(f"todo.{column}" for column in TODO_COLUMNS)
 
 
@@ -226,6 +241,13 @@ def todo_params(todo: Todo) -> dict[str, str | None]:
         "deleted_by": None if todo.deletion is None else todo.deletion.by,
         "deleted_at": None if todo.deletion is None else todo.deletion.at,
         "created_at": todo.created_at,
+        "attachments_json": (
+            _StoredAttachments(
+                files=origin.files, images=origin.images
+            ).model_dump_json()
+            if isinstance(origin, WrittenOrigin) and (origin.files or origin.images)
+            else None
+        ),
     }
 
 
@@ -283,4 +305,7 @@ def _origin(row: sqlite3.Row) -> TodoOrigin:
         return SuggestionOrigin(suggestion_id=row["suggestion_id"])
     if kind == "recurrence":
         return RecurrenceOrigin(previous_todo_id=row["previous_todo_id"])
-    return WrittenOrigin()
+    if row["attachments_json"] is None:
+        return WrittenOrigin()
+    stored = _StoredAttachments.model_validate_json(row["attachments_json"])
+    return WrittenOrigin(files=stored.files, images=stored.images)

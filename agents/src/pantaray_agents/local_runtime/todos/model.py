@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from pantaray_agents.schema.agent.action_message import FileAttachmentInput
+from pantaray_agents.schema.agent.image import ImageInput
+
 type TodoId = str
 type LocalDate = str  # The user's calendar date, YYYY-MM-DD.
 type TodoAuthor = Literal["user", "ai"]
@@ -12,6 +15,11 @@ type TodoAuthor = Literal["user", "ai"]
 
 @dataclass(frozen=True, slots=True)
 class WrittenOrigin:
+    # What the user attached when writing it, for the Action that works on it.
+    # Only a written TODO holds any, so a weekly instance, which is a
+    # `RecurrenceOrigin`, never claims files the first Action already took.
+    files: tuple[FileAttachmentInput, ...] = ()
+    images: tuple[ImageInput, ...] = ()
     kind: Literal["written"] = "written"
 
 

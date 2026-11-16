@@ -39,6 +39,9 @@ from pantaray_agents.local_runtime.todos.writes import (
     suggestion_todo_id,
     update_todo,
 )
+from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
+    resolve_action_storage_paths,
+)
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings import (
     create_workspace_folder,
 )
@@ -50,7 +53,15 @@ from pantaray_agents.schema.agent.suggestion import (
     SuggestionTodo,
 )
 
-from .store_support import NOW, USER, T, execute
+from .store_support import (
+    IMAGE,
+    NOW,
+    USER,
+    T,
+    execute,
+    stage_file,
+    staged_path,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -161,6 +172,40 @@ def test_a_written_todo_starts_one_action_with_its_text_and_project(
         "todo_id": loose.todo_id,
         "project": None,
     }
+
+
+def test_a_written_todo_hands_its_attachments_to_the_actions_first_message(
+    db: Path, tmp_path: Path
+) -> None:
+    artifacts = tmp_path / "artifacts"
+    file = stage_file(artifacts)
+    created = create_todo_item(
+        user_id=USER,
+        client_todo_id="attached",
+        project_id=None,
+        organization_id=None,
+        text="Summarize the notes",
+        starts_on="2026-11-04",
+        due=None,
+        clock=NOW,
+        files=(file,),
+        images=(IMAGE,),
+    )
+    assert isinstance(created, Todo)
+
+    pickup.pick_up_todos(user_id=USER)
+
+    [row] = _actions(db)
+    message = json.loads(row["user_message_json"])
+    assert message["files"] == [file.model_dump()]
+    assert message["images"] == [IMAGE.model_dump()]
+    with closing(sqlite3.connect(db)) as connection:
+        [(action_id,)] = connection.execute("SELECT action_id FROM agent_actions")
+    workspace = resolve_action_storage_paths(
+        db_path=db, user_id=USER, action_id=action_id
+    ).workspace
+    assert (workspace / file.workspace_path).read_bytes() == b"Meeting notes"
+    assert not staged_path(artifacts, file).exists()
 
 
 def test_an_ai_todo_continues_as_pantaray_and_asks_before_every_step(

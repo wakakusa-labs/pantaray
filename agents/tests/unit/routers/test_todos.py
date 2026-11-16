@@ -13,11 +13,13 @@ from fastapi.testclient import TestClient
 from httpx import Response
 from tests.unit.local_runtime.migrated_db import prepare_test_database
 from tests.unit.local_runtime.todos.store_support import (
+    IMAGE,
     NOW,
     USER,
     T,
     execute,
     seed_action,
+    stage_file,
 )
 
 from pantaray_agents.app.shared import install_common_exception_handlers
@@ -32,6 +34,8 @@ from pantaray_agents.local_runtime.todos.clock import (
     TodoClock,
 )
 from pantaray_agents.local_runtime.todos.conversation import todo_message_id
+from pantaray_agents.local_runtime.todos.model import WrittenOrigin
+from pantaray_agents.local_runtime.todos.reads import read_todo
 from pantaray_agents.local_runtime.todos.writes import (
     set_todo_check,
     update_todo,
@@ -40,6 +44,7 @@ from pantaray_agents.routers import todos as todos_router
 from pantaray_agents.routers.local.registry import register_local_routers
 
 TODOS = f"/v1/agents/users/{USER}/todos"
+UNSTAGED_ID = "7c9e6679-7425-40de-944b-e07fc1f90ae7"
 # Wednesday 2026-10-28 in Tokyo, the week before NOW's.
 PREVIOUS_WEEK = replace(NOW, now="2026-10-28T03:00:00.000Z")
 # Exactly 30 days after a deletion at NOW.
@@ -161,6 +166,15 @@ def test_a_replayed_create_returns_the_same_todo_and_a_changed_one_conflicts(
         ),
         ({"text": "two\nlines"}, 422, "TODO_INVALID_TEXT"),
         ({"text": "   "}, 422, "TODO_INVALID_TEXT"),
+        (
+            {
+                "files": [
+                    {"attachment_id": UNSTAGED_ID, "name": "a.txt", "byte_size": 5}
+                ]
+            },
+            422,
+            "TODO_ATTACHMENT_UNAVAILABLE",
+        ),
     ],
 )
 def test_a_create_the_store_refuses_names_why(
@@ -170,6 +184,19 @@ def test_a_create_the_store_refuses_names_why(
 
     assert response.status_code == status_code
     assert _error_code(response) == error_code
+
+
+def test_a_todo_takes_the_files_and_images_the_composer_sends(
+    client: TestClient, tmp_path: Path
+) -> None:
+    file = stage_file(tmp_path / "artifacts")
+
+    response = _create(client, files=[file.model_dump()], images=[IMAGE.model_dump()])
+
+    assert response.status_code == 200, response.text
+    entry = read_todo(user_id=USER, todo_id=response.json()["todo_id"])
+    assert entry is not None
+    assert entry.todo.origin == WrittenOrigin(files=(file,), images=(IMAGE,))
 
 
 def test_a_repeat_without_a_date_two_places_or_an_unknown_scope_is_an_input_error(

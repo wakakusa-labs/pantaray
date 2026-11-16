@@ -13,7 +13,14 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import Final, Literal
 
+from pantaray_agents.local_runtime.runtime.action_file_attachments import (
+    ActionFileAttachmentUnavailableError,
+    require_staged_attachments,
+)
 from pantaray_agents.local_runtime.runtime.identity import verify_current_owner
+from pantaray_agents.local_runtime.runtime.runtime_env import (
+    read_local_runtime_artifact_root,
+)
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
 from pantaray_agents.local_runtime.storage.users import ensure_user_row
 from pantaray_agents.local_runtime.todos import core
@@ -38,9 +45,13 @@ from pantaray_agents.local_runtime.todos.model import (
     TodoAuthor,
     TodoDue,
     TodoId,
+    TodoOrigin,
     WrittenOrigin,
 )
+from pantaray_agents.schema.agent.action_message import FileAttachmentInput
+from pantaray_agents.schema.agent.image import ImageInput
 from pantaray_agents.schema.agent.suggestion import SuggestionTodo
+from pantaray_agents.security.storage_paths import validate_image_storage_path
 
 _INSERT_SQL: Final = (
     f"INSERT INTO todo_items(user_id, client_todo_id, {', '.join(TODO_COLUMNS)}) "
@@ -53,7 +64,10 @@ _UPDATE_SQL: Final = (
 )
 
 type CreateItemRejection = Literal[
-    "project_not_found", "organization_not_found", "client_todo_conflict"
+    "project_not_found",
+    "organization_not_found",
+    "client_todo_conflict",
+    "attachment_unavailable",
 ]
 
 _NAMESPACE_SUGGESTION_TODO: Final = uuid.uuid5(
@@ -71,17 +85,21 @@ def create_todo_item(
     starts_on: LocalDate | None,
     due: TodoDue | None,
     clock: TodoClock,
+    files: tuple[FileAttachmentInput, ...] = (),
+    images: tuple[ImageInput, ...] = (),
 ) -> Todo | Rejected[core.CreateRejection | CreateItemRejection]:
     """The user's new TODO; the same `client_todo_id` again returns it.
 
     `organization_id` is its own organization, so it is None with a project.
+    `files` are staged for the user and `images` are in the user's scope; the
+    TODO holds them until the pickup hands them to its Action.
     """
 
     created = core.create_todo(
         todo_id=str(uuid.uuid4()),
         text=text,
         author="user",
-        origin=WrittenOrigin(),
+        origin=WrittenOrigin(files=files, images=images),
         project_id=project_id,
         organization_id=organization_id,
         starts_on=starts_on,
@@ -112,6 +130,10 @@ def create_todo_item(
             connection, user_id=user_id, organization_id=organization_id
         ):
             return Rejected("organization_not_found")
+        # Checked only for a new TODO: a replay finds its files already taken
+        # by the Action the pickup started.
+        if not _attachments_available(user_id, files, images):
+            return Rejected("attachment_unavailable")
         ensure_user_row(connection, user_id=user_id, timestamp=clock.now)
         insert_todo(
             connection, user_id=user_id, todo=created, client_todo_id=client_todo_id
@@ -255,21 +277,48 @@ def update_todo[R: str](
     return result
 
 
-def delete_purged_todo(*, user_id: str, todo: Todo) -> None:
-    """Remove the row, unless its deletion changed since it was read."""
+def delete_purged_todo(*, user_id: str, todo: Todo) -> bool:
+    """Remove the row, unless its deletion changed since it was read; whether
+    it was removed."""
 
     assert todo.deletion is not None
     with todo_db_connection() as connection, immediate_transaction(connection):
-        connection.execute(
+        cursor = connection.execute(
             "DELETE FROM todo_items WHERE user_id = ? AND todo_id = ? AND deleted_at = ?",
             (user_id, todo.todo_id, todo.deletion.at),
         )
+    return cursor.rowcount == 1
 
 
 def _request(
     todo: Todo,
-) -> tuple[str, str | None, str | None, str | None, TodoDue | None]:
-    return (todo.text, todo.starts_on, todo.project_id, todo.organization_id, todo.due)
+) -> tuple[str, str | None, str | None, str | None, TodoDue | None, TodoOrigin]:
+    return (
+        todo.text,
+        todo.starts_on,
+        todo.project_id,
+        todo.organization_id,
+        todo.due,
+        todo.origin,
+    )
+
+
+def _attachments_available(
+    user_id: str, files: tuple[FileAttachmentInput, ...], images: tuple[ImageInput, ...]
+) -> bool:
+    try:
+        for image in images:
+            validate_image_storage_path(
+                user_id=user_id, storage_path=image.storage_path
+            )
+        require_staged_attachments(
+            artifact_root=read_local_runtime_artifact_root(),
+            user_id=user_id,
+            files=files,
+        )
+    except (ValueError, ActionFileAttachmentUnavailableError):
+        return False
+    return True
 
 
 def _update(connection: sqlite3.Connection, *, user_id: str, todo: Todo) -> None:

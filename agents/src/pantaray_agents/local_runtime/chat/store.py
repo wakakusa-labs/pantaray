@@ -14,7 +14,6 @@ the last end's `read_through` still waits for a turn.
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 import uuid
 from collections.abc import Iterator
@@ -22,12 +21,9 @@ from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from typing import Literal
 
-from pantaray_agents.local_runtime.descriptor_access import (
-    DescriptorPathError,
-    open_regular_file_descriptor,
-)
 from pantaray_agents.local_runtime.runtime.action_file_attachments import (
-    STAGED_ATTACHMENT_DIRECTORY,
+    ActionFileAttachmentUnavailableError,
+    require_staged_attachments,
 )
 from pantaray_agents.local_runtime.runtime.identity import verify_current_owner
 from pantaray_agents.local_runtime.runtime.runtime_env import (
@@ -398,26 +394,14 @@ def _require_attachments(*, user_id: str, content: UserMessageContent) -> None:
             )
         except ValueError as exc:
             raise ChatItemReferenceError("images") from exc
-    if not content.files:
-        return
-    artifact_root = read_local_runtime_artifact_root()
-    for file in content.files:
-        try:
-            descriptor = open_regular_file_descriptor(
-                root_path=artifact_root,
-                relative_path=(
-                    f"{STAGED_ATTACHMENT_DIRECTORY}/{user_id}/"
-                    f"{file.attachment_id}{file.extension}"
-                ),
-            )
-        except DescriptorPathError as exc:
-            raise ChatItemReferenceError("files") from exc
-        try:
-            size = os.fstat(descriptor).st_size
-        finally:
-            os.close(descriptor)
-        if size != file.byte_size:
-            raise ChatItemReferenceError("files")
+    try:
+        require_staged_attachments(
+            artifact_root=read_local_runtime_artifact_root(),
+            user_id=user_id,
+            files=content.files,
+        )
+    except ActionFileAttachmentUnavailableError as exc:
+        raise ChatItemReferenceError("files") from exc
 
 
 __all__ = [

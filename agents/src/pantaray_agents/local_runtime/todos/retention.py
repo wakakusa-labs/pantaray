@@ -1,4 +1,5 @@
-"""Erase deleted TODOs once `DELETED_TODO_RETENTION` has passed, conversations too.
+"""Erase deleted TODOs once `DELETED_TODO_RETENTION` has passed, conversations
+and the staged files no Action took too.
 
 The conversation goes first: if the row's removal then fails, the next pass
 finds the TODO with no conversation and finishes, while the reverse order could
@@ -14,6 +15,9 @@ from pantaray_agents.local_runtime.action_conversation.history_deletion import (
     HistoryItemKind,
     delete_history_item,
 )
+from pantaray_agents.local_runtime.runtime.action_file_attachments import (
+    discard_staged_attachments,
+)
 from pantaray_agents.local_runtime.runtime.runtime_env import (
     read_local_runtime_artifact_root,
     read_local_runtime_db_config,
@@ -21,6 +25,7 @@ from pantaray_agents.local_runtime.runtime.runtime_env import (
 from pantaray_agents.local_runtime.todos.model import (
     ActionConversation,
     SuggestionOrigin,
+    WrittenOrigin,
 )
 from pantaray_agents.local_runtime.todos.reads import (
     TodoEntry,
@@ -49,7 +54,16 @@ def purge_expired_todos(*, user_id: str, now: str) -> None:
                 entry.todo.todo_id,
             )
             continue
-        delete_purged_todo(user_id=user_id, todo=entry.todo)
+        if not delete_purged_todo(user_id=user_id, todo=entry.todo):
+            continue
+        # Files a TODO never handed to an Action go with it; it held them alone.
+        origin = entry.todo.origin
+        if isinstance(origin, WrittenOrigin) and origin.files:
+            discard_staged_attachments(
+                artifact_root=read_local_runtime_artifact_root(),
+                user_id=user_id,
+                files=origin.files,
+            )
         logger.info("Deleted TODO purged: todo_id=%s", entry.todo.todo_id)
 
 

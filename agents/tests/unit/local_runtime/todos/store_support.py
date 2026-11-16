@@ -10,12 +10,46 @@ from zoneinfo import ZoneInfo
 from pantaray_agents.local_runtime.todos.clock import (
     TodoClock,
 )
+from pantaray_agents.schema.agent.action_message import FileAttachmentInput
+from pantaray_agents.schema.agent.image import ImageInput
 
 USER = "user-1"
 T = "2026-11-01T00:00:00.000Z"
 TOKYO = ZoneInfo("Asia/Tokyo")
 # Wednesday 2026-11-04, noon in Tokyo; the week starts on Monday 2026-11-02.
 NOW = TodoClock(now="2026-11-04T03:00:00.000Z", zone=TOKYO)
+
+
+# An image in the user's scope; nothing reads its bytes before an Action does.
+IMAGE = ImageInput(
+    storage_path=f"{USER}/2026-11-04/3f2b9a8e-1c4d-4e5f-8a6b-7c8d9e0f1a2b.png"
+)
+
+
+def stage_file(
+    artifact_root: Path,
+    attachment_id: str = "0f8fad5b-d9cb-469f-a165-70867728950e",
+    name: str = "notes.txt",
+    payload: bytes = b"Meeting notes",
+) -> FileAttachmentInput:
+    """A document staged as Electron main's attach IPC writes it."""
+
+    attachment = FileAttachmentInput(
+        attachment_id=attachment_id, name=name, byte_size=len(payload)
+    )
+    staged = staged_path(artifact_root, attachment)
+    staged.parent.mkdir(parents=True, exist_ok=True)
+    staged.write_bytes(payload)
+    return attachment
+
+
+def staged_path(artifact_root: Path, attachment: FileAttachmentInput) -> Path:
+    return (
+        artifact_root
+        / "generated/attachments"
+        / USER
+        / f"{attachment.attachment_id}{attachment.extension}"
+    )
 
 
 def execute(db_path: Path, script: str) -> None:

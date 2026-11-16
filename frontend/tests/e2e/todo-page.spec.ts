@@ -27,6 +27,8 @@ import type {
   TodoImportView,
   TodoImportWriteRequest,
 } from '../../electron/src/todos/todoImportContracts';
+import type { ActionLiveUpdate } from '../../electron/src/actions/actionLiveCore';
+import type { AcceptActionRequest } from '../../electron/src/orchestration/eventContracts';
 import { waitForAnimationsToSettle } from './animations';
 import { installTaskDrafts } from './taskDrafts';
 
@@ -233,6 +235,62 @@ const SUGGESTION: OverlaySnapshot = {
   lastSequence: 1,
   isLive: true,
 };
+
+/** A finished Action begun from a suggestion, with the reply that accepted it. */
+function actionFromSuggestion(actionId: string): ActionLiveUpdate {
+  const approved = {
+    suggestion_id: 'suggestion-notes',
+    content: '今週の変更点から、10 月分のリリースノートの下書きを作っておきましょうか。',
+  };
+  return {
+    kind: 'action_updated',
+    snapshot: {
+      actionId,
+      page: {
+        action: {
+          action_id: actionId,
+          suggestion_id: approved.suggestion_id,
+          approved_suggestion: approved,
+          status: 'success',
+          latest_run_id: 'run-1',
+          resumable: false,
+        },
+        runs: [
+          {
+            run_id: 'run-1',
+            status: 'success',
+            started_at: '2026-11-04T00:00:00.000000Z',
+            completed_at: '2026-11-04T00:01:00.000000Z',
+            completion_event_id: 'completion-1',
+            final_output: '10 月分の変更点を下書きにまとめました。',
+            error: null,
+            entries: [
+              {
+                step_kind: 'user',
+                chat_note: null,
+                approved_suggestion: approved,
+                step_id: 'step-1',
+                step_number: 1,
+                content: '箇条書きで短めに',
+                message_id: 'message-1',
+                accepted_sequence: 1,
+                images: [],
+                project_refs: [],
+                status: 'adopted',
+              },
+            ],
+          },
+        ],
+        unadopted_messages: [],
+        next_cursor: null,
+      },
+      pageVersion: 1,
+      transientToolSteps: [],
+      approvalBlockers: [],
+      lifecycle: null,
+    },
+  };
+}
 
 async function openHome(page: Page, search = '', suggestion: OverlaySnapshot = SUGGESTION) {
   await page.addInitScript(
@@ -472,7 +530,13 @@ async function openHome(page: Page, search = '', suggestion: OverlaySnapshot = S
             onTurnState: () => noop,
             getTurnState: async () => null,
           },
-          orchestration: { onStatus: () => noop, onEvent: () => noop },
+          orchestration: {
+            onStatus: () => noop,
+            onEvent: () => noop,
+            acceptAction: async (request: AcceptActionRequest) => {
+              document.documentElement.dataset.accepted = JSON.stringify(request);
+            },
+          },
           history: {
             fetch: async () => ({
               data: [
@@ -730,7 +794,12 @@ async function openHome(page: Page, search = '', suggestion: OverlaySnapshot = S
           actions: {
             // The Action panes' reads stay pending: these tests look at what opens them.
             openConversation: () => new Promise(() => {}),
-            onConversationUpdated: () => noop,
+            onConversationUpdated: (callback: (update: ActionLiveUpdate) => void) => {
+              const listener = (event: Event) =>
+                callback((event as CustomEvent<ActionLiveUpdate>).detail);
+              window.addEventListener('test:conversation', listener);
+              return () => window.removeEventListener('test:conversation', listener);
+            },
             attachFile: async ({ bytes, name }: { bytes: ArrayBuffer; name: string }) => ({
               attachmentId: '6f1c7a64-5d1e-4c4b-9b5b-3d0d7c3f2a10',
               name,
@@ -852,7 +921,7 @@ test('the home lists every organization’s TODOs by project, with the rail and 
   await capture(page, info, 'list-focus');
 });
 
-test('a selected TODO opens its conversation beside the list, with 承認 and no 見送る', async ({
+test('a selected TODO opens its conversation beside the list, where a reply accepts the suggestion', async ({
   page,
 }, info) => {
   await openHome(page);
@@ -862,18 +931,35 @@ test('a selected TODO opens its conversation beside the list, with 承認 and no
   await expect(row).toHaveAttribute('aria-current', 'true');
   const pane = page.getByRole('region', { name: '来週の面接の質問リストを作る' });
   await expect(pane.getByText(/職務経歴書と募集要項から/)).toBeVisible();
-  await expect(pane.getByRole('button', { name: '承認' })).toBeEnabled();
-  await expect(pane.getByRole('button', { name: '見送る' })).toHaveCount(0);
+  const reply = pane.getByRole('textbox', { name: 'メッセージ' });
+  await expect(reply).toHaveAttribute('placeholder', '返信を入力');
+  await expect(pane.getByRole('button', { name: '送信' })).toBeDisabled();
   // A TODO's conversation is not in the dated list, so no History delete is offered for it.
   await expect(
     sidebarOf(page).getByRole('button', { name: /来週の面接の質問リストを作る/ })
   ).toHaveCount(0);
   expect(await hasNoSideScroll(page)).toBe(true);
   await capture(page, info, 'conversation');
+  await reply.fill('志望動機を深掘りする質問も入れて');
+  await reply.press('Enter');
+  await expect(page.locator('html')).toHaveAttribute('data-accepted', /suggestion-questions/);
+  expect(JSON.parse((await page.locator('html').getAttribute('data-accepted'))!)).toMatchObject({
+    suggestionId: 'suggestion-questions',
+    commandId: null,
+    supplement: '志望動機を深掘りする質問も入れて',
+  });
 
-  // An Action's TODO opens its task pane; one with no conversation yet says so.
+  // An Action's TODO opens its task pane, under the suggestion it began from.
   await page.getByRole('button', { name: /^リリースノートの下書きを書く/ }).click();
-  await expect(page.getByRole('region', { name: 'リリースノートの下書きを書く' })).toBeVisible();
+  const notes = page.getByRole('region', { name: 'リリースノートの下書きを書く' });
+  await expect(notes).toBeVisible();
+  await page.evaluate(
+    (detail) => window.dispatchEvent(new CustomEvent('test:conversation', { detail })),
+    actionFromSuggestion('action-notes')
+  );
+  await expect(notes.getByRole('region', { name: '提案' })).toContainText('リリースノートの下書き');
+  await expect(notes.getByText('10 月分の変更点を下書きにまとめました。')).toBeVisible();
+  await capture(page, info, 'action-from-suggestion');
 
   // Pantaray's request to delete waits under the conversation for the user's 消す or 残す.
   await page.getByRole('button', { name: /^古いブランチを消す/ }).click();
@@ -982,7 +1068,7 @@ test('a project’s TODO opens beside its list, with the add bar under it offeri
 }, info) => {
   await openHome(page, '?project=project:hiring&todo=t-questions');
   const pane = page.getByRole('region', { name: '来週の面接の質問リストを作る' });
-  await expect(pane.getByRole('button', { name: '承認' })).toBeEnabled();
+  await expect(pane.getByRole('textbox', { name: 'メッセージ' })).toBeVisible();
   await expect(page.getByRole('textbox', { name: 'TODO を追加' })).toBeVisible();
   await expect(page.getByRole('combobox', { name: 'プロジェクト' })).toHaveCount(0);
   expect(await hasNoSideScroll(page)).toBe(true);
@@ -1106,7 +1192,7 @@ test('a narrow window stacks the conversation under the list header, with nothin
 
   await page.getByRole('button', { name: /^来週の面接の質問リストを作る/ }).click();
   const pane = page.getByRole('region', { name: '来週の面接の質問リストを作る' });
-  await expect(pane.getByRole('button', { name: '承認' })).toBeVisible();
+  await expect(pane.getByRole('button', { name: '送信' })).toBeVisible();
   // The list makes room; its close button brings it back.
   await expect(page.getByRole('checkbox', { name: '完了: 名刺 40 枚を入れておく' })).toBeHidden();
   expect(await hasNoSideScroll(page)).toBe(true);
@@ -1295,7 +1381,7 @@ test('beside a conversation the sidebar folds away and the rows keep their one l
   await page.getByRole('button', { name: /^来週の面接の質問リストを作る/ }).click();
   await expect(
     page.getByRole('region', { name: '来週の面接の質問リストを作る' }).getByRole('button', {
-      name: '承認',
+      name: '送信',
     })
   ).toBeVisible();
   await expect(sidebarOf(page)).toHaveCount(0);
@@ -1696,7 +1782,10 @@ test('beside a file the same rule sets the list, remembered apart from the conve
   await page.getByRole('button', { name: 'サイドバーを表示' }).click();
   await expect(sidebarOf(page)).toBeVisible();
   await page.setViewportSize({ width: 1170, height: 900 });
-  const approve = (await page.getByRole('button', { name: '承認' }).boundingBox())!;
-  expect(approve.x + approve.width).toBeLessThanOrEqual(1170);
+  const send = (await page
+    .getByRole('region', { name: '来週の面接の質問リストを作る' })
+    .getByRole('button', { name: '送信' })
+    .boundingBox())!;
+  expect(send.x + send.width).toBeLessThanOrEqual(1170);
   expect(await hasNoSideScroll(page)).toBe(true);
 });

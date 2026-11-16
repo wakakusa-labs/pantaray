@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { useI18n } from '@/context/useI18n';
 import type { OverlaySnapshot } from '../../../electron/src/orchestration/contracts';
@@ -6,16 +6,14 @@ import { isErrorEvent } from '../../../electron/src/orchestration/eventContracts
 import { isActionErrorMeta } from '../agent-overlay/model/overlayTypes';
 import { useActionApprovalMode } from '../agent-overlay/useActionApprovalMode';
 import { useOverlayComposerController } from '../agent-overlay/useOverlayComposerController';
-import { useClearReasonOnDismissal } from '../agent-overlay/useClearReasonOnDismissal';
 
 /**
  * Why the last answer did not go through. `accept_failed` is the accept call itself failing (main
  * sent nothing, or put its record back); `preflight_rejected` and `start_failed` are the backend's
- * answer to `execute_action`; `dismiss_failed` is its error answer to `dismiss_suggestion`.
+ * answer to `execute_action`.
  */
 export type SuggestionStartFailure =
   | { stage: 'accept_failed' }
-  | { stage: 'dismiss_failed' }
   | { stage: 'preflight_rejected' | 'start_failed'; message: string | null };
 
 export type SuggestionTaskPhase =
@@ -25,11 +23,10 @@ export type SuggestionTaskPhase =
   | 'streaming'
   | 'actionable'
   | 'starting'
-  | 'dismissing'
   | 'start_failed'
   /** An Action exists for it; the Action pane takes over. */
   | 'started'
-  /** Dismissed, with the user's reason if they gave one. A reply may still start an Action. */
+  /** Dismissed before replies replaced 見送る, with its reason if any. A reply may still start an Action. */
   | 'dismissed';
 
 type Scoped<T> = { suggestionId: string; value: T };
@@ -37,14 +34,14 @@ type Scoped<T> = { suggestionId: string; value: T };
 export function deriveSuggestionTaskPhase({
   snapshot,
   loadFailed,
-  pending,
+  accepting,
   failure,
   replyActionId,
   replying,
 }: {
   snapshot: OverlaySnapshot | null;
   loadFailed: boolean;
-  pending: 'accept' | 'dismiss' | null;
+  accepting: boolean;
   failure: SuggestionStartFailure | null;
   replyActionId: string | null;
   replying: boolean;
@@ -53,9 +50,8 @@ export function deriveSuggestionTaskPhase({
   if (snapshot.actionId !== null || replyActionId !== null) return 'started';
   if (snapshot.reactionState === 'rejected') return replying ? 'starting' : 'dismissed';
   if (failure?.stage === 'start_failed') return 'start_failed';
-  if (pending === 'dismiss') return 'dismissing';
   if (
-    pending === 'accept' ||
+    accepting ||
     replying ||
     snapshot.reactionState === 'accepted' ||
     snapshot.actionPhase !== 'idle'
@@ -70,13 +66,12 @@ function scoped<T>(state: Scoped<T> | null, suggestionId: string): T | null {
 }
 
 /**
- * One unanswered suggestion in the main window: main's record of it, and the ways to answer it.
+ * One unanswered suggestion in the main window: main's record of it, and the reply that answers it.
  *
- * Every answer goes the way the Overlay sends it. Accepting is `ws:acceptAction` with no command id,
- * so main reuses the command it already holds for this suggestion; dismissing is
- * `dismiss_suggestion` on `ws:send`, with what the user wrote as its reason; replying to a
- * message-only suggestion, or to one the user dismissed, opens a new Action with
- * `reply_to_suggestion_id` through the Overlay's composer controller.
+ * A reply goes the way the Overlay sends it. To an offer it is the acceptance: `ws:acceptAction`
+ * with no command id, so main reuses the command it already holds for this suggestion, and the
+ * reply as its supplement. To a message-only suggestion, or to one dismissed earlier, it opens a
+ * new Action with `reply_to_suggestion_id` through the Overlay's composer controller.
  */
 export function useSuggestionTask(suggestionId: string) {
   const { language } = useI18n();
@@ -90,10 +85,9 @@ export function useSuggestionTask(suggestionId: string) {
 
   const [record, setRecord] = useState<Scoped<OverlaySnapshot> | null>(null);
   const [loadFailedFor, setLoadFailedFor] = useState<string | null>(null);
-  const [pendingState, setPending] = useState<Scoped<'accept' | 'dismiss'> | null>(null);
+  const [acceptingFor, setAcceptingFor] = useState<string | null>(null);
   const [failureState, setFailure] = useState<Scoped<SuggestionStartFailure> | null>(null);
   const snapshot = scoped(record, suggestionId);
-  const pending = scoped(pendingState, suggestionId);
   const failure = scoped(failureState, suggestionId);
 
   useEffect(() => {
@@ -118,31 +112,15 @@ export function useSuggestionTask(suggestionId: string) {
     };
   }, [suggestions, suggestionId]);
 
-  // The suggestion this pane sent dismiss_suggestion for and has no answer to yet.
-  const dismissingRef = useRef<string | null>(null);
-
-  // main's record keeps neither why a start failed nor that a dismissal did; the backend's error
-  // events say it.
+  // main's record does not keep why a start failed; the backend's error events say it.
   useEffect(() => {
     if (!orchestration?.onEvent) return;
     return orchestration.onEvent((event) => {
-      if (!isErrorEvent(event)) return;
-      // The backend answers a dismissal it could not read or save with a suggestion error.
-      if (
-        event.meta?.kind === 'suggestion' &&
-        event.meta.suggestion_id === suggestionId &&
-        dismissingRef.current === suggestionId
-      ) {
-        dismissingRef.current = null;
-        setPending(null);
-        setFailure({ suggestionId, value: { stage: 'dismiss_failed' } });
-        return;
-      }
-      if (!isActionErrorMeta(event.meta)) return;
+      if (!isErrorEvent(event) || !isActionErrorMeta(event.meta)) return;
       const { stage, suggestion_id } = event.meta;
       if (suggestion_id !== suggestionId) return;
       if (stage !== 'preflight_rejected' && stage !== 'start_failed') return;
-      setPending(null);
+      setAcceptingFor(null);
       setFailure({
         suggestionId,
         value: { stage, message: event.data.error_message || null },
@@ -167,80 +145,49 @@ export function useSuggestionTask(suggestionId: string) {
   const phase = deriveSuggestionTaskPhase({
     snapshot,
     loadFailed: loadFailedFor === suggestionId,
-    pending,
+    accepting: acceptingFor === suggestionId,
     failure,
     replyActionId,
     replying: submission !== null && submission.state !== 'failed',
   });
   const permissionsReady = approvalMode.mode !== null && !approvalMode.isSaving;
 
-  const canAccept =
-    phase === 'actionable' &&
-    contract === 'action_offer' &&
+  const hasWords = composer.hasMessage;
+  // A reply to an unanswered offer accepts it, with the reply as what to do next.
+  const repliesToOffer = phase === 'actionable' && contract === 'action_offer';
+  const canSend =
+    (repliesToOffer ||
+      (phase === 'actionable' && contract === 'message_only') ||
+      phase === 'dismissed') &&
     permissionsReady &&
+    submission === null &&
+    hasWords &&
     composer.composer.attachmentsInFlight === 0 &&
-    !composer.supplementInvalid;
-  const accept = async () => {
-    if (!canAccept || !orchestration || approvalMode.mode === null) return;
-    setPending({ suggestionId, value: 'accept' });
+    !(repliesToOffer && composer.supplementInvalid);
+  const send = () => {
+    const mode = approvalMode.mode;
+    if (!canSend || snapshot === null || mode === null) return;
+    if (!repliesToOffer) {
+      composer.submitDraft(null, true, null, snapshot.lastSequence, mode, suggestionId);
+      return;
+    }
+    if (!orchestration) return;
+    setAcceptingFor(suggestionId);
     setFailure(null);
-    try {
-      await orchestration.acceptAction({
+    orchestration
+      .acceptAction({
         suggestionId,
         commandId: null,
         supplement: composer.supplement,
         supplementProjectRefs: composer.refs.project_refs,
         supplementWorkRefs: composer.refs.work_refs,
-        approvalMode: approvalMode.mode,
+        approvalMode: mode,
         images: composer.images,
         files: composer.files,
-      });
-    } catch {
-      setFailure({ suggestionId, value: { stage: 'accept_failed' } });
-    } finally {
+      })
+      .catch(() => setFailure({ suggestionId, value: { stage: 'accept_failed' } }))
       // The record main stored for the accept now says it is starting.
-      setPending((current) => (current?.suggestionId === suggestionId ? null : current));
-    }
-  };
-
-  const hasWords = composer.hasMessage;
-  const canReply =
-    ((phase === 'actionable' && contract === 'message_only') || phase === 'dismissed') &&
-    permissionsReady &&
-    submission === null &&
-    hasWords &&
-    composer.composer.attachmentsInFlight === 0;
-  const reply = () => {
-    if (!canReply || snapshot === null) return;
-    composer.submitDraft(null, true, null, snapshot.lastSequence, approvalMode.mode, suggestionId);
-  };
-  const reason = composer.supplement;
-  const clearReasonOnDismissal = useClearReasonOnDismissal(
-    suggestionId,
-    phase === 'dismissed',
-    reason,
-    composer.clearMessage
-  );
-
-  // 見送る takes only words, as the reason: attachments wait for a message of their own.
-  const canDismiss =
-    phase === 'actionable' &&
-    contract === 'action_offer' &&
-    composer.composer.attachments.length === 0 &&
-    composer.composer.attachmentsInFlight === 0 &&
-    !composer.supplementInvalid;
-  const dismiss = () => {
-    if (!canDismiss || !orchestration) return;
-    clearReasonOnDismissal(reason);
-    // ws:send is fire-and-forget: a transport failure in main never reaches this window.
-    dismissingRef.current = suggestionId;
-    setPending({ suggestionId, value: 'dismiss' });
-    setFailure(null);
-    orchestration.send({
-      event: 'dismiss_suggestion',
-      data:
-        reason === null ? { suggestion_id: suggestionId } : { suggestion_id: suggestionId, reason },
-    });
+      .finally(() => setAcceptingFor((current) => (current === suggestionId ? null : current)));
   };
 
   return {
@@ -250,11 +197,7 @@ export function useSuggestionTask(suggestionId: string) {
     actionId: snapshot?.actionId ?? replyActionId,
     composer,
     approvalMode,
-    canAccept,
-    accept,
-    canDismiss,
-    dismiss,
-    canReply,
-    reply,
+    canSend,
+    send,
   };
 }

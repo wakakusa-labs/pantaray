@@ -54,20 +54,13 @@ export const ComposerForm = styled.form`
 
 /**
  * 枠の下端に残る操作の行。追加と権限が左に並び、送信だけが反対の端へ寄る。
- * 決定ボタンの並びは送信の円より幅を取るので、狭い枠では次の行の右端へ折り返す。
+ * 狭い枠では入りきらない操作が次の行へ折り返す。
  */
 export const ComposerActions = styled.div`
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px;
-`;
-
-/** 送信の円の代わりに右端へ寄せる、ホスト側の決定ボタンの並び。 */
-const ComposerDecision = styled.div`
-  display: flex;
-  gap: 8px;
-  margin-left: auto;
 `;
 
 /**
@@ -178,7 +171,7 @@ type OverlayComposerProps = {
   approvalMode: ActionApprovalModeControl;
   /** The mode read is used as it is: its menu shows only to retry a read that failed. */
   hideApprovalMode?: boolean;
-  /** The words shown in the empty field, in place of the default for `action`. */
+  /** The words shown in the empty field, in place of the default. */
   placeholder?: string;
   draft: string;
   mentions: readonly ComposerMention[];
@@ -194,11 +187,9 @@ type OverlayComposerProps = {
   canAttach: boolean;
   /**
    * 右端のボタンが担う操作。本文があれば送信、空でエージェントが動いていれば
-   * 停止、空で直前に止めたままなら再開。`decision` はホストのボタン（承認の可否など）が
-   * 送信の代わりに右端へ並び、本文はそのボタンが使う。Enter ではどれも押さない。
-   * `canDismiss` はそのボタンに「見送る」があるかで、本文の案内もそれに合わせる。
+   * 停止、空で直前に止めたままなら再開。
    */
-  action: 'send' | 'stop' | 'resume' | { decision: ReactNode; canDismiss: boolean };
+  action: 'send' | 'stop' | 'resume';
   canSend: boolean;
   /** 「再開」の要求が通らなかった。次の入力で消える。 */
   resumeFailed: boolean;
@@ -340,7 +331,6 @@ export function OverlayComposer({
   const { t } = useI18n();
   const attachInputRef = useRef<HTMLInputElement>(null);
   const isReadOnly = retryAcceptance || Boolean(submissionControls);
-  const decides = typeof action === 'object';
   const sendButton = (
     <ComposerPrimaryButton
       type="submit"
@@ -357,7 +347,7 @@ export function OverlayComposer({
       className="overlay-composer"
       onSubmit={(event) => {
         event.preventDefault();
-        if (canSend && !decides) onSubmit();
+        if (canSend) onSubmit();
       }}
       onDragOver={(event) => event.preventDefault()}
       onDrop={(event) => {
@@ -365,9 +355,7 @@ export function OverlayComposer({
         if (!isReadOnly) onAttachFiles(Array.from(event.dataTransfer.files));
       }}
     >
-      <ScreenReaderOnly htmlFor={MESSAGE_FIELD_ID}>
-        {t(decides ? 'overlay.supplement.label' : 'overlay.composer.label')}
-      </ScreenReaderOnly>
+      <ScreenReaderOnly htmlFor={MESSAGE_FIELD_ID}>{t('overlay.composer.label')}</ScreenReaderOnly>
       {quoting ? (
         <ComposerQuotes quoting={quoting} readOnly={isReadOnly} textareaRef={textareaRef} />
       ) : null}
@@ -377,26 +365,16 @@ export function OverlayComposer({
         value={draft}
         mentions={mentions}
         readOnly={isReadOnly}
-        placeholder={
-          placeholder ??
-          t(
-            !decides
-              ? 'overlay.composer.placeholder'
-              : action.canDismiss
-                ? 'overlay.supplement.placeholder'
-                : 'overlay.supplement.placeholderAcceptOnly'
-          )
-        }
+        placeholder={placeholder ?? t('overlay.composer.placeholder')}
         invalid={validationFailed}
         describedBy={validationFailed ? MESSAGE_ERROR_ID : undefined}
         onChange={onDraftChange}
         onAddProject={onAddProject}
         onKeyDown={(event) => {
           if (event.key !== 'Enter' || event.shiftKey) return;
-          // 改行は Shift+Enter だけが入れる。送れない状態でも Enter で改行させない。決定は
-          // どちらを選ぶかを本人が押して決めるので、Enter は何もしない。
+          // 改行は Shift+Enter だけが入れる。送れない状態でも Enter で改行させない。
           event.preventDefault();
-          if (canSend && !decides) onSubmit();
+          if (canSend) onSubmit();
         }}
         onPasteFiles={onAttachFiles}
       />
@@ -409,7 +387,7 @@ export function OverlayComposer({
       />
       {validationFailed ? (
         <ComposerAlert id={MESSAGE_ERROR_ID} role="alert">
-          {t(decides ? 'overlay.supplement.invalid' : 'overlay.composer.invalid')}
+          {t('overlay.composer.invalid')}
         </ComposerAlert>
       ) : null}
       {resumeFailed ? (
@@ -427,13 +405,7 @@ export function OverlayComposer({
       {submissionControls ??
         (retryAcceptance ? (
           // A failed acceptance is retried as it was sent: nothing can be added to it.
-          <ComposerActions>
-            {typeof action === 'object' ? (
-              <ComposerDecision>{action.decision}</ComposerDecision>
-            ) : (
-              sendButton
-            )}
-          </ComposerActions>
+          <ComposerActions>{sendButton}</ComposerActions>
         ) : (
           <ComposerActions>
             <input
@@ -461,9 +433,7 @@ export function OverlayComposer({
             {hideApprovalMode && approvalMode.errorKey === null ? null : (
               <ApprovalModeMenu approvalMode={approvalMode} />
             )}
-            {typeof action === 'object' ? (
-              <ComposerDecision>{action.decision}</ComposerDecision>
-            ) : action === 'send' ? (
+            {action === 'send' ? (
               sendButton
             ) : action === 'stop' ? (
               <ComposerStopButton onStop={onStop} stopping={stopState === 'stopping'} />

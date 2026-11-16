@@ -235,8 +235,6 @@ describe('ActionTaskPane', () => {
     expect(conversation?.firstElementChild).toBe(suggestion);
     expect(suggestion.querySelector('strong')?.textContent).toBe('invoice');
     expect(suggestion.textContent).toContain('before month end?');
-    // Marked approved, as the small window marks it.
-    expect(within(suggestion).getByText('Approved')).toBeInTheDocument();
     expect(screen.getByText('answer of run-1')).toBeInTheDocument();
   });
 

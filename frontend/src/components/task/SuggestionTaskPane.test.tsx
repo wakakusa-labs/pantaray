@@ -57,30 +57,10 @@ function actionError(
   };
 }
 
-// The shape the backend's dismiss handler sends when it cannot read or save the suggestion.
-function suggestionError(stage: string, suggestionId = 'sug-1'): OrchestrationServerEvent {
-  return {
-    event: 'error',
-    data: {
-      error_type: 'internal_error',
-      error_code: 'WS_DEPENDENCY_UNAVAILABLE',
-      error_message: 'Failed to persist suggestion state.',
-      severity: 'error',
-    },
-    meta: {
-      kind: 'suggestion',
-      suggestion_id: suggestionId,
-      stage,
-      error_code: 'WS_DEPENDENCY_UNAVAILABLE',
-    },
-  };
-}
-
 let snapshotListener: ((payload: OverlaySnapshotPayload) => void) | null;
 let eventListener: ((event: OrchestrationServerEvent) => void) | null;
 const read = vi.fn<NonNullable<ElectronBridge['suggestions']>['read']>();
 const acceptAction = vi.fn<NonNullable<ElectronBridge['orchestration']>['acceptAction']>();
-const send = vi.fn();
 const submitMessage = vi.fn<(request: unknown) => Promise<ActionMessageSubmitResult>>();
 const onStarted = vi.fn();
 
@@ -88,18 +68,13 @@ const publish = (snapshot: OverlaySnapshot) =>
   act(async () => snapshotListener?.({ snapshot, initialUiState: null }));
 const emit = (event: OrchestrationServerEvent) => act(async () => eventListener?.(event));
 
-async function renderPane(
-  suggestionId = 'sug-1',
-  requestedFile: string | null = null,
-  canDismiss = true
-) {
+async function renderPane(suggestionId = 'sug-1', requestedFile: string | null = null) {
   const rendered = render(
     <UiLanguageProvider initialLanguage="en">
       <SuggestionTaskPane
         suggestionId={suggestionId}
         title="Invoice draft"
         requestedFile={requestedFile}
-        canDismiss={canDismiss}
         onStarted={onStarted}
         onAddProject={() => undefined}
       />
@@ -109,15 +84,15 @@ async function renderPane(
   return rendered;
 }
 
-const acceptButton = () => screen.getByRole('button', { name: 'Accept' });
-const dismissButton = () => screen.getByRole('button', { name: 'Dismiss suggestion' });
+const field = () => screen.getByRole('textbox', { name: 'Message' });
+const sendButton = () => screen.getByRole('button', { name: 'Send' });
+const write = (text: string) => fireEvent.change(field(), { target: { value: text } });
 
 beforeEach(() => {
   snapshotListener = null;
   eventListener = null;
   read.mockReset().mockResolvedValue(suggestion());
   acceptAction.mockReset().mockResolvedValue(null);
-  send.mockReset();
   submitMessage.mockReset();
   onStarted.mockReset();
   const bridge = createTaskDraftBridge();
@@ -142,7 +117,6 @@ beforeEach(() => {
         },
       },
       orchestration: {
-        send,
         acceptAction,
         onEvent: (callback: typeof eventListener) => {
           eventListener = callback;
@@ -168,62 +142,66 @@ afterEach(() => {
 });
 
 describe('SuggestionTaskPane', () => {
-  it('shows the suggestion with its title and decision, without a badge', async () => {
+  it('shows the suggestion with its title and a reply field, without a badge', async () => {
     await renderPane();
 
     expect(read).toHaveBeenCalledWith({ suggestionId: 'sug-1' });
     expect(screen.getByRole('heading', { name: 'Invoice draft' })).toBeInTheDocument();
     expect(screen.queryByText('Suggestion')).not.toBeInTheDocument();
     expect(screen.getByText('Draft the invoice before month end?')).toBeInTheDocument();
-    expect(acceptButton()).toBeEnabled();
-    expect(dismissButton()).toBeEnabled();
-    expect(screen.getByLabelText('Additional instructions (optional)')).toHaveAttribute(
-      'placeholder',
-      "Conditions to approve with, or why you're passing (optional)"
-    );
-  });
-
-  it('puts dismiss, then accept, where the composer sends, after its other controls', async () => {
-    await renderPane();
-
+    expect(field()).toHaveAttribute('placeholder', 'Reply');
+    // The field, then adding files and sending: the approval mode is used as it was read.
     const composer = document.querySelector('form.overlay-composer');
-    expect(screen.queryByRole('button', { name: 'Send' })).toBeNull();
-    // Reading and tab order: the field, the composer's own controls, then decline and approve.
     const order = Array.from(composer?.querySelectorAll('textarea, button') ?? [], (element) =>
-      element instanceof HTMLTextAreaElement
-        ? 'field'
-        : (element.getAttribute('aria-label') ?? element.textContent)
+      element instanceof HTMLTextAreaElement ? 'field' : element.getAttribute('aria-label')
     );
-    expect(order[0]).toBe('field');
-    expect(order[1]).toBe('Add files');
-    expect(order.slice(-2)).toEqual(['Dismiss suggestion', 'Accept']);
+    expect(order).toEqual(['field', 'Add files', 'Send']);
+    expect(sendButton()).toBeDisabled();
   });
 
-  it("offers accept alone for a TODO's suggestion, which is let go by deleting the TODO", async () => {
-    await renderPane('sug-1', null, false);
-
-    expect(screen.queryByRole('button', { name: 'Dismiss suggestion' })).toBeNull();
-    // Nothing on screen dismisses it, so the field asks for no reason to.
-    expect(screen.getByLabelText('Additional instructions (optional)')).toHaveAttribute(
-      'placeholder',
-      'Conditions to approve with (optional)'
-    );
-    fireEvent.click(acceptButton());
-    expect(acceptAction).toHaveBeenCalledWith(expect.objectContaining({ suggestionId: 'sug-1' }));
-    expect(acceptButton()).toBeDisabled();
-  });
-
-  it('leaves both decisions to their buttons: Enter neither approves nor dismisses', async () => {
+  it('accepts an offer once with the reply, by Enter or Send, and stays disabled while starting', async () => {
+    let settle: (value: null) => void = () => undefined;
+    acceptAction.mockReturnValueOnce(new Promise((resolve) => (settle = resolve)));
     await renderPane();
-    const field = screen.getByLabelText('Additional instructions (optional)');
-    fireEvent.change(field, { target: { value: 'Use the new unit price' } });
 
-    fireEvent.keyDown(field, { key: 'Enter' });
+    write(' Use the new unit price ');
+    fireEvent.keyDown(field(), { key: 'Enter' });
+    fireEvent.keyDown(field(), { key: 'Enter' });
+    fireEvent.click(sendButton());
 
-    expect(acceptAction).not.toHaveBeenCalled();
-    expect(send).not.toHaveBeenCalled();
-    expect(field).toHaveValue('Use the new unit price');
-    expect(acceptButton()).toBeEnabled();
+    // main reuses the command it holds for this suggestion when no command id is given.
+    expect(acceptAction).toHaveBeenCalledExactlyOnceWith({
+      suggestionId: 'sug-1',
+      commandId: null,
+      supplement: 'Use the new unit price',
+      supplementProjectRefs: [],
+      supplementWorkRefs: [],
+      approvalMode: 'prompt_each_time',
+      images: [],
+      files: [],
+    });
+    expect(submitMessage).not.toHaveBeenCalled();
+    expect(sendButton()).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent('Starting');
+
+    await publish(suggestion({ commandId: 'cmd-1', actionPhase: 'requesting', isLive: true }));
+    await act(async () => settle(null));
+    expect(sendButton()).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent('Starting');
+    fireEvent.click(sendButton());
+    expect(acceptAction).toHaveBeenCalledTimes(1);
+    expect(onStarted).not.toHaveBeenCalled();
+
+    await publish(
+      suggestion({
+        commandId: 'cmd-1',
+        reactionState: 'accepted',
+        actionPhase: 'processing',
+        actionId: 'act-1',
+        processId: 'run-1',
+      })
+    );
+    expect(onStarted).toHaveBeenCalledExactlyOnceWith('act-1', null);
   });
 
   it('offers the same header buttons as a task: copy the link, and copy the suggestion', async () => {
@@ -304,16 +282,15 @@ describe('SuggestionTaskPane', () => {
     expect(screen.getByRole('button', { name: 'Open small' })).toBeDisabled();
   });
 
-  it('keeps an unsent extra instruction for its return, and none that went with the approval', async () => {
-    const field = () => screen.getByLabelText('Additional instructions (optional)');
+  it('keeps an unsent reply for its return, and none that went with the acceptance', async () => {
     const first = await renderPane('sug-1');
-    fireEvent.change(field(), { target: { value: 'Use the new unit price' } });
+    write('Use the new unit price');
     first.unmount();
 
     const second = await renderPane('sug-1');
     expect(field()).toHaveValue('Use the new unit price');
-    fireEvent.click(acceptButton());
-    // The extra instruction went with the approval.
+    fireEvent.click(sendButton());
+    // The reply went with the acceptance.
     await publish(
       suggestion({ reactionState: 'accepted', actionPhase: 'requesting', lastSequence: 5 })
     );
@@ -324,9 +301,8 @@ describe('SuggestionTaskPane', () => {
   });
 
   it('keeps a draft when the pane is left while the suggestion loads or after its read failed', async () => {
-    const field = () => screen.getByLabelText('Additional instructions (optional)');
     const first = await renderPane('sug-1');
-    fireEvent.change(field(), { target: { value: 'Use the new unit price' } });
+    write('Use the new unit price');
     first.unmount();
 
     read.mockReturnValueOnce(new Promise(() => {}));
@@ -342,194 +318,55 @@ describe('SuggestionTaskPane', () => {
 
   it('keeps a draft written after a dismissal for its return', async () => {
     read.mockResolvedValue(suggestion({ reactionState: 'rejected' }));
-    const message = () => screen.getByRole('textbox', { name: 'Message' });
     const first = await renderPane('sug-1');
-    fireEvent.change(message(), { target: { value: 'Only the summary, please' } });
+    write('Only the summary, please');
     first.unmount();
 
     await renderPane('sug-1');
-    expect(message()).toHaveValue('Only the summary, please');
+    expect(field()).toHaveValue('Only the summary, please');
   });
 
-  it('accepts with the extra instruction and no command id, and stays disabled while starting', async () => {
-    let settle: (value: null) => void = () => undefined;
-    acceptAction.mockReturnValueOnce(new Promise((resolve) => (settle = resolve)));
-    await renderPane();
-
-    fireEvent.change(screen.getByLabelText('Additional instructions (optional)'), {
-      target: { value: ' Use the new unit price ' },
-    });
-    fireEvent.click(acceptButton());
-
-    // main reuses the command it holds for this suggestion when no command id is given.
-    expect(acceptAction).toHaveBeenCalledWith({
-      suggestionId: 'sug-1',
-      commandId: null,
-      supplement: 'Use the new unit price',
-      supplementProjectRefs: [],
-      supplementWorkRefs: [],
-      approvalMode: 'prompt_each_time',
-      images: [],
-      files: [],
-    });
-    expect(acceptButton()).toBeDisabled();
-    expect(dismissButton()).toBeDisabled();
-    expect(screen.getByRole('status')).toHaveTextContent('Starting');
-
-    await publish(suggestion({ commandId: 'cmd-1', actionPhase: 'requesting', isLive: true }));
-    await act(async () => settle(null));
-    expect(acceptButton()).toBeDisabled();
-    expect(screen.getByRole('status')).toHaveTextContent('Starting');
-    fireEvent.click(acceptButton());
-    expect(acceptAction).toHaveBeenCalledTimes(1);
-    expect(onStarted).not.toHaveBeenCalled();
-
-    await publish(
-      suggestion({
-        commandId: 'cmd-1',
-        reactionState: 'accepted',
-        actionPhase: 'processing',
-        actionId: 'act-1',
-        processId: 'run-1',
-      })
-    );
-    expect(onStarted).toHaveBeenCalledWith('act-1', null);
-    expect(onStarted).toHaveBeenCalledTimes(1);
-  });
-
-  it('lets the user accept again when the accept call fails', async () => {
+  it('lets the user send the same reply again when the accept call fails', async () => {
     acceptAction.mockRejectedValueOnce(new Error('ipc'));
     await renderPane();
 
-    fireEvent.click(acceptButton());
+    write('Use the new unit price');
+    fireEvent.click(sendButton());
     await act(async () => {});
 
     expect(screen.getByRole('alert')).toHaveTextContent(
-      'Could not confirm this action. Try approving again.'
+      'Your reply could not be sent. Send it again.'
     );
-    expect(acceptButton()).toBeEnabled();
-    fireEvent.click(acceptButton());
+    // It is retried as it was sent.
+    expect(field()).toHaveAttribute('readonly');
+    fireEvent.click(sendButton());
     expect(acceptAction).toHaveBeenCalledTimes(2);
-    expect(acceptAction.mock.calls[1][0].commandId).toBeNull();
-  });
-
-  it('dismisses through dismiss_suggestion and then keeps only the composer', async () => {
-    await renderPane();
-
-    fireEvent.click(dismissButton());
-
-    expect(send).toHaveBeenCalledWith({
-      event: 'dismiss_suggestion',
-      data: { suggestion_id: 'sug-1' },
+    expect(acceptAction.mock.calls[1][0]).toMatchObject({
+      commandId: null,
+      supplement: 'Use the new unit price',
     });
-    expect(acceptAction).not.toHaveBeenCalled();
-    expect(acceptButton()).toBeDisabled();
-    expect(dismissButton()).toBeDisabled();
-
-    await publish(suggestion({ reactionState: 'rejected', lastSequence: 5 }));
-    expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Dismiss suggestion' })).toBeNull();
-    expect(screen.getByText('You dismissed this suggestion.')).toBeInTheDocument();
-    // Nothing written: the dismissal stands.
-    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveAttribute(
-      'placeholder',
-      'Send a message'
-    );
-    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
-    expect(submitMessage).not.toHaveBeenCalled();
-    expect(onStarted).not.toHaveBeenCalled();
-  });
-
-  it('dismisses with the words as the reason, starts nothing, and shows the reason', async () => {
-    await renderPane();
-    fireEvent.change(screen.getByLabelText('Additional instructions (optional)'), {
-      target: { value: ' Already sent it by hand ' },
-    });
-
-    fireEvent.click(dismissButton());
-    expect(send).toHaveBeenCalledWith({
-      event: 'dismiss_suggestion',
-      data: { suggestion_id: 'sug-1', reason: 'Already sent it by hand' },
-    });
-
-    await publish(
-      suggestion({
-        reactionState: 'rejected',
-        dismissReason: 'Already sent it by hand',
-        lastSequence: 5,
-      })
-    );
-    expect(screen.getByRole('article', { name: 'Your reason for dismissing' })).toHaveTextContent(
-      'Already sent it by hand'
-    );
-    expect(screen.getByText('You dismissed this suggestion.')).toBeInTheDocument();
-    // The reason was recorded: the composer is empty again, for a reply if the user wants one.
-    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('');
-    expect(submitMessage).not.toHaveBeenCalled();
-    expect(acceptAction).not.toHaveBeenCalled();
-    expect(onStarted).not.toHaveBeenCalled();
-  });
-
-  it('keeps 見送る for words: it waits while files are attached', async () => {
-    const attachFile = vi.mocked(window.electron!.actions!.attachFile);
-    attachFile.mockResolvedValueOnce({
-      attachmentId: '00000000-0000-4000-8000-000000000001',
-      name: 'quote.pdf',
-      byteSize: 9,
-    });
-    await renderPane();
-
-    await act(async () => {
-      fireEvent.change(document.querySelector('input[type="file"]')!, {
-        target: { files: [new File(['%PDF-1.4\n'], 'quote.pdf', { type: 'application/pdf' })] },
-      });
-    });
-
-    await waitFor(() => expect(dismissButton()).toBeDisabled());
-    expect(acceptButton()).toBeEnabled();
-  });
-
-  it('lets the user dismiss again when the backend answers the dismissal with an error', async () => {
-    await renderPane();
-    // A suggestion error the pane did not cause leaves it as it is.
-    await emit(suggestionError('load_state_failed'));
-    expect(screen.queryByRole('alert')).toBeNull();
-
-    fireEvent.click(dismissButton());
-    await emit(suggestionError('load_state_failed', 'sug-2'));
-    expect(dismissButton()).toBeDisabled();
-    await emit(suggestionError('persist_status_failed'));
-
-    expect(screen.getByRole('alert')).toHaveTextContent(
-      'Could not dismiss this suggestion. Try again.'
-    );
-    expect(acceptButton()).toBeEnabled();
-    expect(dismissButton()).toBeEnabled();
-    expect(screen.getByLabelText('Additional instructions (optional)')).toBeInTheDocument();
-    fireEvent.click(dismissButton());
-    expect(send).toHaveBeenCalledTimes(2);
-    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('returns to actionable with the error after preflight_rejected', async () => {
     await renderPane();
-    fireEvent.click(acceptButton());
+    write('Use the new unit price');
+    fireEvent.click(sendButton());
     await publish(suggestion({ commandId: 'cmd-1', actionPhase: 'requesting', isLive: true }));
-    expect(acceptButton()).toBeDisabled();
+    expect(sendButton()).toBeDisabled();
 
     // main resets its record before it forwards the event.
     await publish(suggestion({ lastSequence: 6 }));
     await emit(actionError('preflight_rejected', 'No AI connection is set up.'));
 
     expect(screen.getByRole('alert')).toHaveTextContent('No AI connection is set up.');
-    expect(acceptButton()).toBeEnabled();
-    expect(dismissButton()).toBeEnabled();
+    expect(sendButton()).toBeEnabled();
     expect(screen.queryByText('Starting')).toBeNull();
   });
 
   it('shows the public message when the start fails', async () => {
     await renderPane();
-    fireEvent.click(acceptButton());
+    write('Use the new unit price');
+    fireEvent.click(sendButton());
     await publish(
       suggestion({
         commandId: 'cmd-1',
@@ -541,7 +378,7 @@ describe('SuggestionTaskPane', () => {
     await emit(actionError('start_failed', 'The Action could not start.'));
 
     expect(screen.getByRole('alert')).toHaveTextContent('The Action could not start.');
-    expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: 'Message' })).toBeNull();
     expect(screen.queryByText('Starting')).toBeNull();
   });
 
@@ -553,10 +390,8 @@ describe('SuggestionTaskPane', () => {
     submitMessage.mockReturnValueOnce(new Promise((resolve) => (settle = resolve)));
     await renderPane();
 
-    expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Dismiss suggestion' })).toBeNull();
-    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Yes, please' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    write('Yes, please');
+    fireEvent.click(sendButton());
 
     expect(submitMessage).toHaveBeenCalledWith({
       target: {
@@ -593,23 +428,27 @@ describe('SuggestionTaskPane', () => {
     expect(onStarted).toHaveBeenCalledWith('act-reply', null);
   });
 
-  it('answers a dismissed suggestion with a reply that starts a new Action', async () => {
+  it('shows a past dismissal and answers it with a reply that starts a new Action', async () => {
     const messageId = '00000000-0000-4000-8000-000000000043';
     vi.spyOn(crypto, 'randomUUID').mockReturnValueOnce(messageId);
     read.mockResolvedValueOnce(
-      suggestion({ reactionState: 'rejected', reactionTimestamp: '2026-10-10T00:01:00Z' })
+      suggestion({
+        reactionState: 'rejected',
+        reactionTimestamp: '2026-10-10T00:01:00Z',
+        dismissReason: 'Already sent it by hand',
+      })
     );
     let settle: (result: ActionMessageSubmitResult) => void = () => undefined;
     submitMessage.mockReturnValueOnce(new Promise((resolve) => (settle = resolve)));
     await renderPane();
 
     expect(screen.getByText('Draft the invoice before month end?')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Dismiss suggestion' })).toBeNull();
-    fireEvent.change(screen.getByLabelText('Message'), {
-      target: { value: 'Only the summary, please' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(screen.getByRole('article', { name: 'Your reason for dismissing' })).toHaveTextContent(
+      'Already sent it by hand'
+    );
+    expect(screen.getByText('You dismissed this suggestion.')).toBeInTheDocument();
+    write('Only the summary, please');
+    fireEvent.click(sendButton());
 
     expect(submitMessage).toHaveBeenCalledWith({
       target: {
@@ -663,8 +502,8 @@ describe('SuggestionTaskPane', () => {
     submitMessage.mockResolvedValueOnce({ kind: 'reply_exists', actionId: 'act-existing' });
     await renderPane();
 
-    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Also this' } });
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Send' })));
+    write('Also this');
+    await act(async () => fireEvent.click(sendButton()));
 
     expect(onStarted).toHaveBeenCalledWith('act-existing', null);
   });
@@ -676,9 +515,6 @@ describe('SuggestionTaskPane', () => {
     await renderPane();
 
     expect(onStarted).toHaveBeenCalledWith('act-9', null);
-    // No decision is offered; only the header's buttons remain.
-    expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Dismiss suggestion' })).toBeNull();
   });
 
   it('ignores snapshots and errors of other suggestions', async () => {
@@ -690,7 +526,8 @@ describe('SuggestionTaskPane', () => {
     await publish(suggestion({ suggestionId: 'sug-2', actionId: 'act-2', lastSequence: 9 }));
     await emit(actionError('preflight_rejected', 'Not this one.', 'sug-2'));
 
-    expect(acceptButton()).toBeEnabled();
+    write('Use the new unit price');
+    expect(sendButton()).toBeEnabled();
     expect(screen.queryByRole('alert')).toBeNull();
     expect(onStarted).not.toHaveBeenCalled();
   });

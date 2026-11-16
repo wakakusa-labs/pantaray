@@ -367,7 +367,6 @@ const SuggestionHistoryPage = () => {
         suggestionId={id}
         title={title}
         requestedFile={requestedFile}
-        canDismiss
         onStarted={(actionId, preview) => {
           select(`action:${actionId}`, { replace: true });
           if (preview) setHandedPreview({ from: selection, actionId, preview });

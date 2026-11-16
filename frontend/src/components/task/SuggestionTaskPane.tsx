@@ -1,10 +1,8 @@
 import { Check, CircleAlert, Clipboard, PictureInPicture2 } from 'lucide-react';
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 
-import { ApprovalDecisionButton } from '@/components/agent-overlay/ApprovalDecisionButton';
 import { DismissalReason } from '@/components/agent-overlay/DismissalReason';
 import { MarkdownBlock } from '@/components/agent-overlay/MarkdownRenderer';
-import { SuggestionDecisionButtons } from '@/components/agent-overlay/SuggestionDecisionButtons';
 import { useClipboardCopy } from '@/components/agent-overlay/useClipboardCopy';
 import { useCopyWorkLink } from '@/history/useCopyWorkLink';
 import {
@@ -27,7 +25,6 @@ const COPY = {
     starting: 'Starting',
     dismissed: 'You dismissed this suggestion.',
     notStarted: 'This could not be started. Try again.',
-    dismissFailed: 'Could not dismiss this suggestion. Try again.',
     copySuggestion: 'Copy suggestion',
     openSmallFailed: 'Could not open this suggestion in a small window.',
   },
@@ -37,7 +34,6 @@ const COPY = {
     starting: '開始しています',
     dismissed: 'この提案は見送りました。',
     notStarted: '開始できませんでした。もう一度お試しください。',
-    dismissFailed: 'この提案を見送れませんでした。もう一度お試しください。',
     copySuggestion: '提案をコピー',
     openSmallFailed: 'この提案を小さく開けませんでした。',
   },
@@ -52,15 +48,10 @@ type SuggestionTaskPaneProps = {
   /** One of its files to preview, asked for by an Overlay chip; each new request opens it. */
   requestedFile: string | null;
   /**
-   * Called once an Action exists for the suggestion: accepted, or replied to. The file open in
-   * the preview goes with it, so the Action's pane taking over keeps it open.
+   * Called once an Action exists for the suggestion, started by a reply here or elsewhere. The
+   * file open in the preview goes with it, so the Action's pane taking over keeps it open.
    */
   onStarted: (actionId: string, preview: TaskPreview | null) => void;
-  /**
-   * Whether 見送る is offered. A TODO's suggestion is let go by deleting the TODO, so its pane
-   * offers 承認 alone.
-   */
-  canDismiss: boolean;
   /** The composer's @-mention "Add project" option. */
   onAddProject: () => void;
   /** Closes the pane, last in its header; for the page that opened the pane beside a list. */
@@ -68,17 +59,15 @@ type SuggestionTaskPaneProps = {
 };
 
 /**
- * An unanswered suggestion in the main window's detail pane: its text, and a composer whose
- * 承認 / 見送る take what the user wrote, as the approval's extra instruction or as the reason for
- * the dismissal. A message-only suggestion is answered by a reply, which starts a new Action; so
- * is a dismissed one, if the user writes after all.
+ * An unanswered suggestion in the main window's detail pane: its text, and a composer whose reply
+ * carries the work on, as the suggestion popup's does. A reply to an offer accepts it with the
+ * reply as what to do next; a reply to a message-only or dismissed suggestion starts a new Action.
  */
 export function SuggestionTaskPane({
   suggestionId,
   title,
   requestedFile,
   onStarted,
-  canDismiss,
   onAddProject,
   closeButton,
 }: SuggestionTaskPaneProps) {
@@ -104,7 +93,7 @@ export function SuggestionTaskPane({
     if (requestedFile !== null) setPreviewFile(taskFileAt(requestedFile));
   }
   const files = (snapshot?.artifacts ?? []).map(taskFileAt);
-  // The small window shows it with its decision, as when it arrived; this pane stays.
+  // The small window shows it as when it arrived; this pane stays.
   const openSmall = () => {
     setOpenSmallFailed(false);
     window.electron?.agentOverlay
@@ -129,19 +118,14 @@ export function SuggestionTaskPane({
   }, [task.actionId]);
 
   const dismissed = phase === 'dismissed';
-  // An offer's composer holds 承認 / 見送る until it is dismissed; while one of them is under way
-  // both stay in place, disabled.
-  const decides =
-    snapshot?.interactionContract === 'action_offer' &&
-    snapshot.reactionState !== 'rejected' &&
-    (phase === 'actionable' || phase === 'starting' || phase === 'dismissing');
+  // A reply to an unanswered offer is its acceptance; while that is under way the composer stays.
+  const repliesToOffer =
+    snapshot?.interactionContract === 'action_offer' && snapshot.reactionState !== 'rejected';
   const failureText = (current: SuggestionStartFailure) =>
     current.stage === 'accept_failed'
-      ? t('overlay.acceptFailed')
-      : current.stage === 'dismiss_failed'
-        ? copy.dismissFailed
-        : (current.message ??
-          (current.stage === 'start_failed' ? t('common.unexpectedError') : copy.notStarted));
+      ? t('overlay.replyFailed')
+      : (current.message ??
+        (current.stage === 'start_failed' ? t('common.unexpectedError') : copy.notStarted));
 
   return (
     <section
@@ -256,9 +240,11 @@ export function SuggestionTaskPane({
         </div>
       </div>
       <div className="suggestion-task__dock">
-        {decides || phase === 'actionable' || dismissed ? (
+        {phase === 'actionable' || dismissed || (repliesToOffer && phase === 'starting') ? (
           <OverlayComposer
             approvalMode={approvalMode}
+            hideApprovalMode
+            placeholder={t('overlay.composer.replyPlaceholder')}
             draft={draft.draft}
             mentions={draft.mentions}
             quoting={{ ...composer.quoting, sourceRef: columnRef }}
@@ -275,33 +261,10 @@ export function SuggestionTaskPane({
             retryAcceptance={failure?.stage === 'accept_failed'}
             attachments={draft.attachments}
             attachmentFailure={draft.attachmentFailure}
-            validationFailed={decides ? composer.supplementInvalid : draft.validationFailed}
+            validationFailed={repliesToOffer ? composer.supplementInvalid : draft.validationFailed}
             canAttach={composer.canAttach}
-            action={
-              decides
-                ? {
-                    decision: canDismiss ? (
-                      <SuggestionDecisionButtons
-                        canDismiss={task.canDismiss}
-                        canAccept={task.canAccept}
-                        onDismiss={task.dismiss}
-                        onAccept={() => void task.accept()}
-                      />
-                    ) : (
-                      <ApprovalDecisionButton
-                        type="button"
-                        $variant="primary"
-                        disabled={!task.canAccept}
-                        onClick={() => void task.accept()}
-                      >
-                        {t('overlay.accept')}
-                      </ApprovalDecisionButton>
-                    ),
-                    canDismiss,
-                  }
-                : 'send'
-            }
-            canSend={task.canReply}
+            action="send"
+            canSend={task.canSend}
             resumeFailed={false}
             sendSuperseded={draft.failureKind === 'superseded'}
             canResume={false}
@@ -317,7 +280,7 @@ export function SuggestionTaskPane({
             }
             onAttachFiles={(files) => void composer.attachFiles(files)}
             onRemoveAttachment={composer.removeAttachment}
-            onSubmit={task.reply}
+            onSubmit={task.send}
             onStop={noop}
             onResume={noop}
           />

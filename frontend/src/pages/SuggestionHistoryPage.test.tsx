@@ -78,17 +78,14 @@ vi.mock('@/components/task/SuggestionTaskPane', () => ({
   SuggestionTaskPane: ({
     suggestionId,
     title,
-    canDismiss,
     onStarted,
   }: {
     suggestionId: string;
     title: string;
-    canDismiss: boolean;
     onStarted: (actionId: string, preview: TaskPreview | null) => void;
   }) => (
     <section aria-label={`suggestion ${suggestionId}`}>
       <h1>{title}</h1>
-      {canDismiss ? <button type="button">dismiss</button> : null}
       <button type="button" onClick={() => onStarted('A9', null)}>
         accept
       </button>
@@ -606,7 +603,7 @@ it('lists every TODO by project, counts open TODOs in the sidebar, and hands the
   ]);
 });
 
-it("opens a TODO's conversation beside the list: its Action, its suggestion without 見送る, or a note", async () => {
+it("opens a TODO's conversation beside the list: its Action, its suggestion, or a note", async () => {
   renderPage(['/history']);
   await userEvent.click(await screen.findByRole('button', { name: /^TODO T1/ }));
   expect(location()).toHaveTextContent('/history?todo=T1');
@@ -620,7 +617,6 @@ it("opens a TODO's conversation beside the list: its Action, its suggestion with
 
   await userEvent.click(screen.getByRole('button', { name: /^TODO T3/ }));
   const suggestion = screen.getByRole('region', { name: 'suggestion S5' });
-  expect(within(suggestion).queryByRole('button', { name: 'dismiss' })).toBeNull();
   // Accepting shows its Action at once, before the list names it.
   await userEvent.click(within(suggestion).getByRole('button', { name: 'accept' }));
   expect(screen.getByRole('region', { name: 'action A9' })).toBeInTheDocument();

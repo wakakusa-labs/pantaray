@@ -9,10 +9,9 @@ import type { TodoView } from '../../../electron/src/todos/todoContracts';
 
 /**
  * A TODO's conversation beside the list: its Action, its suggestion while no Action answers it
- * yet, or a short note while it has neither. Under it, like a suggestion's 承認, Pantaray's pending
- * request to delete the TODO, which only the user's 「消す」 carries out. A TODO's suggestion is let go by deleting the
- * TODO, so its pane does not offer 見送る. The conversation itself is the task panes' to hold; the
- * list's close button sits at the end of whichever header it has.
+ * yet, or a short note while it has neither. Under it, Pantaray's pending request to delete the
+ * TODO, which only the user's 「消す」 carries out. The conversation itself is the task panes' to
+ * hold; the list's close button sits at the end of whichever header it has.
  */
 export function TodoConversationPane({
   todo,
@@ -122,7 +121,6 @@ function Conversation({
         suggestionId={conversation.suggestion_id}
         title={todo.text}
         requestedFile={null}
-        canDismiss={false}
         onStarted={(id, preview) => setStarted({ actionId: id, preview })}
         onAddProject={onAddProject}
         closeButton={closeButton}

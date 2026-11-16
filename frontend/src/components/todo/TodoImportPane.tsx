@@ -16,7 +16,6 @@ type DraftIssueReason = NonNullable<TodoImportView['issue']>['reason'];
 const ISSUE_MESSAGES: Record<DraftIssueReason, MessageKey> = {
   organization_not_found: 'todo.import.issue.organization_not_found',
   organization_outside_scope: 'todo.import.issue.organization_outside_scope',
-  project_required: 'todo.import.issue.project_required',
   project_name_taken: 'todo.import.issue.project_name_taken',
   invalid_text: 'todo.import.issue.invalid_text',
   too_many_todos: 'todo.import.issue.too_many_todos',

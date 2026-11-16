@@ -107,7 +107,6 @@ export const TodoImportRegisterRequestSchema = z
 const DraftIssueReasonSchema = z.enum([
   'organization_not_found',
   'organization_outside_scope',
-  'project_required',
   'project_name_taken',
   'invalid_text',
   'too_many_todos',

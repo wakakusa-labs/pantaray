@@ -20,9 +20,9 @@ function status(overrides) {
   };
 }
 
-test('tray copy labels the new conversation action in each language', () => {
-  assert.equal(getTrayMenuCopy('ja').newConversation, '新しい作業');
-  assert.equal(getTrayMenuCopy('en').newConversation, 'New task');
+test('tray copy labels the add-a-TODO action in each language', () => {
+  assert.equal(getTrayMenuCopy('ja').addTodo, 'TODO を追加');
+  assert.equal(getTrayMenuCopy('en').addTodo, 'Add a TODO');
 });
 
 test('tray copy explains recording statuses that pause or block activity recording', () => {
@@ -100,12 +100,15 @@ test('the welcome names the shortcut the user has, or only the button', () => {
   assert.equal(
     getWelcomeSuggestionText('ja', 'Option+Space'),
     'まずはあなたの仕事を理解するところから始めます。お役に立てそうなことが見つかったら、こちらから提案します。\n\n' +
-      'それまでも、任せたい仕事があればいつでも ⌥Space か新しい作業ボタンで声をかけてください。'
+      'それまでも、任せたい仕事があればいつでも ⌥Space か「TODO を追加」から頼んでください。'
   );
-  assert.match(getWelcomeSuggestionText('ja', null), /いつでも新しい作業ボタンで声をかけてください。$/);
+  assert.match(
+    getWelcomeSuggestionText('ja', null),
+    /いつでも「TODO を追加」から頼んでください。$/
+  );
   assert.match(
     getWelcomeSuggestionText('en', 'Option+Space'),
-    /just press ⌥Space or use the New task button\.$/
+    /just press ⌥Space or use Add a TODO\.$/
   );
-  assert.match(getWelcomeSuggestionText('en', null), /just use the New task button\.$/);
+  assert.match(getWelcomeSuggestionText('en', null), /just use Add a TODO\.$/);
 });

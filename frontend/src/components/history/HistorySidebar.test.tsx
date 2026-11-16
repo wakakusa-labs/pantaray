@@ -310,7 +310,7 @@ it('作業の見出しは作業が無くても出し、✎ はメイン画面に
   expect(HISTORY_MESSAGES.ja['history.tasks.title']).toBe('作業');
   expect(HISTORY_MESSAGES.en['history.tasks.title']).toBe('Tasks');
   expect(HISTORY_MESSAGES.ja['history.newTaskMain']).toBe('メイン画面で新しい作業');
-  expect(HISTORY_MESSAGES.ja['history.newTaskSmall']).toBe('小さく新しい作業');
+  expect(HISTORY_MESSAGES.ja['history.newTaskSmall']).toBe('小さな画面で TODO を追加');
   // Pen first, then the small window, as one row beside the heading.
   expect(
     within(tasks)
@@ -330,7 +330,7 @@ it('作業の見出しは作業が無くても出し、✎ はメイン画面に
     'history.newTaskSmallWithShortcut {"shortcut":"⌥ Space"}'
   );
   expect(HISTORY_MESSAGES.ja['history.newTaskSmallWithShortcut']).toBe(
-    '小さく新しい作業（{shortcut}）'
+    '小さな画面で TODO を追加（{shortcut}）'
   );
   small.focus();
   await userEvent.keyboard('{Enter}');

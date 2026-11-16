@@ -410,11 +410,11 @@ const updateUi = createUpdateUiManager({
   },
   getTray: () => trayController.getTray(),
   getMainWindow: () => mainWindow,
-  openNewConversationOverlay: () => {
+  openAddTodoPanel: () => {
     try {
       featureRuntime.openNewConversationOverlay();
     } catch (error) {
-      logger?.error?.('NEW_CONVERSATION_TRAY_ERR', { err: error });
+      logger?.error?.('ADD_TODO_TRAY_ERR', { err: error });
     }
   },
   getGlobalShortcutAccelerator: () => {

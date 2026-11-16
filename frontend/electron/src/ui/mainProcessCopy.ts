@@ -18,7 +18,7 @@ export type UpdateMenuCopy = {
 };
 
 export type TrayMenuCopy = {
-  newConversation: string;
+  addTodo: string;
   openWindow: string;
   startScreenshots: string;
   stopScreenshots: string;
@@ -190,7 +190,7 @@ function getTrayCaptureStatusCopy(
 export function getTrayMenuCopy(lang: UiLanguage): TrayMenuCopy {
   return lang === 'ja'
     ? {
-        newConversation: '新しい作業',
+        addTodo: 'TODO を追加',
         openWindow: 'ウィンドウを開く',
         startScreenshots: '操作の記録を再開',
         stopScreenshots: '操作の記録を一時停止',
@@ -202,7 +202,7 @@ export function getTrayMenuCopy(lang: UiLanguage): TrayMenuCopy {
         },
       }
     : {
-        newConversation: 'New task',
+        addTodo: 'Add a TODO',
         openWindow: 'Open window',
         startScreenshots: 'Resume activity recording',
         stopScreenshots: 'Pause activity recording',
@@ -286,13 +286,13 @@ export function formatMacAccelerator(accelerator: string): string {
 export function getWelcomeSuggestionText(lang: UiLanguage, accelerator: string | null): string {
   const shortcut = accelerator ? formatMacAccelerator(accelerator) : null;
   if (lang === 'ja') {
-    const how = shortcut ? ` ${shortcut} か新しい作業ボタン` : '新しい作業ボタン';
+    const how = shortcut ? ` ${shortcut} か「TODO を追加」` : '「TODO を追加」';
     return [
       'まずはあなたの仕事を理解するところから始めます。お役に立てそうなことが見つかったら、こちらから提案します。',
-      `それまでも、任せたい仕事があればいつでも${how}で声をかけてください。`,
+      `それまでも、任せたい仕事があればいつでも${how}から頼んでください。`,
     ].join('\n\n');
   }
-  const how = shortcut ? `press ${shortcut} or use the New task button` : 'use the New task button';
+  const how = shortcut ? `press ${shortcut} or use Add a TODO` : 'use Add a TODO';
   return [
     "I'll start by getting to know your work. When I find something I can help with, I'll suggest it.",
     `Until then, whenever you have work to hand off, just ${how}.`,

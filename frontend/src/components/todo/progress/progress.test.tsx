@@ -395,9 +395,6 @@ it('opens a day onto its records, the conversation behind an AI record, and the 
   const [thursday] = page().rows.filter((row) => row.start === '2026-11-05');
   const handlers = renderDay(thursday, new Set(['r1']));
   const pane = screen.getByRole('region', { name: '11月5日（木）' });
-  expect(pane).toHaveTextContent('実績 3 件');
-  // A count of none is not shown; the day has no checked TODO.
-  expect(pane).not.toHaveTextContent('完了した TODO 0 件');
   const [byUser, byAi, other] = within(pane).getAllByRole('listitem');
   expect(byUser).toHaveTextContent('丸和商事から受注10,000,000 円販路開拓');
   expect(within(byUser).queryByRole('button', { name: /会話を開く/ })).toBeNull();

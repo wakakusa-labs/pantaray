@@ -10,10 +10,8 @@ import {
   formatDay,
   formatQuantity,
   projectLabel,
-  recordCount,
   indexRecords,
   recordsFor,
-  todoCount,
   type ProjectNameOf,
 } from './progressText';
 
@@ -63,21 +61,6 @@ export function ProgressDayPane({
         <span className="todo-progress-day__controls">{pageControls}</span>
       </header>
       <div className="todo-progress-day__body">
-        {/* Only what the day has; an empty day says so below. */}
-        {records.length > 0 || row.checked.length > 0 ? (
-          <p className="todo-progress-day__facts">
-            {records.length > 0 ? (
-              <span>
-                {t('todoProgress.day.recordCount', { records: recordCount(i18n, records.length) })}
-              </span>
-            ) : null}
-            {row.checked.length > 0 ? (
-              <span>
-                {t('todoProgress.day.checkedCount', { todos: todoCount(i18n, row.checked.length) })}
-              </span>
-            ) : null}
-          </p>
-        ) : null}
         {records.length === 0 && row.checked.length === 0 ? (
           <p className="todo-progress-day__empty">{t('todoProgress.day.empty')}</p>
         ) : null}

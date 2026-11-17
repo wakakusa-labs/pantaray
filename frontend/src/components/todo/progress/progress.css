@@ -382,15 +382,6 @@ button.todo-progress-cell:focus-visible {
   align-items: center;
 }
 
-.todo-progress-day__facts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 14px;
-  margin: 14px 0 0;
-  color: var(--fog-text-2);
-  font-size: 13px;
-}
-
 .todo-progress-day__body {
   flex: 1;
   min-height: 0;

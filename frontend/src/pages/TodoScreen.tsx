@@ -159,10 +159,10 @@ export function TodoScreen({
         : t('todo.nav.all');
 
   // Focus returns to the list: the pane's close button goes away once used. An expanded
-  // conversation's list is drawn again first, so the list takes it once it is there.
+  // conversation's list is hidden until the closing selection lands, so the focus waits for it.
   const listFocusPending = useRef(false);
   useEffect(() => {
-    if (!listFocusPending.current || !listElement) return;
+    if (!listFocusPending.current || !listElement || listElement.hidden) return;
     listFocusPending.current = false;
     listElement.focus();
   });

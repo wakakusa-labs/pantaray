@@ -3,6 +3,50 @@
 Each release's section becomes its notes on GitHub Releases. Write for people who use Pantaray,
 in English and Japanese: one short sentence per change, saying what changed for them, not how.
 
+## 0.7.0-beta.1
+
+A beta of 0.7.0, to try before the stable release. Install it from this page; it then updates
+itself to the next beta or to 0.7.0.
+
+- The home screen is now a TODO list that you and Pantaray share. Its suggestions arrive as TODOs,
+  and you can hand any TODO to Pantaray.
+- Group TODOs into organizations and projects, each with its own folders.
+- Set a TODO's start and due dates on one calendar, and sort the list as you like.
+- Each TODO has its own conversation beside the list, which you can widen or open in the whole
+  window.
+- Reply to a suggestion to carry it on, in its popup or in the main window.
+- Option+Space opens a panel to add a TODO, with files and images if you like.
+- Turn a file, an image or a few lines of text into TODOs at once.
+- Set a goal for a project and see your progress on a monthly calendar.
+- A notice that needs your answer waits for your reply.
+- Approval modes are gone. Work inside your folders runs without asking. When a task needs to go
+  further, such as running outside the sandbox, writing outside your folders, using your sign-ins or
+  changing something in a connected app, Pantaray first checks it against what you asked for and
+  asks you only when it should, saying why.
+- Tasks and suggestions no longer read files that hold secrets, such as .env.
+- Each step shows where a command connected and where data was sent.
+- Text in the main window is a size larger, and the window opens filling the screen.
+- Attach .txt, .md and .csv files.
+
+---
+
+0.7.0 のベータ版です。正式版の前に試すためのもので、このページから入れてください。入れたあとは、次のベータ版や 0.7.0 に自動で更新されます。
+
+- ホーム画面が、あなたと Pantaray が一緒に使う TODO リストになりました。提案は TODO として届き、どの TODO も Pantaray に任せられます。
+- TODO を組織とプロジェクトに分けられます。プロジェクトごとに作業フォルダを持てます。
+- TODO の開始日と期限を 1 つのカレンダーで決められます。リストの並び順も選べます。
+- TODO ごとの会話がリストの横に開きます。幅を広げたり、ウィンドウ全体に広げたりできます。
+- 提案には返事をすれば続きが進みます。ポップアップでもメイン画面でも返事できます。
+- Option+Space で TODO を追加するパネルが開きます。ファイルや画像も添えられます。
+- ファイル、画像、数行の文から、TODO をまとめて作れます。
+- プロジェクトに目標を決めて、進み具合を月のカレンダーで見られます。
+- 返事が要るお知らせは、あなたの返事を待つようになりました。
+- 承認モードをなくしました。作業フォルダの中の作業は確認なしで進みます。安全な実行環境の外で動かす、作業フォルダの外に書き込む、ログイン情報を使う、連携先を変えるといった操作は、まず頼まれた内容に合うかを Pantaray が確かめ、必要なときだけ理由を添えてあなたに聞きます。
+- .env など秘密が入ったファイルは、タスクや提案から読まないようにしました。
+- 作業の各手順に、コマンドがどこに接続したか、どこにデータを送ったかを出すようにしました。
+- メイン画面の文字を一回り大きくしました。ウィンドウは画面いっぱいに開きます。
+- .txt・.md・.csv のファイルも添付できるようになりました。
+
 ## 0.6.3
 
 - When a task looks over an HTML page it made, such as slides or a quote, or turns one into a PDF,

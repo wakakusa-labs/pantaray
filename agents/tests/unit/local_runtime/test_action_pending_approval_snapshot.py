@@ -184,6 +184,7 @@ def test_child_pause_decision_and_cancel_are_ordered_on_the_root_stream(
         "tool_id": "apply_patch",
         "intent_class": "write",
         "command_summary": {"summary": request_a},
+        "review_reason": None,
     }
 
 
@@ -194,6 +195,11 @@ def test_root_pause_snapshot_precedes_its_own_pause_anchor(tmp_path: Path) -> No
         db_path, session_id="session-root", request_id="request-root"
     )
     with spawn._connect(db_path) as connection, connection:
+        # The approval review left this one to the user and said why.
+        connection.execute(
+            "UPDATE approval_sessions SET review_reason='You did not ask for this.' "
+            "WHERE approval_session_id='session-root'"
+        )
         connection.execute(
             "INSERT INTO job_attempts(attempt_id,job_id,attempt_number,started_at,"
             "status) VALUES ('parent-attempt',?,1,?,'running')",
@@ -226,6 +232,12 @@ def test_root_pause_snapshot_precedes_its_own_pause_anchor(tmp_path: Path) -> No
     assert _waiting(db_path)[-1] == [
         (ROOT_PROCESS_ID, "request-root"),
         (child_a["process_id"], request_a),
+    ]
+    assert [
+        blocker["review_reason"] for blocker in _snapshot_blockers(db_path)[-1]
+    ] == [
+        "You did not ask for this.",
+        None,
     ]
 
 

@@ -47,7 +47,7 @@ INTEGRATION_LIST_TOOLS_TOOL = ToolDefinition.from_spec(
                 "most used first, with other_tool_count, how many more of that class "
                 "it has. Each entry gives the tool's slug, description, class, "
                 "input_schema, and every account that can run it with its "
-                "permission: allow runs without asking, ask asks the user each time. "
+                "permission: allow runs without asking, ask needs approval each time. "
                 + _PERMISSIONS_HINT
             ),
             when=(
@@ -138,7 +138,7 @@ INTEGRATION_RUN_TOOL_TOOL = ToolDefinition.from_spec(
                 "delete) only when the user asked for that write."
             ),
             pitfalls=(
-                _UNTRUSTED_RULE + " Every write asks the user for approval, so do "
+                _UNTRUSTED_RULE + " Every write needs approval, so do "
                 "not call one speculatively. Pass account when several accounts can "
                 "run the tool; account_required lists the candidates. "
                 "permission_denied means the current permission does not allow the "
@@ -146,7 +146,7 @@ INTEGRATION_RUN_TOOL_TOOL = ToolDefinition.from_spec(
                 "have run: ask the user to check instead of running it again."
             ),
         ),
-        # Sequential: a write pauses the Action for approval, as capture_screen does.
+        # Sequential: a write may pause the Action for approval, as capture_screen does.
         concurrency=ToolConcurrency("sequential"),
         execution_policy=tool_execution_policy(
             intent_class="network_access",

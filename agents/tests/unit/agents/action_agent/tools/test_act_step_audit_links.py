@@ -539,6 +539,7 @@ def _approved_once_session(_user_id: str, _request_id: str) -> StoredApprovalSes
         tool_id=THINKING_TOOL.tool_id,
         intent_class="thinking",
         approval_source="prompt",
+        review_reason=None,
         tool_request_id=_TOOL_REQUEST_ID,
         status="approved_once",
         approved_capabilities_json={},

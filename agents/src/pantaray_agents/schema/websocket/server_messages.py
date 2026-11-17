@@ -25,6 +25,10 @@ class ApprovalBlockerMessage(BaseModel):
     tool_id: str = Field(description="Tool ID")
     intent_class: str = Field(description="Tool intent class")
     command_summary: dict[str, JSONValue] = Field(description="Command summary")
+    # Snapshots stored before the approval review have no reason.
+    review_reason: str | None = Field(
+        default=None, description="Why the approval review left this to the user"
+    )
 
 
 class SuggestionChunkMessage(BaseModel):

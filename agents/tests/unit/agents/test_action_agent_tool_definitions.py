@@ -24,6 +24,7 @@ from pantaray_agents.local_runtime.runtime.action_subagent_broker_authority impo
 )
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tasks.internal_jobs.action_subagent_broker import (
+    ApprovalReviewer,
     build_action_subagent_broker_tools,
 )
 from pantaray_agents.tasks.internal_jobs.action_subagent_history import (
@@ -58,6 +59,7 @@ def _model_facing_parameters() -> dict[str, dict[str, JSONValue]]:
                 busy_timeout_ms=0,
                 payload=cast(ActionSubagentJobPayload, {}),
             ),
+            reviewer=cast(ApprovalReviewer, None),
         )
     }
     return {**action, **subagent}

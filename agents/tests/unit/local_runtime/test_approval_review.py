@@ -7,13 +7,16 @@ from types import SimpleNamespace
 
 import pytest
 
+from pantaray_agents.agents.core.mixins.llm_usage import CountingSink
 from pantaray_agents.local_runtime.tooling import approval_review
 from pantaray_agents.local_runtime.tooling.approval_review import (
     ApprovalReviewRequest,
     ApprovalReviewVerdict,
+    DeclinedOperation,
     PendingCommand,
     PendingIntegrationWrite,
     RequestTextNotByUser,
+    UserMessage,
     build_approval_review_payload,
     review_approval,
 )
@@ -22,8 +25,10 @@ from pantaray_llm.errors import LlmProxyExecutionError
 from pantaray_llm.profiles import APPROVAL_REVIEW_PROFILE_ID
 
 _REQUEST = ApprovalReviewRequest(
-    user_messages=("Export report.html to PDF",),
-    request_text_not_by_user=RequestTextNotByUser(source="todo", text="Report"),
+    conversation=(UserMessage("Export report.html to PDF"),),
+    request_text_not_by_user=RequestTextNotByUser(
+        source="todo", text="Report", declined=False
+    ),
     operation=PendingCommand(
         tool="bash",
         kinds=frozenset({"outside_sandbox"}),
@@ -50,21 +55,33 @@ class _Models:
         if self.answer is None:
             # What the direct route raises when JSON misses the response schema.
             ApprovalReviewVerdict.model_validate({"decision": "allow"})
-        return SimpleNamespace(text=self.answer)
+        return SimpleNamespace(
+            text=self.answer,
+            usage_metadata={"prompt_token_count": 120, "candidates_token_count": 9},
+        )
 
 
 def _client(models: _Models) -> SimpleNamespace:
     return SimpleNamespace(aio=SimpleNamespace(models=models), files=None)
 
 
-def _review(models: _Models) -> ApprovalReviewVerdict | None:
-    return asyncio.run(review_approval(_client(models), _REQUEST))  # type: ignore[arg-type]
+def _review(
+    models: _Models, sink: CountingSink | None = None
+) -> ApprovalReviewVerdict | None:
+    return asyncio.run(
+        review_approval(
+            _client(models),  # type: ignore[arg-type]
+            _REQUEST,
+            sink=sink or CountingSink(),
+        )
+    )
 
 
 def test_a_valid_allow_is_returned_from_the_approval_review_purpose() -> None:
     models = _Models(answer='{"decision": "allow", "reason": "You asked for it."}')
+    sink = CountingSink()
 
-    verdict = _review(models)
+    verdict = _review(models, sink)
 
     assert verdict == ApprovalReviewVerdict(
         decision="allow", reason="You asked for it."
@@ -73,6 +90,8 @@ def test_a_valid_allow_is_returned_from_the_approval_review_purpose() -> None:
     assert isinstance(config, GenerateContentConfig)
     assert config.inference_profile == APPROVAL_REVIEW_PROFILE_ID
     assert config.response_schema is ApprovalReviewVerdict
+    # The review's tokens count toward the Action like its other model calls.
+    assert (sink.delta.prompt_tokens, sink.delta.completion_tokens) == (120, 9)
 
 
 @pytest.mark.parametrize(
@@ -113,7 +132,7 @@ def test_a_review_that_runs_past_its_timeout_gives_no_verdict(
 def test_the_review_request_has_no_place_for_tool_output() -> None:
     with pytest.raises(TypeError):
         ApprovalReviewRequest(  # type: ignore[call-arg]
-            user_messages=(),
+            conversation=(),
             request_text_not_by_user=None,
             operation=_REQUEST.operation,
             workspace_folders=(),
@@ -124,11 +143,16 @@ def test_the_review_request_has_no_place_for_tool_output() -> None:
     integration = json.loads(
         build_approval_review_payload(
             ApprovalReviewRequest(
-                user_messages=("Post the summary to #general",),
+                conversation=(
+                    UserMessage("Post the summary to #general"),
+                    DeclinedOperation(_REQUEST.operation),
+                ),
                 request_text_not_by_user=None,
                 operation=PendingIntegrationWrite(
                     toolkit="slack",
                     action="SLACK_SEND_MESSAGE",
+                    account_id="acct-work",
+                    account_label="work@example.com",
                     arguments={"channel": "#general"},
                     justification=None,
                 ),
@@ -139,7 +163,7 @@ def test_the_review_request_has_no_place_for_tool_output() -> None:
 
     # Every field the model reads; a new one has to be added here on purpose.
     assert set(command) == {
-        "user_messages",
+        "conversation",
         "request_text_not_by_user",
         "operation",
         "workspace_folders",
@@ -156,7 +180,21 @@ def test_the_review_request_has_no_place_for_tool_output() -> None:
         "requires",
         "toolkit",
         "action",
+        "account",
         "arguments",
         "justification",
     }
-    assert command["request_text_not_by_user"] == {"source": "todo", "text": "Report"}
+    assert command["request_text_not_by_user"] == {
+        "source": "todo",
+        "text": "Report",
+        "declined": False,
+    }
+    # Which account acts, and what the user already declined, reach the model.
+    assert integration["operation"]["account"] == {
+        "id": "acct-work",
+        "label": "work@example.com",
+    }
+    assert integration["conversation"] == [
+        {"kind": "user_message", "text": "Post the summary to #general"},
+        {"kind": "declined_operation", "operation": command["operation"]},
+    ]

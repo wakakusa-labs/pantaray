@@ -34,6 +34,8 @@ EXECUTION_SESSION_TERMINAL_STATUSES: tuple[ExecutionSessionTerminalStatus, ...] 
     "expired",
 )
 ApprovalSessionStatus = Literal["pending", "approved_once", "denied"]
+# Who approved a request: Pantaray's defaults, the user, or the approval review.
+ApprovalSource = Literal["prompt", "settings", "review"]
 ToolRiskLevel = Literal["low", "medium", "high"]
 ToolInvocationStartStatus = Literal["queued", "running"]
 ToolInvocationTerminalStatus = Literal["completed", "failed", "canceled", "timed_out"]
@@ -274,7 +276,9 @@ class StoredApprovalSession:
     tool_invocation_id: str | None
     tool_id: str
     intent_class: ToolIntentClass
-    approval_source: Literal["prompt", "settings", "review"]
+    approval_source: ApprovalSource
+    # The approval review's one sentence: why it approved, or why it asked.
+    review_reason: str | None
     tool_request_id: str
     status: ApprovalSessionStatus
     approved_capabilities_json: JSONStringMap

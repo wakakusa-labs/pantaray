@@ -91,7 +91,10 @@ from pantaray_llm.errors import (
     PROXY_LLM_TOOL_CALL_INVALID,
     LlmProxyExecutionError,
 )
-from pantaray_llm.profiles import ACTION_EXECUTING_PROFILE_ID
+from pantaray_llm.profiles import (
+    ACTION_EXECUTING_PROFILE_ID,
+    APPROVAL_REVIEW_PROFILE_ID,
+)
 
 TIMESTAMP = "2026-09-01T00:00:00Z"
 THINKING_MARKER = "PRIVATE_THINKING_MUST_NOT_PERSIST"
@@ -104,6 +107,17 @@ class _Models:
     async def generate_content(self, **kwargs: object) -> object:
         config = kwargs["config"]
         assert isinstance(config, GenerateContentConfig)
+        if config.inference_profile == APPROVAL_REVIEW_PROFILE_ID:
+            self.client.reviews += 1
+            if self.client.on_review is not None:
+                self.client.on_review()
+            if self.client.review is None:
+                raise LlmProxyExecutionError(
+                    error_code="PROXY_UPSTREAM_UNAVAILABLE",
+                    error_message="no review in this test",
+                    retryable=False,
+                )
+            return SimpleNamespace(text=self.client.review, usage_metadata=None)
         self.client.profiles.append(str(config.inference_profile))
         self.client.prompts.append(str(kwargs["contents"]))
         self.client.system_instructions.append(str(config.system_instruction))
@@ -174,7 +188,13 @@ class _Client:
         on_call: Callable[[int], None] | None = None,
         # One response per entry; a tuple is one response with several calls.
         calls: tuple[LlmToolCall | tuple[LlmToolCall, ...], ...] = (),
+        # The approval review's answer; None gives no verdict, so the user is asked.
+        review: str | None = None,
+        on_review: Callable[[], None] | None = None,
     ) -> None:
+        self.review = review
+        self.on_review = on_review
+        self.reviews = 0
         self.reports = reports
         self.failures = failures
         self.retryable = retryable
@@ -965,6 +985,71 @@ def test_gated_tool_pause_writes_one_anchor_without_a_false_error_transcript(
     ]
     assert statuses == ("paused", "paused", "completed")
     assert invocations == 0
+    assert not (_workspace(db_path) / "gated.txt").exists()
+
+
+def test_a_gated_child_call_the_review_allows_runs_without_a_pause(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _gate_edits(monkeypatch)
+    db_path, payload = _running_child(
+        tmp_path, profile_id=ACTION_EXECUTING_PROFILE_ID, claim_workspace=True
+    )
+    client = _Client(
+        calls=(_APPLY_PATCH_CALL, _REPORT_CALL),
+        review='{"decision": "allow", "reason": "You asked for this file."}',
+    )
+    monkeypatch.setattr(subagent_job, "build_local_llm_proxy_client", lambda: client)
+    with bind_local_runtime_db_execution_context(
+        db_path=db_path, busy_timeout_ms=1_000
+    ):
+        subagent_job.run_action_subagent_job(payload)
+
+    with sqlite3.connect(db_path) as connection:
+        session = connection.execute(
+            "SELECT status, approval_source, review_reason, claimed_at IS NOT NULL "
+            "FROM approval_sessions"
+        ).fetchone()
+        pauses = connection.execute(
+            "SELECT COUNT(*) FROM process_events WHERE process_id='child-process' "
+            "AND event_name='process_paused'"
+        ).fetchone()[0]
+    assert session == ("approved_once", "review", "You asked for this file.", 1)
+    assert pauses == 0
+    assert (_workspace(db_path) / "gated.txt").read_text() == "approved\n"
+
+
+def test_a_stop_while_the_child_review_runs_approves_and_writes_nothing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _gate_edits(monkeypatch)
+    db_path, payload = _running_child(
+        tmp_path, profile_id=ACTION_EXECUTING_PROFILE_ID, claim_workspace=True
+    )
+
+    def stop() -> None:
+        with sqlite3.connect(db_path) as connection:
+            connection.execute(
+                "UPDATE jobs SET cancel_requested_at = 't' WHERE job_id = 'child-job'"
+            )
+
+    client = _Client(
+        calls=(_APPLY_PATCH_CALL, _REPORT_CALL),
+        review='{"decision": "allow", "reason": "You asked for this file."}',
+        on_review=stop,
+    )
+    monkeypatch.setattr(subagent_job, "build_local_llm_proxy_client", lambda: client)
+    with bind_local_runtime_db_execution_context(
+        db_path=db_path, busy_timeout_ms=1_000
+    ):
+        subagent_job.run_action_subagent_job(payload)
+
+    with sqlite3.connect(db_path) as connection:
+        session = connection.execute(
+            "SELECT approval_source, review_reason FROM approval_sessions"
+        ).fetchone()
+    assert client.reviews == 1
+    assert session == ("prompt", None)
     assert not (_workspace(db_path) / "gated.txt").exists()
 
 

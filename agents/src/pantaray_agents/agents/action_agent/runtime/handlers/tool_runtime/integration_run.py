@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Literal
 
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_args import (
     ToolArgs,
@@ -39,6 +38,7 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
 from pantaray_agents.local_runtime.tooling.brokering.execution_start import (
     claim_approved_execution_start,
 )
+from pantaray_agents.local_runtime.tooling.models import ApprovalSource
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.tool_result import build_runtime_tool_error_output
 from pantaray_agents.tools.contract import BrokerPolicyError
@@ -205,7 +205,7 @@ def _authorize_write(
     resolved: ResolvedIntegrationCall,
     tool_request_id: str,
     requested_at: str,
-) -> tuple[str | None, Literal["settings", "prompt"] | None]:
+) -> tuple[str | None, ApprovalSource | None]:
     db_path, busy_timeout_ms = read_local_runtime_db_config()
     return ensure_tool_authorization(
         context=load_broker_context(

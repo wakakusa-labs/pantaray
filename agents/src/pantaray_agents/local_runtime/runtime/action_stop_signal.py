@@ -58,17 +58,27 @@ def action_stop_requested(
         raise MigrationError("LOCAL_DB_BUSY_TIMEOUT_MS must be a positive integer")
     with sqlite3.connect(db_path) as connection:
         configure_connection(connection, busy_timeout_ms)
-        row = connection.execute(
-            _STOP_REQUESTED_SQL,
-            {
-                # A run outside the local runtime worker has no job to fence, so
-                # it observes the Action terminal alone.
-                "job_id": job_id or "",
-                "user_id": user_id,
-                "action_id": action_id,
-            },
-        ).fetchone()
+        return action_stop_requested_in_connection(
+            connection, user_id=user_id, action_id=action_id, job_id=job_id
+        )
+
+
+def action_stop_requested_in_connection(
+    connection: sqlite3.Connection, *, user_id: str, action_id: str, job_id: str | None
+) -> bool:
+    """The same read inside the caller's transaction."""
+
+    row = connection.execute(
+        _STOP_REQUESTED_SQL,
+        {
+            # A run outside the local runtime worker has no job to fence, so
+            # it observes the Action terminal alone.
+            "job_id": job_id or "",
+            "user_id": user_id,
+            "action_id": action_id,
+        },
+    ).fetchone()
     return bool(row[0])
 
 
-__all__ = ["action_stop_requested"]
+__all__ = ["action_stop_requested", "action_stop_requested_in_connection"]

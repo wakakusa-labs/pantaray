@@ -70,8 +70,8 @@ SAVE_HTML_AS_PDF_TOOL = ToolDefinition.from_spec(
                 "load only when the command network setting is on. Refused "
                 "requests are listed in blocked_requests, and remote iframes are "
                 "always refused. Writing pdf_path follows apply_patch's rules: a "
-                "path outside registered workspaces waits for the user to approve "
-                "that one write, so use one only when the user asked for that "
+                "path outside registered workspaces needs approval for that one "
+                "write, so use one only when the user asked for that "
                 "location."
             ),
         ),

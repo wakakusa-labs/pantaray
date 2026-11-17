@@ -34,6 +34,7 @@ def _blocker(process_id: str, name: str) -> dict[str, object]:
         "tool_id": "apply_patch",
         "intent_class": "write",
         "command_summary": {"summary": name},
+        "review_reason": None,
     }
 
 

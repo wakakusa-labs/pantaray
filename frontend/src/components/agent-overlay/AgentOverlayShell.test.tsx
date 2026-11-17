@@ -281,6 +281,7 @@ describe('AgentOverlayShell', () => {
               toolRequestId: 'tool-request-1',
               toolId: 'bash',
               intentClass: 'process_exec_local',
+              reviewReason: null,
               commandSummary: { summary_kind: 'bash', command: 'rm -- a.png', cwd: '/tmp' },
             },
           ]}

@@ -16,6 +16,7 @@ function applyPatchBlocker(
     toolRequestId: 'request-1',
     toolId: 'apply_patch',
     intentClass: 'workspace_edit',
+    reviewReason: null,
     commandSummary: { summary_kind: 'apply_patch', ...commandSummary },
   };
 }
@@ -110,6 +111,18 @@ function renderPanel(language: UiLanguage, blocker: ActionApprovalBlocker) {
 describe('ApprovalPanel', () => {
   afterEach(() => {
     cleanup();
+  });
+
+  it('says why the approval review left the request to the user, keeping every choice', () => {
+    renderPanel('ja', {
+      ...applyPatchBlocker(OUTSIDE_WORKSPACE_SUMMARY),
+      reviewReason: '頼まれていないフォルダに書き込むため、確認してください。',
+    });
+
+    expect(
+      screen.getByText('頼まれていないフォルダに書き込むため、確認してください。')
+    ).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'この会話では許可' })).toBeTruthy();
   });
 
   it('asks in plain words about a folder outside the workspace and maps each choice', () => {

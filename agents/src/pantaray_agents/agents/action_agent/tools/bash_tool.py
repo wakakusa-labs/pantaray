@@ -44,8 +44,8 @@ WRITE_FOLDER_REQUEST_FIELD_PRESENTATION = (
             "Absolute paths, or paths starting with ~/ for the user's real home; only "
             "the folders needed, each the most specific existing folder. Pantaray's "
             "own storage and folders that contain it (/, the home folder, ~/Library) "
-            "cannot be requested. The call waits for the user's approval and, once "
-            "approved, can write only there besides the workspace."
+            "cannot be requested. The call needs approval and, once approved, can "
+            "write only there besides the workspace."
         ),
     ),
     BrokerToolFieldPresentation(
@@ -87,9 +87,8 @@ BASH_TOOL_FIELD_PRESENTATION = (
             "- Use the current workspace marker, an absolute local path "
             "under Workspace Roots in Workspace Path Rules, or a "
             "subdirectory under a registered workspace.\n"
-            "- A cwd outside registered workspaces waits for the user to "
-            "approve that one call; use one only when the user asked for "
-            "that location.\n"
+            "- A cwd outside registered workspaces needs approval for that "
+            "one call; use one only when the user asked for that location.\n"
             "- Command path arguments are relative to cwd."
         ),
     ),
@@ -121,9 +120,9 @@ BASH_TOOL_FIELD_PRESENTATION = (
             "save_html_as_pdf instead of starting a browser. Never set it "
             "pre-emptively for anything else, for convenience, or before trying "
             "the command normally.\n"
-            "- The call always waits for the user to approve this exact command "
-            "once, then runs it with the user's own permissions; if the user "
-            "does not allow it, find another way.\n"
+            "- Each call needs approval for this exact command, then runs it "
+            "with the user's own permissions; if it is not allowed, find another "
+            "way.\n"
             "- Keep the command to the step that needs it. Do not combine it "
             "with additional_write_folders."
         ),

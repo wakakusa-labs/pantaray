@@ -74,7 +74,7 @@ APPLY_PATCH_TOOL = ToolDefinition.from_spec(
                 "or run_python."
             ),
             pitfalls=(
-                "A path outside registered workspaces waits for the user to approve that one write; "
+                "A path outside registered workspaces needs approval for that one write; "
                 "use one only when the user asked for that location. Use absolute paths or paths relative "
                 "to the current workspace cwd. Success returns actual absolute applied_paths. For Update File, "
                 "copy removed lines exactly from the current file into old_lines, "

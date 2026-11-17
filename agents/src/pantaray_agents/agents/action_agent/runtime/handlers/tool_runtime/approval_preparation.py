@@ -1,16 +1,29 @@
 """Turn an approval outcome into the step the Action pauses or continues on.
 
 Every consent-gated tool ends an approval the same way, whatever it does once
-approved: a pending decision becomes a processing step the Overlay can answer, and
-a denial becomes a successful step that reports the tool was skipped. Keeping that
-shape in one place is what makes a new gated tool behave like the existing ones.
+approved: the approval review may approve a pending decision first, one left
+pending becomes a processing step the Overlay can answer, and a denial becomes a
+successful step that reports the tool was skipped. Keeping that shape in one
+place is what makes a new gated tool behave like the existing ones.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
+from pantaray_agents.agents.action_agent.runtime.stop_watch import (
+    ActionStopRequested,
+    ActionStopWatch,
+    build_action_stop_probe,
+)
+from pantaray_agents.agents.action_agent.services.token_accounting_service import (
+    StateTokenSink,
+)
 from pantaray_agents.agents.action_agent.tools import ToolDefinition
+from pantaray_agents.local_runtime.runtime.action_approval_review import (
+    review_pending_approval,
+)
+from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_db_config
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.tooling.repository.approval_sessions import (
     load_approval_session_by_request,
@@ -22,6 +35,7 @@ from pantaray_agents.local_runtime.tooling.tool_result_finalization import (
 )
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.utils.trace_context import get_trace_context
 
 from .shared import (
     APPROVAL_DENIED_OUTPUT_KIND,
@@ -30,7 +44,45 @@ from .shared import (
     ApprovalRequiredToolControl,
     ToolExecutionPreparation,
     UnprojectedToolExecutionResult,
+    ValidatedToolArgs,
 )
+
+
+async def approved_by_review(
+    agent,
+    state,
+    *,
+    sink: StateTokenSink,
+    preflight: ToolExecutionPreparation,
+    args: ValidatedToolArgs,
+) -> bool:
+    """Whether the approval review approved the call the preflight left pending."""
+
+    control = preflight.control
+    if not isinstance(control, ApprovalRequiredToolControl):
+        return False
+    db_path, busy_timeout_ms = read_local_runtime_db_config()
+    trace = get_trace_context()
+    # The call around this may be one a Stop does not interrupt (apply_patch);
+    # the review is only a wait, so a Stop ends it and the call is not approved.
+    async with ActionStopWatch(probe=build_action_stop_probe(state)) as watch:
+        try:
+            return await watch.run(
+                review_pending_approval(
+                    db_path=db_path,
+                    busy_timeout_ms=busy_timeout_ms,
+                    client=agent.client,
+                    sink=sink,
+                    user_id=str(state["user_id"]),
+                    action_id=str(state["action_id"]),
+                    job_id=trace.local_job_id if trace is not None else None,
+                    approval_session_id=control.approval_session_id,
+                    tool_request_id=control.tool_request_id,
+                    args=args,
+                )
+            )
+        except ActionStopRequested:
+            return False
 
 
 def build_approval_required_preparation(
@@ -142,6 +194,7 @@ def build_approval_denied_preparation(
 
 
 __all__ = [
+    "approved_by_review",
     "build_approval_denied_preparation",
     "build_approval_required_preparation",
 ]

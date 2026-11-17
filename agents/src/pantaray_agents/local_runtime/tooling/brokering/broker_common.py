@@ -13,6 +13,7 @@ from pantaray_agents.tools.files.manifest_paths import ManifestRoot, load_manife
 from ...storage.migrations import MigrationError
 from ..models import (
     ApprovalSessionUpsertInput,
+    ApprovalSource,
     StoredExecutionSession,
     StoredToolDefinition,
     ToolOutputStorageKind,
@@ -264,15 +265,16 @@ def ensure_tool_authorization(
     command_summary: dict[str, JSONValue],
     requested_at: str,
     require_user_prompt: bool = False,
-) -> tuple[str | None, Literal["settings", "prompt"] | None]:
+) -> tuple[str | None, ApprovalSource | None]:
     """Authorize one tool request.
 
     A request the session's capabilities do not cover passes with no prompt
     when it stays inside the registered workspace. `require_user_prompt` marks
     a request that leaves it (a write outside the registered folders, a run
     outside the sandbox, the login environment, an integration write, a screen
-    capture): it asks the user for every execution, and the approval binds to
-    `command_summary`, so the summary must name everything the user approves.
+    capture): it needs an approval for every execution, from the approval
+    review or the user, and the approval binds to `command_summary`, so the
+    summary must name everything that is approved.
     """
 
     allowed_capabilities = _load_allowed_capabilities(context)
@@ -308,9 +310,7 @@ def ensure_tool_authorization(
         if latest_session.status == APPROVAL_STATUS_APPROVED_ONCE:
             if latest_session.claimed_at is not None:
                 raise BrokerPolicyError("tool approval has already been claimed")
-            if latest_session.approval_source == "settings":
-                return latest_session.approval_session_id, "settings"
-            return latest_session.approval_session_id, "prompt"
+            return latest_session.approval_session_id, latest_session.approval_source
         if latest_session.status == APPROVAL_STATUS_DENIED:
             raise BrokerApprovalDeniedError(
                 approval_session_id=latest_session.approval_session_id

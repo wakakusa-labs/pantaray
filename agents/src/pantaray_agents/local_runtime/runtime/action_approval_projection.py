@@ -29,7 +29,7 @@ _APPROVAL_STATUS_PENDING = "pending"
 _ANCHORED_BLOCKERS_SQL = """
 SELECT process.process_id, session.action_id, session.approval_session_id,
        session.tool_request_id, session.tool_id, session.intent_class,
-       session.command_summary_json
+       session.command_summary_json, session.review_reason
 FROM processes AS process
 JOIN process_events AS paused
   ON paused.process_id = process.process_id
@@ -59,7 +59,8 @@ ORDER BY process.process_id <> :root_process_id, process.process_id, blocker.key
 
 _PENDING_SESSION_SQL = """
 SELECT session.action_id, session.approval_session_id, session.tool_request_id,
-       session.tool_id, session.intent_class, session.command_summary_json
+       session.tool_id, session.intent_class, session.command_summary_json,
+       session.review_reason
 FROM approval_sessions AS session
 WHERE session.user_id = :user_id AND session.action_id = :action_id
   AND session.approval_session_id = :approval_session_id
@@ -83,6 +84,8 @@ class PendingApprovalBlocker:
     tool_id: str
     intent_class: str
     command_summary: dict[str, JSONValue]
+    # Why the approval review left this request to the user, when it said.
+    review_reason: str | None
 
 
 def append_pending_approval_snapshot_in_connection(
@@ -200,6 +203,7 @@ def _blocker(process_id: str, session_row: Sequence[object]) -> PendingApprovalB
         tool_id=str(session_row[3]),
         intent_class=str(session_row[4]),
         command_summary=cast(dict[str, JSONValue], command_summary),
+        review_reason=None if session_row[6] is None else str(session_row[6]),
     )
 
 

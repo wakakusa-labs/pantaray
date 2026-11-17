@@ -265,13 +265,13 @@ test('a check that finds the staged version again downloads nothing', async () =
   );
 });
 
-test('test-channel releases are ordered by their number, and a stable release follows them', async () => {
+test('beta-channel releases are ordered by their number, and a stable release follows them', async () => {
   await withStagedUpdate(
-    { appVersion: '0.4.0-test.1', stagedVersion: '0.4.0-test.9' },
+    { appVersion: '0.4.0-beta.1', stagedVersion: '0.4.0-beta.9' },
     async ({ updater, feed, calls }) => {
-      feed.latest = '0.4.0-test.10';
+      feed.latest = '0.4.0-beta.10';
       await updater.checkForUpdates('auto');
-      feed.stage('0.4.0-test.10');
+      feed.stage('0.4.0-beta.10');
       feed.latest = '0.4.0';
       await updater.checkForUpdates('auto');
 
@@ -399,8 +399,8 @@ test('packaged dev builds have no update feed and never check', () => {
     ({ createDesktopUpdater, hasUpdateFeed, resolveChannelFromVersion }) => {
       assert.equal(hasUpdateFeed(), false);
       assert.deepEqual(
-        ['0.1.1', '0.1.1-test.3', '0.1.1-rc.1', '0.1.1-dev.3+abc1234'].map(resolveChannelFromVersion),
-        ['stable', 'test', null, null],
+        ['0.1.1', '0.1.1-beta.3', '0.1.1-rc.1', '0.1.1-dev.3+abc1234'].map(resolveChannelFromVersion),
+        ['stable', 'beta', null, null],
       );
       const updater = createDesktopUpdater({ logger: { info: (name) => logs.push(name) } });
       updater.start();
@@ -412,9 +412,9 @@ test('packaged dev builds have no update feed and never check', () => {
   assert.ok(logs.includes('AUTO_UPDATE_DISABLED'));
 });
 
-test('test-channel versions accept prereleases and unpackaged builds never check', () => {
+test('beta-channel versions accept prereleases and unpackaged builds never check', () => {
   const calls = [];
-  const app = { isPackaged: false, getVersion: () => '0.1.1-test.3', exit: () => {} };
+  const app = { isPackaged: false, getVersion: () => '0.1.1-beta.3', exit: () => {} };
   const autoUpdater = createAutoUpdater();
   autoUpdater.checkForUpdates = async () => {
     calls.push('checkForUpdates');

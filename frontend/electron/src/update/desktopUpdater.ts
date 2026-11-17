@@ -9,7 +9,7 @@
  *
  * 方針:
  * - 配布ビルドのバージョンは release workflow のタグと同じ `X.Y.Z`（stable）か
- *   `X.Y.Z-test.N`（test チャネル。prerelease を受け入れる）。それ以外（ローカルで packaged した
+ *   `X.Y.Z-beta.N`（beta チャネル。prerelease を受け入れる）。それ以外（ローカルで packaged した
  *   `-dev` ビルドなど）は feed を持たず、更新チェックをしない
  * - 適用はデフォルトで「次回終了時に自動」+ 任意で「今すぐ再起動して更新」
  * - electron-updater の `update-downloaded` は zip を取り終えた時点で、Squirrel.Mac はその後に
@@ -32,7 +32,7 @@ type LoggerLike = {
 /** 更新状態（手動チェック時のフィードバック用）。 */
 export type UpdateState = 'idle' | 'downloading' | 'downloaded';
 
-export type UpdateChannel = 'stable' | 'test';
+export type UpdateChannel = 'stable' | 'beta';
 
 export type DesktopUpdater = {
   /** パッケージ済みビルドで自動チェックを開始する（初回は即時、以後 6 時間ごと）。 */
@@ -51,19 +51,19 @@ const QUIT_INSTALL_FALLBACK_TIMEOUT_MS = 6000;
 // 過剰なリクエストを避けつつ、十分に追従する間隔。
 const AUTO_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
-// release-desktop.yml が受け付けるバージョンと同じ形式。prerelease 識別子は `test` だけ。
-// electron-updater の GitHub provider は、現在のバージョンと同じ prerelease 識別子を持つ
-// prerelease しか選ばないため、test チャネルの識別子は 1 つに固定する。
-const RELEASE_VERSION = /^(\d+)\.(\d+)\.(\d+)(?:-test\.(\d+))?$/;
+// release-desktop.yml が受け付けるバージョンと同じ形式。prerelease 識別子は `beta` だけ。
+// electron-updater の GitHub provider は、`beta` の版からは新しい beta と stable のうち新しい方を
+// 選ぶ（それ以外の識別子は同じ識別子の prerelease しか選ばず、stable に戻れない）。
+const RELEASE_VERSION = /^(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?$/;
 
 /** 配布ビルドの更新チャネル。配布物ではないバージョン（`-dev` など）は null（更新しない）。 */
 export function resolveChannelFromVersion(ver: string): UpdateChannel | null {
   const match = RELEASE_VERSION.exec(ver);
   if (!match) return null;
-  return match[4] ? 'test' : 'stable';
+  return match[4] ? 'beta' : 'stable';
 }
 
-/** 同じ X.Y.Z では stable が `-test.N` より新しい。 */
+/** 同じ X.Y.Z では stable が `-beta.N` より新しい。 */
 function releaseOrder(ver: string): number[] | null {
   const match = RELEASE_VERSION.exec(ver);
   if (!match) return null;
@@ -218,7 +218,7 @@ export function createDesktopUpdater(params: {
   // ダウンロードは準備済みの版と比べてから update-available の handler が始める。
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
-  autoUpdater.allowPrerelease = channel === 'test';
+  autoUpdater.allowPrerelease = channel === 'beta';
   autoUpdater.allowDowngrade = false;
   ensureEventHandlersInstalled();
 

@@ -76,12 +76,20 @@ WHERE step.user_id = ? AND step.action_id = ? AND step.step_number IS NOT NULL
 ORDER BY step.step_number, step.step_id
 """
 
+# The user's chat messages a hand-off relayed into the task, as first written.
+_RELAYED_CHAT_SQL = """
+SELECT item_id, created_at, json_extract(payload, '$.text') AS text FROM chat_items
+WHERE user_id = ? AND kind = 'user_message'
+  AND item_id IN (SELECT value FROM json_each(?))
+  AND length(json_extract(payload, '$.text')) > 0
+"""
+
 # The user's chat messages up to a hand-off, since the chat last handed work to
 # a task in an earlier turn. Every hand-off's USER row has a message id under
 # its turn's key. Design limit: the newest 20 messages; widen it when
 # chat-started tasks still ask about requests the user made further back.
 _CHAT_WORDS_SQL = """
-SELECT json_extract(payload, '$.text') AS text, created_at FROM chat_items
+SELECT item_id, created_at, json_extract(payload, '$.text') AS text FROM chat_items
 WHERE user_id = :user_id AND kind = 'user_message' AND created_at <= :handed_at
   AND length(json_extract(payload, '$.text')) > 0
   AND created_at > COALESCE((
@@ -124,16 +132,36 @@ class ActionRequestRow:
 type Timed[T] = tuple[str, T]
 
 
+@dataclass(frozen=True, slots=True)
+class ChatMessage:
+    """One of the user's chat messages, with its identity and the time it was sent."""
+
+    item_id: str
+    at: str
+    text: str
+
+
 def action_request_words(
     rows: Iterable[ActionRequestRow],
-    chat_words: Callable[[ActionRequestRow], tuple[Timed[UserMessage], ...]],
+    chat_words: Callable[[ActionRequestRow], tuple[ChatMessage, ...]],
+    relayed_words: Callable[[tuple[str, ...]], tuple[ChatMessage, ...]],
 ) -> tuple[tuple[Timed[UserMessage], ...], RequestTextNotByUser | None]:
     """The user's own messages, and the task text the user did not write.
 
-    ``chat_words`` reads the user's chat messages behind a chat instruction.
+    ``chat_words`` reads the user's chat messages behind a chat instruction, and
+    ``relayed_words`` the chat messages a hand-off relayed. A chat message keeps
+    the time the user sent it and counts once, however often it is relayed.
     """
 
     user_messages: list[Timed[UserMessage]] = []
+    seen_chat_items: set[str] = set()
+
+    def add_chat(messages: tuple[ChatMessage, ...]) -> None:
+        for chat in messages:
+            if chat.item_id not in seen_chat_items:
+                seen_chat_items.add(chat.item_id)
+                user_messages.append((chat.at, UserMessage(chat.text)))
+
     not_by_user: RequestTextNotByUser | None = None
     for row in rows:
         if row.step_type == "assistant_message":
@@ -162,14 +190,26 @@ def action_request_words(
             continue
         # A chat instruction is the chat's words; the user's are in the chat.
         if message.is_chat_instruction:
-            user_messages.extend(chat_words(row))
+            add_chat(chat_words(row))
             continue
+        # Relayed words (the content, or a suggestion's supplement) are the
+        # user's chat messages, which may be older than the hand-off.
+        relayed = (
+            message.chat_handoff.relayed_item_ids
+            if message.chat_handoff is not None
+            else ()
+        )
         if message.suggestion_approval is not None:
             not_by_user = RequestTextNotByUser(
                 source="suggestion_accepted", text=message.content, declined=False
             )
-            if message.supplement is not None:
+            if relayed:
+                add_chat(relayed_words(relayed))
+            elif message.supplement is not None:
                 user_messages.append((row.created_at, UserMessage(message.supplement)))
+            continue
+        if relayed:
+            add_chat(relayed_words(relayed))
             continue
         user_messages.append((row.created_at, UserMessage(message.content)))
     return tuple(user_messages), not_by_user
@@ -311,16 +351,27 @@ def action_request_rows(
 
 def read_chat_words(
     connection: sqlite3.Connection, *, user_id: str, row: ActionRequestRow
-) -> tuple[Timed[UserMessage], ...]:
+) -> tuple[ChatMessage, ...]:
     """The user's chat messages that led to the hand-off ``row``, oldest first."""
 
     # "chat-turn/<turn key>/<tool>/<n>": hand-offs of the same turn share a window.
     turn = "/".join(str(row.user_message_id).split("/")[:2]) + "/"
-    texts = connection.execute(
+    found = connection.execute(
         _CHAT_WORDS_SQL,
         {"user_id": user_id, "handed_at": row.created_at, "turn": turn},
     ).fetchall()
-    return tuple((str(at), UserMessage(str(text))) for text, at in reversed(texts))
+    return tuple(ChatMessage(*map(str, chat)) for chat in reversed(found))
+
+
+def read_relayed_words(
+    connection: sqlite3.Connection, *, user_id: str, item_ids: tuple[str, ...]
+) -> tuple[ChatMessage, ...]:
+    """The user's chat messages ``item_ids`` as they first sent them."""
+
+    found = connection.execute(
+        _RELAYED_CHAT_SQL, (user_id, json.dumps(list(item_ids)))
+    ).fetchall()
+    return tuple(ChatMessage(*map(str, chat)) for chat in found)
 
 
 def declined_operations(
@@ -374,6 +425,9 @@ def _load_review_request(
     user_messages, not_by_user = action_request_words(
         action_request_rows(connection, user_id=user_id, action_id=action_id),
         lambda row: read_chat_words(connection, user_id=user_id, row=row),
+        lambda item_ids: read_relayed_words(
+            connection, user_id=user_id, item_ids=item_ids
+        ),
     )
     roots = load_ready_manifest_roots_in_connection(
         connection=connection,
@@ -395,11 +449,13 @@ def _load_review_request(
 
 __all__ = [
     "ActionRequestRow",
+    "ChatMessage",
     "action_request_rows",
     "action_request_words",
     "declined_operations",
     "ordered_conversation",
     "pending_operation",
     "read_chat_words",
+    "read_relayed_words",
     "review_pending_approval",
 ]

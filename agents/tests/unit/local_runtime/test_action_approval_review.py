@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import astuple
 from pathlib import Path
 
 from pantaray_agents.local_runtime.runtime.action_approval_review import (
     ActionRequestRow,
+    ChatMessage,
     action_request_rows,
     action_request_words,
     declined_operations,
     ordered_conversation,
     read_chat_words,
+    read_relayed_words,
 )
 from pantaray_agents.local_runtime.runtime.action_message_models import (
     ACTION_RESUME_REQUEST_TEXT,
@@ -77,8 +80,8 @@ def _opening(
     )
 
 
-def _no_chat(_row: ActionRequestRow) -> tuple[str, ...]:
-    raise AssertionError("only a chat instruction reads the chat")
+def _no_chat(_row: object) -> tuple[ChatMessage, ...]:
+    raise AssertionError("only a chat hand-off reads the chat")
 
 
 def test_only_the_users_own_words_are_the_users_messages() -> None:
@@ -94,9 +97,12 @@ def test_only_the_users_own_words_are_the_users_messages() -> None:
         _user(ACTION_RESUME_REQUEST_TEXT, step_name=ACTION_RESUME_STEP_NAME),
     )
 
-    chat = (("c", UserMessage("Put it on the drive.")),)
-    assert action_request_words(rows, lambda _row: chat) == (
-        (("t", UserMessage("Send it to me first.")), *chat),
+    chat = (ChatMessage("i1", "c", "Put it on the drive."),)
+    assert action_request_words(rows, lambda _row: chat, _no_chat) == (
+        (
+            ("t", UserMessage("Send it to me first.")),
+            ("c", UserMessage("Put it on the drive.")),
+        ),
         RequestTextNotByUser(
             source="todo", text="Draft the reply to the vendor.", declined=False
         ),
@@ -112,7 +118,7 @@ def test_an_accepted_suggestion_stays_accepted() -> None:
         supplement="Keep it to five lines.",
     )
 
-    assert action_request_words((accepted,), _no_chat) == (
+    assert action_request_words((accepted,), _no_chat, _no_chat) == (
         (("t", UserMessage("Keep it to five lines.")),),
         RequestTextNotByUser(
             source="suggestion_accepted",
@@ -136,7 +142,7 @@ def test_a_reply_to_a_suggestion_is_never_its_acceptance() -> None:
         _user("お願い"),
     )
 
-    assert action_request_words(question, _no_chat) == (
+    assert action_request_words(question, _no_chat, _no_chat) == (
         (("t", UserMessage("What would it include?")),),
         RequestTextNotByUser(
             source="suggestion_reply",
@@ -144,7 +150,7 @@ def test_a_reply_to_a_suggestion_is_never_its_acceptance() -> None:
             declined=True,
         ),
     )
-    assert action_request_words(go_ahead, _no_chat) == (
+    assert action_request_words(go_ahead, _no_chat, _no_chat) == (
         (("t", UserMessage("お願い")),),
         RequestTextNotByUser(
             source="suggestion_reply",
@@ -247,17 +253,23 @@ def test_a_chat_hand_off_reads_the_users_messages_since_the_last_one(
             )
         ]
 
+        relayed = read_relayed_words(
+            connection, user_id="user-1", item_ids=("i4", "i3")
+        )
+
     # Never the chat's own reply, nor what led to the earlier hand-off.
     assert (
         words
         == [
             (
-                ("t3", UserMessage("Export the report as a PDF.")),
-                ("t5", UserMessage("Put it on my Desktop.")),
+                ChatMessage("i3", "t3", "Export the report as a PDF."),
+                ChatMessage("i5", "t5", "Put it on my Desktop."),
             )
         ]
         * 2
     )
+    # A relay reads the user's own message as first sent, never the chat's reply.
+    assert relayed == (ChatMessage("i3", "t3", "Export the report as a PDF."),)
 
 
 def test_what_the_user_declined_in_the_action_reaches_the_review(
@@ -366,3 +378,30 @@ def test_a_decline_is_read_against_what_the_user_wrote_after_it() -> None:
         "declined_operation",
         "user_message",
     ]
+
+
+def test_a_relayed_old_request_stays_before_the_decline_it_led_to() -> None:
+    push = PendingCommand(
+        tool="bash",
+        kinds=frozenset({"login_environment"}),
+        command="git push origin main",
+        cwd="/w",
+        additional_write_folders=(),
+        justification=None,
+    )
+    asked = ChatMessage("i1", "2026-11-18T00:01:00Z", "Push it to GitHub.")
+    first = _user(
+        "Push it to GitHub.",
+        chat_handoff=ChatHandoffInput(relayed_item_ids=("i1",)),
+    )
+    # After the decline, the chat relays the same old message again as context.
+    again = ActionRequestRow(*astuple(first)[:7], "2026-11-18T00:03:00Z", False)
+
+    words, _ = action_request_words(
+        (first, again), _no_chat, lambda _item_ids: (asked,)
+    )
+    conversation = ordered_conversation(
+        words, (("2026-11-18T00:02:00Z", DeclinedOperation(push)),)
+    )
+
+    assert conversation == (UserMessage("Push it to GitHub."), DeclinedOperation(push))

@@ -32,7 +32,6 @@ export function TodoProjectGroup({
       aria-labelledby={organizationName ? `${headingId} ${organizationId}` : headingId}
     >
       <div className="todo-group__head">
-        <span className="todo-group__dot" aria-hidden="true" />
         <h3 id={headingId}>{projectName ?? t('todo.noProject')}</h3>
         {organizationName ? (
           <span id={organizationId} className="todo-group__organization">

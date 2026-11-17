@@ -73,7 +73,6 @@
   align-items: center;
   height: 40px;
   padding: 0 6px 0 12px;
-  border-bottom: 1px solid var(--fog-line);
 }
 
 .todo-row:hover {

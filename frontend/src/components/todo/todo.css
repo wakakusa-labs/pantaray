@@ -21,7 +21,7 @@
   background: var(--fog-text-3);
 }
 
-/* A group: its heading over a hairline, no box around it. */
+/* A group: its heading and rows, set apart by space alone. */
 .todo-group {
   margin-top: 26px;
 }
@@ -31,7 +31,6 @@
   align-items: center;
   gap: 10px;
   padding: 0 12px 8px;
-  border-bottom: 1px solid var(--fog-line);
 }
 
 .todo-group__head h3 {

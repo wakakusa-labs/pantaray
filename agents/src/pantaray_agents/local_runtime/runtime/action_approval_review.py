@@ -3,14 +3,15 @@
 An allow approves the request once and the call runs with no panel; otherwise
 it waits for the user, with the review's reason when it gave one. The review
 reads only the user's own words, and labels the task text the user did not
-write. A screen capture is never reviewed.
+write. For a task the chat started on its own instruction, the user's own words
+are their chat messages that led to it. A screen capture is never reviewed.
 """
 
 from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -56,12 +57,29 @@ _INTEGRATION_SUMMARY_KIND = "integration_tool"
 # message a Suggestion reply or an AI-written TODO opens it with.
 _REQUEST_ROWS_SQL = """
 SELECT step_type, step_name, user_message_id, user_message_json,
-       user_request_text, llm_response_text, source_suggestion_id
+       user_request_text, llm_response_text, source_suggestion_id, created_at
 FROM agent_action_steps
 WHERE user_id = ? AND action_id = ? AND step_number IS NOT NULL
   AND (step_type = 'user_request'
        OR (step_type = 'assistant_message' AND step_number = 1))
 ORDER BY step_number, step_id
+"""
+
+# The user's chat messages up to a hand-off, since the chat last handed work to
+# a task in an earlier turn. Every hand-off's USER row has a message id under
+# its turn's key. Design limit: the newest 20 messages; widen it when
+# chat-started tasks still ask about requests the user made further back.
+_CHAT_WORDS_SQL = """
+SELECT json_extract(payload, '$.text') AS text FROM chat_items
+WHERE user_id = :user_id AND kind = 'user_message' AND created_at <= :handed_at
+  AND length(json_extract(payload, '$.text')) > 0
+  AND created_at > COALESCE((
+        SELECT MAX(created_at) FROM agent_action_steps
+        WHERE user_id = :user_id AND step_type = 'user_request'
+          AND user_message_id GLOB 'chat-turn/*'
+          AND user_message_id NOT GLOB :turn || '*'
+          AND created_at < :handed_at), '')
+ORDER BY sequence DESC LIMIT 20
 """
 
 
@@ -76,12 +94,17 @@ class ActionRequestRow:
     user_request_text: str | None
     llm_response_text: str | None
     source_suggestion_id: str | None
+    created_at: str
 
 
 def action_request_words(
     rows: Iterable[ActionRequestRow],
+    chat_words: Callable[[ActionRequestRow], tuple[str, ...]],
 ) -> tuple[tuple[str, ...], RequestTextNotByUser | None]:
-    """The user's own messages, and the task text the user did not write."""
+    """The user's own messages, and the task text the user did not write.
+
+    ``chat_words`` reads the user's chat messages behind a chat instruction.
+    """
 
     user_messages: list[str] = []
     not_by_user: RequestTextNotByUser | None = None
@@ -100,9 +123,12 @@ def action_request_words(
             message_json=row.user_message_json,
             user_request_text=row.user_request_text,
         )
-        # A row with no envelope cannot say who wrote it, and a chat
-        # instruction is the chat's words: neither speaks for the user.
-        if message is None or message.is_chat_instruction:
+        # A row with no envelope cannot say who wrote it.
+        if message is None:
+            continue
+        # A chat instruction is the chat's words; the user's are in the chat.
+        if message.is_chat_instruction:
+            user_messages.extend(chat_words(row))
             continue
         if message.suggestion_approval is not None:
             not_by_user = RequestTextNotByUser(
@@ -215,6 +241,20 @@ async def review_pending_approval(
     return False
 
 
+def read_chat_words(
+    connection: sqlite3.Connection, *, user_id: str, row: ActionRequestRow
+) -> tuple[str, ...]:
+    """The user's chat messages that led to the hand-off ``row``, oldest first."""
+
+    # "chat-turn/<turn key>/<tool>/<n>": hand-offs of the same turn share a window.
+    turn = "/".join(str(row.user_message_id).split("/")[:2]) + "/"
+    texts = connection.execute(
+        _CHAT_WORDS_SQL,
+        {"user_id": user_id, "handed_at": row.created_at, "turn": turn},
+    ).fetchall()
+    return tuple(str(text) for (text,) in reversed(texts))
+
+
 def _load_review_request(
     connection: sqlite3.Connection,
     *,
@@ -242,8 +282,11 @@ def _load_review_request(
     if operation is None:
         return None
     user_messages, not_by_user = action_request_words(
-        ActionRequestRow(*row)
-        for row in connection.execute(_REQUEST_ROWS_SQL, (user_id, action_id))
+        (
+            ActionRequestRow(*row)
+            for row in connection.execute(_REQUEST_ROWS_SQL, (user_id, action_id))
+        ),
+        lambda row: read_chat_words(connection, user_id=user_id, row=row),
     )
     roots = load_ready_manifest_roots_in_connection(
         connection=connection,
@@ -264,5 +307,6 @@ __all__ = [
     "ActionRequestRow",
     "action_request_words",
     "pending_operation",
+    "read_chat_words",
     "review_pending_approval",
 ]

@@ -34,6 +34,7 @@ _REQUEST = ApprovalReviewRequest(
         justification="Open the page in a browser and save it as a PDF.",
     ),
     workspace_folders=("/work",),
+    declined_by_user=(),
 )
 
 
@@ -144,10 +145,13 @@ def test_the_review_request_has_no_place_for_tool_output() -> None:
                 operation=PendingIntegrationWrite(
                     toolkit="slack",
                     action="SLACK_SEND_MESSAGE",
+                    account_id="acct-work",
+                    account_label="work@example.com",
                     arguments={"channel": "#general"},
                     justification=None,
                 ),
                 workspace_folders=(),
+                declined_by_user=(_REQUEST.operation,),
             )
         )
     )
@@ -158,6 +162,7 @@ def test_the_review_request_has_no_place_for_tool_output() -> None:
         "request_text_not_by_user",
         "operation",
         "workspace_folders",
+        "declined_by_user",
     }
     assert set(command["operation"]) == {
         "tool",
@@ -171,7 +176,14 @@ def test_the_review_request_has_no_place_for_tool_output() -> None:
         "requires",
         "toolkit",
         "action",
+        "account",
         "arguments",
         "justification",
     }
     assert command["request_text_not_by_user"] == {"source": "todo", "text": "Report"}
+    # Which account acts, and what the user already declined, reach the model.
+    assert integration["operation"]["account"] == {
+        "id": "acct-work",
+        "label": "work@example.com",
+    }
+    assert integration["declined_by_user"] == [command["operation"]]

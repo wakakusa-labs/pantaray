@@ -72,16 +72,24 @@ class PendingIntegrationWrite:
 
     toolkit: str
     action: str
+    # The connected account it acts through: its id and the name the user sees.
+    account_id: str
+    account_label: str
     arguments: JSONValue
     justification: str | None
+
+
+type PendingOperation = PendingCommand | PendingIntegrationWrite
 
 
 @dataclass(frozen=True, slots=True)
 class ApprovalReviewRequest:
     user_messages: tuple[str, ...]
     request_text_not_by_user: RequestTextNotByUser | None
-    operation: PendingCommand | PendingIntegrationWrite
+    operation: PendingOperation
     workspace_folders: tuple[str, ...]
+    # Operations the user declined earlier in this Action, newest first.
+    declined_by_user: tuple[PendingOperation, ...]
 
 
 class ApprovalReviewVerdict(BaseModel):
@@ -96,26 +104,6 @@ class ApprovalReviewVerdict(BaseModel):
 def build_approval_review_payload(request: ApprovalReviewRequest) -> str:
     """The review input as one JSON document, so no field can pose as another."""
 
-    operation = request.operation
-    rendered_operation: dict[str, JSONValue]
-    match operation:
-        case PendingCommand():
-            rendered_operation = {
-                "tool": operation.tool,
-                "requires": sorted(operation.kinds),
-                "command": operation.command,
-                "cwd": operation.cwd,
-                "additional_write_folders": list(operation.additional_write_folders),
-                "justification": operation.justification,
-            }
-        case PendingIntegrationWrite():
-            rendered_operation = {
-                "requires": ["integration_write"],
-                "toolkit": operation.toolkit,
-                "action": operation.action,
-                "arguments": operation.arguments,
-                "justification": operation.justification,
-            }
     not_by_user = request.request_text_not_by_user
     payload: dict[str, JSONValue] = {
         "user_messages": list(request.user_messages),
@@ -124,10 +112,38 @@ def build_approval_review_payload(request: ApprovalReviewRequest) -> str:
             if not_by_user is None
             else {"source": not_by_user.source, "text": not_by_user.text}
         ),
-        "operation": rendered_operation,
+        "operation": _render_operation(request.operation),
         "workspace_folders": list(request.workspace_folders),
+        "declined_by_user": [
+            _render_operation(declined) for declined in request.declined_by_user
+        ],
     }
     return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def _render_operation(operation: PendingOperation) -> dict[str, JSONValue]:
+    match operation:
+        case PendingCommand():
+            return {
+                "tool": operation.tool,
+                "requires": sorted(operation.kinds),
+                "command": operation.command,
+                "cwd": operation.cwd,
+                "additional_write_folders": list(operation.additional_write_folders),
+                "justification": operation.justification,
+            }
+        case PendingIntegrationWrite():
+            return {
+                "requires": ["integration_write"],
+                "toolkit": operation.toolkit,
+                "action": operation.action,
+                "account": {
+                    "id": operation.account_id,
+                    "label": operation.account_label,
+                },
+                "arguments": operation.arguments,
+                "justification": operation.justification,
+            }
 
 
 def _parse_verdict(text: str) -> ApprovalReviewVerdict | None:
@@ -195,6 +211,7 @@ __all__ = [
     "CommandReviewKind",
     "PendingCommand",
     "PendingIntegrationWrite",
+    "PendingOperation",
     "RequestTextNotByUser",
     "build_approval_review_payload",
     "review_approval",

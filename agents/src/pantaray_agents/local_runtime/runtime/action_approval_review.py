@@ -26,6 +26,7 @@ from pantaray_agents.local_runtime.tooling.approval_review import (
     CommandReviewKind,
     PendingCommand,
     PendingIntegrationWrite,
+    PendingOperation,
     RequestTextNotByUser,
     review_approval,
 )
@@ -80,6 +81,16 @@ WHERE user_id = :user_id AND kind = 'user_message' AND created_at <= :handed_at
           AND user_message_id NOT GLOB :turn || '*'
           AND created_at < :handed_at), '')
 ORDER BY sequence DESC LIMIT 20
+"""
+
+
+# The user's own declines in an Action. Design limit: the newest 10; raise it
+# when a review allows something the user declined further back.
+_DECLINED_SQL = """
+SELECT tool_id, command_summary_json FROM approval_sessions
+WHERE user_id = ? AND action_id = ? AND approval_source = 'prompt'
+  AND status = 'denied'
+ORDER BY decided_at DESC LIMIT 10
 """
 
 
@@ -143,7 +154,7 @@ def action_request_words(
 
 def pending_operation(
     *, tool_id: str, summary: dict[str, JSONValue], args: dict[str, JSONValue]
-) -> PendingCommand | PendingIntegrationWrite | None:
+) -> PendingOperation | None:
     """The operation an approval summary asks for, or None when it is not reviewed."""
 
     kind = summary.get("summary_kind")
@@ -151,6 +162,8 @@ def pending_operation(
         return PendingIntegrationWrite(
             toolkit=str(summary["toolkit"]),
             action=str(summary["slug"]),
+            account_id=str(summary["account_id"]),
+            account_label=str(summary["account"]),
             arguments=json.loads(str(summary["arguments"])),
             justification=None,
         )
@@ -255,6 +268,28 @@ def read_chat_words(
     return tuple(str(text) for (text,) in reversed(texts))
 
 
+def declined_operations(
+    connection: sqlite3.Connection, *, user_id: str, action_id: str
+) -> tuple[PendingOperation, ...]:
+    """What the user declined in this Action, newest first.
+
+    A subagent's requests carry its parent's Action id, so they count here too.
+    """
+
+    declined: list[PendingOperation] = []
+    for tool_id, summary_json in connection.execute(
+        _DECLINED_SQL, (user_id, action_id)
+    ):
+        summary = json.loads(str(summary_json))
+        # A declined call keeps no arguments; its summary names what it did.
+        operation = pending_operation(
+            tool_id=str(tool_id), summary=summary, args=summary
+        )
+        if operation is not None:
+            declined.append(operation)
+    return tuple(declined)
+
+
 def _load_review_request(
     connection: sqlite3.Connection,
     *,
@@ -300,12 +335,16 @@ def _load_review_request(
         workspace_folders=tuple(
             str(root.canonical_real_path) for root in roots if root.can_apply_patch
         ),
+        declined_by_user=declined_operations(
+            connection, user_id=user_id, action_id=action_id
+        ),
     )
 
 
 __all__ = [
     "ActionRequestRow",
     "action_request_words",
+    "declined_operations",
     "pending_operation",
     "read_chat_words",
     "review_pending_approval",

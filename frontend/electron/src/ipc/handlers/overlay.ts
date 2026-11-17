@@ -10,12 +10,10 @@ import type { CreateNotificationIpcHandlers } from '../../orchestration/contract
 import type { IpcRegistrar } from '../registrar';
 import { parseInput } from '../schemas/error';
 import {
-  ActionApprovalModeUpdateSchema,
   OverlayOpenTaskRequestSchema,
   SubmitApprovalDecisionPayloadSchema,
   SuggestionOverlayOpenRequestSchema,
 } from '../schemas/overlay';
-import { IdSchema } from '../schemas/workspaceSettings';
 
 function loadNotificationModule(): {
   createNotificationIpcHandlers?: CreateNotificationIpcHandlers;
@@ -33,20 +31,6 @@ export function registerOverlayHandlers(ctx: MainContext, registrar: IpcRegistra
       payload
     );
     return await ctx.overlay.submitApprovalDecision(parsed);
-  });
-
-  registrar.handle('overlay:getActionApprovalMode', async (_event, actionId) => {
-    const parsed = parseInput(IdSchema, 'overlay:getActionApprovalMode', actionId);
-    return await ctx.overlay.getActionApprovalMode(parsed);
-  });
-
-  registrar.handle('overlay:setActionApprovalMode', async (_event, payload) => {
-    const parsed = parseInput(
-      ActionApprovalModeUpdateSchema,
-      'overlay:setActionApprovalMode',
-      payload
-    );
-    return await ctx.overlay.setActionApprovalMode(parsed.actionId, parsed.approvalMode);
   });
 
   // The workspace is the projects in the History page's sidebar; this starts naming a new one.

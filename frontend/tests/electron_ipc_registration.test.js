@@ -144,16 +144,6 @@ test('IPC registration: registers all expected channels (invoke/send)', async ()
     actions: { refreshActionConversation: () => {} },
     overlay: {
       resumeLiveProcess: (_payload) => {},
-      getActionApprovalMode: async () => ({
-        action_id: 'act-1',
-        approval_mode: 'prompt_each_time',
-        source: 'user_default',
-      }),
-      setActionApprovalMode: async () => ({
-        action_id: 'act-1',
-        approval_mode: 'prompt_each_time',
-        source: 'action',
-      }),
       createNotificationIpcHandlers: (options) => {
         overlayFactoryCalls.push(options);
         return {

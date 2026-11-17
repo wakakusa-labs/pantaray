@@ -136,7 +136,6 @@ async function installBridge(page: Page, language: 'ja' | 'en') {
             return () => window.removeEventListener('test:snapshot', listener);
           },
           resize: noop,
-          getActionApprovalMode: async () => ({ approval_mode: 'prompt_each_time' }),
         },
         orchestration: {
           onEvent: () => noop,
@@ -144,9 +143,6 @@ async function installBridge(page: Page, language: 'ja' | 'en') {
           acceptAction: async (request: AcceptActionRequest) => {
             document.documentElement.dataset.accepted = JSON.stringify(request);
           },
-        },
-        approval: {
-          getWorkspaceEditCommandPreference: async () => ({ approval_mode: 'prompt_each_time' }),
         },
         actions: {
           onConversationUpdated: (callback: (update: ActionLiveUpdate) => void) => {

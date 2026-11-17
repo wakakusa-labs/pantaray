@@ -70,8 +70,6 @@ export const validInvokeChannels = [
   'auth:signOut',
   // Browser login start (PKCE attempt)
   'auth:startBrowserLogin',
-  'approval:getWorkspaceEditCommandPreference',
-  'approval:setWorkspaceEditCommandPreference',
   // Main window only: connected external apps' permissions
   'integrations:getStatus',
   'integrations:setAccountAccess',
@@ -198,8 +196,6 @@ export const validInvokeChannels = [
   'privacy:setCaptureEditing',
   'ws:acceptAction',
   'overlay:submitApprovalDecision',
-  'overlay:getActionApprovalMode',
-  'overlay:setActionApprovalMode',
   // Main window → panel: a suggestion opens small
   'history:openOverlay',
   // Panel → main window: the panel closes and the main window opens its Action or suggestion

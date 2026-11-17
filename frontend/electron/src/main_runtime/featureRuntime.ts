@@ -26,7 +26,6 @@ import { createTodoFetcher } from '../todos/todoFetch';
 import { createTodoImportFetcher } from '../todos/todoImportFetch';
 import { createActionLatestPageReader } from '../actions/actionLatestPageReader';
 import { createActionApprovalDecisionFetcher } from '../actions/actionApprovalDecisionFetch';
-import { createActionApprovalModeFetcher } from '../actions/actionApprovalModeFetch';
 import { submitActionApprovalDecision } from '../actions/actionApprovalSubmission';
 import { createActionReadState } from '../history/actionReadState';
 import { broadcastHistoryChanged } from '../orchestration/historyNotifications';
@@ -58,10 +57,6 @@ import {
 } from '../windows/macosPermissions';
 import { createConversationOverlayOwner } from '../windows/conversationOverlay';
 import { presentRecordingIntro } from '../windows/recordingIntroWindow';
-import {
-  createApprovalPreferenceFetcher,
-  type ApprovalMode,
-} from '../settings/approvalPreferencesFetch';
 import type { OnboardingState } from '../ipc/schemas/onboarding';
 import { createOnboardingStateStore } from '../settings/onboardingState';
 import { createOverlayPlacementStore } from '../settings/overlayPlacement';
@@ -250,9 +245,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     requestJson,
     getUserId,
   });
-  const actionApprovalModeFetch = createActionApprovalModeFetcher({ requestJson, getUserId });
   const actions = createActionFetcher({ requestJson, getUserId });
-  const approvalPreferenceFetch = createApprovalPreferenceFetcher({ requestJson, getUserId });
   const workspaceSettingsFetch = createWorkspaceSettingsFetcher({ requestJson, getUserId });
   // Since Electron 43 a dialog without defaultPath always opens in Downloads and the OS no
   // longer restores the last-visited folder, so the picker reopens where the last pick was.
@@ -452,13 +445,6 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
           params.setUiLanguage(language);
           rebuildMenus();
         },
-        getWorkspaceEditCommandPreference: approvalPreferenceFetch.get,
-        setWorkspaceEditCommandPreference: async (approvalMode) => {
-          if (approvalMode !== 'prompt_each_time' && approvalMode !== 'always_allow') {
-            throw new Error('Invalid approval mode.');
-          }
-          return await approvalPreferenceFetch.update(approvalMode as ApprovalMode);
-        },
         getGlobalShortcutState: shortcutController.getState,
         setGlobalShortcutAccelerator: (accelerator) => {
           const result = shortcutController.changeShortcut(accelerator);
@@ -518,8 +504,6 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
             onDecisionSettled: (identity) => orchestration.handleApprovalDecisionSettled(identity),
           });
         },
-        getActionApprovalMode: actionApprovalModeFetch.get,
-        setActionApprovalMode: actionApprovalModeFetch.update,
         createNotificationIpcHandlers: params.notificationWindow.createNotificationIpcHandlers,
       },
     });

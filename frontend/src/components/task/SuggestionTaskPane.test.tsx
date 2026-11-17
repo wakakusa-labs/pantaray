@@ -99,14 +99,6 @@ beforeEach(() => {
   Object.defineProperty(window, 'electron', {
     configurable: true,
     value: {
-      approval: {
-        getWorkspaceEditCommandPreference: vi.fn(async () => ({
-          scope_type: 'global',
-          scope_ref: null,
-          approval_mode: 'prompt_each_time',
-          applies_to: ['workspace_edit_and_command'],
-        })),
-      },
       suggestions: {
         read,
         onSnapshot: (callback: typeof snapshotListener) => {

@@ -78,7 +78,7 @@ export function SuggestionTaskPane({
   const columnRef = useRef<HTMLDivElement>(null);
   const submissionControlRef = useRef<HTMLButtonElement>(null);
   const task = useSuggestionTask(suggestionId);
-  const { snapshot, phase, failure, composer, approvalMode } = task;
+  const { snapshot, phase, failure, composer } = task;
   const { status: copyStatus, copy: copyToClipboard } = useClipboardCopy();
   const link = useCopyWorkLink('suggestion', suggestionId);
   const suggestionText = snapshot?.suggestionText ?? '';
@@ -232,18 +232,11 @@ export function SuggestionTaskPane({
               {failureText(failure)}
             </p>
           ) : null}
-          {(phase === 'actionable' || dismissed) && approvalMode.errorKey ? (
-            <p className="suggestion-task__alert" role="alert">
-              {t(approvalMode.errorKey)}
-            </p>
-          ) : null}
         </div>
       </div>
       <div className="suggestion-task__dock">
         {phase === 'actionable' || dismissed || (repliesToOffer && phase === 'starting') ? (
           <OverlayComposer
-            approvalMode={approvalMode}
-            hideApprovalMode
             placeholder={t('overlay.composer.replyPlaceholder')}
             draft={draft.draft}
             mentions={draft.mentions}

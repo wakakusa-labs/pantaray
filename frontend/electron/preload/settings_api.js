@@ -13,12 +13,6 @@ function createSettingsApi({ ipcRenderer }) {
       getState: () => ipcRenderer.invoke('onboarding:getState'),
       setState: (state) => ipcRenderer.invoke('onboarding:setState', state),
     },
-    approval: {
-      getWorkspaceEditCommandPreference: () =>
-        ipcRenderer.invoke('approval:getWorkspaceEditCommandPreference'),
-      setWorkspaceEditCommandPreference: (approvalMode) =>
-        ipcRenderer.invoke('approval:setWorkspaceEditCommandPreference', approvalMode),
-    },
     integrations: {
       getStatus: () => ipcRenderer.invoke('integrations:getStatus'),
       setAccountAccess: (update) => ipcRenderer.invoke('integrations:setAccountAccess', update),

@@ -22,7 +22,6 @@ import type {
 } from '../../electron/src/actions/actionLiveCore';
 import { createActionToolOutputLoader } from '../../electron/src/actions/actionToolOutputLoader';
 import { useActionApprovalDecisionController } from './agent-overlay/useActionApprovalDecisionController';
-import { useActionApprovalMode } from './agent-overlay/useActionApprovalMode';
 import { actionStopTarget, useActionStop } from './agent-overlay/useActionStop';
 import { useCompletionViewed } from './agent-overlay/useCompletionViewed';
 import { useStandaloneComposerFocus } from './agent-overlay/useStandaloneComposerFocus';
@@ -116,11 +115,6 @@ const ConversationOverlay = ({
     () => (actions ? createActionToolOutputLoader(actions.readToolOutputPage) : null),
     [actions]
   );
-  const approvalMode = useActionApprovalMode(
-    conversationActionId,
-    entryMode === 'overlay' ? state.suggestionId : null
-  );
-  const { reset: resetApprovalMode } = approvalMode;
   const approval = useActionApprovalDecisionController({ t });
   const { approvalBlockers, approvalUiState, setApprovalBlockers } = approval;
   useStandaloneComposerFocus(entryMode === 'standalone', standaloneComposerRef);
@@ -130,7 +124,6 @@ const ConversationOverlay = ({
     if (!actions || !toolOutputLoader) return;
     return actions.onConversationUpdated((update) => {
       if (update.kind === 'reset') {
-        resetApprovalMode();
         livePageRef.current = null;
         submissionRefreshScopeRef.current += 1;
         restoreComposerFocusRef.current = false;
@@ -174,7 +167,6 @@ const ConversationOverlay = ({
     setComposer,
     submissionRefreshScopeRef,
     initialActionId,
-    resetApprovalMode,
     setApprovalBlockers,
     toolOutputLoader,
   ]);
@@ -484,8 +476,6 @@ const ConversationOverlay = ({
     (!operationalError || composer.submission) &&
     (canCompose || repliesToOffer || composer.submission) ? (
       <OverlayComposer
-        approvalMode={approvalMode}
-        hideApprovalMode={entryMode === 'overlay'}
         placeholder={entryMode === 'overlay' ? t('overlay.composer.replyPlaceholder') : undefined}
         draft={composer.draft}
         mentions={composer.mentions}

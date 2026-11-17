@@ -521,9 +521,6 @@ async function openHome(page: Page, search = '', suggestion: OverlaySnapshot = S
           onboarding: { getState: async () => ({ status: 'completed' }) },
           aiConnection: { getState: () => new Promise(() => {}), onChanged: () => noop },
           shortcut: { getState: async () => ({ accelerator: 'Alt+Space', failure: null }) },
-          approval: {
-            getWorkspaceEditCommandPreference: async () => ({ approval_mode: 'prompt_each_time' }),
-          },
           chat: {
             listItems: async () => ({ items: [], next_cursor: null }),
             onItemAppended: () => noop,
@@ -788,9 +785,7 @@ async function openHome(page: Page, search = '', suggestion: OverlaySnapshot = S
               suggestionId === suggestion.suggestionId ? suggestion : new Promise(() => {}),
             onSnapshot: () => noop,
           },
-          agentOverlay: {
-            getActionApprovalMode: async () => ({ approval_mode: 'prompt_each_time' }),
-          },
+          agentOverlay: {},
           actions: {
             // The Action panes' reads stay pending: these tests look at what opens them.
             openConversation: () => new Promise(() => {}),

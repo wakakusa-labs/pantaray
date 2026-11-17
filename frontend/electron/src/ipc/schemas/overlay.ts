@@ -2,8 +2,7 @@
  * Zod schemas for the overlay IPC payloads.
  *
  * Shapes mirror `SubmitApprovalDecisionPayload` in
- * `actions/actionApprovalDecisionFetch.ts` and the Action approval mode
- * contract in `actions/actionApprovalModeFetch.ts`.
+ * `actions/actionApprovalDecisionFetch.ts`.
  */
 
 import { z } from 'zod';
@@ -20,13 +19,6 @@ export const SubmitApprovalDecisionPayloadSchema = z
     approvalSessionId: IdSchema,
     toolRequestId: IdSchema,
     decision: z.enum(OVERLAY_APPROVAL_DECISIONS),
-  })
-  .strict();
-
-export const ActionApprovalModeUpdateSchema = z
-  .object({
-    actionId: IdSchema,
-    approvalMode: z.enum(['prompt_each_time', 'always_allow']),
   })
   .strict();
 

@@ -4,7 +4,6 @@ import { useI18n } from '@/context/useI18n';
 import type { OverlaySnapshot } from '../../../electron/src/orchestration/contracts';
 import { isErrorEvent } from '../../../electron/src/orchestration/eventContracts';
 import { isActionErrorMeta } from '../agent-overlay/model/overlayTypes';
-import { useActionApprovalMode } from '../agent-overlay/useActionApprovalMode';
 import { useOverlayComposerController } from '../agent-overlay/useOverlayComposerController';
 
 /**
@@ -138,7 +137,6 @@ export function useSuggestionTask(suggestionId: string) {
     // Refreshing belongs to a conversation; once a reply starts one, the Action pane shows it.
     onRefreshedPage: () => undefined,
   });
-  const approvalMode = useActionApprovalMode(null, suggestionId);
   const { submission } = composer.composer;
   // Only a reply, sent or found already open, gives this composer an Action.
   const replyActionId = composer.composer.initialActionId;
@@ -192,7 +190,6 @@ export function useSuggestionTask(suggestionId: string) {
     failure,
     actionId: snapshot?.actionId ?? replyActionId,
     composer,
-    approvalMode,
     canSend,
     send,
   };

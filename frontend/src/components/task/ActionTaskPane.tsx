@@ -300,7 +300,6 @@ export function ActionTaskPane({
           </div>
         ) : null}
         <OverlayComposer
-          approvalMode={task.approvalMode}
           draft={draft.draft}
           mentions={draft.mentions}
           quoting={{ ...composer.quoting, sourceRef: contentRef }}

@@ -77,14 +77,6 @@ function createOverlayApi({ ipcRenderer, ipcPolicy, logError }) {
         assertValidInvokeChannel('overlay:submitApprovalDecision');
         return ipcRenderer.invoke('overlay:submitApprovalDecision', payload);
       },
-      getActionApprovalMode: (actionId) => {
-        assertValidInvokeChannel('overlay:getActionApprovalMode');
-        return ipcRenderer.invoke('overlay:getActionApprovalMode', actionId);
-      },
-      setActionApprovalMode: (payload) => {
-        assertValidInvokeChannel('overlay:setActionApprovalMode');
-        return ipcRenderer.invoke('overlay:setActionApprovalMode', payload);
-      },
       dragStart: (payload) => {
         if (isValidSendChannel('overlay:dragStart')) {
           ipcRenderer.send('overlay:dragStart', payload);

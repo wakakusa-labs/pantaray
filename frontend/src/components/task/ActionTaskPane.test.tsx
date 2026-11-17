@@ -71,14 +71,13 @@ async function renderPane(props: Partial<Parameters<typeof ActionTaskPane>[0]> =
       />
     </UiLanguageProvider>
   );
-  // The approval mode read gates every composer action.
-  await screen.findByRole('button', { name: /Ask every time/ });
+  await screen.findByRole('textbox', { name: 'Message' });
   return rendered;
 }
 
 const primaryButton = (name: string) => screen.getByRole('button', { name });
 
-// A pane whose composer an unresolved send holds: it shows no permission control to wait for.
+// A pane whose composer an unresolved send holds.
 const renderHeldPane = () =>
   render(
     <UiLanguageProvider initialLanguage="en">
@@ -118,12 +117,6 @@ beforeEach(() => {
       clipboard: { writeText },
       agentOverlay: {
         submitApprovalDecision,
-        getActionApprovalMode: vi.fn(async (actionId: string) => ({
-          action_id: actionId,
-          approval_mode: 'prompt_each_time',
-          source: 'user_default',
-        })),
-        setActionApprovalMode: vi.fn(),
       },
     },
   });

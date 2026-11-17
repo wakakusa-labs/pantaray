@@ -184,14 +184,6 @@ type ElectronOverlayDragPoint = {
   screenY: number;
 };
 
-type ElectronActionApprovalMode = 'prompt_each_time' | 'always_allow';
-
-type ElectronActionApprovalModeResponse = {
-  action_id: string;
-  approval_mode: ElectronActionApprovalMode;
-  source: 'action' | 'user_default';
-};
-
 declare global {
   interface Window {
     electron?: {
@@ -403,22 +395,6 @@ declare global {
         restartToUpdate: () => Promise<void>;
         onReadyNoticeChanged: (callback: () => void) => () => void;
       };
-      approval?: {
-        getWorkspaceEditCommandPreference: () => Promise<{
-          scope_type: 'global';
-          scope_ref: null;
-          approval_mode: 'prompt_each_time' | 'always_allow';
-          applies_to: ['workspace_edit_and_command'];
-        }>;
-        setWorkspaceEditCommandPreference: (
-          approvalMode: 'prompt_each_time' | 'always_allow'
-        ) => Promise<{
-          scope_type: 'global';
-          scope_ref: null;
-          approval_mode: 'prompt_each_time' | 'always_allow';
-          applies_to: ['workspace_edit_and_command'];
-        }>;
-      };
       /** Connected external apps' permissions; main accepts these from the main window only. */
       integrations?: IntegrationSettingsApi;
       aiConnection?: {
@@ -533,11 +509,6 @@ declare global {
           toolRequestId: string;
           decision: 'approved_once' | 'approved_for_conversation' | 'denied';
         }) => Promise<void>;
-        getActionApprovalMode?: (actionId: string) => Promise<ElectronActionApprovalModeResponse>;
-        setActionApprovalMode?: (payload: {
-          actionId: string;
-          approvalMode: ElectronActionApprovalMode;
-        }) => Promise<ElectronActionApprovalModeResponse>;
         dragStart?: (payload: ElectronOverlayDragPoint) => void;
         dragMove?: (payload: ElectronOverlayDragPoint) => void;
         dragEnd?: () => void;

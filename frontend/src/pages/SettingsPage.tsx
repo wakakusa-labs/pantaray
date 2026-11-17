@@ -10,7 +10,7 @@ import type { MessageKey } from '@/i18n/types';
 import type { CapturePermission } from '../../electron/src/context/zaneiProcess';
 import { LanguageSection } from './settings/components/LanguageSection';
 import { AiConnectionSettingsSection } from './settings/components/AiConnectionSettingsSection';
-import { ApprovalModeSection } from './settings/components/ApprovalModeSection';
+import { ExecutionSettingsSection } from './settings/components/ExecutionSettingsSection';
 import { IdeFileRulesSection } from './settings/components/IdeFileRulesSection';
 import { IntegrationSettings } from './settings/components/IntegrationSettings';
 import { OverlayPositionSection } from './settings/components/OverlayPositionSection';
@@ -78,7 +78,7 @@ const SettingsPage: React.FC = () => {
   const sectionLabels: Record<SettingsSectionId, string> = {
     ai_connection: t('settings.aiConnection.title'),
     language: t('settings.language.title'),
-    execution: t('settings.approvalMode.title'),
+    execution: t('settings.execution.title'),
     integrations: t('settings.integrations.title'),
     shortcuts: t('settings.shortcut.title'),
     overlay_position: t('settings.overlayPosition.title'),
@@ -146,7 +146,7 @@ function OwnerScopedSections({
 
   return (
     <>
-      {activeSection === 'execution' ? <ApprovalModeSection t={t} /> : null}
+      {activeSection === 'execution' ? <ExecutionSettingsSection t={t} /> : null}
       {activeSection === 'screenshots' ? (
         <ScreenshotSections controller={controller} t={t} />
       ) : null}

@@ -4,7 +4,6 @@ import {
   ComposerSubmissionStatus,
   OverlayComposer,
 } from '@/components/agent-overlay/OverlayComposer';
-import { useActionApprovalMode } from '@/components/agent-overlay/useActionApprovalMode';
 import { useOverlayComposerController } from '@/components/agent-overlay/useOverlayComposerController';
 import { useI18n } from '@/context/useI18n';
 
@@ -42,7 +41,6 @@ export function NewTaskPane({
     // The unsent draft stays with the owner's new task while the pane is away.
     newTask: true,
   });
-  const approvalMode = useActionApprovalMode(null, null);
   const { composer, setComposer } = controller;
   const actionId = composer.initialActionId;
 
@@ -67,18 +65,9 @@ export function NewTaskPane({
       <header className="suggestion-task__header">
         <h1 id={titleId}>{t('history.newConversation')}</h1>
       </header>
-      <div className="suggestion-task__scroll">
-        {approvalMode.errorKey ? (
-          <div className="suggestion-task__column">
-            <p className="suggestion-task__alert" role="alert">
-              {t(approvalMode.errorKey)}
-            </p>
-          </div>
-        ) : null}
-      </div>
+      <div className="suggestion-task__scroll" />
       <div className="suggestion-task__dock">
         <OverlayComposer
-          approvalMode={approvalMode}
           draft={composer.draft}
           mentions={composer.mentions}
           submissionControls={

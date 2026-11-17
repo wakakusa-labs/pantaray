@@ -12,7 +12,11 @@ function createMainContextForAuthTests(overrides = {}) {
     frontendDistIndex: '/tmp/index.html',
     recordSecurityEvent: () => {},
     saveLoginState: () => {},
-    getRuntimeState: () => ({ status: 'ready', message: null, owner: { id: 'user-1', kind: 'account' } }),
+    getRuntimeState: () => ({
+      status: 'ready',
+      message: null,
+      owner: { id: 'user-1', kind: 'account' },
+    }),
     getSupabaseSessionManager: () => ({
       getState: () => ({ isLoggedIn: true, user: { id: 'user-1' } }),
     }),
@@ -23,8 +27,6 @@ function createMainContextForAuthTests(overrides = {}) {
     getUiSettingsPath: () => '/tmp/ui-settings.json',
     getUiLanguage: () => 'ja',
     setUiLanguage: () => {},
-    getWorkspaceEditCommandPreference: async () => 'allow',
-    setWorkspaceEditCommandPreference: async () => {},
     screenshotSync: {
       getStatus: () => ({ enabled: false }),
       start: () => ({ ok: true }),
@@ -54,10 +56,16 @@ test('buildMainContext: signOut waits for the owner transition and maps its fail
   let fail;
   let completed = false;
   const { context } = createMainContextForAuthTests({
-    signOut: () => new Promise((resolve, reject) => { fail = reject; }),
+    signOut: () =>
+      new Promise((resolve, reject) => {
+        fail = reject;
+      }),
   });
-  const result = context.auth.signOut().then(value => { completed = true; return value; });
-  await new Promise(resolve => setImmediate(resolve));
+  const result = context.auth.signOut().then((value) => {
+    completed = true;
+    return value;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(completed, false);
   fail(new Error('clear failed'));
   assert.deepStrictEqual(await result, { ok: false, error: 'clear failed' });
@@ -97,7 +105,9 @@ test('buildMainContext: disabled account login reports a ready guest session', (
     getSupabaseSessionManager: () => null,
     getSupabaseSessionInitializationStatus: () => 'ready',
     getRuntimeState: () => ({
-      status: 'ready', message: null, owner: { id: 'guest-owner', kind: 'guest' },
+      status: 'ready',
+      message: null,
+      owner: { id: 'guest-owner', kind: 'guest' },
     }),
   });
 
@@ -193,7 +203,9 @@ test('owner-scoped settings and recording IPC reject while no confirmed owner is
   for (const status of ['unknown', 'syncing', 'degraded', 'ready']) {
     const { context } = createMainContextForAuthTests({
       getRuntimeState: () => ({ status, message: null, owner: null }),
-      getUiSettingsPath: () => { throw new Error('old settings path must not be accessed'); },
+      getUiSettingsPath: () => {
+        throw new Error('old settings path must not be accessed');
+      },
     });
     assert.throws(() => context.ui.setLanguage('en'), /Local owner is unavailable/);
     assert.throws(() => context.privacy.getCaptureSettings(), /Local owner is unavailable/);
@@ -203,10 +215,16 @@ test('owner-scoped settings and recording IPC reject while no confirmed owner is
     for (const operation of [
       () => context.privacy.updateCaptureSettings({}),
       () => context.privacy.updateIdeFileRules([]),
-      () => context.privacy.setCaptureEditing({ kind: 'begin', ownerId: 'user-1', sessionId: 'editor' }),
+      () =>
+        context.privacy.setCaptureEditing({
+          kind: 'begin',
+          ownerId: 'user-1',
+          sessionId: 'editor',
+        }),
       () => context.screenshot.start(),
       () => context.screenshot.stop(),
-    ]) await assert.rejects(operation, /Local owner is unavailable/);
+    ])
+      await assert.rejects(operation, /Local owner is unavailable/);
   }
 });
 
@@ -215,9 +233,16 @@ test('only the owner the recording screen was shown to can answer it with "later
   // outlive the owner it was shown to. Main holds one gate for the whole app run, so an
   // answer carried by that late reply must not drop what the current owner is waiting on.
   let dismissed = 0;
-  const gate = { permissions: { accessibility: false, screenRecording: false }, introRequested: true };
+  const gate = {
+    permissions: { accessibility: false, screenRecording: false },
+    introRequested: true,
+  };
   const { context } = createMainContextForAuthTests({
-    getRuntimeState: () => ({ status: 'ready', message: null, owner: { id: 'account-b', kind: 'account' } }),
+    getRuntimeState: () => ({
+      status: 'ready',
+      message: null,
+      owner: { id: 'account-b', kind: 'account' },
+    }),
     readCaptureGateState: () => ({ ...gate }),
     dismissRecordingIntro: () => {
       dismissed += 1;
@@ -234,29 +259,44 @@ test('only the owner the recording screen was shown to can answer it with "later
 });
 
 for (const boundary of ['before_write', 'after_write']) {
-  test(`privacy mutation rechecks its owner ${boundary} and never publishes stale settings`, async t => {
+  test(`privacy mutation rechecks its owner ${boundary} and never publishes stale settings`, async (t) => {
     const fs = require('node:fs');
-    const dir = fs.mkdtempSync(require('node:path').join(require('node:os').tmpdir(), 'owner-privacy-'));
+    const dir = fs.mkdtempSync(
+      require('node:path').join(require('node:os').tmpdir(), 'owner-privacy-')
+    );
     t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
     const { createCapturePrivacyManager } = require('../electron/dist/privacy/capturePrivacy');
-    const privacy = createCapturePrivacyManager({ userDataDir: dir, initialUserId: 'alice', resolveAppBundleId: () => null });
+    const privacy = createCapturePrivacyManager({
+      userDataDir: dir,
+      initialUserId: 'alice',
+      resolveAppBundleId: () => null,
+    });
     const original = privacy.updateCaptureSettings({ apps: { mode: 'include_only', entries: [] } });
     let owner = { id: 'alice', kind: 'account' };
     let release;
-    const held = new Promise(resolve => { release = resolve; });
+    const held = new Promise((resolve) => {
+      release = resolve;
+    });
     const broadcasts = [];
     const { context } = createMainContextForAuthTests({
       getRuntimeState: () => ({ status: 'ready', message: null, owner }),
       capturePrivacy: privacy,
-      screenshotSync: { updatePrivacy: async update => {
-        if (boundary === 'before_write') await held;
-        const result = update();
-        if (boundary === 'after_write') await held;
-        return result;
-      } },
-      getMainWindow: () => ({ isDestroyed: () => false, webContents: { send: (...args) => broadcasts.push(args) } }),
+      screenshotSync: {
+        updatePrivacy: async (update) => {
+          if (boundary === 'before_write') await held;
+          const result = update();
+          if (boundary === 'after_write') await held;
+          return result;
+        },
+      },
+      getMainWindow: () => ({
+        isDestroyed: () => false,
+        webContents: { send: (...args) => broadcasts.push(args) },
+      }),
     });
-    const update = context.privacy.updateCaptureSettings({ apps: { mode: 'exclude', entries: [] } });
+    const update = context.privacy.updateCaptureSettings({
+      apps: { mode: 'exclude', entries: [] },
+    });
     owner = { id: 'bob', kind: 'account' };
     const bobOriginal = privacy.setSettingsScope('bob');
     const rejected = assert.rejects(update, /Local owner (is unavailable|changed)/);
@@ -274,17 +314,28 @@ for (const operation of ['updateCaptureSettings', 'updateIdeFileRules']) {
     const saved = [];
     let changed = 0;
     const { context } = createMainContextForAuthTests({
-      screenshotSync: { updatePrivacy: async update => update() },
+      screenshotSync: { updatePrivacy: async (update) => update() },
       capturePrivacy: {
-        [operation]: value => { saved.push(value); return value; },
+        [operation]: (value) => {
+          saved.push(value);
+          return value;
+        },
         getCaptureSettings: () => ({ apps: { mode: 'exclude', entries: [] } }),
       },
-      getMainWindow: () => ({ isDestroyed: () => false, webContents: {
-        send: () => { throw new Error('Object has been destroyed'); },
-      } }),
-      onCaptureSettingsChanged: () => { changed++; },
+      getMainWindow: () => ({
+        isDestroyed: () => false,
+        webContents: {
+          send: () => {
+            throw new Error('Object has been destroyed');
+          },
+        },
+      }),
+      onCaptureSettingsChanged: () => {
+        changed++;
+      },
     });
-    const value = operation === 'updateIdeFileRules' ? [] : { apps: { mode: 'exclude', entries: [] } };
+    const value =
+      operation === 'updateIdeFileRules' ? [] : { apps: { mode: 'exclude', entries: [] } };
     assert.deepEqual(await context.privacy[operation](value), value);
     assert.deepEqual(saved, [value]);
     assert.equal(changed, 1);
@@ -296,18 +347,40 @@ test('editing cleanup reaches the recorder after the local owner becomes unavail
   const requests = [];
   const { context } = createMainContextForAuthTests({
     getRuntimeState: () => ({ status: 'ready', message: null, owner }),
-    screenshotSync: { setCaptureEditing: async request => { requests.push(request); return true; } },
+    screenshotSync: {
+      setCaptureEditing: async (request) => {
+        requests.push(request);
+        return true;
+      },
+    },
   });
-  assert.equal(await context.privacy.setCaptureEditing({ kind: 'begin', ownerId: 'alice', sessionId: 'editor' }), true);
+  assert.equal(
+    await context.privacy.setCaptureEditing({
+      kind: 'begin',
+      ownerId: 'alice',
+      sessionId: 'editor',
+    }),
+    true
+  );
   owner = null;
   await context.privacy.setCaptureEditing({ kind: 'end', sessionId: 'editor' });
-  assert.deepEqual(requests.map(request => request.kind), ['begin', 'end']);
+  assert.deepEqual(
+    requests.map((request) => request.kind),
+    ['begin', 'end']
+  );
   assert.equal(requests[0].ownerId, 'alice');
   assert.equal(requests[1].sessionId, requests[0].sessionId);
 });
 
-
 test('editing cannot be started for a different owner than the current IPC owner', async () => {
   const { context } = createMainContextForAuthTests();
-  await assert.rejects(async () => context.privacy.setCaptureEditing({ kind: 'begin', ownerId: 'old-owner', sessionId: 'editor' }), /Local owner changed/);
+  await assert.rejects(
+    async () =>
+      context.privacy.setCaptureEditing({
+        kind: 'begin',
+        ownerId: 'old-owner',
+        sessionId: 'editor',
+      }),
+    /Local owner changed/
+  );
 });

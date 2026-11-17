@@ -87,10 +87,6 @@ function buildCtx(overrides = {}, openOverlay = asyncSpy(undefined)) {
     actionFiles: { open: spy(undefined) },
     clipboard: { writeText: spy(undefined) },
     ui: { getLanguage: () => 'en', setLanguage: () => 'en' },
-    approval: {
-      getWorkspaceEditCommandPreference: async () => ({}),
-      setWorkspaceEditCommandPreference: async () => ({}),
-    },
     workspaceSettings: {
       get: async () => ({}),
       getReadAccessScope: async () => ({}),

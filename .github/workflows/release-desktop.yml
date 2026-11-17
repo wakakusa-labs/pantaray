@@ -41,15 +41,15 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
-          # v1.8.2 -> 1.8.2（stable）、v1.8.2-test.1 -> 1.8.2-test.1（test チャネル）。
+          # v1.8.2 -> 1.8.2（stable）、v1.8.2-beta.1 -> 1.8.2-beta.1（beta チャネル）。
           # 配布版の updater が同じ規則でチャネルを決めるため、他の形式は受け付けない。
           VERSION="${TAG#v}"
-          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-test\.[0-9]+)?$ ]]; then
-            echo "invalid tag format: $TAG (expected vX.Y.Z or vX.Y.Z-test.N)" >&2
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$ ]]; then
+            echo "invalid tag format: $TAG (expected vX.Y.Z or vX.Y.Z-beta.N)" >&2
             exit 1
           fi
-          if [[ "$VERSION" == *-test.* ]]; then
-            CHANNEL=test
+          if [[ "$VERSION" == *-beta.* ]]; then
+            CHANNEL=beta
           else
             CHANNEL=stable
           fi
@@ -371,6 +371,7 @@ jobs:
             frontend/release/**/*.dmg
             frontend/release/**/*.zip
             frontend/release/latest*.yml
+            frontend/release/beta*.yml
             frontend/release/*.blockmap
           if-no-files-found: error
           overwrite: true
@@ -383,12 +384,12 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
-          # test チャネルは prerelease にして latest にしない。安定版の updater が
-          # test リリースを選ばず、test リリースが安定版の latest を塞がないようにする。
+          # beta チャネルは prerelease にして latest にしない。安定版の updater が
+          # beta リリースを選ばず、beta リリースが安定版の latest を塞がないようにする。
           # 安定版は GitHub の既定に任せる（作成時に latest になり、再実行の edit では
           # latest を動かさない。古いリリースの再実行で最新版を降格させないため）。
           RELEASE_FLAGS=(--verify-tag)
-          if [ "${CHANNEL}" = "test" ]; then
+          if [ "${CHANNEL}" = "beta" ]; then
             RELEASE_FLAGS+=(--prerelease --latest=false)
           fi
           shopt -s nullglob
@@ -396,6 +397,7 @@ jobs:
             frontend/release/*.dmg
             frontend/release/*.zip
             frontend/release/latest*.yml
+            frontend/release/beta*.yml
             frontend/release/*.blockmap
           )
           if [ "${#ASSETS[@]}" -eq 0 ]; then

@@ -2,7 +2,7 @@
  * Desktop アプリのビルド用バージョン（semver）を決定する。
  *
  * 目的:
- * - **配布ビルド**（GitHub Releases / タグ）では `vX.Y.Z`（test チャネルは `vX.Y.Z-test.N`）を
+ * - **配布ビルド**（GitHub Releases / タグ）では `vX.Y.Z`（beta チャネルは `vX.Y.Z-beta.N`）を
  *   SSOT として、`v` を除いた文字列を使う。
  * - **非配布ビルド**（ローカルなど）では、最新の配布タグの `X.Y.Z` を基準に
  *   `X.Y.Z-dev.<距離>+<short_sha>` を自動生成して衝突を避ける。`-dev` ビルドは更新 feed を持たない。
@@ -59,7 +59,7 @@ function validateSemver(value) {
 }
 
 // release-desktop.yml が受け付けるタグと同じ形式。
-const RELEASE_TAG = /^v(\d+\.\d+\.\d+)(-test\.\d+)?$/;
+const RELEASE_TAG = /^v(\d+\.\d+\.\d+)(-beta\.\d+)?$/;
 
 function parseReleaseTag(tag) {
   const raw = String(tag || '').trim();

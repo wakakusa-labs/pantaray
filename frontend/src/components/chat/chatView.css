@@ -122,7 +122,7 @@
   flex: none;
   padding-bottom: 2px;
   color: var(--fog-text-3);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .chat-reply {
@@ -234,7 +234,7 @@
 }
 
 .chat-card__title {
-  font-size: 13.5px;
+  font-size: 14.5px;
   font-weight: var(--weight-semibold);
 }
 
@@ -242,7 +242,7 @@
   display: -webkit-box;
   overflow: hidden;
   color: rgba(215, 225, 235, 0.75);
-  font-size: 12.5px;
+  font-size: 13.5px;
   line-height: 1.55;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;

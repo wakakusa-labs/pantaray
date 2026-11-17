@@ -143,7 +143,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fog-text-2);
-  font-size: 13px;
+  font-size: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -272,7 +272,7 @@
   color: var(--text-primary);
   cursor: pointer;
   font: inherit;
-  font-size: 13px;
+  font-size: 14px;
   text-align: left;
 }
 
@@ -296,7 +296,7 @@
 .history-project-organizations__choices legend {
   margin-bottom: 8px;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .history-project-organizations__choice {
@@ -306,7 +306,7 @@
   padding: 6px 8px;
   border-radius: 8px;
   color: var(--fog-text);
-  font-size: 13px;
+  font-size: 14px;
   cursor: pointer;
 }
 

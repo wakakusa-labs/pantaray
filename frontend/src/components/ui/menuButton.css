@@ -95,7 +95,7 @@
 }
 
 .menu-button__title {
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .menu-button__item[aria-disabled='true'] .menu-button__title {

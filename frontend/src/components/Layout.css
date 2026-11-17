@@ -7,6 +7,14 @@
   /* Muted text keeps 4.5:1 on the dark ground and on dialogs. Scoped to the main window so
      the overlay's own text colours stay as they are. */
   --text-muted: rgba(200, 210, 220, 0.6);
+  /* The main window's text runs a size up from the shared scale, which the overlay and the
+     notifications keep. */
+  --text-body-size: 15px;
+  --text-ui-size-sm: 13px;
+  --text-meta-size: 13px;
+  --text-heading-size: 15px;
+  --text-heading-size-lg: 17px;
+  font-size: var(--text-body-size);
 }
 
 /* The traffic lights sit in this row; nothing interactive may enter it. */
@@ -29,7 +37,9 @@
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  padding: 58px 0 16px;
+  /* The first tile starts just below the pane headers' bottom line, level with the sidebar's
+     title. */
+  padding: calc(var(--app-pane-header-height) + 6px) 0 16px;
 }
 
 .app-rail-item {
@@ -261,7 +271,7 @@
   /* Japanese wraps between phrases, never inside a word. */
   word-break: auto-phrase;
   color: var(--fog-text);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: var(--weight-semibold);
   line-height: 1.3;
 }
@@ -365,7 +375,7 @@
   color: var(--text-primary);
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: var(--weight-medium);
   white-space: nowrap;
 }

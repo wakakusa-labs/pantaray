@@ -65,7 +65,7 @@
   max-width: 820px;
   margin: 4px 0 22px;
   color: var(--fog-text);
-  font-size: 16px;
+  font-size: 17px;
   line-height: 1.6;
   overflow-wrap: anywhere;
   word-break: auto-phrase;
@@ -101,7 +101,7 @@
 .todo-progress-goal__name b {
   display: block;
   color: var(--fog-text);
-  font-size: 13.5px;
+  font-size: 14.5px;
   font-weight: var(--weight-semibold);
   overflow-wrap: anywhere;
 }
@@ -112,13 +112,13 @@
   gap: 0 10px;
   margin-top: 2px;
   color: var(--fog-text-3);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .todo-progress-goal__empty {
   margin: 0;
   color: var(--fog-text-3);
-  font-size: 12.5px;
+  font-size: 13.5px;
 }
 
 .todo-progress-goal__pace {
@@ -126,21 +126,21 @@
   gap: 2px;
   min-width: 0;
   color: var(--fog-text-2);
-  font-size: 12.5px;
+  font-size: 13.5px;
   line-height: 1.5;
   word-break: auto-phrase;
 }
 
 .todo-progress-goal__pace b {
   color: var(--fog-text);
-  font-size: 15px;
+  font-size: 16px;
   font-weight: var(--weight-semibold);
   font-variant-numeric: tabular-nums;
 }
 
 .todo-progress-goal__pace small {
   color: var(--fog-text-3);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .todo-progress-goal__late {
@@ -154,7 +154,7 @@
 
 .todo-progress-track {
   position: relative;
-  font-size: 11.5px;
+  font-size: 12.5px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -206,7 +206,7 @@
   border-right: 1px solid var(--fog-line);
   border-bottom: 1px solid var(--fog-line);
   color: var(--fog-text-3);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .todo-progress-calendar__weekday--total {
@@ -256,7 +256,7 @@ button.todo-progress-cell:focus-visible {
 .todo-progress-cell__date {
   margin-bottom: 2px;
   color: var(--fog-text-2);
-  font-size: 12.5px;
+  font-size: 13.5px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -291,7 +291,7 @@ button.todo-progress-cell:focus-visible {
   min-width: 0;
   overflow: hidden;
   color: var(--fog-text);
-  font-size: 12px;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -328,7 +328,7 @@ button.todo-progress-cell:focus-visible {
 
 .todo-progress-week .todo-progress-cell__line {
   align-items: baseline;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: var(--weight-semibold);
   white-space: normal;
 }
@@ -339,7 +339,7 @@ button.todo-progress-cell:focus-visible {
 
 .todo-progress-week small {
   color: var(--fog-text-3);
-  font-size: 11.5px;
+  font-size: 12.5px;
 }
 
 /* The day beside the calendar. */
@@ -357,13 +357,13 @@ button.todo-progress-cell:focus-visible {
 
 .todo-progress-day__crumb {
   color: var(--fog-text-3);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .todo-progress-day__head h2 {
   margin: 6px 0 10px;
   color: var(--fog-text);
-  font-size: 16px;
+  font-size: 17px;
   font-weight: var(--weight-semibold);
 }
 
@@ -373,7 +373,7 @@ button.todo-progress-cell:focus-visible {
   gap: 6px 14px;
   margin: 0;
   color: var(--fog-text-2);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .todo-progress-day__body {
@@ -386,7 +386,7 @@ button.todo-progress-cell:focus-visible {
 .todo-progress-day__body h3 {
   margin: 18px 0 8px;
   color: var(--fog-text-3);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: var(--weight-semibold);
 }
 
@@ -399,7 +399,7 @@ button.todo-progress-cell:focus-visible {
 .todo-progress-day__empty {
   margin: 18px 0 0;
   color: var(--fog-text-3);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .todo-progress-entry {
@@ -410,7 +410,7 @@ button.todo-progress-cell:focus-visible {
   padding: 9px 0;
   border-bottom: 1px solid var(--fog-line);
   color: var(--fog-text);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.5;
 }
 
@@ -438,7 +438,7 @@ button.todo-progress-cell:focus-visible {
   grid-column: 2 / -1;
   gap: 0 12px;
   color: var(--fog-text-3);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .todo-progress-entry__error,
@@ -503,7 +503,7 @@ button.todo-progress-cell:focus-visible {
   gap: 4px;
   min-width: 0;
   margin-bottom: 12px;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .todo-goal-form__field label {

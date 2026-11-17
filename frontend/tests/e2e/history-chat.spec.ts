@@ -453,9 +453,14 @@ test('a running turn shows the typing bubble; a failed turn offers to try again'
 /** Drags the mouse across the element's text, first character to last, as a reader selects it. */
 async function dragAcross(page: Page, selector: string) {
   const [start, end] = await page.locator(selector).evaluate((element) => {
-    const range = document.createRange();
-    range.selectNodeContents(element);
-    const rects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0);
+    // The text's own boxes: an element's box (a quote's) would start the drag in its padding.
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    const rects: DOMRect[] = [];
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      rects.push(...Array.from(range.getClientRects()).filter((rect) => rect.width > 0));
+    }
     const first = rects[0];
     const last = rects[rects.length - 1];
     return [

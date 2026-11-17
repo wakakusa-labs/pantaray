@@ -24,7 +24,9 @@ from pantaray_llm.profiles import APPROVAL_REVIEW_PROFILE_ID
 
 _REQUEST = ApprovalReviewRequest(
     user_messages=("Export report.html to PDF",),
-    request_text_not_by_user=RequestTextNotByUser(source="todo", text="Report"),
+    request_text_not_by_user=RequestTextNotByUser(
+        source="todo", text="Report", declined=False
+    ),
     operation=PendingCommand(
         tool="bash",
         kinds=frozenset({"outside_sandbox"}),
@@ -180,7 +182,11 @@ def test_the_review_request_has_no_place_for_tool_output() -> None:
         "arguments",
         "justification",
     }
-    assert command["request_text_not_by_user"] == {"source": "todo", "text": "Report"}
+    assert command["request_text_not_by_user"] == {
+        "source": "todo",
+        "text": "Report",
+        "declined": False,
+    }
     # Which account acts, and what the user already declined, reach the model.
     assert integration["operation"]["account"] == {
         "id": "acct-work",

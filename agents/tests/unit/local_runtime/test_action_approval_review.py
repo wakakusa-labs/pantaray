@@ -6,6 +6,7 @@ from pathlib import Path
 
 from pantaray_agents.local_runtime.runtime.action_approval_review import (
     ActionRequestRow,
+    action_request_rows,
     action_request_words,
     declined_operations,
     read_chat_words,
@@ -16,6 +17,10 @@ from pantaray_agents.local_runtime.runtime.action_message_models import (
     ACTION_TODO_PICKUP_REQUEST_TEXT,
     ACTION_TODO_PICKUP_STEP_NAME,
     ACTION_USER_STEP_NAME,
+    NewActionTarget,
+)
+from pantaray_agents.local_runtime.runtime.action_suggestion_reply import (
+    insert_opening_assistant_message,
 )
 from pantaray_agents.local_runtime.storage.migrations import load_default_migrations
 from pantaray_agents.local_runtime.tooling.approval_review import (
@@ -46,10 +51,13 @@ def _user(
         None,
         None,
         "t",
+        False,
     )
 
 
-def _opening(text: str, *, suggestion_id: str | None) -> ActionRequestRow:
+def _opening(
+    text: str, *, suggestion_id: str | None, declined: bool = False
+) -> ActionRequestRow:
     return ActionRequestRow(
         "assistant_message",
         "assistant_message",
@@ -59,6 +67,7 @@ def _opening(text: str, *, suggestion_id: str | None) -> ActionRequestRow:
         text,
         suggestion_id,
         "t",
+        declined,
     )
 
 
@@ -81,11 +90,13 @@ def test_only_the_users_own_words_are_the_users_messages() -> None:
 
     assert action_request_words(rows, lambda _row: ("Put it on the drive.",)) == (
         ("Send it to me first.", "Put it on the drive."),
-        RequestTextNotByUser(source="todo", text="Draft the reply to the vendor."),
+        RequestTextNotByUser(
+            source="todo", text="Draft the reply to the vendor.", declined=False
+        ),
     )
 
 
-def test_a_suggestion_the_user_accepted_or_answered_is_labelled_as_such() -> None:
+def test_an_accepted_suggestion_stays_accepted() -> None:
     accepted = _user(
         "Summarize this week's discussion.",
         suggestion_approval=SuggestionApprovalInput(
@@ -93,21 +104,45 @@ def test_a_suggestion_the_user_accepted_or_answered_is_labelled_as_such() -> Non
         ),
         supplement="Keep it to five lines.",
     )
-    answered = (
-        _opening("Shall I file the expense report?", suggestion_id="s-2"),
-        _user("Yes, file it."),
-    )
 
     assert action_request_words((accepted,), _no_chat) == (
         ("Keep it to five lines.",),
         RequestTextNotByUser(
-            source="suggestion", text="Summarize this week's discussion."
+            source="suggestion_accepted",
+            text="Summarize this week's discussion.",
+            declined=False,
         ),
     )
-    assert action_request_words(answered, _no_chat) == (
-        ("Yes, file it.",),
+
+
+def test_a_reply_to_a_suggestion_is_never_its_acceptance() -> None:
+    # A question to an offer the user had declined, and a plain go-ahead to a
+    # message: only the user's own reply says what they want.
+    question = (
+        _opening(
+            "Shall I post the summary to #general?", suggestion_id="s-1", declined=True
+        ),
+        _user("What would it include?"),
+    )
+    go_ahead = (
+        _opening("The report draft could use a summary.", suggestion_id="s-2"),
+        _user("お願い"),
+    )
+
+    assert action_request_words(question, _no_chat) == (
+        ("What would it include?",),
         RequestTextNotByUser(
-            source="suggestion", text="Shall I file the expense report?"
+            source="suggestion_reply",
+            text="Shall I post the summary to #general?",
+            declined=True,
+        ),
+    )
+    assert action_request_words(go_ahead, _no_chat) == (
+        ("お願い",),
+        RequestTextNotByUser(
+            source="suggestion_reply",
+            text="The report draft could use a summary.",
+            declined=False,
         ),
     )
 
@@ -196,6 +231,7 @@ def test_a_chat_hand_off_reads_the_users_messages_since_the_last_one(
                     None,
                     None,
                     at,
+                    False,
                 ),
             )
             for message_id, at in (
@@ -246,4 +282,31 @@ def test_what_the_user_declined_in_the_action_reaches_the_review(
     assert [operation.command for operation in declined] == [  # type: ignore[union-attr]
         "rm -rf ~/Archive",
         "git push --force",
+    ]
+
+
+def test_a_reply_knows_from_storage_that_its_offer_was_declined(
+    tmp_path: Path,
+) -> None:
+    db_path = _action_db(tmp_path)
+    with sqlite3.connect(db_path) as connection:
+        connection.row_factory = sqlite3.Row
+        connection.execute(
+            "INSERT INTO agent_suggestions(suggestion_id, user_id, status, "
+            "has_suggestion, interaction_contract, user_reaction, answer, "
+            "created_at, updated_at) VALUES ('s-1', 'user-1', 'success', 1, "
+            "'action_offer', 'rejected', 'Shall I post it?', 't', 't')"
+        )
+        insert_opening_assistant_message(
+            connection=connection,
+            user_id="user-1",
+            action_id="action-1",
+            process_id="process-1",
+            target=NewActionTarget(reply_to_suggestion_id="s-1"),
+            created_at="t",
+        )
+        rows = action_request_rows(connection, user_id="user-1", action_id="action-1")
+
+    assert [(row.source_suggestion_id, row.suggestion_declined) for row in rows] == [
+        ("s-1", True)
     ]

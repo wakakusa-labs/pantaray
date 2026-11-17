@@ -58,13 +58,18 @@ _INTEGRATION_SUMMARY_KIND = "integration_tool"
 # The rows an Action's request is told in: its USER rows, and the assistant
 # message a Suggestion reply or an AI-written TODO opens it with.
 _REQUEST_ROWS_SQL = """
-SELECT step_type, step_name, user_message_id, user_message_json,
-       user_request_text, llm_response_text, source_suggestion_id, created_at
-FROM agent_action_steps
-WHERE user_id = ? AND action_id = ? AND step_number IS NOT NULL
-  AND (step_type = 'user_request'
-       OR (step_type = 'assistant_message' AND step_number = 1))
-ORDER BY step_number, step_id
+SELECT step.step_type, step.step_name, step.user_message_id,
+       step.user_message_json, step.user_request_text, step.llm_response_text,
+       step.source_suggestion_id, step.created_at,
+       COALESCE(suggestion.user_reaction = 'rejected', 0) AS suggestion_declined
+FROM agent_action_steps AS step
+LEFT JOIN agent_suggestions AS suggestion
+  ON suggestion.user_id = step.user_id
+ AND suggestion.suggestion_id = step.source_suggestion_id
+WHERE step.user_id = ? AND step.action_id = ? AND step.step_number IS NOT NULL
+  AND (step.step_type = 'user_request'
+       OR (step.step_type = 'assistant_message' AND step.step_number = 1))
+ORDER BY step.step_number, step.step_id
 """
 
 # The user's chat messages up to a hand-off, since the chat last handed work to
@@ -107,6 +112,8 @@ class ActionRequestRow:
     llm_response_text: str | None
     source_suggestion_id: str | None
     created_at: str
+    # Whether the user had declined the suggestion this Action answers.
+    suggestion_declined: bool
 
 
 def action_request_words(
@@ -123,9 +130,16 @@ def action_request_words(
     for row in rows:
         if row.step_type == "assistant_message":
             if row.llm_response_text:
+                # A suggestion opens an Action this way only when the user
+                # replied to it; an AI-written TODO is the other opening.
                 not_by_user = RequestTextNotByUser(
-                    source="todo" if row.source_suggestion_id is None else "suggestion",
+                    source=(
+                        "todo"
+                        if row.source_suggestion_id is None
+                        else "suggestion_reply"
+                    ),
                     text=row.llm_response_text,
+                    declined=row.suggestion_declined,
                 )
             continue
         if row.step_name in ACTION_HOST_STEP_NAMES or row.user_request_text is None:
@@ -144,7 +158,7 @@ def action_request_words(
             continue
         if message.suggestion_approval is not None:
             not_by_user = RequestTextNotByUser(
-                source="suggestion", text=message.content
+                source="suggestion_accepted", text=message.content, declined=False
             )
             if message.supplement is not None:
                 user_messages.append(message.supplement)
@@ -263,6 +277,17 @@ async def review_pending_approval(
     return False
 
 
+def action_request_rows(
+    connection: sqlite3.Connection, *, user_id: str, action_id: str
+) -> tuple[ActionRequestRow, ...]:
+    """The rows the Action's request is told in, in order."""
+
+    return tuple(
+        ActionRequestRow(*row[:-1], suggestion_declined=bool(row[-1]))
+        for row in connection.execute(_REQUEST_ROWS_SQL, (user_id, action_id))
+    )
+
+
 def read_chat_words(
     connection: sqlite3.Connection, *, user_id: str, row: ActionRequestRow
 ) -> tuple[str, ...]:
@@ -326,10 +351,7 @@ def _load_review_request(
     if operation is None:
         return None
     user_messages, not_by_user = action_request_words(
-        (
-            ActionRequestRow(*row)
-            for row in connection.execute(_REQUEST_ROWS_SQL, (user_id, action_id))
-        ),
+        action_request_rows(connection, user_id=user_id, action_id=action_id),
         lambda row: read_chat_words(connection, user_id=user_id, row=row),
     )
     roots = load_ready_manifest_roots_in_connection(
@@ -352,6 +374,7 @@ def _load_review_request(
 
 __all__ = [
     "ActionRequestRow",
+    "action_request_rows",
     "action_request_words",
     "declined_operations",
     "pending_operation",

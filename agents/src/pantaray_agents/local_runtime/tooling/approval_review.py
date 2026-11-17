@@ -47,10 +47,15 @@ type CommandReviewKind = Literal[
 
 @dataclass(frozen=True, slots=True)
 class RequestTextNotByUser:
-    """Task text the Action started from that the user did not write themselves."""
+    """Task text the Action started from that the user did not write themselves.
 
-    source: Literal["suggestion", "todo"]
+    ``suggestion_accepted``: a suggestion the user accepted. ``suggestion_reply``:
+    one the user only replied to; ``declined`` says they had declined it.
+    """
+
+    source: Literal["suggestion_accepted", "suggestion_reply", "todo"]
     text: str
+    declined: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,7 +115,11 @@ def build_approval_review_payload(request: ApprovalReviewRequest) -> str:
         "request_text_not_by_user": (
             None
             if not_by_user is None
-            else {"source": not_by_user.source, "text": not_by_user.text}
+            else {
+                "source": not_by_user.source,
+                "text": not_by_user.text,
+                "declined": not_by_user.declined,
+            }
         ),
         "operation": _render_operation(request.operation),
         "workspace_folders": list(request.workspace_folders),

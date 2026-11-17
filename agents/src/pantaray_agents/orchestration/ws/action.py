@@ -110,7 +110,6 @@ class ActionFlowMixin(ActionRelayMixin):
                 user_id=str(self.user_id),
                 suggestion_id=suggestion_id,
                 command_id=command_id,
-                approval_mode=payload.approval_mode,
                 language=self._resolve_action_language(payload.language),
                 supplement=payload.supplement,
                 supplement_project_refs=payload.supplement_project_refs,

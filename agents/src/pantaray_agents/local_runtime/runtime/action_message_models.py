@@ -15,7 +15,6 @@ from pydantic import (
     model_validator,
 )
 
-from pantaray_agents.local_runtime.tooling.models import ApprovalMode
 from pantaray_agents.schema.action_conversation import ActionStatus
 from pantaray_agents.schema.agent.action_message import (
     ActionMessageFailureType,
@@ -80,7 +79,6 @@ class NewActionTarget(BaseModel):
 
     kind: Literal["new"] = "new"
     suggestion_id: ActionMessageId | None = None
-    approval_mode: ApprovalMode | None = None
     reply_to_suggestion_id: ActionMessageId | None = None
     # The text of the AI-written TODO a ``todo_pickup`` continues: the Action
     # opens with it as the assistant's first message.
@@ -139,11 +137,6 @@ class SubmitActionMessageCommand(BaseModel):
             return self
         if not isinstance(target, NewActionTarget) or target.todo_text is None:
             raise ValueError("A TODO pickup opens a new Action with its TODO text")
-        # Nobody asked for this work, so it asks before every edit or command
-        # whatever the user's own setting is; the Action-level mode is what the
-        # tool broker reads first.
-        if target.approval_mode != "prompt_each_time":
-            raise ValueError("A TODO pickup asks for approval each time")
         if self.message.content != ACTION_TODO_PICKUP_REQUEST_TEXT:
             raise ValueError("A TODO pickup carries the fixed request text")
         return self
@@ -182,7 +175,6 @@ type SubmitActionMessageResult = (
 class _ExistingSubmission:
     result: SubmitActionMessageResult
     action_created: bool
-    initial_approval_mode: ApprovalMode | None
     suggestion_id: str | None
     reply_to_suggestion_id: str | None
     expected_process_id: str | None

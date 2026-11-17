@@ -554,7 +554,6 @@ test('ws:send rejects a complete execute_action outside the dedicated IPC', asyn
         command_id: 'c1',
         language: 'en',
         supplement: null,
-        approval_mode: 'prompt_each_time',
         images: [],
       },
     });
@@ -571,7 +570,6 @@ test('ws:acceptAction rejects invalid fields and Unicode overflow', async () => 
   const invoke = getInvoke(ipcMain, 'ws:acceptAction');
   await assert.rejects(
     invoke({
-      approvalMode: 'prompt_each_time',
       images: [],
       suggestionId: 123,
       commandId: null,
@@ -583,7 +581,6 @@ test('ws:acceptAction rejects invalid fields and Unicode overflow', async () => 
   );
   await assert.rejects(
     invoke({
-      approvalMode: 'prompt_each_time',
       images: [],
       suggestionId: 's_123',
       commandId: null,
@@ -596,7 +593,6 @@ test('ws:acceptAction rejects invalid fields and Unicode overflow', async () => 
   );
   await assert.rejects(
     invoke({
-      approvalMode: 'prompt_each_time',
       images: [],
       suggestionId: 's_123',
       commandId: null,
@@ -607,7 +603,6 @@ test('ws:acceptAction rejects invalid fields and Unicode overflow', async () => 
     rejectsValidation('ws:acceptAction')
   );
   for (const invalid of [
-    { approvalMode: 'unknown' },
     { images: [{ kind: 'file', storage_path: 'private.pdf' }] },
     { images: Array(33).fill({ kind: 'image', storage_path: 'image.png' }) },
     {
@@ -621,7 +616,6 @@ test('ws:acceptAction rejects invalid fields and Unicode overflow', async () => 
   ]) {
     await assert.rejects(
       invoke({
-        approvalMode: 'prompt_each_time',
         images: [],
         suggestionId: 's_123',
         commandId: null,
@@ -646,7 +640,6 @@ test('ws:acceptAction normalizes blank and accepts 8,000 Unicode code points', a
     { attachment_id: '22222222-2222-4222-8222-222222222222', name: 'plan.pdf', byte_size: 42 },
   ];
   const request = {
-    approvalMode: 'prompt_each_time',
     images: [],
     suggestionId: 's_123',
     commandId: null,
@@ -657,7 +650,6 @@ test('ws:acceptAction normalizes blank and accepts 8,000 Unicode code points', a
   };
   await invoke(request);
   await invoke({
-    approvalMode: 'prompt_each_time',
     images: [],
     suggestionId: 's_123',
     commandId: null,
@@ -669,7 +661,6 @@ test('ws:acceptAction normalizes blank and accepts 8,000 Unicode code points', a
     [request],
     [
       {
-        approvalMode: 'prompt_each_time',
         images: [],
         suggestionId: 's_123',
         commandId: null,

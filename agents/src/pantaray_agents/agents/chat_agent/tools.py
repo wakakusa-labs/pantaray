@@ -43,18 +43,9 @@ from pantaray_agents.local_runtime.runtime.action_message_models import (
 from pantaray_agents.local_runtime.runtime.action_messages import (
     submit_action_message,
 )
-from pantaray_agents.local_runtime.runtime.runtime_env import (
-    read_local_runtime_db_config,
-)
 from pantaray_agents.local_runtime.runtime.suggestion_acceptance import (
     SuggestionAccepted,
     accept_suggestion,
-)
-from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
-    APPROVAL_SCOPE_WORKSPACE_EDIT_AND_COMMAND,
-)
-from pantaray_agents.local_runtime.tooling.repository import (
-    load_effective_approval_preference,
 )
 from pantaray_agents.schema.agent.action_message import (
     ActionProjectRef,
@@ -179,13 +170,6 @@ def chat_tools(plan: ChatTurnPlan) -> tuple[ReactToolDefinition, ...]:
                 "Not taken up: the user has not answered this suggestion yet. It "
                 "stays open until they agree.",
             )
-        db_path, busy_timeout_ms = read_local_runtime_db_config()
-        preference = load_effective_approval_preference(
-            db_path=db_path,
-            busy_timeout_ms=busy_timeout_ms,
-            user_id=plan.user_id,
-            applies_to=APPROVAL_SCOPE_WORKSPACE_EDIT_AND_COMMAND,
-        )
         relayed = _relayed(plan, "accept_suggestion", relay)
         if isinstance(relayed, ReactToolResult):
             return relayed
@@ -193,7 +177,6 @@ def chat_tools(plan: ChatTurnPlan) -> tuple[ReactToolDefinition, ...]:
             user_id=plan.user_id,
             suggestion_id=suggestion_id,
             command_id=key,
-            approval_mode=preference.approval_mode,
             language=None,
             # What the user added to their yes, in their own words.
             supplement=relayed.text,

@@ -26,7 +26,6 @@ from pantaray_agents.tools.contract import BrokerPolicyError
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
     _bootstrap_runtime_db,
-    _grant_workspace_full_access,
 )
 
 
@@ -101,11 +100,6 @@ async def _execute_apply_patch_after_needs_read(
 @pytest.mark.asyncio
 async def test_apply_patch_update_preserves_existing_file_mode(tmp_path: Path) -> None:
     db_path, context = _bootstrap_typed_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     workspace_file = context.workspace_path / "script.sh"
     workspace_file.write_text("echo old\n", encoding="utf-8")
     workspace_file.chmod(0o755)
@@ -136,11 +130,6 @@ async def test_apply_patch_derive_failure_makes_no_filesystem_changes(
     tmp_path: Path,
 ) -> None:
     db_path, context = _bootstrap_typed_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     first_file = context.workspace_path / "first.txt"
     second_file = context.workspace_path / "second.txt"
     first_file.write_text("old first\n", encoding="utf-8")
@@ -184,11 +173,6 @@ async def test_apply_patch_apply_failure_keeps_no_file_changes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db_path, context = _bootstrap_typed_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     target = context.workspace_path / "first.txt"
     target.write_text("old first\n", encoding="utf-8")
     original_replace = broker_structured_patch.os.replace
@@ -243,11 +227,6 @@ async def test_apply_patch_update_uses_before_lines_as_location_hint(
     tmp_path: Path,
 ) -> None:
     db_path, context = _bootstrap_typed_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     workspace_file = context.workspace_path / "notes.txt"
     workspace_file.write_text(
         "## First\n- status: old\n\n## Second\n- status: old\n",
@@ -282,11 +261,6 @@ async def test_apply_patch_update_uses_after_lines_as_location_hint(
     tmp_path: Path,
 ) -> None:
     db_path, context = _bootstrap_typed_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     workspace_file = context.workspace_path / "notes.txt"
     workspace_file.write_text(
         "- status: old\n## First\n\n- status: old\n## Second\n",
@@ -321,11 +295,6 @@ async def test_apply_patch_update_allows_omitted_middle_in_old_line(
     tmp_path: Path,
 ) -> None:
     db_path, context = _bootstrap_typed_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     workspace_file = context.workspace_path / "config.txt"
     workspace_file.write_text(
         "prompt = prefix abcdefghijklmnopqrstuvwxyz suffix\n",
@@ -357,11 +326,6 @@ async def test_apply_patch_update_allows_omitted_middle_in_before_hint(
     tmp_path: Path,
 ) -> None:
     db_path, context = _bootstrap_typed_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     workspace_file = context.workspace_path / "config.txt"
     workspace_file.write_text(
         "section: abcdefghijklmnopqrstuvwxyz end\n"
@@ -404,11 +368,6 @@ async def test_apply_patch_update_treats_omitted_marker_as_literal_new_line(
     tmp_path: Path,
 ) -> None:
     db_path, context = _bootstrap_typed_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     workspace_file = context.workspace_path / "config.txt"
     workspace_file.write_text("value = old\n", encoding="utf-8")
 
@@ -437,11 +396,6 @@ async def test_apply_patch_update_rejects_invalid_omitted_pattern(
     tmp_path: Path,
 ) -> None:
     db_path, context = _bootstrap_typed_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     workspace_file = context.workspace_path / "config.txt"
     workspace_file.write_text("value = old\n", encoding="utf-8")
 
@@ -479,11 +433,6 @@ def _diff_body_lines(diff: str) -> list[str]:
 @pytest.mark.asyncio
 async def test_apply_patch_update_keeps_crlf_and_utf8_bom(tmp_path: Path) -> None:
     db_path, context = _bootstrap_typed_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     target = context.workspace_path / "Module1.vb"
     target.write_bytes(
         b"\xef\xbb\xbfImports System\r\n"

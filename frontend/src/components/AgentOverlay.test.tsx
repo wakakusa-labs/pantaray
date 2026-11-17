@@ -1291,7 +1291,6 @@ describe('AgentOverlay broader E2E', () => {
     expect(submitMessage).toHaveBeenCalledWith({
       target: {
         kind: 'new',
-        approval_mode: 'prompt_each_time',
         reply_to_suggestion_id: 'sug-comment',
       },
       message: {
@@ -1382,7 +1381,6 @@ describe('AgentOverlay broader E2E', () => {
       supplement: 'Add the charts',
       supplementProjectRefs: [],
       supplementWorkRefs: [],
-      approvalMode: 'prompt_each_time',
       images: [],
       files: [],
     });
@@ -1469,7 +1467,6 @@ describe('AgentOverlay broader E2E', () => {
     // A dismissed offer is replied to in a new conversation that opens with it.
     expect(submitMessage.mock.calls[0][0].target).toEqual({
       kind: 'new',
-      approval_mode: 'prompt_each_time',
       reply_to_suggestion_id: 'sug-comment',
     });
 
@@ -1568,7 +1565,6 @@ describe('AgentOverlay broader E2E', () => {
       supplement: 'Use this image',
       supplementProjectRefs: [],
       supplementWorkRefs: [],
-      approvalMode: 'prompt_each_time',
       images: [{ kind: 'image', storage_path: storagePath }],
       files: [],
     });
@@ -2838,35 +2834,5 @@ describe('AgentOverlay broader E2E', () => {
       within(fresh).queryByText('The conversation could not be resumed. Try again.')
     ).toBeNull();
     expect(within(fresh).getByRole('button', { name: 'Resume' })).toBeEnabled();
-  });
-
-  it('blocks existing sends and resumes after an ambiguous permission downgrade until re-read', async () => {
-    getActionApprovalMode.mockResolvedValue({ approval_mode: 'always_allow' });
-    setActionApprovalMode.mockRejectedValue(new Error('save response lost'));
-    render(
-      <UiLanguageProvider initialLanguage="en">
-        <AgentOverlay entryMode="standalone" initialActionId="act-1" />
-      </UiLanguageProvider>
-    );
-    await act(async () => conversationListener?.(createStoppedUpdate()));
-    fireEvent.click(screen.getByRole('button', { name: 'Expand' }));
-    fireEvent.click(await screen.findByRole('button', { name: /permissions: Auto-approve/ }));
-    fireEvent.click(screen.getByRole('menuitemradio', { name: /Ask every time/ }));
-    const retry = await screen.findByRole('button', { name: 'Retry loading permissions' });
-    expect(screen.getByRole('button', { name: 'Resume' })).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Resume' }));
-    expect(resumeAction).not.toHaveBeenCalled();
-    const input = screen.getByLabelText('Message');
-    fireEvent.change(input, { target: { value: 'Wait for consent' } });
-    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
-    fireEvent.submit(input.closest('form')!);
-    expect(submitMessage).not.toHaveBeenCalled();
-    getActionApprovalMode.mockResolvedValue({ approval_mode: 'prompt_each_time' });
-    fireEvent.click(retry);
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled());
-    fireEvent.change(input, { target: { value: '' } });
-    expect(screen.getByRole('button', { name: 'Resume' })).toBeEnabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Resume' }));
-    await waitFor(() => expect(resumeAction).toHaveBeenCalledOnce());
   });
 });

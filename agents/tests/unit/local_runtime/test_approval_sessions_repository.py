@@ -10,21 +10,12 @@ from pantaray_agents.local_runtime.storage.migrations import (
     MigrationError,
     load_default_migrations,
 )
-from pantaray_agents.local_runtime.tooling.brokering.approval_identity import (
-    build_approval_preference_id,
-    build_capability_grant_id,
-)
 from pantaray_agents.local_runtime.tooling.models import (
-    ApprovalPreferenceUpsertInput,
     ApprovalSessionUpsertInput,
-    CapabilityGrantCreateInput,
 )
 from pantaray_agents.local_runtime.tooling.repository import (
-    apply_approval_decision_in_connection,
-    create_capability_grant,
     interrupt_approval_session_for_tool_request,
     load_latest_approval_session,
-    upsert_approval_preference,
     upsert_approval_session,
 )
 
@@ -174,120 +165,6 @@ def test_upsert_approval_session_rejects_capability_identity_mismatch_for_existi
                 },
             ),
         )
-
-
-def test_apply_approval_decision_conflict_leaves_preferences_and_grants_unchanged(
-    tmp_path: Path,
-) -> None:
-    db_path = _bootstrap_db(tmp_path)
-    upsert_approval_preference(
-        db_path=db_path,
-        busy_timeout_ms=BUSY_TIMEOUT_MS,
-        preference=ApprovalPreferenceUpsertInput(
-            preference_id="pref-prompt",
-            user_id="user-1",
-            scope_type="global",
-            scope_ref=None,
-            approval_mode="prompt_each_time",
-            applies_to=("workspace_edit_and_command",),
-            created_at="2026-03-28T00:00:00Z",
-            updated_at="2026-03-28T00:00:00Z",
-        ),
-    )
-    create_capability_grant(
-        db_path=db_path,
-        busy_timeout_ms=BUSY_TIMEOUT_MS,
-        grant=CapabilityGrantCreateInput(
-            grant_id="grant-prompt",
-            user_id="user-1",
-            preference_id="pref-prompt",
-            capability="scoped_write",
-            scope_type="global",
-            scope_ref=None,
-            grant_source="prompt",
-            granted_at="2026-03-28T00:00:01Z",
-        ),
-    )
-    upsert_approval_session(
-        db_path=db_path,
-        busy_timeout_ms=BUSY_TIMEOUT_MS,
-        approval_session=_approval_session(
-            status="approved_once",
-            approved_capabilities_json={"required_capabilities": ["scoped_write"]},
-            decided_at="2026-03-28T00:00:02Z",
-        ),
-    )
-
-    persisted_preference = ApprovalPreferenceUpsertInput(
-        preference_id=build_approval_preference_id(
-            user_id="user-1",
-            scope_type="global",
-            scope_ref=None,
-            applies_to=("workspace_edit_and_command",),
-        ),
-        user_id="user-1",
-        scope_type="global",
-        scope_ref=None,
-        approval_mode="always_allow",
-        applies_to=("workspace_edit_and_command",),
-        created_at="2026-03-28T00:00:03Z",
-        updated_at="2026-03-28T00:00:03Z",
-    )
-    persisted_grant = CapabilityGrantCreateInput(
-        grant_id=build_capability_grant_id(
-            user_id="user-1",
-            scope_type="global",
-            scope_ref=None,
-            capability="scoped_write",
-            applies_to=("workspace_edit_and_command",),
-        ),
-        user_id="user-1",
-        preference_id=persisted_preference.preference_id,
-        capability="scoped_write",
-        scope_type="global",
-        scope_ref=None,
-        grant_source="prompt",
-        granted_at="2026-03-28T00:00:03Z",
-    )
-
-    with sqlite3.connect(db_path) as connection:
-        connection.row_factory = sqlite3.Row
-        result = apply_approval_decision_in_connection(
-            connection=connection,
-            user_id="user-1",
-            tool_request_id="request-1",
-            action_id="action-1",
-            approval_session_id="approval-1",
-            expected_current_status="pending",
-            next_status="approved_once",
-            decided_at="2026-03-28T00:00:03Z",
-            preference=persisted_preference,
-            grants=(persisted_grant,),
-        )
-        preference_rows = connection.execute(
-            """
-            SELECT preference_id, approval_mode
-            FROM approval_preferences
-            WHERE user_id = ? AND scope_type = 'global' AND scope_ref IS NULL
-            ORDER BY preference_id ASC
-            """,
-            ("user-1",),
-        ).fetchall()
-        grant_rows = connection.execute(
-            """
-            SELECT grant_id, preference_id, revoked_at
-            FROM capability_grants
-            WHERE user_id = ? AND scope_type = 'global' AND scope_ref IS NULL
-            ORDER BY grant_id ASC
-            """,
-            ("user-1",),
-        ).fetchall()
-
-    assert result.status == "conflict"
-    assert [tuple(row) for row in preference_rows] == [
-        ("pref-prompt", "prompt_each_time")
-    ]
-    assert [tuple(row) for row in grant_rows] == [("grant-prompt", "pref-prompt", None)]
 
 
 def test_interrupt_approval_session_marks_pending_request_interrupted(

@@ -11,10 +11,6 @@ from pantaray_agents.local_runtime.storage.migrations.connection import (
     configure_connection,
 )
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
-from pantaray_agents.local_runtime.tooling.models import ApprovalMode
-from pantaray_agents.local_runtime.tooling.repository.action_approval_modes import (
-    set_action_approval_mode_in_connection,
-)
 from pantaray_agents.schema.action_conversation import (
     ActionMessageAcceptedEventData,
     ActionMessageAdoptedEventData,
@@ -326,17 +322,8 @@ def _resolve_action_target(
             user_id=command.user_id,
             suggestion_id=target.suggestion_id,
             initial_message_id=command.message.message_id,
-            initial_approval_mode=target.approval_mode,
             created_at=created_at,
         )
-        if target.approval_mode is not None:
-            set_action_approval_mode_in_connection(
-                connection=connection,
-                user_id=command.user_id,
-                action_id=action_id,
-                approval_mode=target.approval_mode,
-                updated_at=created_at,
-            )
         return action_id, target.suggestion_id, "queued", None
 
     row = connection.execute(
@@ -465,7 +452,6 @@ def _insert_action(
     user_id: str,
     suggestion_id: str | None,
     initial_message_id: str,
-    initial_approval_mode: ApprovalMode | None,
     created_at: str,
 ) -> None:
     connection.execute(
@@ -473,8 +459,8 @@ def _insert_action(
         INSERT INTO agent_actions(
             action_id, user_id, suggestion_id, initial_user_message_id,
             execution_target_json, status, final_output, prompt_name,
-            prompt_version, created_at, updated_at, initial_approval_mode
-        ) VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?)
+            prompt_version, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?)
         """,
         (
             action_id,
@@ -487,7 +473,6 @@ def _insert_action(
             ACTION_HEADER_PROMPT_VERSION,
             created_at,
             created_at,
-            initial_approval_mode,
         ),
     )
 

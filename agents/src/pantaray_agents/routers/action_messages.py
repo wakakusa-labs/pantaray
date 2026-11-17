@@ -268,10 +268,7 @@ def _canonical_command(
             expected_process_id=target.expected_process_id,
         )
         if isinstance(target, ActionMessageHttpExistingTarget)
-        else NewActionTarget(
-            approval_mode=target.approval_mode,
-            reply_to_suggestion_id=target.reply_to_suggestion_id,
-        )
+        else NewActionTarget(reply_to_suggestion_id=target.reply_to_suggestion_id)
     )
     message = request.message
     for image in message.images:

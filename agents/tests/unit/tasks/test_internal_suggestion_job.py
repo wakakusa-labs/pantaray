@@ -94,7 +94,6 @@ _EMPTY_RESEARCH_SNAPSHOT = SuggestionResearchSnapshot(
         has_facts=False,
         has_insights=False,
     ),
-    commands_allowed=False,
     read_access_scope="workspace",
 )
 

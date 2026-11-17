@@ -385,7 +385,7 @@ test("Only the main window's new-task send touches the new task's draft", async 
   taskDrafts.open('user-1', 'new', { id: 7, send: () => {} });
   taskDrafts.update('user-1', 'new', newTask, 7);
   const request = {
-    target: { kind: 'new', approval_mode: 'prompt_each_time' },
+    target: { kind: 'new' },
     message: { version: 1, message_id: 'message-1', content: 'Other words', images: [] },
   };
   const fail = async () => {
@@ -569,7 +569,6 @@ function replySubmit() {
   return {
     target: {
       kind: 'new',
-      approval_mode: 'prompt_each_time',
       reply_to_suggestion_id: 'sug-1',
     },
     message: { version: 1, message_id: 'message-1', content: 'Only the summary', images: [] },

@@ -150,7 +150,6 @@ export function useSuggestionTask(suggestionId: string) {
     replyActionId,
     replying: submission !== null && submission.state !== 'failed',
   });
-  const permissionsReady = approvalMode.mode !== null && !approvalMode.isSaving;
 
   const hasWords = composer.hasMessage;
   // A reply to an unanswered offer accepts it, with the reply as what to do next.
@@ -159,16 +158,14 @@ export function useSuggestionTask(suggestionId: string) {
     (repliesToOffer ||
       (phase === 'actionable' && contract === 'message_only') ||
       phase === 'dismissed') &&
-    permissionsReady &&
     submission === null &&
     hasWords &&
     composer.composer.attachmentsInFlight === 0 &&
     !(repliesToOffer && composer.supplementInvalid);
   const send = () => {
-    const mode = approvalMode.mode;
-    if (!canSend || snapshot === null || mode === null) return;
+    if (!canSend || snapshot === null) return;
     if (!repliesToOffer) {
-      composer.submitDraft(null, true, null, snapshot.lastSequence, mode, suggestionId);
+      composer.submitDraft(null, true, null, snapshot.lastSequence, suggestionId);
       return;
     }
     if (!orchestration) return;
@@ -181,7 +178,6 @@ export function useSuggestionTask(suggestionId: string) {
         supplement: composer.supplement,
         supplementProjectRefs: composer.refs.project_refs,
         supplementWorkRefs: composer.refs.work_refs,
-        approvalMode: mode,
         images: composer.images,
         files: composer.files,
       })

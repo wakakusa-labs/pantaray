@@ -12,7 +12,6 @@ from pantaray_agents.local_runtime.tooling.brokering.broker import (
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
     _bootstrap_runtime_db,
-    _grant_workspace_full_access,
 )
 
 
@@ -31,11 +30,6 @@ def _patch_args() -> dict[str, object]:
 @pytest.mark.asyncio
 async def test_execute_broker_tool_applies_workspace_patch(tmp_path: Path) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     workspace_file = context.workspace_path / "todo.txt"
     workspace_file.write_text("old line\n", encoding="utf-8")
 
@@ -75,11 +69,6 @@ async def test_execute_broker_tool_apply_patch_generates_invocation_for_executio
     tmp_path: Path,
 ) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     workspace_file = context.workspace_path / "todo.txt"
     workspace_file.write_text("old line\n", encoding="utf-8")
 
@@ -125,11 +114,6 @@ async def test_execute_broker_tool_apply_patch_tracks_workspace_lock_when_invoca
     tmp_path: Path,
 ) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     workspace_file = context.workspace_path / "todo.txt"
     workspace_file.write_text("old line\n", encoding="utf-8")
 

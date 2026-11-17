@@ -20,7 +20,6 @@ from tests.unit.local_runtime.broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
     BROKER_ALLOWED_TOOL_IDS,
     _bootstrap_runtime_db,
-    _grant_workspace_full_access,
 )
 
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime import (
@@ -72,7 +71,6 @@ from pantaray_agents.local_runtime.tooling.models import ToolInvocationStartInpu
 from pantaray_agents.local_runtime.tooling.repository import (
     load_approval_session_by_request,
     record_tool_invocation_start,
-    set_action_approval_mode,
 )
 from pantaray_agents.local_runtime.tooling.repository.integration_permissions import (
     IntegrationAccess,
@@ -654,21 +652,9 @@ async def test_a_connection_to_reconnect_is_told_before_any_setting(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("action_mode", [None, "always_allow"])
 async def test_a_write_asks_every_time_and_runs_once_approved(
-    env: SimpleNamespace, action_mode: str | None
+    env: SimpleNamespace,
 ) -> None:
-    _grant_workspace_full_access(db_path=env.db_path, capability="process_exec_local")
-    if action_mode is not None:
-        set_action_approval_mode(
-            db_path=env.db_path,
-            busy_timeout_ms=BUSY_TIMEOUT_MS,
-            user_id="user-1",
-            action_id="action-1",
-            approval_mode=action_mode,  # type: ignore[arg-type]
-            updated_at=NOW,
-        )
-
     args = await _approve_send(env, "send")
 
     pending = load_approval_session_by_request(

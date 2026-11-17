@@ -97,8 +97,8 @@ def install_common_middleware(app: FastAPI, *, allowed_origins: list[str]) -> No
         CORSMiddleware,
         allow_origins=allowed_origins,
         allow_credentials=True,
-        # ルータが実際に提供する method と一致させる（workspace_settings /
-        # action_approval_mode / approval_preferences が PUT・DELETE を持つ）。
+        # ルータが実際に提供する method と一致させる（workspace_settings などが
+        # PUT・DELETE を持つ）。
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=[
             "Authorization",

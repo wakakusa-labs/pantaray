@@ -121,7 +121,6 @@ const ConversationOverlay = ({
     entryMode === 'overlay' ? state.suggestionId : null
   );
   const { reset: resetApprovalMode } = approvalMode;
-  const permissionsReady = approvalMode.mode !== null && !approvalMode.isSaving;
   const approval = useActionApprovalDecisionController({ t });
   const { approvalBlockers, approvalUiState, setApprovalBlockers } = approval;
   useStandaloneComposerFocus(entryMode === 'standalone', standaloneComposerRef);
@@ -459,16 +458,14 @@ const ConversationOverlay = ({
     !composer.submission &&
     hasWords &&
     composer.attachmentsInFlight === 0 &&
-    permissionsReady &&
     (!repliesToOffer || (!state.decisionLocked && !supplementInvalid));
   const sendDraft = () => {
-    if (!canSend || approvalMode.mode === null) return;
+    if (!canSend) return;
     if (repliesToOffer) {
       ctrl.onAccept({
         supplement,
         supplementProjectRefs: supplementRefs.project_refs,
         supplementWorkRefs: supplementRefs.work_refs,
-        approvalMode: approvalMode.mode,
         images,
         files,
       });
@@ -479,7 +476,6 @@ const ConversationOverlay = ({
       canStartConversation,
       stopProcessId,
       state.lastSequence,
-      approvalMode.mode,
       entryMode === 'overlay' && repliesToSuggestion ? state.suggestionId : null
     );
   };
@@ -505,9 +501,7 @@ const ConversationOverlay = ({
         resumeFailed={composer.resume?.state === 'failed'}
         stopState={stopState}
         sendSuperseded={composer.failureKind === 'superseded'}
-        canResume={
-          permissionsReady && (composer.resume === null || composer.resume.state === 'failed')
-        }
+        canResume={composer.resume === null || composer.resume.state === 'failed'}
         textareaRef={standaloneComposerRef}
         onAddProject={() => window.electron?.agentOverlay?.openWorkspaceSettings?.()}
         onDraftChange={changeDraft}
@@ -515,9 +509,7 @@ const ConversationOverlay = ({
         onRemoveAttachment={removeAttachment}
         onSubmit={sendDraft}
         onStop={stop}
-        onResume={() => {
-          if (permissionsReady) requestResume(visiblePages);
-        }}
+        onResume={() => requestResume(visiblePages)}
       />
     ) : toolOutputLoader && !operationalError && stopShown ? (
       <ComposerSubmissionRow>

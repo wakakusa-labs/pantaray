@@ -139,9 +139,7 @@ def _command(
             return SubmitActionMessageCommand(
                 user_id=user_id,
                 origin="todo_pickup",
-                target=NewActionTarget(
-                    approval_mode="prompt_each_time", todo_text=todo.text
-                ),
+                target=NewActionTarget(todo_text=todo.text),
                 message=ActionUserMessageInput(
                     message_id=message_id,
                     content=ACTION_TODO_PICKUP_REQUEST_TEXT,

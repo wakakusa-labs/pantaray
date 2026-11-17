@@ -756,8 +756,7 @@ async def test_suggestion_research_tool_set_is_read_only(
         "web_extract",
         "zanei_timeline",
         "zanei_query",
-        # The read-only sandboxed command, offered under the unsaved
-        # always_allow default; it is not the Action's bash.
+        # The read-only sandboxed command; it is not the Action's bash.
         "bash",
     }
     assert names.isdisjoint({"thinking", "apply_patch", "run_python"})

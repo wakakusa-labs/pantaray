@@ -324,14 +324,6 @@ async def run_action(
     timeout_seconds: float,
 ) -> ActionOutcome:
     submitted = await submit_action(client, owner_id=owner_id, prompt=prompt)
-    # Nobody is at the keyboard to answer a consent prompt, so the run grants it
-    # up front the way the Agent Overlay's own control does; the broker reads the
-    # mode per tool request, before the first write preflight.
-    approval = await client.put(
-        f"/v1/agents/users/{owner_id}/actions/{submitted['action_id']}/approval-mode",
-        json={"approval_mode": "always_allow"},
-    )
-    approval.raise_for_status()
     await attach_action(session, submitted)
     return await await_action_terminal(
         client,

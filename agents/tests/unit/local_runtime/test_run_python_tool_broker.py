@@ -25,13 +25,7 @@ from pantaray_agents.local_runtime.tooling.invocation_audit import (
     start_local_tool_invocation_audit,
 )
 from pantaray_agents.local_runtime.tooling.models import (
-    ApprovalPreferenceUpsertInput,
-    CapabilityGrantCreateInput,
     ToolRuntimeResourceCreateInput,
-)
-from pantaray_agents.local_runtime.tooling.repository import (
-    create_capability_grant,
-    upsert_approval_preference,
 )
 from pantaray_agents.local_runtime.tooling.resources.resource_repository import (
     create_tool_runtime_resource,
@@ -67,38 +61,6 @@ def _bootstrap_runtime_db(tmp_path: Path) -> tuple[Path, object]:
         allowed_tool_ids=("read", "apply_patch", "bash", "run_python"),
     )
     return db_path, context
-
-
-def _grant_python_access(*, db_path: Path, manifest_id: str | None = None) -> None:
-    del manifest_id
-    upsert_approval_preference(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        preference=ApprovalPreferenceUpsertInput(
-            preference_id="pref-global",
-            user_id="user-1",
-            scope_type="global",
-            scope_ref=None,
-            approval_mode="always_allow",
-            applies_to=("workspace_edit_and_command",),
-            created_at="2026-03-23T00:00:00Z",
-            updated_at="2026-03-23T00:00:00Z",
-        ),
-    )
-    create_capability_grant(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        grant=CapabilityGrantCreateInput(
-            grant_id="grant-global-process_exec_local",
-            user_id="user-1",
-            preference_id="pref-global",
-            capability="process_exec_local",
-            scope_type="global",
-            scope_ref=None,
-            grant_source="settings",
-            granted_at="2026-03-23T00:00:01Z",
-        ),
-    )
 
 
 def _stub_process_group_resource_registration(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -142,7 +104,6 @@ async def test_run_python_tool_writes_generated_code_to_invocation_temp_dir(
     from pantaray_agents.local_runtime.tooling.brokering import broker as broker_module
 
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_python_access(db_path=db_path, manifest_id=context.manifest_id)
     _stub_process_group_resource_registration(monkeypatch)
     captured_argv: list[str] = []
     captured_script_text: list[str] = []

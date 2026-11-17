@@ -1,19 +1,5 @@
-from .action_approval_modes import (
-    ActionApprovalModeOwnerError,
-    load_action_approval_mode,
-    set_action_approval_mode,
-)
-from .approval_preferences import (
-    apply_approval_preference_setting,
-    create_capability_grant,
-    load_active_capability_grants,
-    load_effective_approval_preference,
-    load_global_approval_preference,
-    upsert_approval_preference,
-)
 from .approval_session_mutations import (
     apply_approval_decision_in_connection,
-    apply_approval_decision_with_grants,
     claim_approval_execution_start,
     interrupt_approval_session_for_tool_request,
     update_approval_session_decision,
@@ -78,7 +64,6 @@ from .workspace_settings_models import (
 )
 
 __all__ = [
-    "ActionApprovalModeOwnerError",
     "ApprovalDecisionConflictError",
     "ApprovalSessionExecutionConflictError",
     "CommandInvocationAuditUpsertInput",
@@ -99,11 +84,8 @@ __all__ = [
     "_deserialize_json_string_map",
     "_serialize_json",
     "apply_approval_decision_in_connection",
-    "apply_approval_decision_with_grants",
     "claim_approval_execution_start",
-    "apply_approval_preference_setting",
     "complete_execution_session",
-    "create_capability_grant",
     "create_execution_session",
     "create_workspace_folder",
     "create_workspace_organization",
@@ -115,14 +97,9 @@ __all__ = [
     "list_workspace_settings",
     "load_read_access_scope",
     "load_action_manifest_id",
-    "load_action_approval_mode",
-    "set_action_approval_mode",
-    "load_active_capability_grants",
     "load_approval_session_by_id",
     "load_approval_session_by_request",
-    "load_effective_approval_preference",
     "load_execution_session",
-    "load_global_approval_preference",
     "load_latest_approval_session",
     "load_tool_definition",
     "record_tool_invocation_start",
@@ -133,7 +110,6 @@ __all__ = [
     "interrupt_approval_session_for_tool_request",
     "update_approval_session_decision",
     "update_read_access_scope",
-    "upsert_approval_preference",
     "upsert_command_invocation_audit",
     "upsert_approval_session",
 ]

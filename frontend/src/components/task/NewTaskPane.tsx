@@ -55,13 +55,11 @@ export function NewTaskPane({
   }, [actionId]);
 
   const canSend =
-    approvalMode.mode !== null &&
-    !approvalMode.isSaving &&
     composer.submission === null &&
     composer.draft.trim() !== '' &&
     composer.attachmentsInFlight === 0;
   const send = () => {
-    if (canSend) controller.submitDraft(null, true, null, 0, approvalMode.mode, null);
+    if (canSend) controller.submitDraft(null, true, null, 0, null);
   };
 
   return (

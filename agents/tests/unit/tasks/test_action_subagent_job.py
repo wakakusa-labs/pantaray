@@ -60,15 +60,6 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_outcome import (
 from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
     ValidatedCommandRequest,
 )
-from pantaray_agents.local_runtime.tooling.models import (
-    ApprovalMode,
-    ApprovalPreferenceUpsertInput,
-    CapabilityGrantCreateInput,
-)
-from pantaray_agents.local_runtime.tooling.repository import (
-    create_capability_grant,
-    upsert_approval_preference,
-)
 from pantaray_agents.local_runtime.tooling.sandbox.sandbox_denial import (
     WRITE_FOLDER_REQUEST_HINT,
 )
@@ -257,9 +248,6 @@ def _running_child(
                 scheduled_at=TIMESTAMP,
             )
     bootstrap_local_tooling_catalog(db_path=db_path, busy_timeout_ms=1_000)
-    # Gated tools pause until a test opts into always_allow, which replaces this
-    # row through its shared preference_id.
-    _save_workspace_approval_mode(db_path, "prompt_each_time")
     context = ensure_action_scratch_execution_context(
         db_path=db_path,
         busy_timeout_ms=1_000,
@@ -858,9 +846,24 @@ _REPORT_CALL = LlmToolCall(
 )
 
 
+def _gate_edits(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make every edit ask the user, as any request that leaves the workspace does.
+
+    The pause and resume are the same whichever request asks.
+    """
+
+    real = broker_module.ensure_tool_authorization
+
+    def asking(**kwargs: object) -> tuple[str | None, str | None]:
+        return real(**{**kwargs, "require_user_prompt": True})  # type: ignore[arg-type]
+
+    monkeypatch.setattr(broker_module, "ensure_tool_authorization", asking)
+
+
 def _pause_gated_child(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> tuple[Path, ActionSubagentJobPayload, str, str]:
+    _gate_edits(monkeypatch)
     db_path, payload = _running_child(
         tmp_path,
         profile_id=ACTION_EXECUTING_PROFILE_ID,
@@ -1024,6 +1027,7 @@ def test_cancel_before_the_gated_pause_commits_settles_canceled_and_interrupts(
         profile_id=ACTION_EXECUTING_PROFILE_ID,
         claim_workspace=True,
     )
+    _gate_edits(monkeypatch)
     real_pause = subagent_job.pause_action_subagent_for_approval
 
     def cancel_then_pause(**kwargs: object) -> object:
@@ -1079,41 +1083,6 @@ def test_wait_reports_an_approval_paused_child_as_nonterminal(
     assert snapshot.terminal_child_process_ids == ()
 
 
-def _save_workspace_approval_mode(db_path: Path, mode: ApprovalMode) -> None:
-    upsert_approval_preference(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        preference=ApprovalPreferenceUpsertInput(
-            preference_id="pref-global",
-            user_id="user-1",
-            scope_type="global",
-            scope_ref=None,
-            approval_mode=mode,
-            applies_to=("workspace_edit_and_command",),
-            created_at=TIMESTAMP,
-            updated_at=TIMESTAMP,
-        ),
-    )
-
-
-def _allow_workspace_commands(db_path: Path) -> None:
-    _save_workspace_approval_mode(db_path, "always_allow")
-    create_capability_grant(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        grant=CapabilityGrantCreateInput(
-            grant_id="grant-process-exec",
-            user_id="user-1",
-            preference_id="pref-global",
-            capability="process_exec_local",
-            scope_type="global",
-            scope_ref=None,
-            grant_source="settings",
-            granted_at=TIMESTAMP,
-        ),
-    )
-
-
 def test_failed_command_output_stays_bounded_in_the_child_transcript(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -1122,7 +1091,6 @@ def test_failed_command_output_stays_bounded_in_the_child_transcript(
         profile_id=ACTION_EXECUTING_PROFILE_ID,
         claim_workspace=True,
     )
-    _allow_workspace_commands(db_path)
     raw_output = "e" * (10 * ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT)
 
     async def failed_command(**_kwargs: object) -> UnprojectedBrokerToolOutcome:
@@ -1176,7 +1144,6 @@ def test_a_likely_denied_write_does_not_tell_the_child_to_request_folders(
         profile_id=ACTION_EXECUTING_PROFILE_ID,
         claim_workspace=True,
     )
-    _allow_workspace_commands(db_path)
     stderr = "Error: Operation not permitted (os error 1)\n"
 
     async def denied_command(**_kwargs: object) -> UnprojectedBrokerToolOutcome:
@@ -1571,7 +1538,6 @@ def test_two_changing_calls_of_one_turn_run_one_after_another_in_order(
         profile_id=ACTION_EXECUTING_PROFILE_ID,
         claim_workspace=True,
     )
-    _allow_workspace_commands(db_path)
     running: list[str] = []
     started: list[str] = []
 
@@ -1657,7 +1623,8 @@ def test_a_pause_inside_a_turn_answers_every_call_and_runs_none_twice(
     )
     workspace = _workspace(db_path)
     (workspace / "notes.txt").write_text("read before the edit", "utf-8")
-    # Without a standing approval every edit asks, so the first edit pauses.
+    # Every edit asks here, so the first edit pauses.
+    _gate_edits(monkeypatch)
     gated = _patch_call("gated", "gated.txt")
     later = _patch_call("later", "later.txt")
     turn = (
@@ -1737,7 +1704,6 @@ def test_a_report_mixed_with_other_calls_waits_for_a_turn_of_its_own(
         profile_id=ACTION_EXECUTING_PROFILE_ID,
         claim_workspace=True,
     )
-    _allow_workspace_commands(db_path)
     launched: list[str] = []
 
     async def command(
@@ -1834,6 +1800,7 @@ def test_a_resumed_child_sends_the_same_prefix_and_hands_its_turns_back(
         claim_workspace=True,
     )
     (_workspace(db_path) / "notes.txt").write_text("read before the edit", "utf-8")
+    _gate_edits(monkeypatch)
     read = LlmToolCall(call_id="read", name="read", arguments={"path": "notes.txt"})
     client = _Client(calls=(read, _APPLY_PATCH_CALL))
     monkeypatch.setattr(subagent_job, "build_local_llm_proxy_client", lambda: client)
@@ -1879,7 +1846,6 @@ def test_a_call_a_crash_left_unanswered_is_answered_as_not_run_on_resume(
         profile_id=ACTION_EXECUTING_PROFILE_ID,
         claim_workspace=True,
     )
-    _allow_workspace_commands(db_path)
 
     async def command(
         *, request: ValidatedCommandRequest, **_kwargs: object
@@ -2016,6 +1982,7 @@ def test_repository_agents_md_reaches_the_child_once_across_a_resume(
     _agents_md_workspace(db_path)
     # The read claims the files; the edit of the same turn then waits for
     # approval, so no send carries them before the pause.
+    _gate_edits(monkeypatch)
     client = _Client(calls=((_read("r1", "sub/notes.txt"), _APPLY_PATCH_CALL),))
     monkeypatch.setattr(subagent_job, "build_local_llm_proxy_client", lambda: client)
     with bind_local_runtime_db_execution_context(

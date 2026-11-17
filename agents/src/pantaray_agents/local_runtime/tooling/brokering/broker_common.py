@@ -12,7 +12,6 @@ from pantaray_agents.tools.files.manifest_paths import ManifestRoot, load_manife
 
 from ...storage.migrations import MigrationError
 from ..models import (
-    ApprovalMode,
     ApprovalSessionUpsertInput,
     StoredExecutionSession,
     StoredToolDefinition,
@@ -21,15 +20,12 @@ from ..models import (
 from ..outside_workspace_grant import approved_summary_covers_request
 from ..repository import (
     ApprovalSessionExecutionConflictError,
-    apply_approval_decision_with_grants,
-    load_action_approval_mode,
     load_action_manifest_id,
-    load_active_capability_grants,
     load_approval_session_by_request,
-    load_effective_approval_preference,
     load_execution_session,
     load_latest_approval_session,
     load_tool_definition,
+    update_approval_session_decision,
     upsert_approval_session,
 )
 from .broker_protocol import BrokerPathAccessKind
@@ -46,11 +42,6 @@ BASH_TOOL_ID = "bash"
 RUN_PYTHON_TOOL_ID = "run_python"
 RUNNING_SESSION_STATUS = "running"
 ALLOWED_CAPABILITIES_KEY = "allowed_capabilities"
-APPROVAL_SCOPE_WORKSPACE_EDIT_AND_COMMAND = "workspace_edit_and_command"
-APPROVAL_SCOPE_SCREEN_CAPTURE = "screen_capture"
-SCREEN_CAPTURE_INTENT_CLASS = "screen_capture"
-APPROVAL_MODE_PROMPT_EACH_TIME: Literal["prompt_each_time"] = "prompt_each_time"
-APPROVAL_MODE_ALWAYS_ALLOW: Literal["always_allow"] = "always_allow"
 APPROVAL_STATUS_PENDING: Literal["pending"] = "pending"
 APPROVAL_STATUS_APPROVED_ONCE: Literal["approved_once"] = "approved_once"
 APPROVAL_STATUS_DENIED: Literal["denied"] = "denied"
@@ -265,19 +256,6 @@ def ensure_session_capabilities(*, context: BrokerContext) -> None:
         )
 
 
-def approval_scope_for_intent_class(intent_class: str) -> str:
-    """The approval scope a tool's consent is read from and written under.
-
-    Screen capture has its own scope on purpose: a durable grant for workspace
-    edits and commands says nothing about recording the screen, so reusing that
-    scope would let one consent auto-approve the other.
-    """
-
-    if intent_class == SCREEN_CAPTURE_INTENT_CLASS:
-        return APPROVAL_SCOPE_SCREEN_CAPTURE
-    return APPROVAL_SCOPE_WORKSPACE_EDIT_AND_COMMAND
-
-
 def ensure_tool_authorization(
     *,
     context: BrokerContext,
@@ -286,70 +264,30 @@ def ensure_tool_authorization(
     command_summary: dict[str, JSONValue],
     requested_at: str,
     require_user_prompt: bool = False,
-    integration_tool_scope: str | None = None,
 ) -> tuple[str | None, Literal["settings", "prompt"] | None]:
     """Authorize one tool request.
 
-    `require_user_prompt` asks the user even under always_allow: that mode is
-    consent for the registered workspace only, not for a write outside it.
-
-    `integration_tool_scope` (`integration_tool:<account>:<slug>`) marks a write
-    to a connected integration. It asks the user for every execution: neither
-    session capabilities, a saved setting nor an Action-level mode approve it.
-    The command summary must name the account, the tool and every argument,
-    because the approval binds to that summary.
+    A request the session's capabilities do not cover passes with no prompt
+    when it stays inside the registered workspace. `require_user_prompt` marks
+    a request that leaves it (a write outside the registered folders, a run
+    outside the sandbox, the login environment, an integration write, a screen
+    capture): it asks the user for every execution, and the approval binds to
+    `command_summary`, so the summary must name everything the user approves.
     """
 
-    always_prompt = require_user_prompt or integration_tool_scope is not None
     allowed_capabilities = _load_allowed_capabilities(context)
     missing_capabilities = [
         capability
         for capability in context.tool_definition.required_capabilities
         if capability not in allowed_capabilities
     ]
-    if not missing_capabilities and not always_prompt:
+    if not missing_capabilities and not require_user_prompt:
         return None, None
     if context.execution_session.action_id is None:
         raise MigrationError(
             "approval-required tool execution requires an owning agent action"
         )
 
-    # Resolved per tool request, so a mode change made from the Agent Overlay
-    # while the Action runs takes effect from the next preflight onwards.
-    # That control grants file/command consent, never screen-capture consent.
-    approval_scope = integration_tool_scope or approval_scope_for_intent_class(
-        context.tool_definition.intent_class
-    )
-    action_approval_mode = (
-        load_action_approval_mode(
-            db_path=context.db_path,
-            busy_timeout_ms=context.busy_timeout_ms,
-            user_id=context.execution_session.user_id,
-            action_id=context.execution_session.action_id,
-        )
-        if approval_scope == APPROVAL_SCOPE_WORKSPACE_EDIT_AND_COMMAND
-        else None
-    )
-    if integration_tool_scope is not None:
-        # Consent to an integration write is never saved: each execution asks.
-        approval_mode: ApprovalMode = APPROVAL_MODE_PROMPT_EACH_TIME
-        requires_global_grants = False
-    elif action_approval_mode is None:
-        user_default = load_effective_approval_preference(
-            db_path=context.db_path,
-            busy_timeout_ms=context.busy_timeout_ms,
-            user_id=context.execution_session.user_id,
-            applies_to=approval_scope,
-        )
-        approval_mode = user_default.approval_mode
-        # A saved always_allow auto-approves only against the durable capability
-        # grants written with it. The unsaved built-in default has no row to grant
-        # from, and an Action-level override carries its own consent record and is
-        # scoped to this one conversation.
-        requires_global_grants = user_default.preference_id is not None
-    else:
-        approval_mode = action_approval_mode
-        requires_global_grants = False
     latest_session = load_latest_approval_session(
         db_path=context.db_path,
         busy_timeout_ms=context.busy_timeout_ms,
@@ -382,28 +320,7 @@ def ensure_tool_authorization(
             approval_session_id=latest_session.approval_session_id,
         )
 
-    if approval_mode not in {
-        APPROVAL_MODE_ALWAYS_ALLOW,
-        APPROVAL_MODE_PROMPT_EACH_TIME,
-    }:
-        raise MigrationError("unsupported approval mode")
-    if approval_mode == APPROVAL_MODE_ALWAYS_ALLOW and not always_prompt:
-        if requires_global_grants:
-            active_grants = load_active_capability_grants(
-                db_path=context.db_path,
-                busy_timeout_ms=context.busy_timeout_ms,
-                user_id=context.execution_session.user_id,
-                applies_to=approval_scope,
-            )
-            missing_grants = [
-                capability
-                for capability in missing_capabilities
-                if capability not in active_grants
-            ]
-            if missing_grants:
-                raise BrokerPolicyError(
-                    "durable capability grants are required for always_allow"
-                )
+    if not require_user_prompt:
         return (
             create_settings_approval_session(
                 context=context,
@@ -483,7 +400,7 @@ def apply_approval_decision(
     }:
         raise ApprovalDecisionError("unsupported approval decision")
 
-    result = apply_approval_decision_with_grants(
+    result = update_approval_session_decision(
         db_path=db_path,
         busy_timeout_ms=busy_timeout_ms,
         user_id=user_id,
@@ -493,8 +410,6 @@ def apply_approval_decision(
         expected_current_status=APPROVAL_STATUS_PENDING,
         next_status=decision,
         decided_at=decided_at,
-        preference=None,
-        grants=(),
     )
     if result.status == "not_found":
         raise ApprovalDecisionError("approval session not found")
@@ -563,10 +478,6 @@ def create_settings_approval_session(
 __all__ = [
     "ALLOWED_CAPABILITIES_KEY",
     "APPLY_PATCH_TOOL_ID",
-    "APPROVAL_MODE_ALWAYS_ALLOW",
-    "APPROVAL_MODE_PROMPT_EACH_TIME",
-    "APPROVAL_SCOPE_SCREEN_CAPTURE",
-    "APPROVAL_SCOPE_WORKSPACE_EDIT_AND_COMMAND",
     "APPROVAL_STATUS_APPROVED_ONCE",
     "APPROVAL_STATUS_DENIED",
     "APPROVAL_STATUS_PENDING",
@@ -582,7 +493,6 @@ __all__ = [
     "RUN_PYTHON_TOOL_ID",
     "SAVE_HTML_AS_PDF_TOOL_ID",
     "apply_approval_decision",
-    "approval_scope_for_intent_class",
     "create_settings_approval_session",
     "ensure_session_capabilities",
     "ensure_tool_authorization",

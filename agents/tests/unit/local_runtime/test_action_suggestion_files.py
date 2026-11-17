@@ -127,7 +127,6 @@ async def _accept() -> SuggestionAccepted:
         user_id=USER_ID,
         suggestion_id=SUGGESTION_ID,
         command_id=COMMAND_ID,
-        approval_mode="prompt_each_time",
         language="en",
         supplement=None,
         supplement_project_refs=(),

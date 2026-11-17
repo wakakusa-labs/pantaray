@@ -34,18 +34,12 @@ from pantaray_agents.local_runtime.tooling.bootstrap import (
     ensure_action_scratch_execution_context,
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker import (
+    BrokerApprovalRequiredError,
     BrokerToolOutcome,
+    apply_approval_decision,
     execute_broker_tool,
 )
-from pantaray_agents.local_runtime.tooling.models import (
-    ActionExecutionContext,
-    ApprovalPreferenceUpsertInput,
-    CapabilityGrantCreateInput,
-)
-from pantaray_agents.local_runtime.tooling.repository import (
-    create_capability_grant,
-    upsert_approval_preference,
-)
+from pantaray_agents.local_runtime.tooling.models import ActionExecutionContext
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings import (
     update_read_access_scope,
 )
@@ -67,6 +61,7 @@ def seatbelt_available() -> bool:
 @dataclass(frozen=True, slots=True)
 class RuntimeIntegrationTestbed:
     db_path: Path
+    action_id: str
     context: ActionExecutionContext
 
 
@@ -134,39 +129,8 @@ def bootstrap_runtime_testbed(
         started_at=INTEGRATION_APPROVAL_TIMESTAMP,
         allowed_tool_ids=("read", "apply_patch", "bash"),
     )
-    _grant_global_command_access(db_path=db_path)
-    return RuntimeIntegrationTestbed(db_path=db_path, context=context)
-
-
-def _grant_global_command_access(*, db_path: Path) -> None:
-    preference_id = "pref-global-workspace-edit-and-command"
-    upsert_approval_preference(
-        db_path=db_path,
-        busy_timeout_ms=ONE_SECOND_MS,
-        preference=ApprovalPreferenceUpsertInput(
-            preference_id=preference_id,
-            user_id="user-1",
-            scope_type="global",
-            scope_ref=None,
-            approval_mode="always_allow",
-            applies_to=("workspace_edit_and_command",),
-            created_at=INTEGRATION_APPROVAL_TIMESTAMP,
-            updated_at=INTEGRATION_APPROVAL_TIMESTAMP,
-        ),
-    )
-    create_capability_grant(
-        db_path=db_path,
-        busy_timeout_ms=ONE_SECOND_MS,
-        grant=CapabilityGrantCreateInput(
-            grant_id="grant-global-process_exec_local",
-            user_id="user-1",
-            preference_id=preference_id,
-            capability="process_exec_local",
-            scope_type="global",
-            scope_ref=None,
-            grant_source="settings",
-            granted_at=INTEGRATION_APPROVAL_TIMESTAMP,
-        ),
+    return RuntimeIntegrationTestbed(
+        db_path=db_path, action_id=action_id, context=context
     )
 
 
@@ -198,26 +162,49 @@ async def execute_bash(
     cwd: str | None = None,
     use_login_environment: bool = False,
 ) -> BrokerToolOutcome:
-    return await execute_broker_tool(
-        db_path=testbed.db_path,
-        busy_timeout_ms=ONE_SECOND_MS,
-        tool_id="bash",
-        user_id="user-1",
-        actor_process_id=BROKER_ACTOR_PROCESS_ID,
-        manifest_id=testbed.context.manifest_id,
-        execution_session_id=testbed.context.execution_session_id,
-        tool_request_id=f"request-{uuid.uuid4()}",
-        args={
-            "command": command,
-            **({"cwd": cwd} if cwd is not None else {}),
-            "use_login_environment": use_login_environment,
-            **(
-                {"justification": "Use your signed-in accounts for this check."}
-                if use_login_environment
-                else {}
-            ),
-        },
-    )
+    tool_request_id = f"request-{uuid.uuid4()}"
+
+    async def run() -> BrokerToolOutcome:
+        return await execute_broker_tool(
+            db_path=testbed.db_path,
+            busy_timeout_ms=ONE_SECOND_MS,
+            tool_id="bash",
+            user_id="user-1",
+            actor_process_id=BROKER_ACTOR_PROCESS_ID,
+            manifest_id=testbed.context.manifest_id,
+            execution_session_id=testbed.context.execution_session_id,
+            tool_request_id=tool_request_id,
+            args={
+                "command": command,
+                **({"cwd": cwd} if cwd is not None else {}),
+                "use_login_environment": use_login_environment,
+                **(
+                    {"justification": "Use your signed-in accounts for this check."}
+                    if use_login_environment
+                    else {}
+                ),
+            },
+        )
+
+    if not use_login_environment:
+        return await run()
+    # The login environment asks the user first; the user allows it once.
+    try:
+        await run()
+    except BrokerApprovalRequiredError as asked:
+        apply_approval_decision(
+            db_path=testbed.db_path,
+            busy_timeout_ms=ONE_SECOND_MS,
+            tool_request_id=tool_request_id,
+            user_id="user-1",
+            action_id=testbed.action_id,
+            approval_session_id=asked.approval_session_id,
+            decision="approved_once",
+            decided_at=INTEGRATION_APPROVAL_TIMESTAMP,
+        )
+    else:
+        raise AssertionError("a login environment command ran without asking")
+    return await run()
 
 
 def load_latest_audit(*, db_path: Path) -> dict[str, Any]:

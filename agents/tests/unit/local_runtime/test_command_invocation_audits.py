@@ -18,7 +18,6 @@ from pantaray_agents.local_runtime.tooling.repository import (
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
     _bootstrap_runtime_db,
-    _grant_workspace_full_access,
     _stub_process_group_resource_registration,
     _stub_subprocess_exec,
 )
@@ -85,11 +84,6 @@ async def test_successful_bash_writes_command_invocation_audit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="process_exec_local",
-    )
     _stub_process_group_resource_registration(monkeypatch)
     _stub_subprocess_exec(monkeypatch, stdout=b"hello\n")
 

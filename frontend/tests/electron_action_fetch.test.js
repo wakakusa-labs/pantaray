@@ -220,19 +220,6 @@ test('Action message request は nullable process fence を必須にし private 
     },
     {
       ...MESSAGE_REQUEST,
-      target: { kind: 'new', approval_mode: 'invalid' },
-    },
-    {
-      ...MESSAGE_REQUEST,
-      target: {
-        kind: 'existing',
-        action_id: 'action-1',
-        expected_process_id: null,
-        approval_mode: 'always_allow',
-      },
-    },
-    {
-      ...MESSAGE_REQUEST,
       message: { ...MESSAGE_REQUEST.message, supplement: 'private supplement' },
     },
   ];
@@ -693,27 +680,6 @@ test('conversation wire は canceled Action だけを resumable にする', asyn
   await assert.rejects(
     () => read({ ...CONVERSATION_PAGE, action: actionWithoutResumable }),
     (error) => error instanceof ActionWireContractError
-  );
-});
-
-test('new Action request forwards the selected initial approval mode', async () => {
-  const requests = [];
-  const fetcher = createFetcher(async (request) => {
-    requests.push(request);
-    return MESSAGE_RESPONSE;
-  });
-  for (const mode of ['prompt_each_time', 'always_allow']) {
-    await fetcher.submitMessage({
-      ...MESSAGE_REQUEST,
-      target: { kind: 'new', approval_mode: mode },
-    });
-  }
-  assert.deepEqual(
-    requests.map((request) => request.body.target),
-    [
-      { kind: 'new', approval_mode: 'prompt_each_time' },
-      { kind: 'new', approval_mode: 'always_allow' },
-    ]
   );
 });
 

@@ -29,7 +29,6 @@ from pantaray_agents.tools.files.secret_paths import (
     withheld_reason,
 )
 
-from .broker_test_support import _grant_workspace_full_access
 from .path_access_policy_support import bootstrap_path_policy_runtime_db
 from .test_private_app_storage_policy import _patch_args, _run
 from .test_read_only_file_tools import _call, _tools
@@ -249,7 +248,6 @@ async def test_action_tools_neither_read_nor_patch_an_env_file(tmp_path: Path) -
     db_path, context = bootstrap_path_policy_runtime_db(
         tmp_path, allowed_tool_ids=("read", "apply_patch")
     )
-    _grant_workspace_full_access(db_path=db_path, capability="scoped_write")
     workspace = context.workspace_path  # type: ignore[attr-defined]
     env = workspace / ".env"
     env.write_text("kept\n", encoding="utf-8")
@@ -275,7 +273,6 @@ async def test_a_link_swapped_to_a_secret_between_the_two_resolutions_is_refused
     db_path, context = bootstrap_path_policy_runtime_db(
         tmp_path, allowed_tool_ids=("read", "apply_patch")
     )
-    _grant_workspace_full_access(db_path=db_path, capability="scoped_write")
     workspace = context.workspace_path  # type: ignore[attr-defined]
     (workspace / "notes.txt").write_text("kept\n", encoding="utf-8")
     env = workspace / ".env"

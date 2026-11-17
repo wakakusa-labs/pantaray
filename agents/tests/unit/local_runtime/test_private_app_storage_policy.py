@@ -33,7 +33,6 @@ from pantaray_agents.tools.files.ripgrep import RIPGREP_TRUSTED_PATH
 
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
-    _grant_workspace_full_access,
 )
 from .discovery_output_support import glob_paths, grep_matches
 from .path_access_policy_support import (
@@ -259,7 +258,6 @@ async def test_apply_patch_refuses_private_app_storage(tmp_path: Path) -> None:
     db_path, context = bootstrap_path_policy_runtime_db(
         tmp_path, allowed_tool_ids=_TOOL_IDS
     )
-    _grant_workspace_full_access(db_path=db_path, capability="scoped_write")
     storage = db_path.parent
     notes = storage / "notes.txt"
     notes.write_text("kept\n", encoding="utf-8")

@@ -176,19 +176,13 @@ class LocalSuggestionResearchTools:
                 reader=SourceReader(context_source_control.gate),
                 start=self.activity_start,
             ).definitions(),
-            *(
-                SuggestionCommandSession(
-                    db_path=self.db_path,
-                    busy_timeout_ms=self.busy_timeout_ms,
-                    user_id=user_id,
-                    workspace_roots=self.snapshot.folders,
-                    read_access_scope=self.snapshot.read_access_scope,
-                    spill_root=spill_root,
-                    artifact_folder=artifact_folder,
-                ).definitions()
-                if self.snapshot.commands_allowed
-                else ()
-            ),
+            *SuggestionCommandSession(
+                db_path=self.db_path,
+                workspace_roots=self.snapshot.folders,
+                read_access_scope=self.snapshot.read_access_scope,
+                spill_root=spill_root,
+                artifact_folder=artifact_folder,
+            ).definitions(),
             # Decided when each lens run starts, as an Action decides when it starts.
             *(
                 SuggestionIntegrationSession(

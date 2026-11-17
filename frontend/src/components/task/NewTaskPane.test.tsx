@@ -74,7 +74,7 @@ it('shows an empty composer whose send opens a new Action and hands the pane to 
   });
 
   expect(submitMessage).toHaveBeenCalledWith({
-    target: { kind: 'new', approval_mode: 'prompt_each_time' },
+    target: { kind: 'new' },
     message: {
       version: 1,
       message_id: messageId,

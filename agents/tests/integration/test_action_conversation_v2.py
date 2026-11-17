@@ -317,9 +317,7 @@ def test_a_todo_pickup_shows_the_ai_text_and_never_its_request_as_the_users(
         SubmitActionMessageCommand(
             user_id=USER_ID,
             origin="todo_pickup",
-            target=NewActionTarget(
-                approval_mode="prompt_each_time", todo_text=todo_text
-            ),
+            target=NewActionTarget(todo_text=todo_text),
             message=ActionUserMessageInput(
                 message_id="todo-pickup", content=ACTION_TODO_PICKUP_REQUEST_TEXT
             ),
@@ -354,15 +352,6 @@ def test_a_todo_pickup_shows_the_ai_text_and_never_its_request_as_the_users(
         )
         assert search.status_code == 200, search.text
         assert [item["action_id"] for item in search.json()["items"]] == found
-
-    approval = client.get(
-        f"/v1/agents/users/{USER_ID}/actions/{action_id}/approval-mode"
-    )
-    assert approval.json() == {
-        "action_id": action_id,
-        "approval_mode": "prompt_each_time",
-        "source": "action",
-    }
 
 
 def test_a_reply_to_the_welcome_continues_it_as_an_ordinary_conversation(

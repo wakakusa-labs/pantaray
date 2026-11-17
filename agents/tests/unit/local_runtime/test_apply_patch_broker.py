@@ -13,7 +13,6 @@ from pantaray_agents.tools.contract import BrokerPolicyError
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
     _bootstrap_runtime_db,
-    _grant_workspace_full_access,
 )
 
 
@@ -76,11 +75,6 @@ async def test_execute_broker_tool_applies_structured_update(
     tmp_path: Path,
 ) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     workspace_file = context.workspace_path / "todo.md"
     workspace_file.write_text("## Tasks\n- old\n", encoding="utf-8")
 
@@ -107,11 +101,6 @@ async def test_execute_broker_tool_adds_file_under_new_directory(
     tmp_path: Path,
 ) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
 
     outcome = await execute_broker_tool(
         db_path=db_path,
@@ -147,11 +136,6 @@ async def test_apply_patch_add_rejects_parent_symlink_retarget_during_write(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     parent = context.workspace_path / "parent"
     parent.mkdir()
     original_parent = context.workspace_path / "original-parent"
@@ -212,11 +196,6 @@ async def test_apply_patch_add_rejects_parent_symlink_retarget_during_write(
 @pytest.mark.asyncio
 async def test_execute_broker_tool_deletes_file(tmp_path: Path) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     workspace_file = context.workspace_path / "obsolete.txt"
     workspace_file.write_text("remove me\n", encoding="utf-8")
 
@@ -240,11 +219,6 @@ async def test_execute_broker_tool_update_deletes_matched_block(
     tmp_path: Path,
 ) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     workspace_file = context.workspace_path / "todo.txt"
     workspace_file.write_text("keep\nremove\n", encoding="utf-8")
 
@@ -269,11 +243,6 @@ async def test_execute_broker_tool_update_preserves_trailing_newline(
     tmp_path: Path,
 ) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     with_newline = context.workspace_path / "with-newline.txt"
     without_newline = context.workspace_path / "without-newline.txt"
     with_newline.write_text("old\n", encoding="utf-8")
@@ -311,11 +280,6 @@ async def test_execute_broker_tool_structured_update_treats_prefixes_as_text(
     tmp_path: Path,
 ) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     workspace_file = context.workspace_path / "symbols.txt"
     workspace_file.write_text("+old\n- keep\n  indented\n", encoding="utf-8")
 
@@ -340,11 +304,6 @@ async def test_execute_broker_tool_reports_context_not_found(
     tmp_path: Path,
 ) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     workspace_file = context.workspace_path / "todo.txt"
     workspace_file.write_text("current line\n", encoding="utf-8")
 
@@ -374,11 +333,6 @@ async def test_execute_broker_tool_reports_ambiguous_context(
     tmp_path: Path,
 ) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     workspace_file = context.workspace_path / "todo.md"
     workspace_file.write_text("same\nx\nsame\n", encoding="utf-8")
 
@@ -406,11 +360,6 @@ async def test_execute_broker_tool_rejects_multiple_update_edits(
     tmp_path: Path,
 ) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     workspace_file = context.workspace_path / "todo.txt"
     workspace_file.write_text("a\nb\n", encoding="utf-8")
 
@@ -447,11 +396,6 @@ async def test_execute_broker_tool_rejects_duplicate_raw_paths(
     tmp_path: Path,
 ) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
 
     with pytest.raises(BrokerPolicyError) as exc_info:
         await execute_broker_tool(
@@ -490,11 +434,6 @@ async def test_execute_broker_tool_preflight_does_not_read_or_mutate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     workspace_file = context.workspace_path / "todo.txt"
     workspace_file.write_text("old line\n", encoding="utf-8")
 
@@ -533,11 +472,6 @@ async def test_execute_broker_tool_revalidates_content_after_preflight(
     tmp_path: Path,
 ) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     workspace_file = context.workspace_path / "todo.txt"
     workspace_file.write_text("old line\n", encoding="utf-8")
     args = _update_args(
@@ -582,11 +516,6 @@ async def test_execute_broker_tool_revalidates_content_after_preflight(
 @pytest.mark.asyncio
 async def test_execute_broker_tool_rejects_patch_string(tmp_path: Path) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
 
     with pytest.raises(BrokerPolicyError) as exc_info:
         await execute_broker_tool(

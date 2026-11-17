@@ -155,23 +155,16 @@ export function useActionTask(actionId: string) {
     view,
   });
 
-  const permissionsReady = approvalMode.mode !== null && !approvalMode.isSaving;
   const canCompose =
     composer.submission === null && visiblePages !== null && canonicalPage !== null;
-  const canSend =
-    canCompose &&
-    composerControl.hasMessage &&
-    composer.attachmentsInFlight === 0 &&
-    permissionsReady;
+  const canSend = canCompose && composerControl.hasMessage && composer.attachmentsInFlight === 0;
   const { stopShown, stopState, stop } = useActionStop({
     actionId,
     stopTarget: status.stopTarget,
     running: status.kind === 'running',
   });
   const canResume =
-    status.resumable &&
-    permissionsReady &&
-    (composer.resume === null || composer.resume.state === 'failed');
+    status.resumable && (composer.resume === null || composer.resume.state === 'failed');
   // The composer's primary button: send a draft, else stop the running run, else resume a stop.
   const composerAction: 'send' | 'stop' | 'resume' = composerControl.hasMessage
     ? 'send'
@@ -189,7 +182,6 @@ export function useActionTask(actionId: string) {
         false,
         status.stopTarget,
         MAIN_WINDOW_STREAM_SEQUENCE,
-        approvalMode.mode,
         null
       );
   };

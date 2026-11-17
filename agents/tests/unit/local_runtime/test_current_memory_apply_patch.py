@@ -30,7 +30,6 @@ from pantaray_agents.tools.contract import BrokerPolicyError
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
     _bootstrap_runtime_db,
-    _grant_workspace_full_access,
 )
 
 
@@ -38,7 +37,6 @@ from .broker_test_support import (
 def memory_runtime(tmp_path, monkeypatch):
     db, raw_context = _bootstrap_runtime_db(tmp_path)
     context = cast(ActionExecutionContext, raw_context)
-    _grant_workspace_full_access(db_path=db, capability="scoped_write")
     artifacts = tmp_path / "artifacts"
     artifacts.mkdir()
     monkeypatch.setenv("LOCAL_ARTIFACT_ROOT", str(artifacts))

@@ -483,7 +483,6 @@ export function createOrchestrationRendererBridge(params: {
             supplement: request.supplement,
             supplement_project_refs: request.supplementProjectRefs,
             supplement_work_refs: request.supplementWorkRefs,
-            approval_mode: request.approvalMode,
             images: request.images,
             files: request.files,
           },

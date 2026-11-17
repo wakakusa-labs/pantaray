@@ -172,7 +172,6 @@ test('offer: a reply continues the work, with no decision buttons or mode menu',
   expect(JSON.parse((await page.locator('html').getAttribute('data-accepted'))!)).toMatchObject({
     suggestionId: 'suggestion-1',
     supplement: '未決事項だけを、箇条書きでまとめて',
-    approvalMode: 'prompt_each_time',
     images: [],
   });
 });

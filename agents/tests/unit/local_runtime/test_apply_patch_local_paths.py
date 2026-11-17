@@ -10,7 +10,6 @@ from pantaray_agents.tools.contract import BrokerPolicyError
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
     _bootstrap_runtime_db,
-    _grant_workspace_full_access,
 )
 
 
@@ -21,11 +20,6 @@ async def test_execute_broker_tool_accepts_authorized_patch_destinations(
     spelling: str,
 ) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
 
     (context.workspace_path / "alias").symlink_to(
         context.workspace_path, target_is_directory=True
@@ -68,11 +62,6 @@ async def test_execute_broker_tool_rejects_multiple_patch_changes(
     tmp_path: Path,
 ) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
 
     with pytest.raises(BrokerPolicyError) as exc_info:
         await execute_broker_tool(
@@ -112,11 +101,6 @@ async def test_execute_broker_tool_adds_file_under_new_directory(
     tmp_path: Path,
 ) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
 
     outcome = await execute_broker_tool(
         db_path=db_path,

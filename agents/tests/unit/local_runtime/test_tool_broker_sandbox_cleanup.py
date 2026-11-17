@@ -21,7 +21,6 @@ from pantaray_agents.local_runtime.tooling.sandbox.command_sandbox_protocol impo
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
     _bootstrap_runtime_db,
-    _grant_workspace_full_access,
     _stub_process_group_resource_registration,
     _stub_runtime_budget,
 )
@@ -35,11 +34,6 @@ async def test_execute_broker_tool_cleans_process_resources_on_timeout(
     from pantaray_agents.local_runtime.tooling.brokering import broker as broker_module
 
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="process_exec_local",
-    )
 
     class _FakeStdout:
         def __init__(self) -> None:
@@ -171,11 +165,6 @@ async def test_command_failures_keep_captured_output_and_terminal_evidence(
     from pantaray_agents.local_runtime.tooling.brokering import broker as broker_module
 
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="process_exec_local",
-    )
 
     raw_violation = (
         "ModuleNotFoundError: command sandbox dependency is missing\n"
@@ -335,11 +324,6 @@ async def test_execute_broker_tool_preserves_cancellation_when_process_cleanup_f
     from pantaray_agents.local_runtime.tooling.brokering import broker as broker_module
 
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="process_exec_local",
-    )
     started = asyncio.Event()
 
     class _FakeStdout:

@@ -172,11 +172,9 @@ def _result(
     )
 
 
-@pytest.mark.parametrize("approval_mode", ["prompt_each_time", "always_allow"])
 @pytest.mark.asyncio
 async def test_execute_action_adapts_suggestion_to_the_canonical_creation_command(
     monkeypatch: pytest.MonkeyPatch,
-    approval_mode: Literal["prompt_each_time", "always_allow"],
 ) -> None:
     captured: list[SubmitActionMessageCommand] = []
 
@@ -194,7 +192,6 @@ async def test_execute_action_adapts_suggestion_to_the_canonical_creation_comman
 
     await handler.execute_action(
         ExecuteActionMessage(
-            approval_mode=approval_mode,
             images=(
                 {
                     "kind": "image",
@@ -220,9 +217,7 @@ async def test_execute_action_adapts_suggestion_to_the_canonical_creation_comman
     assert len(captured) == 1
     command = captured[0]
     assert command.user_id == "user-1"
-    assert command.target == NewActionTarget(
-        suggestion_id="suggestion-1", approval_mode=approval_mode
-    )
+    assert command.target == NewActionTarget(suggestion_id="suggestion-1")
     message = command.message
     assert message.message_id == COMMAND_ID
     assert message.content == "Apply the approved change"
@@ -278,7 +273,6 @@ async def test_execute_action_stamps_a_pending_approval_in_canonical_millisecond
 
     await handler.execute_action(
         ExecuteActionMessage(
-            approval_mode="prompt_each_time",
             images=(),
             suggestion_id="suggestion-1",
             command_id=COMMAND_ID,
@@ -311,7 +305,6 @@ async def test_execute_action_replay_uses_the_same_function_without_a_second_pat
 
     await handler.execute_action(
         ExecuteActionMessage(
-            approval_mode="prompt_each_time",
             images=(),
             suggestion_id="suggestion-1",
             command_id=COMMAND_ID,
@@ -378,7 +371,6 @@ async def test_terminal_replay_uses_submit_identity_without_reloading_detail(
 
     await handler.execute_action(
         ExecuteActionMessage(
-            approval_mode="prompt_each_time",
             images=(),
             suggestion_id="suggestion-1",
             command_id=COMMAND_ID,
@@ -442,7 +434,6 @@ async def test_execute_action_does_not_replay_or_attach_deferred_submission(
 
     await handler.execute_action(
         ExecuteActionMessage(
-            approval_mode="prompt_each_time",
             images=(),
             suggestion_id="suggestion-1",
             command_id=COMMAND_ID,
@@ -482,7 +473,6 @@ async def test_execute_action_fails_closed_before_relay_attachment(
 
     await handler.execute_action(
         ExecuteActionMessage(
-            approval_mode="prompt_each_time",
             images=(),
             suggestion_id="suggestion-1",
             command_id=COMMAND_ID,
@@ -510,7 +500,6 @@ async def test_execute_action_rejects_legacy_oversized_suggestion_as_not_allowed
 
     await handler.execute_action(
         ExecuteActionMessage(
-            approval_mode="prompt_each_time",
             images=(),
             suggestion_id="suggestion-1",
             command_id=COMMAND_ID,
@@ -534,7 +523,6 @@ async def test_execute_action_rejects_a_project_ref_outside_its_supplement_span(
 
     await handler.execute_action(
         ExecuteActionMessage(
-            approval_mode="prompt_each_time",
             images=(),
             suggestion_id="suggestion-1",
             command_id=COMMAND_ID,
@@ -572,7 +560,6 @@ async def test_post_commit_attach_failure_is_session_error_not_action_failure(
 
     await handler.execute_action(
         ExecuteActionMessage(
-            approval_mode="prompt_each_time",
             images=(),
             suggestion_id="suggestion-1",
             command_id=COMMAND_ID,
@@ -617,7 +604,6 @@ async def test_suggestion_images_reject_foreign_or_escaping_paths(
         ExecuteActionMessage(
             suggestion_id="suggestion-1",
             command_id=COMMAND_ID,
-            approval_mode="always_allow",
             images=({"kind": "image", "storage_path": path},),
         )
     )

@@ -258,8 +258,8 @@ def build_validated_command_request(
         outside_workspace_folders=resolved_cwd.outside_workspace_folders,
     )
     # The approval binds to this exact summary, command text included, and the
-    # argv below runs that same text. A run outside the sandbox is asked every
-    # time, whatever the approval mode.
+    # argv below runs that same text. A run outside the sandbox, with the login
+    # environment or with a write folder outside the workspace asks every time.
     approval_session_id, approval_source = ensure_tool_authorization(
         context=context,
         tool_invocation_id=tool_invocation_id,
@@ -267,7 +267,9 @@ def build_validated_command_request(
         command_summary=command_summary_json,
         requested_at=requested_at,
         require_user_prompt=(
-            run_outside_sandbox or bool(resolved_cwd.outside_workspace_folders)
+            run_outside_sandbox
+            or use_login_environment
+            or bool(resolved_cwd.outside_workspace_folders)
         ),
     )
     storage = resolve_action_storage_paths(

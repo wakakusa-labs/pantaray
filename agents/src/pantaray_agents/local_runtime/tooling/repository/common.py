@@ -10,7 +10,6 @@ from ...storage.migrations import MigrationError
 
 BUSY_TIMEOUT_PRAGMA_TEMPLATE = "PRAGMA busy_timeout = {timeout_ms};"
 FOREIGN_KEYS_ON_PRAGMA = "PRAGMA foreign_keys = ON;"
-WORKSPACE_EDIT_AND_COMMAND_SCOPE = "workspace_edit_and_command"
 
 
 class ApprovalDecisionConflictError(MigrationError):

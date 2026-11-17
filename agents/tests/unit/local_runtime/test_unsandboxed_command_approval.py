@@ -51,7 +51,6 @@ from .broker_test_support import (
     _seed_broker_actor_process,
 )
 from .test_outside_workspace_command_approval import (
-    APPROVAL_MODES,
     _approval_rows,
     _decide,
     _run,
@@ -125,14 +124,12 @@ def test_only_an_unsandboxed_request_starts_without_the_profile(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mode", APPROVAL_MODES)
-async def test_unsandboxed_command_asks_in_every_approval_mode(
+async def test_unsandboxed_command_asks(
     tmp_path: Path,
     outside: Path,
     launched: list[ValidatedCommandRequest],
-    mode: str,
 ) -> None:
-    db_path, context = _setup(tmp_path, mode)
+    db_path, context = _setup(tmp_path)
 
     with pytest.raises(BrokerApprovalRequiredError):
         await _run(
@@ -166,7 +163,7 @@ async def test_unsandboxed_command_asks_in_every_approval_mode(
 async def test_approval_runs_that_one_command_unsandboxed_once(
     tmp_path: Path, launched: list[ValidatedCommandRequest]
 ) -> None:
-    db_path, context = _setup(tmp_path, "always_allow")
+    db_path, context = _setup(tmp_path)
     args = _unsandboxed()
 
     with pytest.raises(BrokerApprovalRequiredError) as asked:
@@ -212,7 +209,7 @@ async def test_an_approval_covers_only_the_exact_unsandboxed_command(
     launched: list[ValidatedCommandRequest],
     changed: dict[str, JSONValue],
 ) -> None:
-    db_path, context = _setup(tmp_path, "prompt_each_time")
+    db_path, context = _setup(tmp_path)
 
     with pytest.raises(BrokerApprovalRequiredError) as asked:
         await _run(
@@ -238,7 +235,7 @@ async def test_an_approval_covers_only_the_exact_unsandboxed_command(
 async def test_a_denied_unsandboxed_command_does_not_run(
     tmp_path: Path, launched: list[ValidatedCommandRequest]
 ) -> None:
-    db_path, context = _setup(tmp_path, "always_allow")
+    db_path, context = _setup(tmp_path)
 
     with pytest.raises(BrokerApprovalRequiredError) as asked:
         await _run(
@@ -264,7 +261,7 @@ async def test_a_denied_unsandboxed_command_does_not_run(
 async def test_an_unsandboxed_approval_cannot_be_allowed_for_the_conversation(
     tmp_path: Path, outside: Path, launched: list[ValidatedCommandRequest]
 ) -> None:
-    db_path, context = _setup(tmp_path, "prompt_each_time")
+    db_path, context = _setup(tmp_path)
 
     with pytest.raises(BrokerApprovalRequiredError) as asked:
         await _run(
@@ -323,7 +320,7 @@ def _claim(db_path: Path, context: ActionExecutionContext, folder: str) -> None:
 async def test_a_subagent_cannot_run_outside_the_sandbox(
     tmp_path: Path, launched: list[ValidatedCommandRequest]
 ) -> None:
-    db_path, context = _setup(tmp_path, "prompt_each_time")
+    db_path, context = _setup(tmp_path)
     _seed_child(db_path)
     _claim(db_path, context, "claimed")
 
@@ -345,7 +342,7 @@ async def test_a_subagent_cannot_run_outside_the_sandbox(
 async def test_the_action_cannot_run_outside_the_sandbox_over_a_subagent_claim(
     tmp_path: Path, launched: list[ValidatedCommandRequest]
 ) -> None:
-    db_path, context = _setup(tmp_path, "prompt_each_time")
+    db_path, context = _setup(tmp_path)
     _seed_child(db_path)
     _claim(db_path, context, "claimed")
 
@@ -367,7 +364,7 @@ async def test_the_action_cannot_run_outside_the_sandbox_over_a_subagent_claim(
 async def test_no_subagent_claim_is_taken_while_an_unsandboxed_run_is_active(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    db_path, context = _setup(tmp_path, "prompt_each_time")
+    db_path, context = _setup(tmp_path)
     _seed_child(db_path)
     refused: list[bool] = []
 

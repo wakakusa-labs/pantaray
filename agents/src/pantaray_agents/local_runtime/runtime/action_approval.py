@@ -570,8 +570,6 @@ def _apply_decision(
         expected_current_status="pending",
         next_status=_session_status(command.decision),
         decided_at=decided_at,
-        preference=None,
-        grants=(),
     )
     if result.status == "not_found":
         error_code = "APPROVAL_NOT_FOUND"

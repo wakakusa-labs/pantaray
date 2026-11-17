@@ -749,50 +749,6 @@ def test_typed_domain_failures_map_to_public_status(
     assert response.json() == {"type": expected_type}
 
 
-@pytest.mark.parametrize("mode", ["prompt_each_time", "always_allow"])
-def test_new_target_forwards_initial_approval_mode(
-    monkeypatch: pytest.MonkeyPatch, mode: str
-) -> None:
-    commands: list[SubmitActionMessageCommand] = []
-
-    def submit(command: SubmitActionMessageCommand) -> StartedActionMessageResult:
-        commands.append(command)
-        return _started(command, inserted=True)
-
-    monkeypatch.setattr(router_module, "submit_canonical_action_message", submit)
-    with _client() as client:
-        response = client.post(
-            "/v1/agents/users/user-1/actions/messages",
-            json=_request(target={"kind": "new", "approval_mode": mode}),
-        )
-    assert response.status_code == 200
-    assert isinstance(commands[0].target, NewActionTarget)
-    assert commands[0].target.approval_mode == mode
-
-
-@pytest.mark.parametrize(
-    "target",
-    [
-        {"kind": "new", "approval_mode": "invalid"},
-        {
-            "kind": "existing",
-            "action_id": "action-1",
-            "expected_process_id": None,
-            "approval_mode": "always_allow",
-        },
-    ],
-)
-def test_invalid_initial_mode_is_rejected_before_submission(
-    monkeypatch: pytest.MonkeyPatch, target: dict[str, object]
-) -> None:
-    monkeypatch.setattr(router_module, "submit_canonical_action_message", pytest.fail)
-    with _client() as client:
-        response = client.post(
-            "/v1/agents/users/user-1/actions/messages", json=_request(target=target)
-        )
-    assert response.status_code == 422
-
-
 WITHDRAW_PATH = "/v1/agents/users/user-1/actions/action-1/unadopted-messages/step-2"
 
 

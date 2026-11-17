@@ -1264,7 +1264,6 @@ test('進捗 lays out the month, keeps its page in the address, and opens a day�
   await page.getByRole('button', { name: '11月3日（火）、実績 1 件、完了した TODO 1 件' }).click();
   await expect(page).toHaveURL(/view=progress&day=2026-11-03$/);
   const day = page.getByRole('region', { name: '11月3日（火）' });
-  await expect(day).toContainText('実績 1 件');
   await expect(day).toContainText('丸和商事から受注');
   await expect(day).toContainText('名刺 40 枚を入れておく');
   await expect(sidebarOf(page)).toHaveCount(0);

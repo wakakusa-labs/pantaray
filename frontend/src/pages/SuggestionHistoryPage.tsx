@@ -44,7 +44,7 @@ import { TODO_UX_ENABLED } from '@/todos/todoUxFeature';
 import { useTodoList } from '@/todos/useTodoList';
 
 import type { TodoScopeQuery, TodoView } from '../../electron/src/todos/todoContracts';
-import { TODO_SCREEN_TITLE_ID, TodoScreen } from './TodoScreen';
+import { TODO_SCREEN_LIST_ID, TodoScreen } from './TodoScreen';
 import './suggestionHistoryPage.css';
 
 // A task the loaded list does not hold yet (still loading, filtered out, or older than its pages).
@@ -360,12 +360,12 @@ const SuggestionHistoryPage = () => {
     if (shownSearch !== null) navigate({ search: shownSearch }, { replace: true });
   }, [shownSearch, navigate]);
 
-  // A conversation alone closes to the TODO list, whose title then takes the focus.
+  // A conversation alone closes to the TODO list, which then takes the focus.
   const listFocusPending = useRef(false);
   useEffect(() => {
     if (selection !== null || !listFocusPending.current) return;
     listFocusPending.current = false;
-    document.getElementById(TODO_SCREEN_TITLE_ID)?.focus();
+    document.getElementById(TODO_SCREEN_LIST_ID)?.focus();
   }, [selection]);
   const closeToList = TODO_UX_ENABLED ? (
     <PageControlButton

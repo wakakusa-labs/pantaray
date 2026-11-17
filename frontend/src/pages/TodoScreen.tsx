@@ -46,8 +46,8 @@ function FailureLine({ failure }: { failure: TodoMutationFailure }) {
   );
 }
 
-/** The list's title, which takes focus once a pane closes; the page focuses it too. */
-export const TODO_SCREEN_TITLE_ID = 'todo-screen-title';
+/** The list, which takes focus once a pane closes; the page focuses it too. */
+export const TODO_SCREEN_LIST_ID = 'todo-screen-list';
 
 /** Why an import did not start, told under the add bar. */
 const startProblemMessage = (problem: TodoImportProblem) =>
@@ -107,7 +107,6 @@ export function TodoScreen({
   handedPreview: { actionId: string; preview: TaskPreview } | null;
 }) {
   const { t } = useI18n();
-  const headingRef = useRef<HTMLHeadingElement>(null);
   const importPaneRef = useRef<HTMLDivElement>(null);
   // Measured by the rule between the list and the pane, so held as state to follow remounts.
   const [screenElement, setScreenElement] = useState<HTMLDivElement | null>(null);
@@ -148,7 +147,9 @@ export function TodoScreen({
   // One project in view is one list under its name; with several, the groups name them. No
   // project across all organizations is a group for each organization.
   const oneProject = selection.project.project !== 'any';
-  const title = !showingList
+  // The list's name for assistive tech. No title is drawn: the sidebar shows what is selected,
+  // and the groups name their projects.
+  const listName = !showingList
     ? t('todo.nav.deleted')
     : selectedProjectId !== null
       ? // Named once the workspace is read; the list waits for it too.
@@ -158,15 +159,15 @@ export function TodoScreen({
         : t('todo.nav.all');
 
   // Focus returns to the list: the pane's close button goes away once used. An expanded
-  // conversation's list is drawn again first, so the heading takes it once it is there.
-  const headingFocusPending = useRef(false);
+  // conversation's list is hidden until the closing selection lands, so the focus waits for it.
+  const listFocusPending = useRef(false);
   useEffect(() => {
-    if (!headingFocusPending.current || !headingRef.current) return;
-    headingFocusPending.current = false;
-    headingRef.current.focus();
+    if (!listFocusPending.current || !listElement || listElement.hidden) return;
+    listFocusPending.current = false;
+    listElement.focus();
   });
-  const focusHeading = () => {
-    headingFocusPending.current = true;
+  const focusList = () => {
+    listFocusPending.current = true;
   };
   /** A read that failed after one landed: what is shown may be out of date. */
   const staleAlert = (
@@ -238,7 +239,7 @@ export function TodoScreen({
           {groups.length === 0 ? (
             <p className="todo-screen__empty">{t('todo.page.empty')}</p>
           ) : oneProject && groups.length === 1 ? (
-            <ul className="todo-list" aria-labelledby="todo-screen-title">
+            <ul className="todo-list" aria-label={listName}>
               {renderRows(groups[0].items, page.today)}
             </ul>
           ) : (
@@ -265,7 +266,7 @@ export function TodoScreen({
     );
   };
 
-  /** How much of what is in view is done, beside the title. */
+  /** How much of what is in view is done, in the header. */
   const renderSummary = (): ReactNode => {
     const done = groups.reduce((sum, group) => sum + group.doneCount, 0);
     const total = groups.reduce((sum, group) => sum + group.totalCount, 0);
@@ -291,7 +292,7 @@ export function TodoScreen({
   };
   const closeImport = () => {
     onSelect({ ...selection, importId: null });
-    focusHeading();
+    focusList();
     void openImports.reload();
   };
 
@@ -389,14 +390,13 @@ export function TodoScreen({
           text are there again on shrinking. */}
       <section
         ref={setListElement}
+        id={TODO_SCREEN_LIST_ID}
         className="todo-screen__list"
-        aria-labelledby={TODO_SCREEN_TITLE_ID}
+        aria-label={listName}
+        tabIndex={-1}
         hidden={expanded}
       >
         <header className="history-pane-header todo-screen__header">
-          <h1 id={TODO_SCREEN_TITLE_ID} ref={headingRef} tabIndex={-1}>
-            {title}
-          </h1>
           {showingList ? renderSummary() : null}
           {showingList ? (
             <select
@@ -510,7 +510,7 @@ export function TodoScreen({
                     icon={X}
                     onClick={() => {
                       onSelect({ ...selection, todoId: null, expanded: false });
-                      focusHeading();
+                      focusList();
                     }}
                   />
                 </>

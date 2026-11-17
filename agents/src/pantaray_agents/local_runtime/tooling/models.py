@@ -285,7 +285,7 @@ class StoredApprovalSession:
     tool_invocation_id: str | None
     tool_id: str
     intent_class: ToolIntentClass
-    approval_source: Literal["prompt", "settings"]
+    approval_source: Literal["prompt", "settings", "review"]
     tool_request_id: str
     status: ApprovalSessionStatus
     approved_capabilities_json: JSONStringMap

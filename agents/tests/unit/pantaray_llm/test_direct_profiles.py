@@ -79,7 +79,11 @@ def test_selected_responses_model_controls_provider_parameters(
 )
 @pytest.mark.parametrize(
     ("purpose", "effort"),
-    [("action.executing", "high"), ("activity_summary", "medium")],
+    [
+        ("action.executing", "high"),
+        ("activity_summary", "medium"),
+        ("approval_review", "low"),
+    ],
 )
 def test_anthropic_uses_the_purpose_effort_with_adaptive_thinking(
     model: str, purpose: str, effort: str

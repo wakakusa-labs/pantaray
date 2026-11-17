@@ -3,6 +3,7 @@ import { useRef, useState, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 
 import { AiConnectionNotice } from '@/components/AiConnectionNotice';
+import { PageControlButton } from '@/components/task/PageControlButton';
 import { useI18n } from '@/context/useI18n';
 
 import type { ProgressSpan, TodoSelection } from '../../../todos/todoSelection';
@@ -216,20 +217,6 @@ export function ProgressScreen({
             {t('todoProgress.title')}
           </h1>
           {renderControls()}
-          {dayRow ? (
-            <button
-              type="button"
-              className="action-task__icon-button"
-              aria-label={t('todoProgress.day.close')}
-              data-tooltip={t('todoProgress.day.close')}
-              onClick={() => {
-                onSelect({ ...selection, progressDay: null });
-                focusHeading();
-              }}
-            >
-              <X size={17} strokeWidth={1.8} aria-hidden="true" />
-            </button>
-          ) : null}
         </header>
         <div className="todo-screen__scroll">
           <AiConnectionNotice />
@@ -251,6 +238,16 @@ export function ProgressScreen({
             }
             onOpenEvidence={onOpenEvidence}
             onDeleteRecord={(recordId) => void mutations.deleteRecord(recordId)}
+            pageControls={
+              <PageControlButton
+                label={t('todoProgress.day.close')}
+                icon={X}
+                onClick={() => {
+                  onSelect({ ...selection, progressDay: null });
+                  focusHeading();
+                }}
+              />
+            }
           />
         </div>
       ) : null}

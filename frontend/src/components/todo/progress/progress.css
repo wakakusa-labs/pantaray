@@ -350,28 +350,43 @@ button.todo-progress-cell:focus-visible {
   min-height: 0;
 }
 
+/* Like the task panes' headers: above the window's drag strip so the close takes the click, and a
+   drag region itself so the window still moves from its empty space. */
 .todo-progress-day__head {
-  padding: 20px 22px 14px;
-  border-bottom: 1px solid var(--fog-line);
+  position: relative;
+  z-index: 3;
+  /* The close at the same place as a conversation's (.action-task__header's end padding). */
+  padding-right: 16px;
+  -webkit-app-region: drag;
 }
 
-.todo-progress-day__crumb {
-  color: var(--fog-text-3);
-  font-size: 13px;
+.todo-progress-day__head button {
+  -webkit-app-region: no-drag;
 }
 
 .todo-progress-day__head h2 {
-  margin: 6px 0 10px;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
   color: var(--fog-text);
   font-size: 17px;
   font-weight: var(--weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.todo-progress-day__controls {
+  display: flex;
+  flex: none;
+  align-items: center;
 }
 
 .todo-progress-day__facts {
   display: flex;
   flex-wrap: wrap;
   gap: 6px 14px;
-  margin: 0;
+  margin: 14px 0 0;
   color: var(--fog-text-2);
   font-size: 13px;
 }

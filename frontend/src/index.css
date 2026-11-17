@@ -16,8 +16,12 @@
   color-scheme: dark;
   /* The window's title bar row, where the traffic lights sit (see .app-titlebar). */
   --app-titlebar-height: 40px;
-  /* The detail panes' header row; the sidebar panel's top edge runs on from its bottom line. */
-  --app-pane-header-height: 52px;
+  /* That row's center line, which the traffic lights' 14px frame is centered on: the main
+     window's trafficLightPosition (electron/window_lifecycle.js) sets their y to this minus 7. */
+  --app-title-row-center: 28px;
+  /* The detail panes' header row, centered on that line, so its controls have as much room
+     above as below. The sidebar panel's top edge runs on from its bottom line. */
+  --app-pane-header-height: calc(2 * var(--app-title-row-center));
   /* Fog: one flat dark grey-indigo. A gradient or haze reads as a glow behind the text. */
   --app-background: #13171e;
   /* Fog tokens for the main window. Light is reserved for what needs attention. */

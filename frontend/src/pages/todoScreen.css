@@ -98,7 +98,7 @@
   min-width: 0;
   margin-right: 4px;
   overflow: hidden;
-  font-size: 20px;
+  font-size: 21px;
   letter-spacing: -0.01em;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -139,7 +139,7 @@
   flex: none;
   margin-right: 6px;
   color: var(--fog-text-3);
-  font-size: 13px;
+  font-size: 14px;
   white-space: nowrap;
 }
 
@@ -187,7 +187,7 @@
   gap: 10px;
   margin-left: auto;
   color: var(--fog-text-2);
-  font-size: 12.5px;
+  font-size: 13.5px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -255,7 +255,7 @@
     right 4px center / 8px no-repeat;
   color: var(--fog-text-2);
   font: inherit;
-  font-size: 12.5px;
+  font-size: 13.5px;
   cursor: pointer;
   appearance: none;
 }
@@ -291,7 +291,7 @@
 .todo-screen__empty {
   margin: var(--space-xl) 0 0;
   color: var(--fog-text-3);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .todo-screen__deleted {
@@ -307,7 +307,7 @@
 .todo-screen__failure {
   margin: 4px 8px 8px 38px;
   color: var(--danger-color);
-  font-size: 13px;
+  font-size: 14px;
   overflow-wrap: anywhere;
 }
 
@@ -321,7 +321,7 @@
 .todo-conversation-none__text {
   margin: 24px 28px;
   color: var(--fog-text-3);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 /* Too narrow for both: the pane takes the list's place under the list's header, and its close
@@ -379,5 +379,5 @@
 .todo-screen__notice {
   margin: 12px 0 0;
   color: var(--fog-text-2);
-  font-size: 13px;
+  font-size: 14px;
 }

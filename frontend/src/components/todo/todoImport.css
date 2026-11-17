@@ -27,7 +27,7 @@
   margin: 0;
   padding: 8px 12px 6px;
   color: var(--fog-text);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: var(--weight-semibold);
 }
 
@@ -58,7 +58,7 @@
   border: 1px solid var(--todo-line-strong);
   border-radius: 4px;
   color: var(--fog-text-2);
-  font-size: 11.5px;
+  font-size: 12.5px;
   font-weight: var(--weight-regular, 400);
   line-height: 18px;
 }
@@ -90,7 +90,7 @@
   background: transparent;
   color: var(--fog-text);
   font: inherit;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .todo-import__text:hover:not(:disabled),
@@ -171,7 +171,7 @@
 .todo-import__note,
 .todo-import__alert {
   margin: 0;
-  font-size: 13px;
+  font-size: 14px;
   overflow-wrap: anywhere;
 }
 

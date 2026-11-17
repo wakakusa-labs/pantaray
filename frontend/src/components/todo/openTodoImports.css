@@ -44,7 +44,7 @@
 .todo-open-import__text {
   min-width: 0;
   overflow: hidden;
-  font-size: 13.5px;
+  font-size: 14.5px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -52,7 +52,7 @@
 .todo-open-import__state,
 .todo-open-import__day {
   justify-self: end;
-  font-size: 12.5px;
+  font-size: 13.5px;
   white-space: nowrap;
 }
 

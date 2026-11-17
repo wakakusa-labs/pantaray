@@ -4,13 +4,6 @@
 .history-page {
   --history-card-gap: 6px;
   --history-card-radius: 12px;
-  /* The traffic lights' center line: trafficLightPosition's y (10px) plus half their 14px
-     frame. The sidebar toggle, and the detail headers while the sidebar is hidden, sit on it. */
-  --history-title-row-center: 17px;
-  /* A detail header's bottom padding that lifts its content's center onto that line. */
-  --history-title-row-lift: calc(
-    var(--app-pane-header-height) - 2 * var(--history-title-row-center)
-  );
   position: relative;
   display: flex;
   flex: 1;
@@ -53,10 +46,11 @@
 }
 
 /* In the title bar row, right of the traffic lights (they end near the rail's edge) and centered
-   on their line. It rises above the drag strip so it takes the click. */
+   on their line, as the detail headers' controls are. It rises above the drag strip so it takes
+   the click. */
 .history-sidebar-toggle {
   position: absolute;
-  top: calc(var(--history-title-row-center) - 28px / 2);
+  top: calc(var(--app-title-row-center) - 28px / 2);
   left: 16px;
   z-index: 4;
   display: flex;
@@ -83,10 +77,8 @@
   box-shadow: var(--focus-ring);
 }
 
-/* With the sidebar hidden, each detail header joins the toggle's row: the bottom padding lifts
-   its content's center onto the title row's center line, and the header starts after the toggle
-   (its right edge at 44px) and the headers' 10px item gap. The header keeps its height, so its
-   bottom line stays the card's top edge.
+/* With the sidebar hidden, each detail header beside the toggle starts after it (its right edge
+   at 44px) and the headers' 10px item gap.
    The header must start clear of the toggle rather than pad its title past it: Electron makes a
    point draggable when the last app-region box over it in document order is a drag one, whatever
    the z-index, so a drag header reaching under the toggle turns a click on it into a window drag.
@@ -101,21 +93,7 @@
   :is(.action-task__header, .suggestion-task__header),
 .history-page--sidebar-hidden > .todo-screen > .todo-screen__list > .todo-screen__header {
   margin-left: 54px;
-  padding-bottom: var(--history-title-row-lift);
   padding-left: 0;
-}
-
-/* The pane beside the list (a conversation or an import) is in the row too, level with the list's
-   header, so expanding the conversation into the list's place leaves its controls where they
-   were. Clear of the toggle, it keeps its own start. Under the list's header, in a narrow
-   window, it is below the row. */
-@media (min-width: 1101px) {
-  .history-page--sidebar-hidden
-    > .todo-screen--with-pane
-    > .history-detail
-    :is(.action-task__header, .suggestion-task__header) {
-    padding-bottom: var(--history-title-row-lift);
-  }
 }
 
 /* Starts below the window's drag strip, level with the rail's first icon, so it stays clickable. */
@@ -145,7 +123,7 @@
   padding: 2px 4px 0;
   overflow: hidden;
   color: var(--fog-text);
-  font-size: 17px;
+  font-size: 18px;
   font-weight: var(--weight-bold);
   letter-spacing: -0.01em;
   text-overflow: ellipsis;
@@ -212,8 +190,8 @@
 }
 
 .history-detail {
-  /* The conversations read like the small window's: a size up with looser lines. */
-  --text-body-size: 15px;
+  /* The conversations read a size up from the window's text, with looser lines. */
+  --text-body-size: 16px;
   --text-body-leading: 1.75;
   display: flex;
   flex: 1;
@@ -247,7 +225,7 @@
 .history-pane-header h1 {
   margin: 0;
   color: var(--fog-text);
-  font-size: 15px;
+  font-size: 16px;
   font-weight: var(--weight-semibold);
 }
 
@@ -315,7 +293,7 @@
   color: var(--fog-text);
   cursor: pointer;
   font: inherit;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .history-chat-row:hover {
@@ -351,7 +329,7 @@
   flex-direction: column;
   gap: var(--space-sm);
   padding: 0 12px;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .history-list {
@@ -398,7 +376,7 @@
   color: inherit;
   cursor: pointer;
   font: inherit;
-  font-size: 13px;
+  font-size: 14px;
   text-align: left;
 }
 
@@ -551,13 +529,13 @@
 }
 
 .history-delete-dialog h2 {
-  font-size: 16px;
+  font-size: 17px;
   margin: 0 0 10px;
 }
 
 .history-delete-dialog p {
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.7;
   margin: 0;
 }

@@ -372,7 +372,9 @@ function createMainWindow(options = {}) {
     ...(process.platform === 'darwin'
       ? {
           titleBarStyle: 'hiddenInset',
-          trafficLightPosition: { x: 10, y: 10 },
+          // Centered on the renderer's title row line (index.css --app-title-row-center, 28px):
+          // their 14px frame starts 7px above it.
+          trafficLightPosition: { x: 10, y: 21 },
           visualEffectState: 'active',
         }
       : {}),

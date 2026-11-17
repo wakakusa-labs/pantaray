@@ -108,7 +108,7 @@
   max-width: 100%;
   margin: 0;
   overflow: hidden;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: var(--weight-semibold);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -158,7 +158,7 @@
   background: var(--button-fill);
   box-shadow: var(--button-face-highlight);
   color: var(--fog-text);
-  font-size: 12px;
+  font-size: 13px;
   cursor: pointer;
 }
 
@@ -216,7 +216,7 @@
   background: transparent;
   color: var(--fog-text);
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
   text-align: left;
   white-space: nowrap;
   cursor: pointer;

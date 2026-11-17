@@ -10,7 +10,7 @@
   --todo-faint: #687183;
   --todo-late: #c4a782;
   --todo-line-strong: rgba(214, 226, 248, 0.14);
-  --todo-state-size: 12.5px;
+  --todo-state-size: 13.5px;
 }
 
 .todo-group__dot {
@@ -38,7 +38,7 @@
   margin: 0;
   overflow: hidden;
   color: var(--fog-text);
-  font-size: 13.5px;
+  font-size: 14.5px;
   font-weight: var(--weight-semibold);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -131,7 +131,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fog-text);
-  font-size: 13.5px;
+  font-size: 14.5px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -308,7 +308,7 @@
   min-width: 0;
   margin: 0;
   color: var(--fog-text);
-  font-size: 13px;
+  font-size: 14px;
   overflow-wrap: anywhere;
 }
 
@@ -328,7 +328,7 @@
 }
 
 .todo-rail__entry {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: var(--weight-semibold);
 }
 
@@ -404,7 +404,7 @@
   color: var(--fog-text-3);
   cursor: pointer;
   font: inherit;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.3;
 }
 

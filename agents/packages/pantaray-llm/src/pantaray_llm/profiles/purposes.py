@@ -7,6 +7,7 @@ from .llm import (
     ACTION_EXECUTING_PROFILE_ID,
     ACTION_PLANNING_PROFILE_ID,
     ACTIVITY_SUMMARY_PROFILE_ID,
+    APPROVAL_REVIEW_PROFILE_ID,
     CHAT_PROFILE_ID,
     INSIGHT_PROFILE_ID,
     MEMORY_UPDATE_PROFILE_ID,
@@ -39,6 +40,8 @@ LLM_PURPOSES = {
         Purpose(INSIGHT_PROFILE_ID, "medium", frozenset({"tool_use"}), "high"),
         # The chat answers first and hands long work to an Action, so it stays quick.
         Purpose(CHAT_PROFILE_ID, "low", frozenset({"tool_use"}), "high"),
+        # An approval waits on this verdict before it can run or reach the user.
+        Purpose(APPROVAL_REVIEW_PROFILE_ID, "low", frozenset({"structured_output"})),
         *(
             Purpose(profile_id, "high", frozenset({"tool_use"}), "high")
             for profile_id in (

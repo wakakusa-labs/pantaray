@@ -371,3 +371,47 @@ def claim_approval_execution_start(
                 status="conflict",
                 approval_session=session,
             )
+
+
+def record_review_approval_in_connection(
+    *,
+    connection: sqlite3.Connection,
+    user_id: str,
+    action_id: str,
+    tool_request_id: str,
+    approval_session_id: str,
+    reason: str,
+    decided_at: str,
+) -> bool:
+    """Approve a pending request on the AI review's verdict, with its reason.
+
+    Only a request still pending moves: one the user or a stop decided while the
+    review ran keeps that decision. Returns whether this call approved it.
+    """
+
+    cursor = connection.execute(
+        """
+        UPDATE approval_sessions
+        SET
+            status = 'approved_once',
+            decided_at = ?,
+            approval_source = 'review',
+            review_reason = ?
+        WHERE
+            user_id = ?
+            AND action_id = ?
+            AND tool_request_id = ?
+            AND approval_session_id = ?
+            AND status = 'pending'
+            AND decided_at IS NULL
+        """,
+        (
+            decided_at,
+            reason,
+            user_id,
+            action_id,
+            tool_request_id,
+            approval_session_id,
+        ),
+    )
+    return cursor.rowcount == 1

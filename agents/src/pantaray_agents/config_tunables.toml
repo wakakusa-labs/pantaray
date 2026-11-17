@@ -29,6 +29,11 @@ cancel_check_failure_grace_seconds = 60
 # 64,000 a long chat failed turns that read two or three files.
 context_window_tokens = 128000
 
+[approval_review]
+# Seconds an approval waits for the AI review. A review that has not answered by
+# then asks the user, as a failed review does.
+timeout_seconds = 30.0
+
 [artifact_paths]
 # artifact root からの相対 storage path template。衝突回避のため {user_id} を必ず含む。
 long_term_insight_storage_path_template = "users/{user_id}/insights/long_term.md"

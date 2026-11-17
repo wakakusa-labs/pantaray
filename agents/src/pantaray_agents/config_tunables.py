@@ -63,6 +63,12 @@ class ChatTunables(_TunableSection):
     context_window_tokens: PositiveInt
 
 
+class ApprovalReviewTunables(_TunableSection):
+    """How long an approval waits for the AI review before the user is asked."""
+
+    timeout_seconds: PositiveFloat
+
+
 class ArtifactPathTunables(_TunableSection):
     """artifact root からの相対 storage path template。"""
 
@@ -101,6 +107,7 @@ class LocalRuntimeTunables(_TunableSection):
 
     action_agent: ActionAgentTunables
     chat: ChatTunables
+    approval_review: ApprovalReviewTunables
     artifact_paths: ArtifactPathTunables
     websocket: WebSocketTunables
     websocket_capacity: WebSocketCapacityTunables
@@ -142,6 +149,7 @@ def load_local_runtime_tunables() -> LocalRuntimeTunables:
 __all__ = [
     "LOCAL_RUNTIME_TUNABLES_PATH",
     "ActionAgentTunables",
+    "ApprovalReviewTunables",
     "ArtifactPathTunables",
     "ChatTunables",
     "LocalRuntimeTunables",

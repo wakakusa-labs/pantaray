@@ -216,16 +216,9 @@
   background: var(--fog-mist-strong);
 }
 
-/* No due day: named, but drawn only on the row's hover or focus, so the line stays calm. */
+/* No due day: named in the faint text, so every row shows where its due day goes. */
 .todo-row__due--none {
   color: var(--fog-text-3);
-  opacity: 0;
-}
-
-.todo-row:hover .todo-row__due--none,
-.todo-row__due--none:focus-visible,
-.todo-row__due--none:has(+ .todo-date-picker:popover-open) {
-  opacity: 1;
 }
 
 .todo-row__due--late {

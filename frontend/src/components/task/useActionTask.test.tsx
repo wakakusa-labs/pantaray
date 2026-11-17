@@ -64,7 +64,6 @@ describe('useActionTask', () => {
       wrapper,
       initialProps: { id: actionId },
     });
-    await waitFor(() => expect(rendered.result.current.approvalMode.mode).not.toBeNull());
     return rendered;
   };
 
@@ -96,12 +95,6 @@ describe('useActionTask', () => {
         },
         agentOverlay: {
           submitApprovalDecision,
-          getActionApprovalMode: vi.fn(async (actionId: string) => ({
-            action_id: actionId,
-            approval_mode: 'prompt_each_time',
-            source: 'user_default',
-          })),
-          setActionApprovalMode: vi.fn(),
         },
       },
     });

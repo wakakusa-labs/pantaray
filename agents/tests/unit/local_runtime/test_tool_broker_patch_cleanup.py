@@ -18,7 +18,6 @@ from pantaray_agents.local_runtime.tooling.sandbox.command_sandbox_protocol impo
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
     _bootstrap_runtime_db,
-    _grant_workspace_full_access,
     _stub_runtime_budget,
 )
 
@@ -31,11 +30,6 @@ async def test_execute_broker_tool_terminates_timed_out_process_group(
     from pantaray_agents.local_runtime.tooling.brokering import broker as broker_module
 
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="process_exec_local",
-    )
 
     class _FakeStdout:
         def __init__(self) -> None:

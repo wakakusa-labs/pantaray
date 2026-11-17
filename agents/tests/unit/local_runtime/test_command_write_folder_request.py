@@ -42,7 +42,6 @@ from .broker_test_support import (
     _seed_broker_actor_process,
 )
 from .test_outside_workspace_command_approval import (
-    APPROVAL_MODES,
     COMMAND_TOOLS,
     PYTHON_CODE,
     _approval_rows,
@@ -102,18 +101,17 @@ def _args(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tool_id", COMMAND_TOOLS)
-@pytest.mark.parametrize("mode", APPROVAL_MODES)
 async def test_requested_folder_asks_and_opens_for_the_approved_call_only(
     tmp_path: Path,
     outside: Path,
     launched: list[ValidatedCommandRequest],
     tool_id: str,
-    mode: str,
 ) -> None:
-    db_path, context = _setup(tmp_path, mode)
+    db_path, context = _setup(tmp_path)
     args = _args(tool_id, folders=[str(outside)])
 
-    # Asked even when commands are auto-approved, with the reason to show.
+    # Asked even though commands in the workspace run without asking, with the
+    # reason to show.
     with pytest.raises(BrokerApprovalRequiredError) as asked:
         await _run(
             db_path=db_path,
@@ -138,22 +136,21 @@ async def test_requested_folder_asks_and_opens_for_the_approved_call_only(
     # The command still runs in the workspace; only the write roots grow.
     assert command.cwd == str(context.workspace_path.resolve())
     assert str(outside) in command.real_write_roots
-    if mode != "prompt_each_time":
-        await _run(
-            db_path=db_path,
-            context=context,
-            tool_id=tool_id,
-            request_id="r2",
-            args=_args(tool_id, justification=None),
-        )
-        assert str(outside) not in launched[-1].real_write_roots
+    await _run(
+        db_path=db_path,
+        context=context,
+        tool_id=tool_id,
+        request_id="r2",
+        args=_args(tool_id, justification=None),
+    )
+    assert str(outside) not in launched[-1].real_write_roots
 
 
 @pytest.mark.asyncio
 async def test_conversation_grant_of_a_requested_folder_stops_asking(
     tmp_path: Path, outside: Path, launched: list[ValidatedCommandRequest]
 ) -> None:
-    db_path, context = _setup(tmp_path, "always_allow")
+    db_path, context = _setup(tmp_path)
     args = _args("bash", folders=[str(outside)])
     with pytest.raises(BrokerApprovalRequiredError) as asked:
         await _run(
@@ -182,7 +179,7 @@ async def test_home_relative_folder_names_the_real_home(
     launched: list[ValidatedCommandRequest],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    db_path, context = _setup(tmp_path, "always_allow")
+    db_path, context = _setup(tmp_path)
     monkeypatch.setenv("HOME", str(outside.parent))
     with pytest.raises(BrokerApprovalRequiredError):
         await _run(
@@ -203,7 +200,7 @@ async def test_home_relative_folder_names_the_real_home(
 async def test_outside_cwd_and_the_same_requested_folder_are_asked_once(
     tmp_path: Path, outside: Path, launched: list[ValidatedCommandRequest]
 ) -> None:
-    db_path, context = _setup(tmp_path, "always_allow")
+    db_path, context = _setup(tmp_path)
     with pytest.raises(BrokerApprovalRequiredError):
         await _run(
             db_path=db_path,
@@ -225,7 +222,7 @@ async def test_outside_cwd_and_the_same_requested_folder_are_asked_once(
 async def test_folder_inside_the_workspace_runs_without_asking(
     tmp_path: Path, launched: list[ValidatedCommandRequest]
 ) -> None:
-    db_path, context = _setup(tmp_path, "always_allow")
+    db_path, context = _setup(tmp_path)
     inside = context.workspace_path / "build"
     inside.mkdir()
 
@@ -250,7 +247,7 @@ async def test_protected_or_unusable_folders_are_refused_without_asking(
     monkeypatch: pytest.MonkeyPatch,
     tool_id: str,
 ) -> None:
-    db_path, context = _setup(tmp_path, "always_allow")
+    db_path, context = _setup(tmp_path)
     (context.workspace_path / "escape").symlink_to(outside)
     artifact_root = read_local_runtime_artifact_root()
     artifact_root.mkdir(parents=True, exist_ok=True)
@@ -305,7 +302,7 @@ async def test_justification_comes_exactly_with_extra_access(
     justification: str | None,
     login: bool,
 ) -> None:
-    db_path, context = _setup(tmp_path, "always_allow")
+    db_path, context = _setup(tmp_path)
     args = _args(tool_id, folders=folders, justification=justification)
     if login:
         args["use_login_environment"] = True
@@ -326,7 +323,7 @@ async def test_justification_comes_exactly_with_extra_access(
 async def test_login_environment_approval_carries_the_reason(
     tmp_path: Path, launched: list[ValidatedCommandRequest]
 ) -> None:
-    db_path, context = _setup(tmp_path, "prompt_each_time")
+    db_path, context = _setup(tmp_path)
     args = _args("bash")
     args["use_login_environment"] = True
     with pytest.raises(BrokerApprovalRequiredError):
@@ -344,7 +341,7 @@ async def test_login_environment_approval_carries_the_reason(
 async def test_subagent_folder_request_is_denied_without_asking(
     tmp_path: Path, outside: Path, launched: list[ValidatedCommandRequest]
 ) -> None:
-    db_path, context = _setup(tmp_path, "prompt_each_time")
+    db_path, context = _setup(tmp_path)
     _seed_broker_actor_process(
         db_path,
         process_id="child-1",

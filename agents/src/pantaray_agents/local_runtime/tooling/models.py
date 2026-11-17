@@ -33,7 +33,6 @@ EXECUTION_SESSION_TERMINAL_STATUSES: tuple[ExecutionSessionTerminalStatus, ...] 
     "canceled",
     "expired",
 )
-ApprovalMode = Literal["prompt_each_time", "always_allow"]
 ApprovalSessionStatus = Literal["pending", "approved_once", "denied"]
 ToolRiskLevel = Literal["low", "medium", "high"]
 ToolInvocationStartStatus = Literal["queued", "running"]
@@ -266,16 +265,6 @@ class StoredExecutionSession:
 
 
 @dataclass(frozen=True, slots=True)
-class StoredApprovalPreference:
-    # None for the built-in default, which the user has not saved.
-    preference_id: str | None
-    scope_type: Literal["global"]
-    scope_ref: str | None
-    approval_mode: ApprovalMode
-    applies_to: tuple[str, ...]
-
-
-@dataclass(frozen=True, slots=True)
 class StoredApprovalSession:
     approval_session_id: str
     user_id: str
@@ -302,17 +291,6 @@ ApprovalSessionMutationStatus = Literal[
 class ApprovalSessionMutationResult:
     status: ApprovalSessionMutationStatus
     approval_session: StoredApprovalSession | None
-
-
-class ApprovalPreferenceUpsertInput(InternalStrictModel):
-    preference_id: str
-    user_id: str
-    scope_type: Literal["global"]
-    scope_ref: str | None
-    approval_mode: ApprovalMode
-    applies_to: tuple[str, ...]
-    created_at: str
-    updated_at: str
 
 
 class CapabilityGrantCreateInput(InternalStrictModel):

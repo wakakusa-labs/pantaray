@@ -60,7 +60,7 @@ async function renderFinishedTask() {
       <TaskWorkspace actionId="act-1" title="見積書を作り直す" onAddProject={() => {}} />
     </UiLanguageProvider>
   );
-  await screen.findByRole('button', { name: /毎回確認/ });
+  await screen.findByRole('textbox', { name: 'メッセージ' });
   const page = createActionPage('act-1', 'success');
   page.runs[0].final_output = ANSWER;
   emitPage(page, 1);
@@ -107,13 +107,6 @@ beforeEach(() => {
       orchestration: { send: vi.fn() },
       actionFiles: { open: revealLink, read, openInApp, quickLook, reveal, openWithApp },
       clipboard: { writeText },
-      agentOverlay: {
-        getActionApprovalMode: vi.fn(async (actionId: string) => ({
-          action_id: actionId,
-          approval_mode: 'prompt_each_time',
-          source: 'user_default',
-        })),
-      },
     },
   });
 });

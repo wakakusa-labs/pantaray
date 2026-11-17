@@ -1,8 +1,7 @@
 """Shell commands for a Suggestion run.
 
-A Suggestion has nobody to ask for approval, so it runs commands only while the
-user's default lets Actions run them without asking. Each command runs in the
-Action's command sandbox with the Action's read scope and limits, never with
+A Suggestion has nobody to ask for approval, so it runs only the commands an
+Action runs without asking. Each command runs in the Action's command sandbox with the Action's read scope and limits, never with
 the network or the user's sign-ins: a Suggestion reads text it was not asked to
 trust, so nothing it reads may leave the computer through a command. A research
 command has no writable folder at all; a make-stage command writes only into the
@@ -36,18 +35,9 @@ from pantaray_agents.tools.contract import (
 )
 
 from ...app_runtime_verification import load_and_verify_app_runtime_python_from_env
-from ..brokering.broker_common import (
-    APPROVAL_MODE_ALWAYS_ALLOW,
-    APPROVAL_SCOPE_WORKSPACE_EDIT_AND_COMMAND,
-)
 from ..brokering.broker_protocol import BashToolOutput, BrokerExecutionKind
-from ..brokering.broker_registry import BROKER_TOOL_REGISTRY
 from ..brokering.command_runtime import build_command_env
 from ..outside_workspace_grant import app_owned_roots
-from ..repository import (
-    load_active_capability_grants,
-    load_effective_approval_preference,
-)
 from ..repository.command_invocation_audits import TerminalOutcome
 from ..sandbox.command_sandbox_protocol import (
     ActionSandboxStorage,
@@ -69,36 +59,6 @@ ERROR_MESSAGE_MAX_CHARS = 1_200
 _SPILL_ROOT_MODE = 0o700
 # What storage stores whole when it cannot move stdout or stderr out alone.
 _WHOLE_RESULT_STORED: dict[str, JSONValue] = {"required": ["storage", "path"]}
-
-
-def commands_run_without_asking(
-    *, db_path: Path, busy_timeout_ms: int, user_id: str
-) -> bool:
-    """Whether the user's default lets Actions run commands without asking.
-
-    The broker's rule for that default: a saved always_allow counts only together
-    with the durable capability grants the setting writes with it; the unsaved
-    built-in default needs none.
-    """
-
-    preference = load_effective_approval_preference(
-        db_path=db_path,
-        busy_timeout_ms=busy_timeout_ms,
-        user_id=user_id,
-        applies_to=APPROVAL_SCOPE_WORKSPACE_EDIT_AND_COMMAND,
-    )
-    if preference.approval_mode != APPROVAL_MODE_ALWAYS_ALLOW:
-        return False
-    if preference.preference_id is None:
-        return True
-    grants = load_active_capability_grants(
-        db_path=db_path,
-        busy_timeout_ms=busy_timeout_ms,
-        user_id=user_id,
-        applies_to=APPROVAL_SCOPE_WORKSPACE_EDIT_AND_COMMAND,
-    )
-    required = BROKER_TOOL_REGISTRY.definitions["bash"].required_capabilities
-    return all(capability in grants for capability in required)
 
 
 def _react_result(
@@ -165,8 +125,6 @@ class PinnedFolder:
 @dataclass(frozen=True, slots=True)
 class SuggestionCommandSession:
     db_path: Path
-    busy_timeout_ms: int
-    user_id: str
     workspace_roots: tuple[Path, ...]
     read_access_scope: ReadAccessScope
     # The run's folder for output too long to show inline, created when the
@@ -343,18 +301,6 @@ class SuggestionCommandSession:
         """Run bash on ``bash_command``, or the app runtime Python on
         ``python_code`` as the Action's run_python runs it."""
 
-        # Read per call, as the broker does: a change the user makes while the
-        # run is in progress applies to the next command.
-        if not commands_run_without_asking(
-            db_path=self.db_path,
-            busy_timeout_ms=self.busy_timeout_ms,
-            user_id=self.user_id,
-        ):
-            return tool_error_response(
-                tool_name=call.tool_name,
-                error_code="COMMANDS_NOT_ALLOWED",
-                message="Commands now need the user's approval, so none can run.",
-            )
         if self.artifact_folder is not None and not self.artifact_folder.unchanged():
             return tool_error_response(
                 tool_name=call.tool_name,
@@ -446,4 +392,4 @@ class SuggestionCommandSession:
         )
 
 
-__all__ = ["PinnedFolder", "SuggestionCommandSession", "commands_run_without_asking"]
+__all__ = ["PinnedFolder", "SuggestionCommandSession"]

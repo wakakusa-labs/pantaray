@@ -123,7 +123,7 @@ describe('a task draft shared by its composers', () => {
     );
     expect(main.result.current.composer.draft).toBe('see Aurora');
 
-    act(() => main.result.current.submitDraft(null, true, null, 0, 'prompt_each_time', 'sug-1'));
+    act(() => main.result.current.submitDraft(null, true, null, 0, 'sug-1'));
     const { message } = submitMessage.mock.calls[0][0];
     expect(message.content).toBe('> 合計が違う\n\n直して\n\n> 税込み\n\nsee Aurora');
     expect(message.project_refs).toEqual([
@@ -160,7 +160,7 @@ describe('a task draft shared by its composers', () => {
     await waitFor(() => expect(main.result.current.composer.draft).toBe('Only the summary'));
     let fail!: (error: Error) => void;
     submitMessage.mockReturnValueOnce(new Promise((_, reject) => (fail = reject)));
-    act(() => panel.result.current.submitDraft(null, true, null, 0, 'prompt_each_time', 'sug-1'));
+    act(() => panel.result.current.submitDraft(null, true, null, 0, 'sug-1'));
     // Main took the words as the send went out: no window offers them meanwhile.
     await waitFor(() => expect(main.result.current.composer.draft).toBe(''));
     return { panel, main, fail };
@@ -218,9 +218,7 @@ describe('a task draft shared by its composers', () => {
     await act(async () => {});
     act(() => composer.result.current.changeDraft('Do it', []));
     submitMessage.mockResolvedValueOnce(submitted('act-9'));
-    await act(async () =>
-      composer.result.current.submitDraft(null, true, null, 0, 'prompt_each_time', 'sug-a')
-    );
+    await act(async () => composer.result.current.submitDraft(null, true, null, 0, 'sug-a'));
     // The conversation page shows the message: the send has gone through.
     await act(async () =>
       composer.result.current.setComposer((current) => ({

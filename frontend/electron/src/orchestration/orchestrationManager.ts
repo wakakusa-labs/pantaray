@@ -197,7 +197,6 @@ export function createOrchestrationManager(params: {
           typeof data.command_id !== 'string' ||
           (data.language !== 'en' && data.language !== 'ja') ||
           !(typeof data.supplement === 'string' || data.supplement === null) ||
-          (data.approval_mode !== 'prompt_each_time' && data.approval_mode !== 'always_allow') ||
           !images.success ||
           !projectRefs.success ||
           !workRefs.success ||
@@ -214,7 +213,6 @@ export function createOrchestrationManager(params: {
             supplement: data.supplement,
             supplement_project_refs: projectRefs.data,
             supplement_work_refs: workRefs.data,
-            approval_mode: data.approval_mode,
             images: images.data,
             files: files.data,
           },

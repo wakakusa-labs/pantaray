@@ -24,10 +24,6 @@ import type { InstalledAppOption } from '../privacy/installedApps';
 import type { RecordingStartResult } from '../screenshot/screenshotSync';
 import type { CapturePrivacySettingsInput, IdeFileRulesInput } from './schemas/privacy';
 import type { SubmitApprovalDecisionPayload } from '../actions/actionApprovalDecisionFetch';
-import type {
-  ActionApprovalMode,
-  ActionApprovalModeResponse,
-} from '../actions/actionApprovalModeFetch';
 import type { HistoryFetchResult } from '../history/historyFetch';
 import type { ConversationHistoryListItem, HistoryItemKey } from '../history/historyContracts';
 import type { HistoryItemDeleteResult } from '../history/historyItemDelete';
@@ -235,11 +231,6 @@ export type MainContext = {
 
   integrations: IntegrationSettingsApi;
 
-  approval: {
-    getWorkspaceEditCommandPreference: () => Promise<unknown>;
-    setWorkspaceEditCommandPreference: (approvalMode: unknown) => Promise<unknown>;
-  };
-
   shortcut: {
     getState: () => GlobalShortcutState;
     setAccelerator: (accelerator: string) => GlobalShortcutChangeResult;
@@ -340,11 +331,6 @@ export type MainContext = {
     /** Tells every window showing the suggestion which Action a reply to it opened. */
     recordSuggestionReply: (suggestionId: string, actionId: string) => void;
     submitApprovalDecision: (payload: SubmitApprovalDecisionPayload) => Promise<void>;
-    getActionApprovalMode: (actionId: string) => Promise<ActionApprovalModeResponse>;
-    setActionApprovalMode: (
-      actionId: string,
-      approvalMode: ActionApprovalMode
-    ) => Promise<ActionApprovalModeResponse>;
     createNotificationIpcHandlers?: CreateNotificationIpcHandlers;
   };
 };

@@ -30,9 +30,6 @@ test.beforeEach(async ({ page }) => {
     Object.defineProperty(window, 'electron', {
       value: {
         ipcRenderer: { on: () => noop },
-        approval: {
-          getWorkspaceEditCommandPreference: async () => ({ approval_mode: 'prompt_each_time' }),
-        },
         // Dummy projects; a test empties the workspace with data-no-projects on <html>.
         workspaceSettings: {
           get: async () => {
@@ -56,7 +53,6 @@ test.beforeEach(async ({ page }) => {
           },
         },
         agentOverlay: {
-          getActionApprovalMode: async () => ({ approval_mode: 'prompt_each_time' }),
           openWorkspaceSettings: () => {
             document.documentElement.dataset.workspaceOpened = 'true';
           },
@@ -172,7 +168,6 @@ test('offer: a reply continues the work, with no decision buttons or mode menu',
   expect(JSON.parse((await page.locator('html').getAttribute('data-accepted'))!)).toMatchObject({
     suggestionId: 'suggestion-1',
     supplement: '未決事項だけを、箇条書きでまとめて',
-    approvalMode: 'prompt_each_time',
     images: [],
   });
 });

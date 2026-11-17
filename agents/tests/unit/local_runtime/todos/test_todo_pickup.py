@@ -125,7 +125,7 @@ def _actions(db: Path) -> list[sqlite3.Row]:
     with closing(sqlite3.connect(db)) as connection:
         connection.row_factory = sqlite3.Row
         return connection.execute(
-            """SELECT action.initial_user_message_id, action.initial_approval_mode,
+            """SELECT action.initial_user_message_id,
                       step.step_name, step.user_message_json, step.user_request_text,
                       (SELECT llm_response_text FROM agent_action_steps
                        WHERE action_id = action.action_id
@@ -161,12 +161,8 @@ def test_a_written_todo_starts_one_action_with_its_text_and_project(
     assert set(rows) == {todo_message_id(todo.todo_id), todo_message_id(loose.todo_id)}
     row = rows[todo_message_id(todo.todo_id)]
     message = json.loads(row["user_message_json"])
-    # The user wrote it, so it is their message and their approval setting.
-    assert (row["step_name"], row["initial_approval_mode"], row["opening"]) == (
-        "user_request",
-        None,
-        None,
-    )
+    # The user wrote it, so it is their message.
+    assert (row["step_name"], row["opening"]) == ("user_request", None)
     assert message["content"] == "Send the quote"
     assert message["todo_handoff"] == {
         "todo_id": todo.todo_id,
@@ -255,9 +251,7 @@ def test_a_written_todo_hands_its_attachments_to_the_actions_first_message(
     )
 
 
-def test_an_ai_todo_continues_as_pantaray_and_asks_before_every_step(
-    db: Path,
-) -> None:
+def test_an_ai_todo_continues_as_pantaray(db: Path) -> None:
     _insert_ai_todo(db, "todo-recur", origin="recurrence")
 
     pickup.pick_up_todos(user_id=USER)
@@ -270,13 +264,11 @@ def test_an_ai_todo_continues_as_pantaray_and_asks_before_every_step(
     )
     assert (
         row["step_name"],
-        row["initial_approval_mode"],
         row["opening"],
         message["content"],
         message["todo_handoff"]["project"],
     ) == (
         "todo_pickup_request",
-        "prompt_each_time",
         "Renew the domain",
         ACTION_TODO_PICKUP_REQUEST_TEXT,
         None,
@@ -442,7 +434,6 @@ async def _approve(suggestion_id: str) -> SuggestionAcceptanceResult:
         user_id=USER,
         suggestion_id=suggestion_id,
         command_id="11111111-1111-4111-8111-111111111111",
-        approval_mode="prompt_each_time",
         language="ja",
         supplement=None,
         supplement_project_refs=(),

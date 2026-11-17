@@ -44,13 +44,10 @@ from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
     BROKER_ACTOR_TIMESTAMP,
     _bootstrap_runtime_db,
-    _grant_workspace_full_access,
     _register_folder_mount,
     _seed_broker_actor_process,
 )
-from .test_tool_broker_approval import _set_prompt_preference
 
-APPROVAL_MODES = ("prompt_each_time", "always_allow")
 TOOLS = ("read", "apply_patch", "bash", "run_python")
 
 
@@ -78,13 +75,8 @@ def launched(monkeypatch: pytest.MonkeyPatch) -> list[ValidatedCommandRequest]:
     return requests
 
 
-def _setup(tmp_path: Path, mode: str) -> tuple[Path, ActionExecutionContext]:
+def _setup(tmp_path: Path) -> tuple[Path, ActionExecutionContext]:
     db_path, context = _bootstrap_runtime_db(tmp_path, allowed_tool_ids=TOOLS)
-    if mode == "always_allow":
-        _grant_workspace_full_access(db_path=db_path, capability="scoped_write")
-        _grant_workspace_full_access(db_path=db_path, capability="process_exec_local")
-    else:
-        _set_prompt_preference(db_path)
     assert isinstance(context, ActionExecutionContext)
     return db_path, context
 
@@ -193,14 +185,12 @@ async def _ask(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mode", APPROVAL_MODES)
 async def test_conversation_grant_runs_the_call_and_opens_the_folder_for_later_calls(
     tmp_path: Path,
     outside: Path,
     launched: list[ValidatedCommandRequest],
-    mode: str,
 ) -> None:
-    db_path, context = _setup(tmp_path, mode)
+    db_path, context = _setup(tmp_path)
     target = outside / "notes.txt"
     asked = await _ask(db_path, context, "apply_patch", "req-1", _patch_args(target))
 
@@ -217,28 +207,23 @@ async def test_conversation_grant_runs_the_call_and_opens_the_folder_for_later_c
     assert target.read_text(encoding="utf-8") == "created\n"
     later_patch = _patch_args(outside / "second.txt")
     later_bash = _bash_args(outside)
-    if mode == "always_allow":
-        await _call(
-            db_path=db_path,
-            context=context,
-            tool_id="apply_patch",
-            request_id="req-2",
-            args=later_patch,
-        )
-        await _call(
-            db_path=db_path,
-            context=context,
-            tool_id="bash",
-            request_id="req-3",
-            args=later_bash,
-        )
-        assert (outside / "second.txt").is_file()
-        [command] = launched
-        assert str(outside) in command.real_write_roots
-    else:
-        await _ask(db_path, context, "apply_patch", "req-2", later_patch)
-        await _ask(db_path, context, "bash", "req-3", later_bash)
-        assert launched == []
+    await _call(
+        db_path=db_path,
+        context=context,
+        tool_id="apply_patch",
+        request_id="req-2",
+        args=later_patch,
+    )
+    await _call(
+        db_path=db_path,
+        context=context,
+        tool_id="bash",
+        request_id="req-3",
+        args=later_bash,
+    )
+    assert (outside / "second.txt").is_file()
+    [command] = launched
+    assert str(outside) in command.real_write_roots
     assert "outside_workspace" not in _summary(db_path, "req-2")
     assert "outside_workspace" not in _summary(db_path, "req-3")
 
@@ -249,7 +234,7 @@ async def test_conversation_grant_from_a_command_runs_it_in_the_folder(
     outside: Path,
     launched: list[ValidatedCommandRequest],
 ) -> None:
-    db_path, context = _setup(tmp_path, "always_allow")
+    db_path, context = _setup(tmp_path)
     asked = await _ask(
         db_path,
         context,
@@ -293,7 +278,7 @@ async def test_grant_survives_a_new_run_and_gives_way_to_registration(
         "_resolve_verified_app_runtime_python",
         lambda: Path(sys.executable).resolve(),
     )
-    db_path, context = _setup(tmp_path, "always_allow")
+    db_path, context = _setup(tmp_path)
     asked = await _ask(db_path, context, "bash", "req-1", _bash_args(outside))
     _allow_for_conversation(db_path, asked, "req-1")
 
@@ -339,7 +324,7 @@ async def test_conversation_grant_opens_every_folder_of_the_approval(
     tmp_path_factory: pytest.TempPathFactory,
     launched: list[ValidatedCommandRequest],
 ) -> None:
-    db_path, context = _setup(tmp_path, "always_allow")
+    db_path, context = _setup(tmp_path)
     second = tmp_path_factory.mktemp("second-outside-folder").resolve()
     asked = await _ask(db_path, context, "bash", "req-1", _bash_args(outside))
     two_folders = build_bash_summary(
@@ -377,7 +362,7 @@ async def test_conversation_grant_opens_every_folder_of_the_approval(
 
 @pytest.mark.asyncio
 async def test_other_action_still_asks(tmp_path: Path, outside: Path) -> None:
-    db_path, context = _setup(tmp_path, "always_allow")
+    db_path, context = _setup(tmp_path)
     asked = await _ask(db_path, context, "bash", "req-1", _bash_args(outside))
     _allow_for_conversation(db_path, asked, "req-1")
     insert_agent_action(
@@ -412,18 +397,24 @@ async def test_other_action_still_asks(tmp_path: Path, outside: Path) -> None:
 async def test_only_a_grantable_outside_folder_can_be_granted(
     tmp_path: Path,
 ) -> None:
-    db_path, context = _setup(tmp_path, "prompt_each_time")
+    db_path, context = _setup(tmp_path)
     # The parent of tmp_path encloses the app database folder.
     enclosing = tmp_path.parent
     enclosing_ask = await _ask(
         db_path, context, "apply_patch", "req-enclosing", _patch_args(enclosing / "x")
     )
+    # A command with the login environment asks without leaving the workspace.
     inside_ask = await _ask(
         db_path,
         context,
-        "apply_patch",
+        "bash",
         "req-inside",
-        _patch_args(context.workspace_path / "a.txt"),
+        {
+            "command": "gh auth status",
+            "cwd": str(context.workspace_path),
+            "use_login_environment": True,
+            "justification": "Check the pull request with your GitHub account.",
+        },
     )
 
     outside_summary = _summary(db_path, "req-enclosing")["outside_workspace"]

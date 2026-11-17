@@ -12,25 +12,17 @@ from pantaray_agents.local_runtime.tooling.bootstrap import (
     bootstrap_local_tooling_catalog,
     ensure_action_scratch_execution_context,
 )
-from pantaray_agents.local_runtime.tooling.brokering.approval_identity import (
-    build_approval_preference_id,
-    build_capability_grant_id,
-)
 from pantaray_agents.local_runtime.tooling.brokering.broker import execute_broker_tool
 from pantaray_agents.local_runtime.tooling.models import (
     ActionExecutionContext,
-    ApprovalPreferenceUpsertInput,
     ApprovalSessionUpsertInput,
-    CapabilityGrantCreateInput,
     ToolInvocationStartInput,
 )
 from pantaray_agents.local_runtime.tooling.repository import (
     claim_approval_execution_start,
     complete_execution_session,
-    create_capability_grant,
     load_approval_session_by_request,
     record_tool_invocation_start,
-    upsert_approval_preference,
     upsert_approval_session,
 )
 
@@ -213,54 +205,6 @@ def _upsert_settings_approved_session(
             requested_at="2026-03-31T00:00:01Z",
             decided_at="2026-03-31T00:00:02Z",
             claimed_at=None,
-        ),
-    )
-
-
-def _grant_workspace_scoped_write(
-    *,
-    db_path: Path,
-    manifest_id: str | None = None,
-) -> None:
-    del manifest_id
-    preference_id = build_approval_preference_id(
-        user_id="user-1",
-        scope_type="global",
-        scope_ref=None,
-        applies_to=("workspace_edit_and_command",),
-    )
-    upsert_approval_preference(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        preference=ApprovalPreferenceUpsertInput(
-            preference_id=preference_id,
-            user_id="user-1",
-            scope_type="global",
-            scope_ref=None,
-            approval_mode="always_allow",
-            applies_to=("workspace_edit_and_command",),
-            created_at="2026-03-31T00:00:00Z",
-            updated_at="2026-03-31T00:00:00Z",
-        ),
-    )
-    create_capability_grant(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        grant=CapabilityGrantCreateInput(
-            grant_id=build_capability_grant_id(
-                user_id="user-1",
-                scope_type="global",
-                scope_ref=None,
-                capability="scoped_write",
-                applies_to=("workspace_edit_and_command",),
-            ),
-            user_id="user-1",
-            preference_id=preference_id,
-            capability="scoped_write",
-            scope_type="global",
-            scope_ref=None,
-            grant_source="settings",
-            granted_at="2026-03-31T00:00:01Z",
         ),
     )
 
@@ -479,10 +423,6 @@ def test_claim_approval_execution_start_rejects_same_invocation_reentry(
     tmp_path: Path,
 ) -> None:
     db_path, context = _bootstrap_claim_runtime(tmp_path)
-    _grant_workspace_scoped_write(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-    )
     _upsert_settings_approved_session(
         db_path=db_path,
         context=context,
@@ -580,15 +520,8 @@ def test_claim_approval_execution_start_rejects_different_invocation_reentry(
 @pytest.mark.asyncio
 async def test_execute_broker_tool_uses_preflight_settings_approval_at_execution_claim(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from pantaray_agents.local_runtime.tooling.brokering import execution_start
-
     db_path, context = _bootstrap_claim_runtime(tmp_path)
-    _grant_workspace_scoped_write(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-    )
     workspace_file = context.workspace_path / "todo.txt"
     workspace_file.write_text("old line\n", encoding="utf-8")
 
@@ -606,31 +539,6 @@ async def test_execute_broker_tool_uses_preflight_settings_approval_at_execution
         args=_patch_args(),
     )
     assert preflight.status == "success"
-
-    original_claim = execution_start.claim_approval_execution_start
-
-    def _revoke_grant_before_claim(**kwargs):
-        with sqlite3.connect(db_path) as connection:
-            connection.execute(
-                """
-                UPDATE capability_grants
-                SET revoked_at = ?, revocation_reason = ?
-                WHERE user_id = ? AND scope_type = 'global' AND scope_ref IS NULL
-                    AND revoked_at IS NULL
-                """,
-                (
-                    "2026-03-31T00:00:03Z",
-                    "test revoke before claim",
-                    "user-1",
-                ),
-            )
-        return original_claim(**kwargs)
-
-    monkeypatch.setattr(
-        execution_start,
-        "claim_approval_execution_start",
-        _revoke_grant_before_claim,
-    )
 
     outcome = await execute_broker_tool(
         db_path=db_path,

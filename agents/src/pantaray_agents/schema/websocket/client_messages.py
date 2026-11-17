@@ -31,7 +31,6 @@ class ExecuteActionMessage(BaseModel):
 
     suggestion_id: str = Field(description="実行対象の提案ID（UUIDv4、必須）")
     command_id: UUID4 = Field(description="冪等な action command ID（UUIDv4、必須）")
-    approval_mode: Literal["prompt_each_time", "always_allow"]
     images: tuple[ImageInput, ...] = Field(max_length=ACTION_MESSAGE_MAX_IMAGES)
     language: LanguageCode | None = Field(
         default=None,

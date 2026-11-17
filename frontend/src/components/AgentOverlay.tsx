@@ -22,7 +22,6 @@ import type {
 } from '../../electron/src/actions/actionLiveCore';
 import { createActionToolOutputLoader } from '../../electron/src/actions/actionToolOutputLoader';
 import { useActionApprovalDecisionController } from './agent-overlay/useActionApprovalDecisionController';
-import { useActionApprovalMode } from './agent-overlay/useActionApprovalMode';
 import { actionStopTarget, useActionStop } from './agent-overlay/useActionStop';
 import { useCompletionViewed } from './agent-overlay/useCompletionViewed';
 import { useStandaloneComposerFocus } from './agent-overlay/useStandaloneComposerFocus';
@@ -116,12 +115,6 @@ const ConversationOverlay = ({
     () => (actions ? createActionToolOutputLoader(actions.readToolOutputPage) : null),
     [actions]
   );
-  const approvalMode = useActionApprovalMode(
-    conversationActionId,
-    entryMode === 'overlay' ? state.suggestionId : null
-  );
-  const { reset: resetApprovalMode } = approvalMode;
-  const permissionsReady = approvalMode.mode !== null && !approvalMode.isSaving;
   const approval = useActionApprovalDecisionController({ t });
   const { approvalBlockers, approvalUiState, setApprovalBlockers } = approval;
   useStandaloneComposerFocus(entryMode === 'standalone', standaloneComposerRef);
@@ -131,7 +124,6 @@ const ConversationOverlay = ({
     if (!actions || !toolOutputLoader) return;
     return actions.onConversationUpdated((update) => {
       if (update.kind === 'reset') {
-        resetApprovalMode();
         livePageRef.current = null;
         submissionRefreshScopeRef.current += 1;
         restoreComposerFocusRef.current = false;
@@ -175,7 +167,6 @@ const ConversationOverlay = ({
     setComposer,
     submissionRefreshScopeRef,
     initialActionId,
-    resetApprovalMode,
     setApprovalBlockers,
     toolOutputLoader,
   ]);
@@ -459,16 +450,14 @@ const ConversationOverlay = ({
     !composer.submission &&
     hasWords &&
     composer.attachmentsInFlight === 0 &&
-    permissionsReady &&
     (!repliesToOffer || (!state.decisionLocked && !supplementInvalid));
   const sendDraft = () => {
-    if (!canSend || approvalMode.mode === null) return;
+    if (!canSend) return;
     if (repliesToOffer) {
       ctrl.onAccept({
         supplement,
         supplementProjectRefs: supplementRefs.project_refs,
         supplementWorkRefs: supplementRefs.work_refs,
-        approvalMode: approvalMode.mode,
         images,
         files,
       });
@@ -479,7 +468,6 @@ const ConversationOverlay = ({
       canStartConversation,
       stopProcessId,
       state.lastSequence,
-      approvalMode.mode,
       entryMode === 'overlay' && repliesToSuggestion ? state.suggestionId : null
     );
   };
@@ -488,8 +476,6 @@ const ConversationOverlay = ({
     (!operationalError || composer.submission) &&
     (canCompose || repliesToOffer || composer.submission) ? (
       <OverlayComposer
-        approvalMode={approvalMode}
-        hideApprovalMode={entryMode === 'overlay'}
         placeholder={entryMode === 'overlay' ? t('overlay.composer.replyPlaceholder') : undefined}
         draft={composer.draft}
         mentions={composer.mentions}
@@ -505,9 +491,7 @@ const ConversationOverlay = ({
         resumeFailed={composer.resume?.state === 'failed'}
         stopState={stopState}
         sendSuperseded={composer.failureKind === 'superseded'}
-        canResume={
-          permissionsReady && (composer.resume === null || composer.resume.state === 'failed')
-        }
+        canResume={composer.resume === null || composer.resume.state === 'failed'}
         textareaRef={standaloneComposerRef}
         onAddProject={() => window.electron?.agentOverlay?.openWorkspaceSettings?.()}
         onDraftChange={changeDraft}
@@ -515,9 +499,7 @@ const ConversationOverlay = ({
         onRemoveAttachment={removeAttachment}
         onSubmit={sendDraft}
         onStop={stop}
-        onResume={() => {
-          if (permissionsReady) requestResume(visiblePages);
-        }}
+        onResume={() => requestResume(visiblePages)}
       />
     ) : toolOutputLoader && !operationalError && stopShown ? (
       <ComposerSubmissionRow>

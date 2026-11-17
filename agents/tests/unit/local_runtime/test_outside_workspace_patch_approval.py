@@ -44,20 +44,8 @@ from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
     BROKER_ACTOR_TIMESTAMP,
     _bootstrap_runtime_db,
-    _grant_workspace_full_access,
     _seed_broker_actor_process,
 )
-from .test_tool_broker_approval import _set_prompt_preference
-
-# "unsaved_default" saves nothing, so the built-in always_allow default applies.
-APPROVAL_MODES = ("prompt_each_time", "always_allow", "unsaved_default")
-
-
-def _set_approval_mode(db_path: Path, mode: str) -> None:
-    if mode == "always_allow":
-        _grant_workspace_full_access(db_path=db_path, capability="scoped_write")
-    elif mode == "prompt_each_time":
-        _set_prompt_preference(db_path)
 
 
 def _add_args(path: Path | str, line: str = "created") -> dict[str, JSONValue]:
@@ -130,12 +118,8 @@ def outside(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mode", APPROVAL_MODES)
-async def test_outside_workspace_patch_asks_in_every_approval_mode(
-    tmp_path: Path, outside: Path, mode: str
-) -> None:
+async def test_outside_workspace_patch_asks(tmp_path: Path, outside: Path) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _set_approval_mode(db_path, mode)
     target = outside / "notes.txt"
 
     with pytest.raises(BrokerApprovalRequiredError):
@@ -161,35 +145,18 @@ async def test_outside_workspace_patch_asks_in_every_approval_mode(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mode", APPROVAL_MODES)
-async def test_inside_workspace_patch_keeps_its_approval_behavior(
-    tmp_path: Path, mode: str
-) -> None:
+async def test_inside_workspace_patch_runs_without_asking(tmp_path: Path) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _set_approval_mode(db_path, mode)
 
-    if mode != "prompt_each_time":
-        await _patch(
-            db_path=db_path,
-            context=context,
-            request_id="req-in",
-            args=_add_args("a.txt"),
-        )
-        assert (context.workspace_path / "a.txt").is_file()
-        expected_status = "approved_once"
-    else:
-        with pytest.raises(BrokerApprovalRequiredError):
-            await _patch(
-                db_path=db_path,
-                context=context,
-                request_id="req-in",
-                args=_add_args("a.txt"),
-            )
-        expected_status = "pending"
+    await _patch(
+        db_path=db_path, context=context, request_id="req-in", args=_add_args("a.txt")
+    )
+
+    assert (context.workspace_path / "a.txt").is_file()
     assert _approval_rows(db_path) == [
         (
             "req-in",
-            expected_status,
+            "approved_once",
             {"summary_kind": "apply_patch", "target_paths": ["a.txt"]},
         )
     ]
@@ -200,7 +167,6 @@ async def test_approve_once_writes_only_that_call(
     tmp_path: Path, outside: Path
 ) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(db_path=db_path, capability="scoped_write")
     target = outside / "notes.txt"
 
     with pytest.raises(BrokerApprovalRequiredError) as first:
@@ -237,7 +203,6 @@ async def test_denied_outside_workspace_patch_is_not_written(
     tmp_path: Path, outside: Path
 ) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _set_prompt_preference(db_path)
     target = outside / "notes.txt"
 
     with pytest.raises(BrokerApprovalRequiredError) as first:
@@ -260,7 +225,6 @@ async def test_approved_folder_is_rechecked_before_the_write(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _set_prompt_preference(db_path)
     target = outside / "notes.txt"
     elsewhere = tmp_path_factory.mktemp("elsewhere").resolve()
     with pytest.raises(BrokerApprovalRequiredError) as first:
@@ -287,7 +251,6 @@ async def test_approved_folder_is_rechecked_before_the_write(
 @pytest.mark.asyncio
 async def test_protected_paths_stay_hard_denied(tmp_path: Path, outside: Path) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(db_path=db_path, capability="scoped_write")
     (context.workspace_path / "escape").symlink_to(outside)
     tool_results = load_tool_results_root(
         db_path=db_path,
@@ -326,7 +289,6 @@ async def test_subagent_outside_workspace_patch_is_denied_without_asking(
     tmp_path: Path, outside: Path
 ) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _set_prompt_preference(db_path)
     _seed_broker_actor_process(
         db_path,
         process_id="child-1",
@@ -371,7 +333,6 @@ async def test_approved_update_of_outside_file_goes_through_the_read_gate(
     tmp_path: Path, outside: Path
 ) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _set_prompt_preference(db_path)
     target = outside / "notes.txt"
     target.write_text("old line\n", encoding="utf-8")
     args: dict[str, JSONValue] = {

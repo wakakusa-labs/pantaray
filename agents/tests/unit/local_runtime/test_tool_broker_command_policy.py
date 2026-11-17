@@ -13,6 +13,8 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_command_validation i
     build_validated_python_request,
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
+    BrokerApprovalRequiredError,
+    apply_approval_decision,
     load_broker_context,
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
@@ -29,7 +31,6 @@ from pantaray_agents.local_runtime.tooling.sandbox.command_sandbox_protocol impo
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
     _bootstrap_runtime_db,
-    _grant_workspace_full_access,
 )
 
 
@@ -41,11 +42,6 @@ async def test_execute_broker_tool_uses_allowlisted_env_only(
     from pantaray_agents.local_runtime.tooling.brokering import broker as broker_module
 
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="process_exec_local",
-    )
     monkeypatch.setenv("BASH_ENV", str(context.workspace_path / "should_not_run.sh"))
     captured_env: dict[str, str] = {}
 
@@ -141,11 +137,6 @@ async def test_shell_input_rejects_nul_before_process_launch(tmp_path: Path) -> 
     from pantaray_agents.tools.contract import BrokerPolicyError
 
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="process_exec_local",
-    )
     with pytest.raises(BrokerPolicyError, match="must not contain NUL"):
         await execute_broker_tool(
             db_path=db_path,
@@ -167,7 +158,6 @@ def test_command_reads_follow_setting_and_login_leaves_roots_unchanged(
     db_path, context = _bootstrap_runtime_db(
         tmp_path, read_access_scope=read_access_scope
     )
-    _grant_workspace_full_access(db_path=db_path, capability="process_exec_local")
     broker_context = load_broker_context(
         db_path=db_path,
         busy_timeout_ms=1_000,
@@ -196,6 +186,19 @@ def test_command_reads_follow_setting_and_login_leaves_roots_unchanged(
         )
 
     normal = validate(use_login_environment=False)
+    # A command with the login environment asks the user first.
+    with pytest.raises(BrokerApprovalRequiredError) as asked:
+        validate(use_login_environment=True)
+    apply_approval_decision(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        tool_request_id="request-login-True",
+        user_id="user-1",
+        action_id="action-1",
+        approval_session_id=asked.value.approval_session_id,
+        decision="approved_once",
+        decided_at="2026-03-23T00:00:03Z",
+    )
     login = validate(use_login_environment=True)
 
     assert ("/" in normal.real_read_roots) is (read_access_scope == "full_access")
@@ -215,7 +218,6 @@ def test_run_python_reads_follow_setting(
         read_access_scope=read_access_scope,
         allowed_tool_ids=("bash", "run_python"),
     )
-    _grant_workspace_full_access(db_path=db_path, capability="process_exec_local")
     broker_context = load_broker_context(
         db_path=db_path,
         busy_timeout_ms=1_000,

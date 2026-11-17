@@ -61,10 +61,6 @@ const ALLOWED_LOCAL_BACKEND_ROUTES: ReadonlyArray<{
     methods: new Set(['POST']),
   },
   {
-    path: /^\/v1\/agents\/users\/[^/]+\/actions\/[^/]+\/approval-mode$/,
-    methods: new Set(['GET', 'PUT']),
-  },
-  {
     path: /^\/v1\/agents\/users\/[^/]+\/actions\/messages$/,
     methods: new Set(['POST']),
   },
@@ -155,10 +151,6 @@ const ALLOWED_LOCAL_BACKEND_ROUTES: ReadonlyArray<{
   {
     path: /^\/v1\/agents\/users\/[^/]+\/workspace-settings\/projects\/[^/]+\/name$/,
     methods: new Set(['PUT']),
-  },
-  {
-    path: /^\/v1\/agents\/users\/[^/]+\/approval-preferences\/workspace-edit-and-command$/,
-    methods: new Set(['GET', 'PUT']),
   },
   { path: /^\/v1\/agents\/users\/[^/]+\/integrations$/, methods: new Set(['GET']) },
   {

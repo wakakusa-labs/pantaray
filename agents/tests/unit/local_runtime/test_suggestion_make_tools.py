@@ -41,7 +41,7 @@ from pantaray_agents.tools.contract import (
 from .broker_test_support import RecordingDesktopSession, desktop_session
 from .test_pdf_page_render import write_pdf
 from .test_suggestion_commands import _EXITED, _capture_request, _command
-from .test_suggestion_commands import allowed_db as allowed_db  # the fixture
+from .test_suggestion_commands import suggestion_db as suggestion_db  # the fixture
 from .test_suggestion_research_tools import BUSY_TIMEOUT_MS, _snapshot
 from .test_workspace_settings_repository import TIMESTAMP
 
@@ -110,11 +110,11 @@ async def test_writes_that_would_leave_the_folder_are_refused(
 
 @pytest.mark.asyncio
 async def test_make_stage_commands_write_only_into_the_folder_offline(
-    allowed_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    suggestion_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # The user lets research commands reach the network; making never does.
     update_command_network_enabled(
-        db_path=allowed_db,
+        db_path=suggestion_db,
         busy_timeout_ms=BUSY_TIMEOUT_MS,
         user_id="user-1",
         command_network_enabled=True,
@@ -123,9 +123,9 @@ async def test_make_stage_commands_write_only_into_the_folder_offline(
     temp_dir = (tmp_path / "temp").resolve()
     requests = _capture_request(monkeypatch, temp_dir, _EXITED)
     tools = LocalSuggestionResearchTools(
-        db_path=allowed_db,
+        db_path=suggestion_db,
         busy_timeout_ms=BUSY_TIMEOUT_MS,
-        snapshot=_snapshot(db_path=allowed_db),
+        snapshot=_snapshot(db_path=suggestion_db),
         activity_start=None,
     )
 
@@ -171,14 +171,14 @@ def _read(path: Path) -> ReactToolCall:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("scope", ["workspace", "full_access"])
 async def test_the_make_stage_reads_its_own_folder_and_no_other(
-    allowed_db: Path, scope: str
+    suggestion_db: Path, scope: str
 ) -> None:
     other = resolve_suggestion_artifacts_root(
-        db_path=allowed_db, user_id="user-1", suggestion_id="sug-other"
+        db_path=suggestion_db, user_id="user-1", suggestion_id="sug-other"
     )
     other.mkdir(parents=True)
     (other / "theirs.md").write_text("another Suggestion's file\n")
-    make = await _tools(allowed_db, scope=scope).build_make_tools(
+    make = await _tools(suggestion_db, scope=scope).build_make_tools(
         user_id="user-1", run_id="sug-1"
     )
     (make.folder / "draft.md").write_text("my draft\n")
@@ -198,14 +198,16 @@ async def test_the_make_stage_reads_its_own_folder_and_no_other(
 )
 @pytest.mark.asyncio
 async def test_a_command_cannot_swap_the_folder_for_a_way_outside(
-    allowed_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    suggestion_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     outside = (tmp_path / "outside").resolve()
     outside.mkdir()
     temp_dir = (tmp_path / "temp").resolve()
     temp_dir.mkdir()
     requests = _capture_request(monkeypatch, temp_dir, _EXITED)
-    make = await _tools(allowed_db).build_make_tools(user_id="user-1", run_id="sug-1")
+    make = await _tools(suggestion_db).build_make_tools(
+        user_id="user-1", run_id="sug-1"
+    )
     registry = ReactToolRegistry(make.definitions)
     folder = make.folder
     swap = f"rm -rf '{folder}' || mv '{folder}' '{temp_dir}/away'; ln -s '{outside}' '{folder}'"
@@ -248,15 +250,13 @@ def _python(code: str) -> ReactToolCall:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("commands_allowed", [True, False])
-async def test_run_python_is_offered_to_the_make_stage_only_with_bash(
-    allowed_db: Path, commands_allowed: bool
+async def test_run_python_is_offered_to_the_make_stage_only(
+    suggestion_db: Path,
 ) -> None:
-    snapshot = replace(_snapshot(db_path=allowed_db), commands_allowed=commands_allowed)
     tools = LocalSuggestionResearchTools(
-        db_path=allowed_db,
+        db_path=suggestion_db,
         busy_timeout_ms=BUSY_TIMEOUT_MS,
-        snapshot=snapshot,
+        snapshot=_snapshot(db_path=suggestion_db),
         activity_start=None,
     )
 
@@ -264,11 +264,9 @@ async def test_run_python_is_offered_to_the_make_stage_only_with_bash(
     make = await tools.build_make_tools(user_id="user-1", run_id="sug-1")
 
     made = {tool.name for tool in make.definitions}
-    assert {"bash", "run_python"} & made == (
-        {"bash", "run_python"} if commands_allowed else set()
-    )
+    assert {"bash", "run_python"} <= made
     assert "run_python" not in {tool.name for tool in research}
-    # Neither asks anything, so both are made-stage tools whatever the setting.
+    # Neither asks anything, so both are make-stage tools.
     assert {"render_html_page", "save_html_as_pdf"} <= made
 
 
@@ -278,11 +276,11 @@ async def test_run_python_is_offered_to_the_make_stage_only_with_bash(
 )
 @pytest.mark.asyncio
 async def test_run_python_writes_only_into_the_folder_offline(
-    allowed_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    suggestion_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # The user lets research commands reach the network; run_python never does.
     update_command_network_enabled(
-        db_path=allowed_db,
+        db_path=suggestion_db,
         busy_timeout_ms=BUSY_TIMEOUT_MS,
         user_id="user-1",
         command_network_enabled=True,
@@ -293,7 +291,9 @@ async def test_run_python_writes_only_into_the_folder_offline(
     temp_dir = (tmp_path / "temp").resolve()
     temp_dir.mkdir()
     requests = _capture_request(monkeypatch, temp_dir, _EXITED)
-    make = await _tools(allowed_db).build_make_tools(user_id="user-1", run_id="sug-1")
+    make = await _tools(suggestion_db).build_make_tools(
+        user_id="user-1", run_id="sug-1"
+    )
     code = f"""
 import pathlib, socket
 pathlib.Path("made.txt").write_text("ok")
@@ -372,16 +372,18 @@ def artifact_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 @pytest.mark.asyncio
 async def test_html_is_printed_offline_and_saved_into_the_folder(
-    allowed_db: Path, artifact_root: Path
+    suggestion_db: Path, artifact_root: Path
 ) -> None:
     update_command_network_enabled(
-        db_path=allowed_db,
+        db_path=suggestion_db,
         busy_timeout_ms=BUSY_TIMEOUT_MS,
         user_id="user-1",
         command_network_enabled=True,
         now=TIMESTAMP,
     )
-    make = await _tools(allowed_db).build_make_tools(user_id="user-1", run_id="sug-1")
+    make = await _tools(suggestion_db).build_make_tools(
+        user_id="user-1", run_id="sug-1"
+    )
     (make.folder / "deck.html").write_text("<h1>Deck</h1>")
     registry = ReactToolRegistry(make.definitions)
     page = str(make.folder / "deck.html")
@@ -413,11 +415,13 @@ async def test_html_is_printed_offline_and_saved_into_the_folder(
 
 @pytest.mark.asyncio
 async def test_a_pdf_is_never_saved_outside_the_folder(
-    allowed_db: Path, tmp_path: Path, artifact_root: Path
+    suggestion_db: Path, tmp_path: Path, artifact_root: Path
 ) -> None:
     outside = (tmp_path / "outside").resolve()
     outside.mkdir()
-    make = await _tools(allowed_db).build_make_tools(user_id="user-1", run_id="sug-1")
+    make = await _tools(suggestion_db).build_make_tools(
+        user_id="user-1", run_id="sug-1"
+    )
     (make.folder / "deck.html").write_text("<h1>Deck</h1>")
     (make.folder / "link").symlink_to(outside, target_is_directory=True)
     registry = ReactToolRegistry(make.definitions)

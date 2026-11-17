@@ -63,25 +63,17 @@ from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
     BROKER_ACTOR_TIMESTAMP,
     _bootstrap_runtime_db,
-    _grant_workspace_full_access,
     _seed_broker_actor_process,
 )
-from .test_tool_broker_approval import _set_prompt_preference
 
-# "unsaved_default" saves nothing, so the built-in always_allow default applies.
-APPROVAL_MODES = ("prompt_each_time", "always_allow", "unsaved_default")
 COMMAND_TOOLS = ("bash", "run_python")
 PYTHON_CODE = "open('made.txt', 'w').write('x')"
 
 
-def _setup(tmp_path: Path, mode: str) -> tuple[Path, ActionExecutionContext]:
+def _setup(tmp_path: Path) -> tuple[Path, ActionExecutionContext]:
     db_path, context = _bootstrap_runtime_db(
         tmp_path, allowed_tool_ids=("read", "apply_patch", "bash", "run_python")
     )
-    if mode == "always_allow":
-        _grant_workspace_full_access(db_path=db_path, capability="process_exec_local")
-    elif mode == "prompt_each_time":
-        _set_prompt_preference(db_path)
     assert isinstance(context, ActionExecutionContext)
     return db_path, context
 
@@ -197,15 +189,13 @@ def launched(monkeypatch: pytest.MonkeyPatch) -> list[ValidatedCommandRequest]:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tool_id", COMMAND_TOOLS)
-@pytest.mark.parametrize("mode", APPROVAL_MODES)
-async def test_outside_workspace_cwd_asks_in_every_approval_mode(
+async def test_outside_workspace_cwd_asks(
     tmp_path: Path,
     outside: Path,
     launched: list[ValidatedCommandRequest],
-    mode: str,
     tool_id: str,
 ) -> None:
-    db_path, context = _setup(tmp_path, mode)
+    db_path, context = _setup(tmp_path)
 
     with pytest.raises(BrokerApprovalRequiredError):
         await _run(
@@ -230,7 +220,7 @@ async def test_approve_once_opens_the_folder_for_that_call_only(
     launched: list[ValidatedCommandRequest],
     tool_id: str,
 ) -> None:
-    db_path, context = _setup(tmp_path, "always_allow")
+    db_path, context = _setup(tmp_path)
     args = _args(tool_id, outside)
 
     with pytest.raises(BrokerApprovalRequiredError) as first:
@@ -279,7 +269,7 @@ async def test_denied_outside_workspace_command_does_not_run(
     launched: list[ValidatedCommandRequest],
     tool_id: str,
 ) -> None:
-    db_path, context = _setup(tmp_path, "prompt_each_time")
+    db_path, context = _setup(tmp_path)
     args = _args(tool_id, outside)
 
     with pytest.raises(BrokerApprovalRequiredError) as first:
@@ -304,40 +294,26 @@ async def test_denied_outside_workspace_command_does_not_run(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tool_id", COMMAND_TOOLS)
-@pytest.mark.parametrize("mode", APPROVAL_MODES)
-async def test_inside_workspace_command_keeps_its_approval_behavior(
+async def test_inside_workspace_command_runs_without_asking(
     tmp_path: Path,
     outside: Path,
     launched: list[ValidatedCommandRequest],
-    mode: str,
     tool_id: str,
 ) -> None:
-    db_path, context = _setup(tmp_path, mode)
-    args = _args(tool_id, ".")
+    db_path, context = _setup(tmp_path)
 
-    if mode != "prompt_each_time":
-        await _run(
-            db_path=db_path,
-            context=context,
-            tool_id=tool_id,
-            request_id="req-in",
-            args=args,
-        )
-        [request] = launched
-        assert str(outside) not in request.real_write_roots
-        expected_status = "approved_once"
-    else:
-        with pytest.raises(BrokerApprovalRequiredError):
-            await _run(
-                db_path=db_path,
-                context=context,
-                tool_id=tool_id,
-                request_id="req-in",
-                args=args,
-            )
-        expected_status = "pending"
+    await _run(
+        db_path=db_path,
+        context=context,
+        tool_id=tool_id,
+        request_id="req-in",
+        args=_args(tool_id, "."),
+    )
+
+    [request] = launched
+    assert str(outside) not in request.real_write_roots
     [(request_id, status, summary)] = _approval_rows(db_path)
-    assert (request_id, status) == ("req-in", expected_status)
+    assert (request_id, status) == ("req-in", "approved_once")
     assert "outside_workspace" not in summary
     assert summary["cwd"] == str(context.workspace_path.resolve())
 
@@ -350,7 +326,7 @@ async def test_approved_cwd_is_rechecked_before_launch(
     launched: list[ValidatedCommandRequest],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    db_path, context = _setup(tmp_path, "prompt_each_time")
+    db_path, context = _setup(tmp_path)
     args = _args("bash", outside)
     elsewhere = tmp_path_factory.mktemp("elsewhere").resolve()
     with pytest.raises(BrokerApprovalRequiredError) as first:
@@ -393,7 +369,7 @@ async def test_approved_cwd_is_rechecked_before_launch(
 def test_every_approved_folder_is_rechecked_before_launch(
     tmp_path: Path, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
-    db_path, context = _setup(tmp_path, "prompt_each_time")
+    db_path, context = _setup(tmp_path)
     broker_context = load_broker_context(
         db_path=db_path,
         busy_timeout_ms=1_000,
@@ -440,7 +416,7 @@ async def test_protected_cwds_stay_hard_denied(
     launched: list[ValidatedCommandRequest],
     tool_id: str,
 ) -> None:
-    db_path, context = _setup(tmp_path, "always_allow")
+    db_path, context = _setup(tmp_path)
     (context.workspace_path / "escape").symlink_to(outside)
     artifact_root = read_local_runtime_artifact_root()
     artifact_root.mkdir(parents=True, exist_ok=True)
@@ -472,7 +448,7 @@ async def test_subagent_outside_workspace_cwd_is_denied_without_asking(
     outside: Path,
     launched: list[ValidatedCommandRequest],
 ) -> None:
-    db_path, context = _setup(tmp_path, "prompt_each_time")
+    db_path, context = _setup(tmp_path)
     _seed_broker_actor_process(
         db_path,
         process_id="child-1",

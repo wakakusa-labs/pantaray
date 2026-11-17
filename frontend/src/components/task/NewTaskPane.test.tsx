@@ -24,14 +24,6 @@ beforeEach(() => {
   Object.defineProperty(window, 'electron', {
     configurable: true,
     value: {
-      approval: {
-        getWorkspaceEditCommandPreference: vi.fn(async () => ({
-          scope_type: 'global',
-          scope_ref: null,
-          approval_mode: 'prompt_each_time',
-          applies_to: ['workspace_edit_and_command'],
-        })),
-      },
       actions: {
         submitMessage: bridge.sending(submitMessage),
         ...bridge.window(),
@@ -74,7 +66,7 @@ it('shows an empty composer whose send opens a new Action and hands the pane to 
   });
 
   expect(submitMessage).toHaveBeenCalledWith({
-    target: { kind: 'new', approval_mode: 'prompt_each_time' },
+    target: { kind: 'new' },
     message: {
       version: 1,
       message_id: messageId,

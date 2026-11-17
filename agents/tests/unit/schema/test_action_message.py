@@ -235,33 +235,17 @@ def test_internal_command_forbids_extra_fields() -> None:
     }
 
 
-@pytest.mark.parametrize(
-    ("overrides", "field"),
-    [
-        ({"approval_mode": "unknown"}, "approval_mode"),
-        (
-            {
-                "images": [{"kind": "image", "storage_path": "image.png"}]
-                * (ACTION_MESSAGE_MAX_IMAGES + 1)
-            },
-            "images",
-        ),
-    ],
-)
-def test_execute_action_rejects_invalid_consent_or_image_count(
-    overrides: dict[str, object], field: str
-) -> None:
+def test_execute_action_rejects_too_many_images() -> None:
     with pytest.raises(ValidationError) as captured:
         ExecuteActionMessage.model_validate(
             {
                 "suggestion_id": "suggestion-1",
                 "command_id": "11111111-1111-4111-8111-111111111111",
-                "approval_mode": "prompt_each_time",
-                "images": [],
-                **overrides,
+                "images": [{"kind": "image", "storage_path": "image.png"}]
+                * (ACTION_MESSAGE_MAX_IMAGES + 1),
             }
         )
-    assert captured.value.errors(include_url=False)[0]["loc"] == (field,)
+    assert captured.value.errors(include_url=False)[0]["loc"] == ("images",)
 
 
 def test_execute_action_websocket_bounds_suggestion_supplement() -> None:
@@ -270,7 +254,6 @@ def test_execute_action_websocket_bounds_suggestion_supplement() -> None:
             {
                 "suggestion_id": "suggestion-1",
                 "command_id": "11111111-1111-4111-8111-111111111111",
-                "approval_mode": "prompt_each_time",
                 "images": [],
                 "supplement": "x" * (ACTION_MESSAGE_SUPPLEMENT_MAX_CODEPOINTS + 1),
             }

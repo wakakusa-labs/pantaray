@@ -10,7 +10,6 @@ import type {
 } from '../../../electron/src/actions/actionConversationModel';
 import { ACTION_CONVERSATION_PAGE_LIMIT } from './conversationPaging';
 import { isActionSupplementWithinLimit, normalizeActionSupplement } from '@/types/websocket';
-import type { ActionApprovalMode } from './useActionApprovalMode';
 import { mentionRefs, type ComposerMention } from './composerMentions';
 import { composeQuotedMessage, type ComposerQuote } from './messageQuotes';
 import { useSharedTaskDraft } from './useSharedTaskDraft';
@@ -298,7 +297,6 @@ export function useOverlayComposerController({
     canStartConversation: boolean,
     activeProcessId: string | null,
     sequence: number,
-    initialApprovalMode: ActionApprovalMode | null,
     replyToSuggestionId: string | null
   ) => {
     // 送信ボタンと Enter は canSend で塞いであるが、form の submit はそれを通らない。
@@ -310,10 +308,9 @@ export function useOverlayComposerController({
           action_id: visiblePages[0].action.action_id,
           expected_process_id: activeProcessId,
         } as const)
-      : canStartConversation && initialApprovalMode !== null
+      : canStartConversation
         ? ({
             kind: 'new',
-            approval_mode: initialApprovalMode,
             ...(replyToSuggestionId === null
               ? {}
               : { reply_to_suggestion_id: replyToSuggestionId }),

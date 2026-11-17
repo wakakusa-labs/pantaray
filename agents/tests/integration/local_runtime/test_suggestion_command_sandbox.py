@@ -47,8 +47,6 @@ def _session(
 ) -> SuggestionCommandSession:
     session = SuggestionCommandSession(
         db_path=testbed.db_path,
-        busy_timeout_ms=ONE_SECOND_MS,
-        user_id="user-1",
         workspace_roots=(workspace,),
         read_access_scope=scope,
         spill_root=suggestion_tool_results_root(

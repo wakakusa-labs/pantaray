@@ -12,7 +12,6 @@ import { createIpcRegistrar } from './registrar';
 
 import { registerAiConnectionHandlers } from './handlers/aiConnection';
 import { registerAuthHandlers } from './handlers/auth';
-import { registerApprovalHandlers } from './handlers/approval';
 import { registerActionFileHandlers } from './handlers/actionFiles';
 import { registerActionHandlers } from './handlers/actions';
 import { registerActionImageHandlers } from './handlers/actionImages';
@@ -51,7 +50,6 @@ export function registerAllIpcHandlers(ctx: MainContext): RegisterAllResult {
   // invoke handlers
   registerWindowHandlers(ctx, registrar);
   registerAuthHandlers(ctx, registrar);
-  registerApprovalHandlers(ctx, registrar);
   registerIntegrationHandlers(ctx, registrar);
   registerShortcutHandlers(ctx, registrar);
   registerOverlayPlacementHandlers(ctx, registrar);

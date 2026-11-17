@@ -4,10 +4,8 @@ import styled from 'styled-components';
 import { ArrowUp, Play, Plus, Square } from 'lucide-react';
 
 import { useI18n } from '@/context/useI18n';
-import { ApprovalModeMenu } from './ApprovalModeMenu';
 import { ComposerMessageField } from './ComposerMessageField';
 import type { ComposerMention } from './composerMentions';
-import type { ActionApprovalModeControl } from './useActionApprovalMode';
 import { ComposerAlert, ComposerAttachments } from './ComposerAttachments';
 import { ComposerQuotes, type ComposerQuoting } from './ComposerQuotes';
 import type { ActionStopState } from './useActionStop';
@@ -168,9 +166,6 @@ const ScreenReaderOnly = styled.label`
 `;
 
 type OverlayComposerProps = {
-  approvalMode: ActionApprovalModeControl;
-  /** The mode read is used as it is: its menu shows only to retry a read that failed. */
-  hideApprovalMode?: boolean;
   /** The words shown in the empty field, in place of the default. */
   placeholder?: string;
   draft: string;
@@ -301,8 +296,6 @@ export function ComposerSubmissionStatus({
 }
 
 export function OverlayComposer({
-  approvalMode,
-  hideApprovalMode = false,
   placeholder,
   draft,
   mentions,
@@ -430,9 +423,6 @@ export function OverlayComposer({
             >
               <Plus strokeWidth={1.75} aria-hidden />
             </ComposerIconButton>
-            {hideApprovalMode && approvalMode.errorKey === null ? null : (
-              <ApprovalModeMenu approvalMode={approvalMode} />
-            )}
             {action === 'send' ? (
               sendButton
             ) : action === 'stop' ? (

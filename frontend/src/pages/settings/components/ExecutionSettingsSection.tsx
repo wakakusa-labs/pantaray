@@ -7,41 +7,20 @@ import { CommandNetworkSettingsSection } from './CommandNetworkSettingsSection';
 import type { MessageKey } from '@/i18n/types';
 import { clearWorkspaceSettingsCache } from './workspaceSettingsCache';
 
-type ApprovalMode = 'prompt_each_time' | 'always_allow';
 type ReadAccessScope = 'workspace' | 'full_access';
 
-type ApprovalModeSectionProps = {
+type ExecutionSettingsSectionProps = {
   t: (key: MessageKey, vars?: Record<string, string | number>) => string;
 };
 
-export function ApprovalModeSection({ t }: ApprovalModeSectionProps) {
+export function ExecutionSettingsSection({ t }: ExecutionSettingsSectionProps) {
   const navigate = useNavigate();
-  const [approvalMode, setApprovalMode] = useState<ApprovalMode | null>(null);
   const [readAccessScope, setReadAccessScope] = useState<ReadAccessScope | null>(null);
-  const [isSavingApproval, setIsSavingApproval] = useState(false);
   const [isSavingReadScope, setIsSavingReadScope] = useState(false);
-  const [approvalErrorMessage, setApprovalErrorMessage] = useState<string | null>(null);
   const [readScopeErrorMessage, setReadScopeErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    const loadApprovalMode = async () => {
-      try {
-        const approvalApi = window.electron?.approval;
-        if (!approvalApi) {
-          throw new Error('Approval settings bridge is unavailable.');
-        }
-        const response = await approvalApi.getWorkspaceEditCommandPreference();
-        if (cancelled) return;
-        setApprovalMode(response.approval_mode);
-        setApprovalErrorMessage(null);
-      } catch {
-        if (cancelled) return;
-        setApprovalErrorMessage(t('settings.approvalMode.loadFailed'));
-        setApprovalMode(null);
-      }
-    };
-
     const loadReadAccessScope = async () => {
       try {
         const workspaceSettingsApi = window.electron?.workspaceSettings;
@@ -59,32 +38,11 @@ export function ApprovalModeSection({ t }: ApprovalModeSectionProps) {
       }
     };
 
-    void Promise.all([loadApprovalMode(), loadReadAccessScope()]);
+    void loadReadAccessScope();
     return () => {
       cancelled = true;
     };
   }, [t]);
-
-  const updateApprovalMode = async (nextMode: ApprovalMode) => {
-    if (approvalMode === nextMode || isSavingApproval) return;
-    const previousMode = approvalMode;
-    setApprovalMode(nextMode);
-    setIsSavingApproval(true);
-    setApprovalErrorMessage(null);
-    try {
-      const approvalApi = window.electron?.approval;
-      if (!approvalApi) {
-        throw new Error('Approval settings bridge is unavailable.');
-      }
-      const response = await approvalApi.setWorkspaceEditCommandPreference(nextMode);
-      setApprovalMode(response.approval_mode);
-    } catch {
-      setApprovalMode(previousMode);
-      setApprovalErrorMessage(t('settings.approvalMode.saveFailed'));
-    } finally {
-      setIsSavingApproval(false);
-    }
-  };
 
   const updateReadAccessScope = async (nextScope: ReadAccessScope) => {
     if (readAccessScope === nextScope || isSavingReadScope) return;
@@ -108,14 +66,7 @@ export function ApprovalModeSection({ t }: ApprovalModeSectionProps) {
     }
   };
 
-  const isAlwaysAllow = approvalMode === 'always_allow';
   const isFullAccess = readAccessScope === 'full_access';
-  const modeLabel =
-    approvalMode === 'always_allow'
-      ? t('settings.approvalMode.mode.alwaysAllow')
-      : approvalMode === 'prompt_each_time'
-        ? t('settings.approvalMode.mode.promptEachTime')
-        : t('settings.approvalMode.unavailable');
   const readAccessLabel =
     readAccessScope === 'full_access'
       ? t('settings.readAccessScope.fullAccess')
@@ -125,48 +76,7 @@ export function ApprovalModeSection({ t }: ApprovalModeSectionProps) {
 
   return (
     <div className="dashboard-section execution-settings-section">
-      <h3 className="dashboard-section-title">{t('settings.approvalMode.title')}</h3>
-
-      <div className="settings-control-row">
-        <div className="settings-control-copy">
-          <div className="settings-control-title">{t('settings.approvalMode.controlTitle')}</div>
-          <div className="settings-section-status">{modeLabel}</div>
-          <p className="dashboard-section-description settings-control-description">
-            {t('settings.approvalMode.description')}
-          </p>
-        </div>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={isAlwaysAllow}
-          aria-label={t('settings.approvalMode.controlTitle')}
-          className={[
-            'settings-toggle',
-            'settings-toggle--fixed',
-            isAlwaysAllow ? 'settings-toggle--on' : null,
-          ]
-            .filter(Boolean)
-            .join(' ')}
-          disabled={isSavingApproval || approvalMode === null}
-          onClick={() =>
-            void updateApprovalMode(isAlwaysAllow ? 'prompt_each_time' : 'always_allow')
-          }
-        >
-          <span className="settings-toggle-thumb" />
-          <span className="settings-toggle-label">
-            {isAlwaysAllow
-              ? t('settings.approvalMode.mode.alwaysAllow')
-              : t('settings.approvalMode.mode.promptEachTime')}
-          </span>
-        </button>
-      </div>
-      {approvalErrorMessage ? (
-        <p className="dashboard-section-description settings-section-error">
-          {approvalErrorMessage}
-        </p>
-      ) : null}
-
-      <div className="settings-section-divider" />
+      <h3 className="dashboard-section-title">{t('settings.execution.title')}</h3>
 
       <div className="settings-control-row">
         <div className="settings-control-copy">

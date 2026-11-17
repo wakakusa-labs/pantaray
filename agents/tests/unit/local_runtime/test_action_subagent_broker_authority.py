@@ -34,7 +34,6 @@ from .broker_test_support import (
     BROKER_ACTOR_TIMESTAMP,
     _bootstrap_runtime_db,
     _bootstrap_runtime_db_with_registered_folder,
-    _grant_workspace_full_access,
     _seed_broker_actor_process,
 )
 
@@ -135,7 +134,6 @@ async def test_broker_write_authority_follows_actor_and_active_claims(
     tmp_path: Path,
 ) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(db_path=db_path, capability="scoped_write")
     (context.workspace_path / "claimed").mkdir()
     for process_id, status in (
         ("child-1", "running"),
@@ -218,7 +216,6 @@ async def test_apply_patch_rechecks_claims_immediately_before_mutation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(db_path=db_path, capability="scoped_write")
     _seed_broker_actor_process(
         db_path,
         process_id="child-race",
@@ -282,7 +279,6 @@ async def test_apply_patch_rejects_retargeted_locked_destination(
     db_path, context, repo, _folder = _bootstrap_runtime_db_with_registered_folder(
         tmp_path
     )
-    _grant_workspace_full_access(db_path=db_path, capability="scoped_write")
     parent = repo / "parent"
     parent.mkdir()
     original_parent = repo / "original-parent"

@@ -21,15 +21,11 @@ from pantaray_agents.local_runtime.tooling.bootstrap import (
     ensure_action_scratch_execution_context,
 )
 from pantaray_agents.local_runtime.tooling.models import (
-    ApprovalPreferenceUpsertInput,
-    CapabilityGrantCreateInput,
     ToolInvocationStartInput,
     ToolRuntimeResourceCreateInput,
 )
 from pantaray_agents.local_runtime.tooling.repository import (
-    create_capability_grant,
     record_tool_invocation_start,
-    upsert_approval_preference,
 )
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings import (
     create_workspace_folder,
@@ -212,43 +208,6 @@ def _register_folder_mount(
         organization_ids=(),
         project_ids=(),
         now=now,
-    )
-
-
-def _grant_workspace_full_access(
-    *,
-    db_path: Path,
-    manifest_id: str | None = None,
-    capability: str,
-) -> None:
-    del manifest_id
-    upsert_approval_preference(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        preference=ApprovalPreferenceUpsertInput(
-            preference_id="pref-global",
-            user_id="user-1",
-            scope_type="global",
-            scope_ref=None,
-            approval_mode="always_allow",
-            applies_to=("workspace_edit_and_command",),
-            created_at="2026-03-23T00:00:00Z",
-            updated_at="2026-03-23T00:00:00Z",
-        ),
-    )
-    create_capability_grant(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        grant=CapabilityGrantCreateInput(
-            grant_id=f"grant-global-{capability}",
-            user_id="user-1",
-            preference_id="pref-global",
-            capability=capability,
-            scope_type="global",
-            scope_ref=None,
-            grant_source="settings",
-            granted_at="2026-03-23T00:00:01Z",
-        ),
     )
 
 

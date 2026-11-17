@@ -18,8 +18,6 @@ import type { OrchestrationServerEvent } from '../../electron/src/orchestration/
 import type { OverlaySnapshotPayload } from './agent-overlay/model/overlayTypes';
 import { createTaskDraftBridge } from '@/tests/taskDraftBridge';
 
-type ElectronBridge = NonNullable<Window['electron']>;
-
 function createPendingSnapshot(): OverlaySnapshotPayload {
   return {
     snapshot: {
@@ -261,20 +259,9 @@ describe('AgentOverlay broader E2E', () => {
   const acceptAction = vi.fn();
   const resizeOverlay = vi.fn();
   const observeOverlaySize = vi.fn();
-  const getActionApprovalMode = vi.fn();
   const openWorkspaceSettings = vi.fn();
   const hideOverlay = vi.fn();
   const openTask = vi.fn(async () => undefined);
-  const setActionApprovalMode =
-    vi.fn<NonNullable<NonNullable<ElectronBridge['agentOverlay']>['setActionApprovalMode']>>();
-  const getWorkspaceEditCommandPreference =
-    vi.fn<NonNullable<ElectronBridge['approval']>['getWorkspaceEditCommandPreference']>();
-  const defaultPermissions: Awaited<ReturnType<typeof getWorkspaceEditCommandPreference>> = {
-    scope_type: 'global',
-    scope_ref: null,
-    approval_mode: 'prompt_each_time',
-    applies_to: ['workspace_edit_and_command'],
-  };
   const [writeText, readConversationPage, submitMessage, stopAction, resumeAction] = [
     vi.fn(),
     vi.fn(),
@@ -334,17 +321,9 @@ describe('AgentOverlay broader E2E', () => {
     acceptAction.mockReset().mockResolvedValue(null);
     resizeOverlay.mockReset();
     observeOverlaySize.mockReset();
-    setActionApprovalMode.mockReset();
-    getWorkspaceEditCommandPreference.mockReset().mockResolvedValue(defaultPermissions);
     openWorkspaceSettings.mockReset();
     hideOverlay.mockReset();
     openTask.mockReset().mockResolvedValue(undefined);
-    getActionApprovalMode.mockReset();
-    getActionApprovalMode.mockResolvedValue({
-      action_id: 'act-1',
-      approval_mode: 'prompt_each_time',
-      source: 'user_default',
-    });
     snapshotListener = null;
     eventListener = null;
     conversationListener = null;
@@ -373,9 +352,6 @@ describe('AgentOverlay broader E2E', () => {
             };
           },
         },
-        approval: {
-          getWorkspaceEditCommandPreference,
-        },
         agentOverlay: {
           onSnapshot: (cb: (payload: unknown) => void) => {
             snapshotListener = cb;
@@ -387,8 +363,6 @@ describe('AgentOverlay broader E2E', () => {
           resize: resizeOverlay,
           hide: hideOverlay,
           openTask,
-          getActionApprovalMode,
-          setActionApprovalMode,
           openWorkspaceSettings,
         },
         orchestration: {
@@ -693,30 +667,7 @@ describe('AgentOverlay broader E2E', () => {
     expect(submitMessage).toHaveBeenCalledTimes(2);
   });
 
-  it('keeps the open approval mode menu out of the subtree the overlay measures', async () => {
-    // A task window: the suggestion popup shows no approval mode menu.
-    render(
-      <UiLanguageProvider initialLanguage="en">
-        <AgentOverlay entryMode="standalone" initialActionId="act-1" />
-      </UiLanguageProvider>
-    );
-    await act(async () => conversationListener?.(createConversationUpdate(null, true)));
-    fireEvent.click(screen.getByRole('button', { name: 'Expand' }));
-
-    const trigger = await screen.findByRole('button', { name: /permissions: Ask every time/ });
-    const measured = observeOverlaySize.mock.calls.map(([target]) => target as HTMLElement);
-    expect(measured.length).toBeGreaterThan(0);
-    // The trigger is inside what the overlay measures; the popover must not be,
-    // or opening it would grow the measured content and resize the window.
-    expect(measured.some((element) => element.contains(trigger))).toBe(true);
-
-    fireEvent.click(trigger);
-    const menu = screen.getByRole('menu');
-    expect(measured.some((element) => element.contains(menu))).toBe(false);
-  });
-
   it('keeps every composer control inside the input box, in reading order', async () => {
-    // A task window: the suggestion popup shows no approval mode menu.
     render(
       <UiLanguageProvider initialLanguage="en">
         <AgentOverlay entryMode="standalone" initialActionId="act-1" />
@@ -728,23 +679,18 @@ describe('AgentOverlay broader E2E', () => {
     const message = await screen.findByLabelText('Message');
     const box = message.closest('form.overlay-composer');
     expect(box).not.toBeNull();
-    const permission = await within(box as HTMLElement).findByRole('button', {
-      name: /permissions: Ask every time/,
-    });
 
     // Tab order is document order, so this list is the keyboard order through the
-    // box: write, then attach, then permissions, then the primary control.
-    // Nothing is left below it.
+    // box: write, then attach, then the primary control. Nothing is left below it.
     const controls = Array.from((box as HTMLElement).querySelectorAll('textarea, button'));
-    expect(controls).toHaveLength(4);
+    expect(controls).toHaveLength(3);
     expect(controls[0]).toBe(message);
     expect(controls[1]).toBe(within(box as HTMLElement).getByRole('button', { name: 'Add files' }));
-    expect(controls[2]).toBe(permission);
-    expect(controls[3]).toBe(within(box as HTMLElement).getByRole('button', { name: 'Stop' }));
+    expect(controls[2]).toBe(within(box as HTMLElement).getByRole('button', { name: 'Stop' }));
 
     fireEvent.change(message, { target: { value: 'ready' } });
     const send = within(box as HTMLElement).getByRole('button', { name: 'Send' });
-    expect(Array.from((box as HTMLElement).querySelectorAll('textarea, button'))[3]).toBe(send);
+    expect(Array.from((box as HTMLElement).querySelectorAll('textarea, button'))[2]).toBe(send);
     expect(send).toBeEnabled();
   });
 
@@ -1291,7 +1237,6 @@ describe('AgentOverlay broader E2E', () => {
     expect(submitMessage).toHaveBeenCalledWith({
       target: {
         kind: 'new',
-        approval_mode: 'prompt_each_time',
         reply_to_suggestion_id: 'sug-comment',
       },
       message: {
@@ -1369,7 +1314,6 @@ describe('AgentOverlay broader E2E', () => {
     // There is nothing to decide: the reply is the answer, sent as the TODO list sends it.
     expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Dismiss suggestion' })).toBeNull();
-    expect(screen.queryByRole('button', { name: /permissions/ })).toBeNull();
     const field = screen.getByRole('textbox', { name: 'Message' });
     expect(field).toHaveAttribute('placeholder', 'Reply');
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
@@ -1382,7 +1326,6 @@ describe('AgentOverlay broader E2E', () => {
       supplement: 'Add the charts',
       supplementProjectRefs: [],
       supplementWorkRefs: [],
-      approvalMode: 'prompt_each_time',
       images: [],
       files: [],
     });
@@ -1469,7 +1412,6 @@ describe('AgentOverlay broader E2E', () => {
     // A dismissed offer is replied to in a new conversation that opens with it.
     expect(submitMessage.mock.calls[0][0].target).toEqual({
       kind: 'new',
-      approval_mode: 'prompt_each_time',
       reply_to_suggestion_id: 'sug-comment',
     });
 
@@ -1568,7 +1510,6 @@ describe('AgentOverlay broader E2E', () => {
       supplement: 'Use this image',
       supplementProjectRefs: [],
       supplementWorkRefs: [],
-      approvalMode: 'prompt_each_time',
       images: [{ kind: 'image', storage_path: storagePath }],
       files: [],
     });
@@ -2838,35 +2779,5 @@ describe('AgentOverlay broader E2E', () => {
       within(fresh).queryByText('The conversation could not be resumed. Try again.')
     ).toBeNull();
     expect(within(fresh).getByRole('button', { name: 'Resume' })).toBeEnabled();
-  });
-
-  it('blocks existing sends and resumes after an ambiguous permission downgrade until re-read', async () => {
-    getActionApprovalMode.mockResolvedValue({ approval_mode: 'always_allow' });
-    setActionApprovalMode.mockRejectedValue(new Error('save response lost'));
-    render(
-      <UiLanguageProvider initialLanguage="en">
-        <AgentOverlay entryMode="standalone" initialActionId="act-1" />
-      </UiLanguageProvider>
-    );
-    await act(async () => conversationListener?.(createStoppedUpdate()));
-    fireEvent.click(screen.getByRole('button', { name: 'Expand' }));
-    fireEvent.click(await screen.findByRole('button', { name: /permissions: Auto-approve/ }));
-    fireEvent.click(screen.getByRole('menuitemradio', { name: /Ask every time/ }));
-    const retry = await screen.findByRole('button', { name: 'Retry loading permissions' });
-    expect(screen.getByRole('button', { name: 'Resume' })).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Resume' }));
-    expect(resumeAction).not.toHaveBeenCalled();
-    const input = screen.getByLabelText('Message');
-    fireEvent.change(input, { target: { value: 'Wait for consent' } });
-    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
-    fireEvent.submit(input.closest('form')!);
-    expect(submitMessage).not.toHaveBeenCalled();
-    getActionApprovalMode.mockResolvedValue({ approval_mode: 'prompt_each_time' });
-    fireEvent.click(retry);
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled());
-    fireEvent.change(input, { target: { value: '' } });
-    expect(screen.getByRole('button', { name: 'Resume' })).toBeEnabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Resume' }));
-    await waitFor(() => expect(resumeAction).toHaveBeenCalledOnce());
   });
 });

@@ -6,18 +6,8 @@ from typing import Literal
 
 from ...storage.transactions import immediate_transaction
 from ..models import (
-    ApprovalPreferenceUpsertInput,
     ApprovalSessionMutationResult,
-    CapabilityGrantCreateInput,
     ToolInvocationStartInput,
-)
-from .approval_preferences import (
-    _matching_preference_ids,
-    _revoke_capability_grants_in_connection,
-    _revoke_other_approval_preferences_in_connection,
-    _revoke_superseded_capability_grant_in_connection,
-    _upsert_approval_preference_in_connection,
-    _upsert_capability_grant_in_connection,
 )
 from .approval_sessions import _load_approval_session_by_request_in_connection
 from .common import _configure_connection
@@ -55,37 +45,6 @@ def update_approval_session_decision(
                 expected_current_status=expected_current_status,
                 next_status=next_status,
                 decided_at=decided_at,
-            )
-
-
-def apply_approval_decision_with_grants(
-    *,
-    db_path: Path,
-    busy_timeout_ms: int,
-    user_id: str,
-    tool_request_id: str,
-    action_id: str,
-    approval_session_id: str | None,
-    expected_current_status: str,
-    next_status: str,
-    decided_at: str,
-    preference: ApprovalPreferenceUpsertInput | None = None,
-    grants: tuple[CapabilityGrantCreateInput, ...] = (),
-) -> ApprovalSessionMutationResult:
-    with sqlite3.connect(db_path) as connection:
-        _configure_connection(connection=connection, busy_timeout_ms=busy_timeout_ms)
-        with connection:
-            return apply_approval_decision_in_connection(
-                connection=connection,
-                user_id=user_id,
-                tool_request_id=tool_request_id,
-                action_id=action_id,
-                approval_session_id=approval_session_id,
-                expected_current_status=expected_current_status,
-                next_status=next_status,
-                decided_at=decided_at,
-                preference=preference,
-                grants=grants,
             )
 
 
@@ -132,8 +91,6 @@ def apply_approval_decision_in_connection(
     expected_current_status: str,
     next_status: str,
     decided_at: str,
-    preference: ApprovalPreferenceUpsertInput | None = None,
-    grants: tuple[CapabilityGrantCreateInput, ...] = (),
 ) -> ApprovalSessionMutationResult:
     session = _load_approval_session_by_request_in_connection(
         connection=connection,
@@ -178,34 +135,6 @@ def apply_approval_decision_in_connection(
             status="conflict",
             approval_session=session,
         )
-    if preference is not None:
-        matching_preference_ids = _matching_preference_ids(
-            connection=connection,
-            preference=preference,
-        )
-        _upsert_approval_preference_in_connection(
-            connection=connection,
-            preference=preference,
-        )
-        _revoke_other_approval_preferences_in_connection(
-            connection=connection,
-            preference=preference,
-            revoked_at=preference.updated_at,
-        )
-        _revoke_capability_grants_in_connection(
-            connection=connection,
-            preference_ids=matching_preference_ids,
-            revoked_at=preference.updated_at,
-            revocation_reason="approval preference replaced",
-        )
-    for grant in grants:
-        _revoke_superseded_capability_grant_in_connection(
-            connection=connection,
-            grant=grant,
-            revoked_at=grant.granted_at,
-            revocation_reason="capability grant replaced",
-        )
-        _upsert_capability_grant_in_connection(connection=connection, grant=grant)
     return ApprovalSessionMutationResult(
         status="updated",
         approval_session=_load_approval_session_by_request_in_connection(

@@ -54,7 +54,6 @@ class _ActionMessageHttpModel(BaseModel):
 
 class ActionMessageHttpNewTarget(_ActionMessageHttpModel):
     kind: Literal["new"]
-    approval_mode: Literal["prompt_each_time", "always_allow"] | None = None
     reply_to_suggestion_id: ActionMessageId | None = None
 
 

@@ -36,8 +36,6 @@ from pantaray_agents.local_runtime.tooling.repository.workspace_settings_models 
 )
 from pantaray_agents.schema.read_access import ReadAccessScope
 
-from .commands import commands_run_without_asking
-
 # The prompt carries insights/todos.md up to this size (production peaked at 41k
 # characters); a larger file is cut with a marker pointing to memory_search.
 PENDING_WORK_MAX_CHARS = 60_000
@@ -58,8 +56,6 @@ class SuggestionResearchSnapshot:
     # Those revisions' folders, which the file tools may read.
     memory_folders: tuple[Path, ...]
     stable_memory: SuggestionStableMemoryContext
-    # Whether the run offers commands at all; each command checks again.
-    commands_allowed: bool
     read_access_scope: ReadAccessScope
 
 
@@ -130,9 +126,6 @@ def build_suggestion_research_snapshot(
         memory_revisions=memory_revisions,
         memory_folders=tuple(head.folder for head in heads),
         stable_memory=stable_memory,
-        commands_allowed=commands_run_without_asking(
-            db_path=db_path, busy_timeout_ms=busy_timeout_ms, user_id=user_id
-        ),
         read_access_scope=workspace_settings.read_access_scope,
     )
 

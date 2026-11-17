@@ -46,7 +46,6 @@ from pantaray_agents.tools.files import (
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
     _bootstrap_runtime_db,
-    _grant_workspace_full_access,
 )
 from .resource_recovery_test_support import register_running_apply_patch_invocation
 
@@ -75,11 +74,6 @@ def _bootstrap_workspace_write_context(
     tmp_path: Path,
 ) -> tuple[Path, ActionExecutionContext]:
     db_path, context = _bootstrap_typed_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     return db_path, context
 
 
@@ -187,11 +181,6 @@ async def test_patch_read_gate_accepts_valid_no_output_completion(
             (invocation_id, invocation_id),
         )
 
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     target = context.workspace_path / "todo.txt"
     target.write_text("old\n", encoding="utf-8")
 
@@ -214,11 +203,6 @@ async def test_patch_read_gate_accepts_valid_no_output_completion(
 @pytest.mark.asyncio
 async def test_apply_patch_initial_update_returns_needs_read(tmp_path: Path) -> None:
     db_path, context = _bootstrap_typed_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     target = context.workspace_path / "todo.txt"
     target.write_text("old\n", encoding="utf-8")
 
@@ -581,11 +565,6 @@ async def test_apply_patch_retry_after_needs_read_applies(
     tmp_path: Path, retry_absolute: bool
 ) -> None:
     db_path, context = _bootstrap_typed_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     target = context.workspace_path / "todo.txt"
     target.write_text("old\n", encoding="utf-8")
     args = _update_args(path="todo.txt", old_lines=["old"], new_lines=["new"])
@@ -630,11 +609,6 @@ async def test_apply_patch_retry_reads_large_needs_read_action_file(
     tmp_path: Path,
 ) -> None:
     db_path, context = _bootstrap_typed_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     target = context.workspace_path / "large.txt"
     target.write_text(f"{'x' * 25_000}\nold\n", encoding="utf-8")
     args = _update_args(path="large.txt", old_lines=["old"], new_lines=["new"])
@@ -700,11 +674,6 @@ async def test_apply_patch_reads_action_file_from_manifest_root(
     tmp_path: Path,
 ) -> None:
     db_path, context = _bootstrap_typed_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     nested_cwd = context.workspace_path / "nested"
     nested_cwd.mkdir()
     target = nested_cwd / "large.txt"
@@ -795,11 +764,6 @@ async def test_apply_patch_ignores_prior_result_above_snapshot_read_limit(
     )
     assert stored_result.storage_kind == "action_file"
 
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     target = context.workspace_path / "todo.txt"
     target.write_text("old\n", encoding="utf-8")
 
@@ -824,11 +788,6 @@ async def test_apply_patch_ignores_prior_result_above_snapshot_read_limit(
 @pytest.mark.asyncio
 async def test_apply_patch_ignores_read_tool_history(tmp_path: Path) -> None:
     db_path, context = _bootstrap_typed_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     target = context.workspace_path / "todo.txt"
     target.write_text("old\n", encoding="utf-8")
 
@@ -867,11 +826,6 @@ async def test_apply_patch_stale_snapshot_returns_needs_read_again(
     tmp_path: Path,
 ) -> None:
     db_path, context = _bootstrap_typed_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     target = context.workspace_path / "todo.txt"
     target.write_text("old\n", encoding="utf-8")
     args = _update_args(path="todo.txt", old_lines=["old"], new_lines=["new"])
@@ -913,11 +867,6 @@ async def test_successful_apply_patch_invalidates_prior_snapshot(
     tmp_path: Path,
 ) -> None:
     db_path, context = _bootstrap_typed_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     target = context.workspace_path / "todo.txt"
     target.write_text("old\n", encoding="utf-8")
     args = _update_args(path="todo.txt", old_lines=["old"], new_lines=["new"])
@@ -977,11 +926,6 @@ async def test_successful_apply_patch_invalidates_prior_snapshot(
 @pytest.mark.asyncio
 async def test_apply_patch_large_file_returns_target_window(tmp_path: Path) -> None:
     db_path, context = _bootstrap_typed_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     lines = [f"- item {index}" for index in range(1, 851)]
     lines[829] = "- target old"
     target = context.workspace_path / "large.txt"
@@ -1040,11 +984,6 @@ async def test_apply_patch_rejects_target_line_larger_than_read_limit(
     tmp_path: Path,
 ) -> None:
     db_path, context = _bootstrap_typed_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     oversized_line = "x" * 40_001
     target = context.workspace_path / "large-line.txt"
     target.write_text(f"{oversized_line}\n", encoding="utf-8")
@@ -1078,11 +1017,6 @@ async def test_apply_patch_large_file_delete_requires_full_file_snapshot(
     tmp_path: Path,
 ) -> None:
     db_path, context = _bootstrap_typed_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     lines = [f"- item {index}" for index in range(1, 851)]
     target = context.workspace_path / "large-delete.txt"
     target.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -1115,11 +1049,6 @@ async def test_apply_patch_large_file_window_uses_location_hints(
     tmp_path: Path,
 ) -> None:
     db_path, context = _bootstrap_typed_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="scoped_write",
-    )
     lines = [f"line {index}" for index in range(1, 901)]
     lines[99] = "duplicate"
     lines[699] = "section B"

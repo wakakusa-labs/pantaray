@@ -26,7 +26,6 @@ const MAIN_AND_OVERLAY_CHANNELS = new Set<IpcChannel>([
   'auth:getState',
   // Read-only: the overlay's permission control opens on the Settings default
   // before a conversation exists. The matching setter stays main-only.
-  'approval:getWorkspaceEditCommandPreference',
   // Read-only: the overlay composer lists workspace projects to reference.
   // Every workspaceSettings write stays main-only.
   'workspaceSettings:get',
@@ -54,8 +53,6 @@ const MAIN_AND_OVERLAY_CHANNELS = new Set<IpcChannel>([
   'action:stop',
   'action:sendNow',
   'overlay:submitApprovalDecision',
-  'overlay:getActionApprovalMode',
-  'overlay:setActionApprovalMode',
   'history:markCompletionViewed',
   // Read-only: both windows' composers title a pasted task or suggestion link.
   'history:readItem',

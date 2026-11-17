@@ -63,23 +63,6 @@ test('Only the main window reads or changes first-run setup', () => {
   }
 });
 
-test('Overlay reads the workspace approval default but cannot write it', () => {
-  const { mainEvent, security } = createSecurityHarness();
-  const overlayEvent = createSender('http://127.0.0.1:3001/notification.html', 2);
-  security.registerWindow('overlay', overlayEvent.sender);
-
-  assert.equal(
-    security.authorize('approval:getWorkspaceEditCommandPreference', overlayEvent),
-    'overlay'
-  );
-  assert.equal(security.authorize('approval:setWorkspaceEditCommandPreference', mainEvent), 'main');
-  assert.throws(
-    () => security.authorize('approval:setWorkspaceEditCommandPreference', overlayEvent),
-    (error) =>
-      error instanceof IpcSenderRejectedError && error.code === 'channel_not_allowed_for_window'
-  );
-});
-
 test('Overlay reads workspace projects but cannot change them', () => {
   const { mainEvent, security } = createSecurityHarness();
   const overlayEvent = createSender('http://127.0.0.1:3001/notification.html', 2);
@@ -114,8 +97,6 @@ test('Both windows act on an Action; History opens and suggestion reads belong t
     'action:stop',
     'action:sendNow',
     'overlay:submitApprovalDecision',
-    'overlay:getActionApprovalMode',
-    'overlay:setActionApprovalMode',
     'clipboard:writeText',
     'history:markCompletionViewed',
     'history:readItem',

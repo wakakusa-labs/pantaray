@@ -13,8 +13,7 @@ type ImageLightboxCopy = {
 /**
  * Full-size view of one attached image.
  *
- * Rendered into `document.body` for the same reason as the approval-mode popover: the overlay
- * window resizes itself to the measured height of the conversation subtree, and a full-size
+ * Rendered into `document.body` because the overlay window resizes itself to the measured height of the conversation subtree, and a full-size
  * image inside it would drag the window to full screen. Fixed positioning outside that subtree
  * keeps the window exactly where the user left it.
  */

@@ -28,7 +28,6 @@ export type AcceptActionRequest = {
   // Spans point into the trimmed supplement.
   supplementProjectRefs: ActionProjectRef[];
   supplementWorkRefs: ActionWorkRef[];
-  approvalMode: 'prompt_each_time' | 'always_allow';
   images: ActionMessageRequest['message']['images'];
   files?: ActionFileAttachment[];
 };
@@ -117,7 +116,6 @@ export type ExecuteActionClientEvent = {
     supplement: string | null;
     supplement_project_refs: AcceptActionRequest['supplementProjectRefs'];
     supplement_work_refs: AcceptActionRequest['supplementWorkRefs'];
-    approval_mode: AcceptActionRequest['approvalMode'];
     images: AcceptActionRequest['images'];
     files?: AcceptActionRequest['files'];
   };

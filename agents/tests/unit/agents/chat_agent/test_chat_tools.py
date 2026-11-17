@@ -444,9 +444,7 @@ def test_a_picked_up_todo_is_listed_and_found_by_the_todo_not_its_request(
         SubmitActionMessageCommand(
             user_id=USER,
             origin="todo_pickup",
-            target=NewActionTarget(
-                approval_mode="prompt_each_time", todo_text="Draft the weekly report"
-            ),
+            target=NewActionTarget(todo_text="Draft the weekly report"),
             message=ActionUserMessageInput(
                 message_id="todo-pickup", content=ACTION_TODO_PICKUP_REQUEST_TEXT
             ),

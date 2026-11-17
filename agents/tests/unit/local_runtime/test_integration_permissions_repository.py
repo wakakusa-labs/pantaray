@@ -9,16 +9,12 @@ from pantaray_agents.local_runtime.storage.migrations import load_default_migrat
 from pantaray_agents.local_runtime.tooling.brokering.approval_identity import (
     build_approval_preference_id,
 )
-from pantaray_agents.local_runtime.tooling.models import ApprovalPreferenceUpsertInput
-from pantaray_agents.local_runtime.tooling.repository import (
-    apply_approval_preference_setting,
-    upsert_approval_preference,
-)
 from pantaray_agents.local_runtime.tooling.repository import (
     integration_permissions as permissions_repository,
 )
 from pantaray_agents.local_runtime.tooling.repository.approval_preferences import (
     IntegrationWriteAllowError,
+    _write_approval_preference_row,
 )
 from pantaray_agents.local_runtime.tooling.repository.integration_permissions import (
     IntegrationAccess,
@@ -223,29 +219,26 @@ def test_saving_an_integration_write_as_always_allow_is_rejected(
     db_path: Path,
 ) -> None:
     scope = integration_write_scope(toolkit=TOOLKIT, account="account-a")
-    preference = ApprovalPreferenceUpsertInput(
-        preference_id=build_approval_preference_id(
-            user_id=USER_ID, scope_type="global", scope_ref=None, applies_to=(scope,)
-        ),
-        user_id=USER_ID,
-        scope_type="global",
-        scope_ref=None,
-        approval_mode="always_allow",
-        # Hiding the write scope beside another one must not get it through.
-        applies_to=("screen_capture", scope),
-        created_at=TIMESTAMP,
-        updated_at=TIMESTAMP,
-    )
 
-    with pytest.raises(IntegrationWriteAllowError):
-        upsert_approval_preference(
-            db_path=db_path, busy_timeout_ms=BUSY_TIMEOUT_MS, preference=preference
-        )
-    with pytest.raises(IntegrationWriteAllowError):
-        apply_approval_preference_setting(
-            db_path=db_path, busy_timeout_ms=BUSY_TIMEOUT_MS, preference=preference
-        )
     with sqlite3.connect(db_path) as connection:
+        with pytest.raises(IntegrationWriteAllowError):
+            _write_approval_preference_row(
+                connection=connection,
+                preference_id=build_approval_preference_id(
+                    user_id=USER_ID,
+                    scope_type="global",
+                    scope_ref=None,
+                    applies_to=(scope,),
+                ),
+                user_id=USER_ID,
+                scope_type="global",
+                scope_ref=None,
+                approval_mode="always_allow",
+                # Hiding the write scope beside another one must not get it through.
+                applies_to=("screen_capture", scope),
+                created_at=TIMESTAMP,
+                updated_at=TIMESTAMP,
+            )
         assert connection.execute(
             "SELECT COUNT(*) FROM approval_preferences"
         ).fetchone() == (0,)

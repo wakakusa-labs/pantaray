@@ -40,7 +40,6 @@ from pantaray_agents.tools.contract import BrokerPolicyError
 from .action_seed import insert_agent_action
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
-    _grant_workspace_full_access,
     _seed_broker_actor_process,
 )
 from .migrated_db import prepare_test_database
@@ -61,7 +60,6 @@ async def test_action_reads_current_facts_and_insights_whole_but_cannot_change_t
 ) -> None:
     db_path, artifact_root, context = _bootstrap(tmp_path, monkeypatch)
     # Approval is not what stops a write below: the folders are read-only.
-    _grant_workspace_full_access(db_path=db_path, capability="scoped_write")
     _publish_facts(db_path, artifact_root, index_link="wakakusa/pantaray.md")
     _publish_head(
         db_path=db_path,

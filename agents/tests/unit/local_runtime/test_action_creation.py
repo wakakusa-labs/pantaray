@@ -57,11 +57,6 @@ from pantaray_agents.local_runtime.runtime.suggestion_from_insight import (
     suggestion_id_for_insight,
 )
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
-from pantaray_agents.local_runtime.tooling.models import ApprovalMode
-from pantaray_agents.local_runtime.tooling.repository.action_approval_modes import (
-    load_action_approval_mode,
-    set_action_approval_mode,
-)
 from pantaray_agents.schema.agent.action import (
     ActionUserMessageInput,
     SuggestionApprovalInput,
@@ -116,7 +111,6 @@ def _create_schema(db_path: Path) -> None:
                 user_id TEXT NOT NULL,
                 suggestion_id TEXT UNIQUE,
                 initial_user_message_id TEXT NOT NULL,
-                initial_approval_mode TEXT,
                 execution_target_json TEXT NOT NULL,
                 status TEXT NOT NULL,
                 final_output TEXT NOT NULL,
@@ -129,13 +123,6 @@ def _create_schema(db_path: Path) -> None:
                 UNIQUE(user_id, initial_user_message_id),
                 FOREIGN KEY(user_id) REFERENCES users(user_id),
                 FOREIGN KEY(suggestion_id) REFERENCES agent_suggestions(suggestion_id)
-            );
-            CREATE TABLE action_approval_modes (
-                action_id TEXT PRIMARY KEY REFERENCES agent_actions(action_id),
-                user_id TEXT NOT NULL REFERENCES users(user_id),
-                approval_mode TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
             );
             CREATE TABLE agent_action_steps (
                 step_id TEXT PRIMARY KEY,
@@ -292,12 +279,10 @@ def creation_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return db_path
 
 
-def _text_command(
-    *, text: str = "Do the work", approval_mode: ApprovalMode | None = None
-) -> SubmitActionMessageCommand:
+def _text_command(*, text: str = "Do the work") -> SubmitActionMessageCommand:
     return SubmitActionMessageCommand(
         user_id="user-1",
-        target=NewActionTarget(approval_mode=approval_mode),
+        target=NewActionTarget(),
         message=ActionUserMessageInput(
             message_id="message-1",
             content=text,
@@ -318,12 +303,8 @@ def _insert_reply_source(db_path: Path) -> None:
 
 
 def _reply_command() -> SubmitActionMessageCommand:
-    return _text_command(approval_mode="always_allow").model_copy(
-        update={
-            "target": NewActionTarget(
-                approval_mode="always_allow", reply_to_suggestion_id="comment-1"
-            )
-        }
+    return _text_command().model_copy(
+        update={"target": NewActionTarget(reply_to_suggestion_id="comment-1")}
     )
 
 
@@ -368,11 +349,7 @@ def test_reply_snapshots_assistant_before_user_and_replays_without_reading_sourc
         connection.execute("DELETE FROM agent_suggestions")
     assert submit_action_message(command) == replace(result, inserted=False)
     with pytest.raises(MessageIdentityConflictError, match="reply origin"):
-        submit_action_message(
-            command.model_copy(
-                update={"target": NewActionTarget(approval_mode="always_allow")}
-            )
-        )
+        submit_action_message(command.model_copy(update={"target": NewActionTarget()}))
     with sqlite3.connect(creation_db) as connection:
         assert (
             connection.execute("SELECT COUNT(*) FROM agent_action_steps").fetchone()[0]
@@ -462,8 +439,7 @@ def _todo_pickup_command(
     return SubmitActionMessageCommand(
         user_id="user-1",
         origin=origin,
-        target=target
-        or NewActionTarget(approval_mode="prompt_each_time", todo_text=_TODO_TEXT),
+        target=target or NewActionTarget(todo_text=_TODO_TEXT),
         message=ActionUserMessageInput(message_id="todo-pickup-1", content=content),
     )
 
@@ -532,41 +508,11 @@ def test_concurrent_todo_pickups_start_one_action(creation_db: Path) -> None:
         assert connection.execute("SELECT COUNT(*) FROM jobs").fetchone() == (1,)
 
 
-def test_todo_pickup_asks_each_time_while_a_user_message_keeps_the_user_setting(
-    creation_db: Path,
-) -> None:
-    pickup = submit_action_message(_todo_pickup_command())
-    typed = submit_action_message(_text_command())
-    modes = [
-        load_action_approval_mode(
-            db_path=creation_db,
-            busy_timeout_ms=1_000,
-            user_id="user-1",
-            action_id=result.action_id,
-        )
-        for result in (pickup, typed)
-    ]
-    # No Action-level mode means the user's own setting decides.
-    assert modes == ["prompt_each_time", None]
-
-
 @pytest.mark.parametrize(
     ("origin", "target", "content", "error"),
     [
-        ("todo_pickup", NewActionTarget(todo_text=_TODO_TEXT), None, "each time"),
-        (
-            "todo_pickup",
-            NewActionTarget(approval_mode="always_allow", todo_text=_TODO_TEXT),
-            None,
-            "each time",
-        ),
         ("todo_pickup", None, "Do the work", "fixed request text"),
-        (
-            "todo_pickup",
-            NewActionTarget(approval_mode="prompt_each_time"),
-            None,
-            "opens a new Action",
-        ),
+        ("todo_pickup", NewActionTarget(), None, "opens a new Action"),
         (
             "todo_pickup",
             ExistingActionTarget(action_id="action-1", expected_process_id=None),
@@ -1213,14 +1159,11 @@ def test_create_action_rolls_back_when_acceptance_event_append_fails(
     )
 
     with pytest.raises(RuntimeError, match="append failed"):
-        submit_action_message(
-            _reply_command() if reply else _text_command(approval_mode="always_allow")
-        )
+        submit_action_message(_reply_command() if reply else _text_command())
 
     with sqlite3.connect(creation_db) as connection:
         for table in (
             "agent_actions",
-            "action_approval_modes",
             "agent_action_steps",
             "processes",
             "jobs",
@@ -1848,62 +1791,6 @@ def test_submit_action_message_rejects_message_identity_reused_for_another_actio
                 ),
             )
         )
-
-
-@pytest.mark.parametrize("mode", [None, "prompt_each_time", "always_allow"])
-def test_initial_approval_mode_is_committed_with_creation(
-    creation_db: Path, mode: ApprovalMode | None
-) -> None:
-    result = submit_action_message(_text_command(approval_mode=mode))
-    assert (
-        load_action_approval_mode(
-            db_path=creation_db,
-            busy_timeout_ms=1_000,
-            user_id="user-1",
-            action_id=result.action_id,
-        )
-        == mode
-    )
-    with sqlite3.connect(creation_db) as connection:
-        assert (
-            connection.execute(
-                "SELECT initial_approval_mode FROM agent_actions WHERE action_id = ?",
-                (result.action_id,),
-            ).fetchone()[0]
-            == mode
-        )
-
-
-def test_creation_replay_preserves_later_consent_and_rejects_changed_initial_mode(
-    creation_db: Path,
-) -> None:
-    command = _text_command(approval_mode="always_allow")
-    result = submit_action_message(command)
-    set_action_approval_mode(
-        db_path=creation_db,
-        busy_timeout_ms=1_000,
-        user_id="user-1",
-        action_id=result.action_id,
-        approval_mode="prompt_each_time",
-        updated_at="2026-08-16T02:00:00.000Z",
-    )
-    replay = submit_action_message(command)
-    assert replay.inserted is False
-    assert replay.action_id == result.action_id
-    for changed_mode in (None, "prompt_each_time"):
-        with pytest.raises(MessageIdentityConflictError, match="initial approval mode"):
-            submit_action_message(_text_command(approval_mode=changed_mode))
-    assert (
-        load_action_approval_mode(
-            db_path=creation_db,
-            busy_timeout_ms=1_000,
-            user_id="user-1",
-            action_id=result.action_id,
-        )
-        == "prompt_each_time"
-    )
-    with sqlite3.connect(creation_db) as connection:
-        assert connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 1
 
 
 def _checkpoint_run(db_path: Path, *, action_id: str, user_step_ids: list[str]) -> None:

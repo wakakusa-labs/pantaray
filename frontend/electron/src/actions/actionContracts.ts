@@ -58,7 +58,6 @@ const ActionMessageTargetSchema = z.discriminatedUnion('kind', [
   z
     .object({
       kind: z.literal('new'),
-      approval_mode: z.enum(['prompt_each_time', 'always_allow']).nullable().optional(),
       reply_to_suggestion_id: ActionMessageIdSchema.nullable().optional(),
     })
     .strict(),

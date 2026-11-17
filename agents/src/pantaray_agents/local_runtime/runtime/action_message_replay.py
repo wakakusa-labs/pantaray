@@ -6,7 +6,6 @@ import sqlite3
 from typing import cast
 
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
-from pantaray_agents.local_runtime.tooling.models import ApprovalMode
 from pantaray_agents.schema.action_conversation import ActionStatus
 from pantaray_agents.tasks.action_user_message import parse_action_user_message
 
@@ -38,7 +37,7 @@ def _load_existing_submission(
     row = connection.execute(
         """
         SELECT actions.action_id, actions.suggestion_id, actions.status AS action_status,
-               actions.initial_user_message_id, actions.initial_approval_mode,
+               actions.initial_user_message_id,
                steps.step_id, steps.user_message_id, steps.user_message_json,
                steps.step_number, steps.adoption_canceled_at, steps.expected_process_id,
                steps.adopted_process_id,
@@ -81,7 +80,6 @@ def _load_existing_submission(
     return _ExistingSubmission(
         result=result,
         action_created=action_created,
-        initial_approval_mode=cast(ApprovalMode | None, row["initial_approval_mode"]),
         suggestion_id=str(raw_suggestion_id) if raw_suggestion_id is not None else None,
         reply_to_suggestion_id=(
             str(raw_reply_to_suggestion_id)
@@ -172,13 +170,6 @@ def _validate_idempotent_replay(
     ):
         raise MessageIdentityConflictError(
             "message_id already belongs to a different expected process"
-        )
-    if (
-        isinstance(target, NewActionTarget)
-        and existing.initial_approval_mode != target.approval_mode
-    ):
-        raise MessageIdentityConflictError(
-            "message_id already belongs to a different initial approval mode"
         )
     if (
         isinstance(target, NewActionTarget)

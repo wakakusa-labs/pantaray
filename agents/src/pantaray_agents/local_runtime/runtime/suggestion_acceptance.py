@@ -15,7 +15,6 @@ from pantaray_agents.local_runtime.storage.migrations import MigrationError
 from pantaray_agents.local_runtime.suggestion_state.repository import (
     LocalSuggestionStateRepository,
 )
-from pantaray_agents.local_runtime.tooling.models import ApprovalMode
 from pantaray_agents.schema.agent.action import (
     ActionUserMessageInput,
     SuggestionApprovalInput,
@@ -74,7 +73,6 @@ async def accept_suggestion(
     user_id: str,
     suggestion_id: str,
     command_id: str,
-    approval_mode: ApprovalMode,
     language: ActionLanguage | None,
     supplement: str | None,
     supplement_project_refs: tuple[ActionProjectRef, ...],
@@ -120,7 +118,6 @@ async def accept_suggestion(
                 supplement=_optional_text(supplement),
                 supplement_project_refs=supplement_project_refs,
                 supplement_work_refs=supplement_work_refs,
-                approval_mode=approval_mode,
                 images=images,
                 files=files,
                 chat_handoff=chat_handoff,
@@ -169,7 +166,6 @@ def _build_command(
     supplement: str | None,
     supplement_project_refs: tuple[ActionProjectRef, ...],
     supplement_work_refs: tuple[ActionWorkRef, ...],
-    approval_mode: ApprovalMode,
     images: tuple[ImageInput, ...],
     files: tuple[FileAttachmentInput, ...],
     chat_handoff: ChatHandoffInput | None,
@@ -191,9 +187,7 @@ def _build_command(
     try:
         return SubmitActionMessageCommand(
             user_id=user_id,
-            target=NewActionTarget(
-                suggestion_id=suggestion_id, approval_mode=approval_mode
-            ),
+            target=NewActionTarget(suggestion_id=suggestion_id),
             message=ActionUserMessageInput(
                 message_id=command_id,
                 content=content,

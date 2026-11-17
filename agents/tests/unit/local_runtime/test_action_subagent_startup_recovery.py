@@ -417,7 +417,7 @@ def test_broken_child_envelope_still_reaches_the_blocked_transition(
 def _claim_child_gated_tool(
     db_path: Path, context: ActionExecutionContext, *, request_id: str = TOOL_REQUEST_ID
 ) -> None:
-    """Claim one gated child Tool the way an always_allow setting does."""
+    """Claim one gated child Tool the way a workspace edit is approved."""
 
     register_running_apply_patch_invocation(db_path=db_path, context=context)
     _update(

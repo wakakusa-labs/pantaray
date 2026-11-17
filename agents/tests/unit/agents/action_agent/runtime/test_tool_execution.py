@@ -49,14 +49,6 @@ from pantaray_agents.local_runtime.tooling.bootstrap import (
 from pantaray_agents.local_runtime.tooling.brokering.broker_outcome import (
     UnprojectedBrokerToolOutcome,
 )
-from pantaray_agents.local_runtime.tooling.models import (
-    ApprovalPreferenceUpsertInput,
-    CapabilityGrantCreateInput,
-)
-from pantaray_agents.local_runtime.tooling.repository import (
-    create_capability_grant,
-    upsert_approval_preference,
-)
 from pantaray_agents.local_runtime.tooling.sandbox.runtime_policy import (
     BrokerLocalBudget,
     RuntimeBudgetResolution,
@@ -1214,6 +1206,7 @@ async def test_run_tool_does_not_execute_broker_without_invocation_audit(
 @pytest.mark.asyncio
 async def test_run_tool_returns_processing_with_pending_approval_without_invocation(
     tmp_path,
+    tmp_path_factory: pytest.TempPathFactory,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db_path = tmp_path / "runtime.db"
@@ -1237,22 +1230,8 @@ async def test_run_tool_returns_processing_with_pending_approval_without_invocat
         started_at="2025-01-01T00:00:00Z",
         allowed_tool_ids=("apply_patch",),
     )
-    upsert_approval_preference(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        preference=ApprovalPreferenceUpsertInput(
-            preference_id="pref-prompt",
-            user_id="user-123",
-            scope_type="global",
-            scope_ref=None,
-            approval_mode="prompt_each_time",
-            applies_to=("workspace_edit_and_command",),
-            created_at="2025-01-01T00:00:00Z",
-            updated_at="2025-01-01T00:00:00Z",
-        ),
-    )
-    target_file = context.workspace_path / "notes.txt"
-    target_file.write_text("line-1\n", encoding="utf-8")
+    # A write outside the registered folders asks the user.
+    outside = tmp_path_factory.mktemp("outside-folder").resolve()
     monkeypatch.setenv("LOCAL_DB_PATH", str(db_path))
     monkeypatch.setenv("LOCAL_DB_BUSY_TIMEOUT_MS", "1000")
 
@@ -1269,9 +1248,10 @@ async def test_run_tool_returns_processing_with_pending_approval_without_invocat
         args={
             "changes": [
                 {
-                    "op": "update",
-                    "path": "notes.txt",
-                    "edits": [{"old_lines": ["line-1"], "new_lines": ["line-2"]}],
+                    "op": "add",
+                    "path": str(outside / "notes.txt"),
+                    "new_lines": ["line-2"],
+                    "trailing_newline": True,
                 }
             ]
         },
@@ -1335,34 +1315,6 @@ async def test_run_tool_records_actual_bash_cwd_and_runtime_timeout_in_local_aud
     executable_path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     executable_path.chmod(
         executable_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
-    )
-    upsert_approval_preference(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        preference=ApprovalPreferenceUpsertInput(
-            preference_id="pref-123",
-            user_id="user-123",
-            scope_type="global",
-            scope_ref=None,
-            approval_mode="always_allow",
-            applies_to=("workspace_edit_and_command",),
-            created_at="2025-01-01T00:00:00Z",
-            updated_at="2025-01-01T00:00:00Z",
-        ),
-    )
-    create_capability_grant(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        grant=CapabilityGrantCreateInput(
-            grant_id="grant-123",
-            user_id="user-123",
-            preference_id="pref-123",
-            capability="process_exec_local",
-            scope_type="global",
-            scope_ref=None,
-            grant_source="settings",
-            granted_at="2025-01-01T00:00:01Z",
-        ),
     )
     monkeypatch.setenv("LOCAL_DB_PATH", str(db_path))
     monkeypatch.setenv("LOCAL_DB_BUSY_TIMEOUT_MS", "1000")

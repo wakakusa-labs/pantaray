@@ -18,14 +18,8 @@ from pantaray_agents.local_runtime.tooling.brokering.broker import (
     BrokerExecutionError,
     execute_broker_tool,
 )
-from pantaray_agents.local_runtime.tooling.models import (
-    ApprovalPreferenceUpsertInput,
-    CapabilityGrantCreateInput,
-)
 from pantaray_agents.local_runtime.tooling.repository import (
     complete_execution_session,
-    create_capability_grant,
-    upsert_approval_preference,
 )
 
 from .action_seed import insert_agent_action
@@ -59,40 +53,6 @@ def _bootstrap_runtime_db(tmp_path: Path) -> tuple[Path, object]:
     return db_path, context
 
 
-def _grant_workspace_command_access(
-    *, db_path: Path, manifest_id: str | None = None
-) -> None:
-    del manifest_id
-    upsert_approval_preference(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        preference=ApprovalPreferenceUpsertInput(
-            preference_id="pref-global-command",
-            user_id="user-1",
-            scope_type="global",
-            scope_ref=None,
-            approval_mode="always_allow",
-            applies_to=("workspace_edit_and_command",),
-            created_at="2026-03-23T00:00:00Z",
-            updated_at="2026-03-23T00:00:00Z",
-        ),
-    )
-    create_capability_grant(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        grant=CapabilityGrantCreateInput(
-            grant_id="grant-global-process_exec_local",
-            user_id="user-1",
-            preference_id="pref-global-command",
-            capability="process_exec_local",
-            scope_type="global",
-            scope_ref=None,
-            grant_source="settings",
-            granted_at="2026-03-23T00:00:01Z",
-        ),
-    )
-
-
 @pytest.mark.asyncio
 async def test_helper_spawn_failure_cleans_temp_dir_resource(
     tmp_path: Path,
@@ -101,10 +61,6 @@ async def test_helper_spawn_failure_cleans_temp_dir_resource(
     from pantaray_agents.local_runtime.tooling.brokering import broker as broker_module
 
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_command_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-    )
 
     async def _failing_create_subprocess_exec(*args, **kwargs):
         del args, kwargs
@@ -154,10 +110,6 @@ async def test_initial_resource_conflict_removes_untracked_temp_dir(
     from pantaray_agents.local_runtime.tooling.brokering import broker as broker_module
 
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_command_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-    )
     original_register = broker_module.register_path_resource
     attempted_paths: list[Path] = []
 
@@ -212,10 +164,6 @@ async def test_process_group_registration_failure_cleans_temp_dir_resource(
     )
 
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_command_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-    )
 
     class _FakeStdout:
         async def readline(self) -> bytes:
@@ -326,10 +274,6 @@ async def test_user_stop_kills_the_command_and_keeps_its_partial_output(
     )
 
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_command_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-    )
     partial_line = (
         json.dumps(
             {
@@ -484,10 +428,6 @@ async def test_stop_after_the_helper_exited_records_no_termination_signal(
     )
 
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_command_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-    )
     reading = asyncio.Event()
 
     class _ExitedProcess:
@@ -564,10 +504,6 @@ async def test_stop_racing_a_self_exit_records_the_real_wait_status(
     )
 
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_command_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-    )
     reading = asyncio.Event()
 
     class _ReapedProcess:

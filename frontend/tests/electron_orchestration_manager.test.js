@@ -63,7 +63,6 @@ function actionRequest(supplement = null, commandId = null) {
     supplement,
     supplementProjectRefs: [],
     supplementWorkRefs: [],
-    approvalMode: 'prompt_each_time',
     images: [],
   };
 }
@@ -497,7 +496,6 @@ test('OrchestrationManager: command allocation時のexact envelopeだけを再�
   ];
   const snapshot = await harness.manager.acceptAction({
     ...actionRequest('Keep this condition'),
-    approvalMode: 'always_allow',
     images,
     files,
   });
@@ -511,7 +509,6 @@ test('OrchestrationManager: command allocation時のexact envelopeだけを再�
       supplement: 'Keep this condition',
       supplement_project_refs: [],
       supplement_work_refs: [],
-      approval_mode: 'always_allow',
       images,
       files,
     },

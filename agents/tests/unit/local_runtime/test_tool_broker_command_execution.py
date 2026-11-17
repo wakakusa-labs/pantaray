@@ -30,7 +30,6 @@ from .action_seed import insert_agent_action
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
     _bootstrap_runtime_db,
-    _grant_workspace_full_access,
     _register_folder_mount,
     _seed_broker_actor_process,
     _stub_process_group_resource_registration,
@@ -45,11 +44,6 @@ async def test_execute_broker_tool_forwards_shell_command_to_worker(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="process_exec_local",
-    )
     _stub_process_group_resource_registration(monkeypatch)
     captured_argv = _stub_subprocess_exec(
         monkeypatch,
@@ -125,11 +119,6 @@ async def test_bash_sandbox_request_uses_manifest_roots_without_workspace_id(
         action_id="action-1",
         started_at="2026-03-23T00:00:00Z",
         allowed_tool_ids=("read", "apply_patch", "bash"),
-    )
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="process_exec_local",
     )
     with sqlite3.connect(db_path) as connection:
         connection.execute(

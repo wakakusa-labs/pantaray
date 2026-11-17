@@ -71,8 +71,6 @@ export function buildMainContext(params: {
   getUiSettingsPath: () => string;
   getUiLanguage: () => UiLanguage;
   setUiLanguage: (lang: UiLanguage) => void;
-  getWorkspaceEditCommandPreference: MainContext['approval']['getWorkspaceEditCommandPreference'];
-  setWorkspaceEditCommandPreference: MainContext['approval']['setWorkspaceEditCommandPreference'];
   getGlobalShortcutState: MainContext['shortcut']['getState'];
   setGlobalShortcutAccelerator: MainContext['shortcut']['setAccelerator'];
   overlayPlacement: MainContext['overlayPlacement'];
@@ -122,8 +120,6 @@ export function buildMainContext(params: {
   adoptSuggestionSnapshot: MainContext['overlay']['adoptSuggestionSnapshot'];
   recordSuggestionReply: MainContext['overlay']['recordSuggestionReply'];
   submitApprovalDecision: MainContext['overlay']['submitApprovalDecision'];
-  getActionApprovalMode: MainContext['overlay']['getActionApprovalMode'];
-  setActionApprovalMode: MainContext['overlay']['setActionApprovalMode'];
   createNotificationIpcHandlers?: MainContext['overlay']['createNotificationIpcHandlers'];
 }): MainContext {
   const normalizeOptionalString = (value: unknown): string | null =>
@@ -317,12 +313,6 @@ export function buildMainContext(params: {
       },
     },
 
-    approval: {
-      getWorkspaceEditCommandPreference: async () => params.getWorkspaceEditCommandPreference(),
-      setWorkspaceEditCommandPreference: async (approvalMode) =>
-        params.setWorkspaceEditCommandPreference(approvalMode),
-    },
-
     shortcut: {
       getState: params.getGlobalShortcutState,
       setAccelerator: params.setGlobalShortcutAccelerator,
@@ -436,9 +426,6 @@ export function buildMainContext(params: {
       adoptSuggestionSnapshot: params.adoptSuggestionSnapshot,
       recordSuggestionReply: params.recordSuggestionReply,
       submitApprovalDecision: async (payload) => params.submitApprovalDecision(payload),
-      getActionApprovalMode: async (actionId) => params.getActionApprovalMode(actionId),
-      setActionApprovalMode: async (actionId, approvalMode) =>
-        params.setActionApprovalMode(actionId, approvalMode),
       createNotificationIpcHandlers: params.createNotificationIpcHandlers,
     },
   };

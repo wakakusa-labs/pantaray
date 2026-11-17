@@ -121,9 +121,9 @@ BASH_TOOL_FIELD_PRESENTATION = (
             "save_html_as_pdf instead of starting a browser. Never set it "
             "pre-emptively for anything else, for convenience, or before trying "
             "the command normally.\n"
-            "- The call waits for the user to approve this exact command once, "
-            "whatever the approval mode, then runs it with the user's own "
-            "permissions; if the user does not allow it, find another way.\n"
+            "- The call always waits for the user to approve this exact command "
+            "once, then runs it with the user's own permissions; if the user "
+            "does not allow it, find another way.\n"
             "- Keep the command to the step that needs it. Do not combine it "
             "with additional_write_folders."
         ),

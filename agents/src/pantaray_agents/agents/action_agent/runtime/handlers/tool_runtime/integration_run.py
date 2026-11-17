@@ -39,9 +39,6 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
 from pantaray_agents.local_runtime.tooling.brokering.execution_start import (
     claim_approved_execution_start,
 )
-from pantaray_agents.local_runtime.tooling.repository.integration_permissions import (
-    integration_tool_scope,
-)
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.tool_result import build_runtime_tool_error_output
 from pantaray_agents.tools.contract import BrokerPolicyError
@@ -240,9 +237,8 @@ def _authorize_write(
             "slug": resolved.tool.slug,
         },
         requested_at=requested_at,
-        integration_tool_scope=integration_tool_scope(
-            account=resolved.account.account, slug=resolved.tool.slug
-        ),
+        # An integration write asks the user for every execution.
+        require_user_prompt=True,
     )
 
 

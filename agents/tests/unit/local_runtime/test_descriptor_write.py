@@ -24,7 +24,6 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_structured_patch imp
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
     _bootstrap_runtime_db,
-    _grant_workspace_full_access,
 )
 
 
@@ -81,9 +80,6 @@ async def test_broker_returns_absolute_changed_path_after_sync_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(
-        db_path=db_path, manifest_id=context.manifest_id, capability="scoped_write"
-    )
     sync = os.fsync
 
     def fail_directory_sync(fd: int) -> None:

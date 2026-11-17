@@ -9,7 +9,6 @@ from tests.unit.local_runtime.broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
     _bootstrap_runtime_db,
     _bootstrap_runtime_db_with_registered_folder,
-    _grant_workspace_full_access,
 )
 from tests.unit.local_runtime.test_action_subagent_command_sandbox import (
     _seed_children_and_claim,
@@ -28,11 +27,6 @@ async def test_python_copies_to_other_authorized_root_and_denies_outside(
 ) -> None:
     db_path, context, repo, _folder = _bootstrap_runtime_db_with_registered_folder(
         tmp_path, allowed_tool_ids=("read", "apply_patch", "bash", "run_python")
-    )
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="process_exec_local",
     )
     source = context.workspace_path / "report.md"
     source.write_text("verified report\n")
@@ -70,11 +64,6 @@ async def test_parent_can_read_during_child_claim_but_only_child_can_write(
     # A claim narrows the write roots; a temp root above the workspace would not.
     db_path, context = _bootstrap_runtime_db(
         outside_temp_path, allowed_tool_ids=("bash", "run_python")
-    )
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="process_exec_local",
     )
     claimed = context.workspace_path / "claimed"
     claimed.mkdir()
@@ -131,10 +120,6 @@ async def test_file_and_command_tools_share_session_cwd(tmp_path: Path) -> None:
     db_path, context, repo, _folder = _bootstrap_runtime_db_with_registered_folder(
         tmp_path
     )
-    for capability in ("scoped_write", "process_exec_local"):
-        _grant_workspace_full_access(
-            db_path=db_path, manifest_id=context.manifest_id, capability=capability
-        )
     with sqlite3.connect(db_path) as connection:
         connection.execute(
             "UPDATE execution_sessions SET cwd_path = ? WHERE execution_session_id = ?",
@@ -182,11 +167,6 @@ async def test_broker_executes_pytest_from_nested_project_environment(
 ) -> None:
     db_path, context, repo, _folder = _bootstrap_runtime_db_with_registered_folder(
         tmp_path
-    )
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="process_exec_local",
     )
     (repo / ".git").mkdir()
     project = repo / "agents"

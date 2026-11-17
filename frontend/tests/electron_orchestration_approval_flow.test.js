@@ -5,7 +5,6 @@ const {
   createOrchestrationManager,
 } = require('../electron/dist/orchestration/orchestrationManager.js');
 
-
 // Starts each read as soon as it is asked for, as the shared reader does with no other caller.
 function immediateLatestPages(readPage) {
   let readsStarted = 0;
@@ -159,7 +158,6 @@ test('OrchestrationManager: approval pending は process_paused payload から�
     supplement: null,
     supplementProjectRefs: [],
     supplementWorkRefs: [],
-    approvalMode: 'prompt_each_time',
     images: [],
   });
   const hooks = harness.getWsHooks();

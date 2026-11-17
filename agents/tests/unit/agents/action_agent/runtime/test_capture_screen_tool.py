@@ -15,7 +15,6 @@ from tests.unit.local_runtime.broker_test_support import (
     BROKER_ALLOWED_TOOL_IDS,
     RecordingDesktopSession,
     _bootstrap_runtime_db,
-    _grant_workspace_full_access,
     desktop_session,
 )
 
@@ -40,19 +39,13 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
     apply_approval_decision,
 )
 from pantaray_agents.local_runtime.tooling.models import (
-    ApprovalMode,
-    ApprovalPreferenceUpsertInput,
-    CapabilityGrantCreateInput,
+    ApprovalSessionUpsertInput,
     ToolInvocationStartInput,
 )
 from pantaray_agents.local_runtime.tooling.repository import (
-    create_capability_grant,
     load_approval_session_by_request,
     record_tool_invocation_start,
-    upsert_approval_preference,
-)
-from pantaray_agents.local_runtime.tooling.repository.action_approval_modes import (
-    set_action_approval_mode,
+    upsert_approval_session,
 )
 
 CAPTURE_UUID = "6a6f1b2c-6e34-4d21-9a11-0f2c3d4e5f60"
@@ -117,33 +110,31 @@ def _write_capture(artifact_root: Path, payload: bytes = PNG_BYTES) -> None:
     target.write_bytes(payload)
 
 
-def _grant_screen_capture(db_path: Path) -> None:
-    upsert_approval_preference(
+def _approve_capture(db_path: Path, context: object) -> None:
+    """The user's answer to this capture's approval, recorded before it runs."""
+
+    upsert_approval_session(
         db_path=db_path,
         busy_timeout_ms=1_000,
-        preference=ApprovalPreferenceUpsertInput(
-            preference_id="pref-capture",
+        approval_session=ApprovalSessionUpsertInput(
+            approval_session_id="approval-capture",
+            tool_request_id=TOOL_REQUEST_ID,
             user_id="user-1",
-            scope_type="global",
-            scope_ref=None,
-            approval_mode="always_allow",
-            applies_to=("screen_capture",),
-            created_at=REQUESTED_AT,
-            updated_at=REQUESTED_AT,
-        ),
-    )
-    create_capability_grant(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        grant=CapabilityGrantCreateInput(
-            grant_id="grant-screen-capture",
-            user_id="user-1",
-            preference_id="pref-capture",
-            capability="screen_capture",
-            scope_type="global",
-            scope_ref=None,
-            grant_source="settings",
-            granted_at=REQUESTED_AT,
+            action_id="action-1",
+            manifest_id=context.manifest_id,  # type: ignore[attr-defined]
+            expected_execution_session_id=context.execution_session_id,  # type: ignore[attr-defined]
+            tool_invocation_id=None,
+            tool_id=CAPTURE_SCREEN_TOOL.tool_id,
+            intent_class="screen_capture",
+            approval_source="prompt",
+            status="approved_once",
+            approved_capabilities_json={"required_capabilities": ["screen_capture"]},
+            command_summary_json=capture_screen_module.build_capture_screen_summary(
+                APP_NAME
+            ),
+            requested_at=REQUESTED_AT,
+            decided_at=REQUESTED_AT,
+            claimed_at=None,
         ),
     )
 
@@ -225,23 +216,12 @@ async def _run(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("action_mode", [None, "always_allow"])
-async def test_prompt_each_time_pauses_before_any_capture_is_requested(
+async def test_every_capture_pauses_before_it_is_requested(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    action_mode: ApprovalMode | None,
     desktop: RecordingDesktopSession,
 ) -> None:
     db_path, context = _bootstrap(tmp_path)
-    if action_mode is not None:
-        set_action_approval_mode(
-            db_path=db_path,
-            busy_timeout_ms=1_000,
-            user_id="user-1",
-            action_id="action-1",
-            approval_mode=action_mode,
-            updated_at=REQUESTED_AT,
-        )
     _bind(monkeypatch, db_path=db_path)
 
     preparation = await _preflight(_state(context))
@@ -260,19 +240,6 @@ async def test_prompt_each_time_pauses_before_any_capture_is_requested(
     # The capture is what needs consent, so nothing may have been asked of the
     # desktop client before the user answered.
     assert desktop.requests == []
-
-
-@pytest.mark.asyncio
-async def test_workspace_grant_alone_still_prompts_for_a_capture(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    db_path, context = _bootstrap(tmp_path)
-    _grant_workspace_full_access(db_path=db_path, capability="screen_capture")
-    _bind(monkeypatch, db_path=db_path)
-
-    preparation = await _preflight(_state(context))
-
-    assert isinstance(preparation.control, ApprovalRequiredToolControl)
 
 
 @pytest.mark.asyncio
@@ -295,21 +262,11 @@ async def test_denied_approval_reports_the_call_as_skipped(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("action_mode", [None, "prompt_each_time"])
-async def test_screen_capture_grant_authorizes_without_a_prompt(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, action_mode: ApprovalMode | None
+async def test_an_approved_capture_preflights_without_asking_again(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     db_path, context = _bootstrap(tmp_path)
-    _grant_screen_capture(db_path)
-    if action_mode is not None:
-        set_action_approval_mode(
-            db_path=db_path,
-            busy_timeout_ms=1_000,
-            user_id="user-1",
-            action_id="action-1",
-            approval_mode=action_mode,
-            updated_at=REQUESTED_AT,
-        )
+    _approve_capture(db_path, context)
     _bind(monkeypatch, db_path=db_path)
 
     preparation = await _preflight(_state(context))
@@ -325,7 +282,7 @@ async def test_captured_image_becomes_a_verified_tool_attachment(
     desktop: RecordingDesktopSession,
 ) -> None:
     db_path, context = _bootstrap(tmp_path)
-    _grant_screen_capture(db_path)
+    _approve_capture(db_path, context)
     artifact_root = tmp_path / "artifacts"
     broker = _bind(monkeypatch, db_path=db_path, artifact_root=artifact_root)
     _write_capture(artifact_root)
@@ -379,7 +336,7 @@ async def test_a_file_that_is_not_what_was_reported_fails_the_capture(
     """Electron's sha256 and byte_size are claims; the file on disk decides."""
 
     db_path, context = _bootstrap(tmp_path)
-    _grant_screen_capture(db_path)
+    _approve_capture(db_path, context)
     artifact_root = tmp_path / "artifacts"
     artifact_root.mkdir()
     broker = _bind(monkeypatch, db_path=db_path, artifact_root=artifact_root)
@@ -405,7 +362,7 @@ async def test_refusal_reaches_the_model_with_its_code_and_no_attachment(
     desktop: RecordingDesktopSession,
 ) -> None:
     db_path, context = _bootstrap(tmp_path)
-    _grant_screen_capture(db_path)
+    _approve_capture(db_path, context)
     broker = _bind(monkeypatch, db_path=db_path)
 
     result = await _answer_with(
@@ -440,7 +397,7 @@ async def test_unanswered_request_times_out_instead_of_waiting_forever(
     desktop: RecordingDesktopSession,
 ) -> None:
     db_path, context = _bootstrap(tmp_path)
-    _grant_screen_capture(db_path)
+    _approve_capture(db_path, context)
     _bind(monkeypatch, db_path=db_path)
     monkeypatch.setattr(capture_screen_module, "_CAPTURE_TIMEOUT_SECONDS", 0.01)
 
@@ -461,7 +418,7 @@ async def test_a_stop_while_the_request_is_being_sent_leaves_no_request_open(
     """A late answer to a stopped capture must find nothing, not a dead loop."""
 
     db_path, context = _bootstrap(tmp_path)
-    _grant_screen_capture(db_path)
+    _approve_capture(db_path, context)
     broker = _bind(monkeypatch, db_path=db_path)
     sending = asyncio.Event()
 
@@ -496,7 +453,7 @@ async def test_an_approved_capture_is_spent_and_cannot_run_a_second_time(
     """One consent is one capture, even if the Action replays the same step."""
 
     db_path, context = _bootstrap(tmp_path)
-    _grant_screen_capture(db_path)
+    _approve_capture(db_path, context)
     artifact_root = tmp_path / "artifacts"
     broker = _bind(monkeypatch, db_path=db_path, artifact_root=artifact_root)
     _write_capture(artifact_root)

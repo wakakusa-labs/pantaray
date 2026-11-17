@@ -20,7 +20,6 @@ from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
     BROKER_ACTOR_TIMESTAMP,
     _bootstrap_runtime_db,
-    _grant_workspace_full_access,
 )
 
 BUSY_TIMEOUT_MS = 1_000
@@ -81,11 +80,6 @@ async def test_command_sandbox_uses_actor_claim_roots_without_parent_bypass(
         manifest_id=context.manifest_id,
         claimed_path=claimed_path,
     )
-    _grant_workspace_full_access(
-        db_path=db_path,
-        manifest_id=context.manifest_id,
-        capability="process_exec_local",
-    )
 
     captured: dict[str, ValidatedCommandRequest] = {}
 
@@ -141,7 +135,6 @@ async def test_claim_acquired_after_validation_prevents_spawn_and_approval_consu
     from .broker_test_support import _seed_broker_actor_process
 
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(db_path=db_path, capability="process_exec_local")
     _seed_broker_actor_process(
         db_path,
         process_id="child-race",

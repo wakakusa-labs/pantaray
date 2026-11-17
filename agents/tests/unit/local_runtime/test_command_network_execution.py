@@ -16,7 +16,6 @@ from pantaray_agents.local_runtime.tooling.repository.command_network_settings i
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
     _bootstrap_runtime_db,
-    _grant_workspace_full_access,
     _stub_process_group_resource_registration,
     _stub_subprocess_exec,
 )
@@ -30,7 +29,6 @@ async def test_each_command_uses_its_users_current_network_setting(
     db_path, context = _bootstrap_runtime_db(
         tmp_path, allowed_tool_ids=("bash", "run_python")
     )
-    _grant_workspace_full_access(db_path=db_path, capability="process_exec_local")
     _stub_process_group_resource_registration(monkeypatch)
     _stub_subprocess_exec(monkeypatch)
     update_command_network_enabled(
@@ -73,7 +71,6 @@ async def test_missing_network_authority_prevents_spawn_and_cleans_preparation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
     db_path, context = _bootstrap_runtime_db(tmp_path)
-    _grant_workspace_full_access(db_path=db_path, capability="process_exec_local")
     captured_argv = _stub_subprocess_exec(monkeypatch)
     if failure == "storage":
         with sqlite3.connect(db_path) as connection:

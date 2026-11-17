@@ -36,7 +36,6 @@ from pantaray_agents.tools.contract import BrokerPolicyError
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
     BROKER_ACTOR_TIMESTAMP,
-    _grant_workspace_full_access,
 )
 from .test_outside_workspace_patch_approval import _approval_rows, _decide
 from .test_render_html_page_broker import (
@@ -71,7 +70,6 @@ def _files(folder: Path) -> list[str]:
 
 @pytest.fixture
 def deck(runtime: Runtime) -> Path:  # noqa: F811
-    _grant_workspace_full_access(db_path=runtime[0], capability="scoped_write")
     html = _workspace(runtime) / "deck.html"
     html.write_text("<h1>Deck</h1>")
     return html
@@ -83,7 +81,7 @@ def outside(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 @pytest.mark.parametrize("existing", [False, True], ids=["new", "overwrite"])
-async def test_saves_in_the_workspace_without_asking_under_always_allow(
+async def test_saves_in_the_workspace_without_asking(
     runtime: Runtime,  # noqa: F811
     deck: Path,
     existing: bool,
@@ -124,7 +122,7 @@ async def test_saves_in_the_workspace_without_asking_under_always_allow(
     assert _files(deck.parent) == ["deck.html", "deck.pdf"]
 
 
-async def test_outside_the_workspace_asks_even_under_always_allow(
+async def test_outside_the_workspace_asks(
     runtime: Runtime,  # noqa: F811
     deck: Path,
     outside: Path,

@@ -4,8 +4,8 @@ Nothing here takes a screenshot. What may be captured depends on the recording
 filter and on the macOS Screen Recording permission, both of which live in Electron
 main; this module owns the order the two sides act in.
 
-1. Consent is settled in the preflight, before any request reaches Electron. Under
-   ``prompt_each_time`` the preflight pauses the Action, so the user answers before
+1. Consent is settled in the preflight, before any request reaches Electron. The
+   preflight pauses the Action for every capture, so the user answers before
    a single pixel is read - never "capture, then ask". The execution below then
    spends that approval through the same claim the brokered tools make, so one
    answer authorizes exactly one capture even across a resume.
@@ -377,6 +377,8 @@ def _authorize_capture(
         tool_request_id=tool_request_id,
         command_summary=build_capture_screen_summary(app_name),
         requested_at=requested_at,
+        # A screen capture asks the user every time.
+        require_user_prompt=True,
     )
 
 

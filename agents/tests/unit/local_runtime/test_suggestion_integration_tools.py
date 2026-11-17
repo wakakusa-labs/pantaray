@@ -90,7 +90,6 @@ def _research_tools(db_path: Path) -> LocalSuggestionResearchTools:
             memory_revisions={},
             memory_folders=(),
             stable_memory=SuggestionStableMemoryContext("", False, False),
-            commands_allowed=False,
             read_access_scope="workspace",
         ),
         activity_start=None,

@@ -103,7 +103,6 @@ export const AcceptActionRequestSchema = z
     supplement: ActionSupplementSchema,
     supplementProjectRefs: ActionProjectRefsSchema,
     supplementWorkRefs: ActionWorkRefsSchema,
-    approvalMode: z.enum(['prompt_each_time', 'always_allow']),
     images: ActionMessageRequestSchema.shape.message.shape.images,
     files: ActionFileAttachmentsSchema.optional(),
   })

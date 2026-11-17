@@ -19,6 +19,11 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from pantaray_agents.agents.core.mixins.llm_usage import (
+    LlmUsage,
+    TokenSink,
+    llm_usage_from_metadata,
+)
 from pantaray_agents.config_tunables import load_local_runtime_tunables
 from pantaray_agents.utils.llm_types import types
 from pantaray_agents.utils.prompt_loader import prompt_loader
@@ -55,7 +60,8 @@ class PendingCommand:
     tool: str
     kinds: frozenset[CommandReviewKind]
     command: str
-    cwd: str
+    # None for a file tool, which runs in no folder.
+    cwd: str | None
     additional_write_folders: tuple[str, ...]
     justification: str | None
 
@@ -135,12 +141,12 @@ def _parse_verdict(text: str) -> ApprovalReviewVerdict | None:
 
 
 async def review_approval(
-    client: LLMClientProtocol, request: ApprovalReviewRequest
+    client: LLMClientProtocol, request: ApprovalReviewRequest, *, sink: TokenSink
 ) -> ApprovalReviewVerdict | None:
     """The review's verdict, or None when it gave none and the user must decide.
 
     The caller runs this inside the Action's trace, which routes the request to
-    the user's selected model.
+    the user's selected model, and its tokens count toward the Action's usage.
     """
 
     prompt = prompt_loader.load_config(APPROVAL_REVIEW_PROMPT_NAME)
@@ -164,13 +170,22 @@ async def review_approval(
         logger.warning("Approval review timed out after %s seconds", timeout_seconds)
         return None
     except LlmProxyExecutionError as exc:
+        _record_usage(sink, llm_usage_from_metadata(exc.usage_metadata))
         logger.warning("Approval review failed: %s", exc.error_code)
         return None
     except ValidationError:
         # The direct route decodes the answer with the response schema itself.
         logger.warning("Approval review answered outside its schema")
         return None
+    _record_usage(
+        sink, llm_usage_from_metadata(getattr(response, "usage_metadata", None))
+    )
     return _parse_verdict(response.text)
+
+
+def _record_usage(sink: TokenSink, usage: LlmUsage) -> None:
+    # A spent budget stops the Action at its next model call, not this review.
+    sink.record(usage, stage=APPROVAL_REVIEW_PROMPT_NAME, may_raise=False)
 
 
 __all__ = [

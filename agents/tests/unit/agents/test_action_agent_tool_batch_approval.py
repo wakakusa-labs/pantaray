@@ -285,6 +285,7 @@ def _stored_session(*, request, status: str) -> StoredApprovalSession:
         tool_id=PATCH_TOOL,
         intent_class="workspace_write",
         approval_source="prompt",
+        review_reason=None,
         tool_request_id=_TOOL_REQUEST_ID,
         status=cast(Any, status),
         approved_capabilities_json={},

@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from pantaray_agents.agents.core.mixins.llm_usage import CountingSink
 from pantaray_agents.local_runtime.tooling import approval_review
 from pantaray_agents.local_runtime.tooling.approval_review import (
     ApprovalReviewRequest,
@@ -50,21 +51,33 @@ class _Models:
         if self.answer is None:
             # What the direct route raises when JSON misses the response schema.
             ApprovalReviewVerdict.model_validate({"decision": "allow"})
-        return SimpleNamespace(text=self.answer)
+        return SimpleNamespace(
+            text=self.answer,
+            usage_metadata={"prompt_token_count": 120, "candidates_token_count": 9},
+        )
 
 
 def _client(models: _Models) -> SimpleNamespace:
     return SimpleNamespace(aio=SimpleNamespace(models=models), files=None)
 
 
-def _review(models: _Models) -> ApprovalReviewVerdict | None:
-    return asyncio.run(review_approval(_client(models), _REQUEST))  # type: ignore[arg-type]
+def _review(
+    models: _Models, sink: CountingSink | None = None
+) -> ApprovalReviewVerdict | None:
+    return asyncio.run(
+        review_approval(
+            _client(models),  # type: ignore[arg-type]
+            _REQUEST,
+            sink=sink or CountingSink(),
+        )
+    )
 
 
 def test_a_valid_allow_is_returned_from_the_approval_review_purpose() -> None:
     models = _Models(answer='{"decision": "allow", "reason": "You asked for it."}')
+    sink = CountingSink()
 
-    verdict = _review(models)
+    verdict = _review(models, sink)
 
     assert verdict == ApprovalReviewVerdict(
         decision="allow", reason="You asked for it."
@@ -73,6 +86,8 @@ def test_a_valid_allow_is_returned_from_the_approval_review_purpose() -> None:
     assert isinstance(config, GenerateContentConfig)
     assert config.inference_profile == APPROVAL_REVIEW_PROFILE_ID
     assert config.response_schema is ApprovalReviewVerdict
+    # The review's tokens count toward the Action like its other model calls.
+    assert (sink.delta.prompt_tokens, sink.delta.completion_tokens) == (120, 9)
 
 
 @pytest.mark.parametrize(

@@ -93,6 +93,7 @@ from pantaray_llm.contracts.tool_use import LlmToolDefinition
 from pantaray_llm.errors import LlmProxyExecutionError
 
 from .action_subagent_broker import (
+    ApprovalReviewer,
     build_action_subagent_broker_tools,
     execute_action_subagent_broker_tool,
 )
@@ -172,6 +173,7 @@ async def _execute_action_subagent_job(
     stop_watch: ActionStopWatch,
 ) -> ActionSubagentTerminalSuccess:
     sink = CountingSink()
+    reviewer = ApprovalReviewer(client=runner.client, sink=sink)
     tunables = load_local_runtime_tunables().action_agent
     check_cancel = functools.partial(
         _raise_if_cancellation_requested,
@@ -220,6 +222,7 @@ async def _execute_action_subagent_job(
                 tool_request_id=resumed.tool_request_id,
                 call_id=resumed.call_id,
                 agents_md=agents_md,
+                reviewer=reviewer,
             ),
             cancellable=resumed.tool_id not in UNCANCELLABLE_TOOL_IDS,
         )
@@ -277,6 +280,7 @@ async def _execute_action_subagent_job(
         payload=payload,
         authority=broker_authority,
         agents_md=agents_md,
+        reviewer=reviewer,
     )
     return await run_conversation(
         ConversationRun(

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from pantaray_agents.agents.action_agent.runtime.agents_md import (
     claim_repository_context,
@@ -25,6 +26,10 @@ from pantaray_agents.agents.action_agent.tools.read_tool import READ_TOOL
 from pantaray_agents.agents.action_agent.tools.run_python_tool import RUN_PYTHON_TOOL
 from pantaray_agents.agents.action_agent.tools.schema_types import (
     schema_to_plain_json,
+)
+from pantaray_agents.agents.core.mixins.llm_usage import TokenSink
+from pantaray_agents.local_runtime.runtime.action_approval_review import (
+    review_pending_approval,
 )
 from pantaray_agents.local_runtime.runtime.action_subagent_broker_authority import (
     ActionSubagentBrokerAuthority,
@@ -68,6 +73,9 @@ from pantaray_agents.tools.contract import (
     react_tool_response_schema,
     tool_error_response,
 )
+
+if TYPE_CHECKING:
+    from pantaray_agents.dependencies import LLMClientProtocol
 
 _CHILD_BROKER_TOOLS = (
     READ_TOOL,
@@ -126,6 +134,7 @@ def build_action_subagent_broker_tools(
     payload: ActionSubagentJobPayload,
     authority: ActionSubagentBrokerAuthority,
     agents_md: AgentsMdClaims,
+    reviewer: ApprovalReviewer,
 ) -> tuple[ReactToolDefinition, ...]:
     return tuple(
         _build_tool(
@@ -135,9 +144,18 @@ def build_action_subagent_broker_tools(
             payload=payload,
             authority=authority,
             agents_md=agents_md,
+            reviewer=reviewer,
         )
         for definition in _CHILD_BROKER_TOOLS
     )
+
+
+@dataclass(frozen=True, slots=True)
+class ApprovalReviewer:
+    """The child's model client and token count, for the approval review."""
+
+    client: LLMClientProtocol
+    sink: TokenSink
 
 
 async def execute_action_subagent_broker_tool(
@@ -151,8 +169,12 @@ async def execute_action_subagent_broker_tool(
     tool_request_id: str,
     call_id: str,
     agents_md: AgentsMdClaims,
+    reviewer: ApprovalReviewer,
 ) -> ReactToolResult:
-    """Run one child broker call, turning approval control into a typed pause."""
+    """Run one child broker call, turning approval control into a typed pause.
+
+    A call the approval review approves runs again at once, now approved.
+    """
 
     try:
         outcome = await execute_broker_tool(
@@ -168,6 +190,29 @@ async def execute_action_subagent_broker_tool(
             requested_at=now_utc_iso(),
         )
     except BrokerApprovalRequiredError as exc:
+        if await review_pending_approval(
+            db_path=db_path,
+            busy_timeout_ms=busy_timeout_ms,
+            client=reviewer.client,
+            sink=reviewer.sink,
+            user_id=payload["user_id"],
+            action_id=payload["action_id"],
+            approval_session_id=exc.approval_session_id,
+            tool_request_id=tool_request_id,
+            args=args,
+        ):
+            return await execute_action_subagent_broker_tool(
+                db_path=db_path,
+                busy_timeout_ms=busy_timeout_ms,
+                payload=payload,
+                authority=authority,
+                tool_id=tool_id,
+                args=args,
+                tool_request_id=tool_request_id,
+                call_id=call_id,
+                agents_md=agents_md,
+                reviewer=reviewer,
+            )
         raise _approval_pause(
             db_path=db_path,
             busy_timeout_ms=busy_timeout_ms,
@@ -343,6 +388,7 @@ def _build_tool(
     payload: ActionSubagentJobPayload,
     authority: ActionSubagentBrokerAuthority,
     agents_md: AgentsMdClaims,
+    reviewer: ApprovalReviewer,
 ) -> ReactToolDefinition:
     async def execute(call: ReactToolCall, _step_number: int) -> ReactToolResult:
         if call.call_id is None:
@@ -371,6 +417,7 @@ def _build_tool(
             tool_request_id=tool_request_id,
             call_id=call.call_id,
             agents_md=agents_md,
+            reviewer=reviewer,
         )
 
     return ReactToolDefinition(

@@ -870,6 +870,7 @@ it('実行中の会話だけ行の下に今の動きを1行で出し、終われ
         toolRequestId: 'request-1',
         toolId: 'bash',
         intentClass: 'write',
+        reviewReason: null,
         commandSummary: {},
       },
     ])

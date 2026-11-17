@@ -56,6 +56,7 @@ from pantaray_agents.utils.metrics import (
     record_tool_execution,
 )
 
+from .approval_preparation import approved_by_review
 from .broker_tools import run_broker_tool_wrapper
 from .consent_gated import (
     CONSENT_GATED_TOOL_IDS,
@@ -436,7 +437,11 @@ async def run_tool(
                 preflight_only=True,
             )
         )
-        if _preflight_blocks_execution(preflight_result):
+        if _preflight_blocks_execution(preflight_result) and not (
+            await approved_by_review(
+                agent, state, sink=sink, preflight=preflight_result, args=validated_args
+            )
+        ):
             finalized_preflight = finalize_action_step_preparation(
                 state=state,
                 preparation=preflight_result,

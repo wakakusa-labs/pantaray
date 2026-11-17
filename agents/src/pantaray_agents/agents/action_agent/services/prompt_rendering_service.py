@@ -202,12 +202,12 @@ def _render_workspace_path_contract(
         "Edit/command paths (`apply_patch`, `bash.cwd`, `run_python.cwd`): use Workspace Roots below or paths relative to the current workspace cwd."
     )
     lines.append(
-        "An `apply_patch` path, `bash.cwd`, or `run_python.cwd` outside Workspace Roots waits for the user "
-        "to approve that one call; use one only when the user asked for that location."
+        "An `apply_patch` path, `bash.cwd`, or `run_python.cwd` outside Workspace Roots needs approval "
+        "for that one call; use one only when the user asked for that location."
     )
     lines.append(
         "A `bash` or `run_python` call that must write a folder outside Workspace Roots names it in "
-        "`additional_write_folders` with a `justification`, and waits for the user to approve that one call."
+        "`additional_write_folders` with a `justification`, and needs approval for that one call."
     )
     lines.append(
         "All relative paths use the same session cwd; bash.cwd/run_python.cwd override it for that call only. "

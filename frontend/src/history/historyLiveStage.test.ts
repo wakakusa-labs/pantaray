@@ -71,6 +71,7 @@ const blocker = {
   toolRequestId: 'request-1',
   toolId: 'bash',
   intentClass: 'write',
+  reviewReason: null,
   commandSummary: {},
 };
 

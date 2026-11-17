@@ -231,6 +231,7 @@ async def test_process_paused_persists_public_event_before_ws_delivery(
                             "tool_id": "bash",
                             "intent_class": "process_exec_local",
                             "command_summary": {"kind": "bash", "command": "pwd"},
+                            "review_reason": None,
                         }
                     ],
                 },

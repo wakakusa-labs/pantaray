@@ -335,6 +335,9 @@ export function ApprovalPanel({
         )}
       </ApprovalPanelTitle>
       {body}
+      {approvalPanel.reviewReason ? (
+        <ApprovalHint>{approvalPanel.reviewReason}</ApprovalHint>
+      ) : null}
       {approvalErrorMessage ? <ApprovalErrorText>{approvalErrorMessage}</ApprovalErrorText> : null}
       <ApprovalActionRow>
         {onDecide

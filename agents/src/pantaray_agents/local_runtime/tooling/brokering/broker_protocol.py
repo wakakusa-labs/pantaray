@@ -27,7 +27,7 @@ from pantaray_agents.tools.files.render_pages import (
     SaveHtmlAsPdfToolArgs,
 )
 
-from ..models import BrokerNetworkPolicy
+from ..models import ApprovalSource, BrokerNetworkPolicy
 from ..sandbox.egress_proxy import NetworkDestination
 
 BrokerExecutionPath = Literal[
@@ -487,7 +487,7 @@ class ValidatedPatchRequest(BaseModel):
     execution_session_id: str
     action_id: str
     approval_session_id: str | None = None
-    approval_source: Literal["settings", "prompt"] | None = None
+    approval_source: ApprovalSource | None = None
     changes: list[ApplyPatchChange]
     patch_paths: list[str]
     command_summary_json: dict[str, JSONValue]
@@ -504,7 +504,7 @@ class ValidatedSaveHtmlAsPdfRequest(BaseModel):
     execution_session_id: str
     action_id: str
     approval_session_id: str | None = None
-    approval_source: Literal["settings", "prompt"] | None = None
+    approval_source: ApprovalSource | None = None
     args: SaveHtmlAsPdfToolArgs
     command_summary_json: dict[str, JSONValue]
     tool_request_id: str
@@ -520,7 +520,7 @@ class ValidatedCommandRequest(BaseModel):
     execution_session_id: str
     action_id: str
     approval_session_id: str | None = None
-    approval_source: Literal["settings", "prompt"] | None = None
+    approval_source: ApprovalSource | None = None
     private_storage_roots: list[str]
     action_workspace_root: str
     published_results_root: str

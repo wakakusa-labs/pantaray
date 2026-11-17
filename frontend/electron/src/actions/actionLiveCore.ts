@@ -29,6 +29,7 @@ export type ActionApprovalBlocker = {
   toolId: string;
   intentClass: string;
   commandSummary: JsonObject;
+  reviewReason: string | null;
 };
 
 export type ActionLiveSnapshot = {
@@ -138,6 +139,7 @@ function normalizeApprovalBlocker(
     toolId: blocker.tool_id,
     intentClass: blocker.intent_class,
     commandSummary: blocker.command_summary,
+    reviewReason: blocker.review_reason,
   };
 }
 

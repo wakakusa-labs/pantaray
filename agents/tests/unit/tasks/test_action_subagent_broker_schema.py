@@ -27,6 +27,7 @@ def _response_schema(tmp_path: Path, tool_name: str) -> object:
         payload=cast(Any, {}),
         authority=cast(Any, None),
         agents_md=cast(Any, None),
+        reviewer=cast(Any, None),
     )
     return next(tool for tool in tools if tool.name == tool_name).response_schema
 

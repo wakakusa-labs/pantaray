@@ -63,6 +63,7 @@ from pantaray_agents.local_runtime.tooling.tool_result_validation import (
 from pantaray_agents.schema.action_conversation import ActionStepEventData
 from pantaray_agents.schema.repositories.repository import RepositoryErrorKind
 from pantaray_agents.utils.trace_context import TraceContextManager
+from pantaray_llm.errors import LlmProxyExecutionError
 
 
 @pytest.fixture(autouse=True)
@@ -1203,11 +1204,53 @@ async def test_run_tool_does_not_execute_broker_without_invocation_audit(
     executor.assert_not_called()
 
 
+def _review_client(answer: str | None) -> SimpleNamespace:
+    async def generate_content(**_kwargs: object) -> SimpleNamespace:
+        if answer is None:
+            raise LlmProxyExecutionError(
+                error_code="PROXY_UPSTREAM_UNAVAILABLE",
+                error_message="no review in this test",
+                retryable=False,
+            )
+        return SimpleNamespace(text=answer, usage_metadata=None)
+
+    return SimpleNamespace(
+        aio=SimpleNamespace(models=SimpleNamespace(generate_content=generate_content)),
+        files=None,
+    )
+
+
+_ASK = '{"decision": "ask_user", "reason": "You did not ask to write there."}'
+_ALLOW = '{"decision": "allow", "reason": "You asked to save notes there."}'
+
+
 @pytest.mark.asyncio
-async def test_run_tool_returns_processing_with_pending_approval_without_invocation(
+@pytest.mark.parametrize(
+    ("review", "status", "session"),
+    [
+        # No verdict and ask_user both leave the call to the user.
+        (None, "processing", ("pending", "prompt", None, 0)),
+        (
+            _ASK,
+            "processing",
+            ("pending", "prompt", "You did not ask to write there.", 0),
+        ),
+        # An allow runs the call at once, as the user's approval would.
+        (
+            _ALLOW,
+            "success",
+            ("approved_once", "review", "You asked to save notes there.", 1),
+        ),
+    ],
+    ids=["no-verdict", "ask-user", "allow"],
+)
+async def test_run_tool_puts_a_write_outside_the_workspace_to_the_approval_review(
     tmp_path,
     tmp_path_factory: pytest.TempPathFactory,
     monkeypatch: pytest.MonkeyPatch,
+    review: str | None,
+    status: str,
+    session: tuple[object, ...],
 ) -> None:
     db_path = tmp_path / "runtime.db"
     apply_migrations(
@@ -1230,13 +1273,12 @@ async def test_run_tool_returns_processing_with_pending_approval_without_invocat
         started_at="2025-01-01T00:00:00Z",
         allowed_tool_ids=("apply_patch",),
     )
-    # A write outside the registered folders asks the user.
     outside = tmp_path_factory.mktemp("outside-folder").resolve()
     monkeypatch.setenv("LOCAL_DB_PATH", str(db_path))
     monkeypatch.setenv("LOCAL_DB_BUSY_TIMEOUT_MS", "1000")
 
     agent = MagicMock()
-    runtime = MagicMock()
+    agent.client = _review_client(review)
     state = _base_state()
     state["manifest_id"] = context.manifest_id
     state["execution_session_id"] = context.execution_session_id
@@ -1257,31 +1299,21 @@ async def test_run_tool_returns_processing_with_pending_approval_without_invocat
         },
         state=state,  # type: ignore[arg-type]
         sink=CountingSink(),
-        runtime=runtime,
+        runtime=MagicMock(),
         step_number=1,
         actor="goal_worker",
     )
 
-    assert result.status == "processing"
-    assert result.finalized_output.output["kind"] == "approval_required"
-    assert result.finalized_output.output["approval_status"] == "pending"
+    assert result.status == status
+    assert (outside / "notes.txt").exists() == (status == "success")
     with sqlite3.connect(db_path) as connection:
-        invocation_count = connection.execute(
-            "SELECT COUNT(*) FROM tool_invocations"
-        ).fetchone()
         approval_row = connection.execute(
-            """
-            SELECT status, tool_request_id
-            FROM approval_sessions
-            ORDER BY requested_at DESC
-            LIMIT 1
-            """
+            "SELECT status, approval_source, review_reason, "
+            "(SELECT COUNT(*) FROM tool_invocations), tool_request_id "
+            "FROM approval_sessions"
         ).fetchone()
-    assert invocation_count == (0,)
-    assert approval_row is not None
-    assert approval_row[0] == "pending"
-    assert approval_row[1].startswith("act-123:")
-    assert approval_row[1].endswith(":1")
+    assert approval_row[:4] == session
+    assert approval_row[4].startswith("act-123:")
 
 
 @pytest.mark.asyncio

@@ -114,11 +114,20 @@ def test_stored_approvals_keep_their_decisions_and_reviews_need_a_reason(
                 decided_at="t2",
                 reason="Not asked for.",
             )
+        # A request the review left to the user keeps its reason for the panel.
+        _insert_session(
+            connection,
+            "asked",
+            source="prompt",
+            status="pending",
+            decided_at=None,
+            reason="You did not ask for this.",
+        )
         with pytest.raises(sqlite3.IntegrityError):
             _insert_session(
                 connection,
-                "prompt-with-reason",
-                source="prompt",
+                "settings-with-reason",
+                source="settings",
                 status="approved_once",
                 decided_at="t2",
                 reason="Stray reason.",

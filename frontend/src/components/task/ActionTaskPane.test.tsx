@@ -42,6 +42,7 @@ const blocker: ActionApprovalBlocker = {
   toolRequestId: 'tool-request-1',
   toolId: 'bash',
   intentClass: 'process_exec_local',
+  reviewReason: null,
   commandSummary: { kind: 'bash', command: 'pytest -q', timeout_ms: 600000 },
 };
 

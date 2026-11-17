@@ -50,9 +50,8 @@ RUN_PYTHON_TOOL_FIELD_PRESENTATION = (
             "- Use the current workspace marker, an absolute local workspace "
             "path under Workspace Roots in Workspace Path Rules, or a "
             "subdirectory under a registered workspace.\n"
-            "- A cwd outside registered workspaces waits for the user to "
-            "approve that one call; use one only when the user asked for "
-            "that location.\n"
+            "- A cwd outside registered workspaces needs approval for that "
+            "one call; use one only when the user asked for that location.\n"
             "- File paths used by the script should be inside registered "
             "workspaces or approved folders."
         ),
@@ -77,8 +76,8 @@ RUN_PYTHON_TOOL = ToolDefinition.from_spec(
                 "Input shape:\n"
                 "- code contains one complete, short Python program.\n"
                 "- args is optional argv data for that program.\n"
-                "- cwd is optional; outside registered workspaces it waits for "
-                "the user's approval."
+                "- cwd is optional; outside registered workspaces it needs "
+                "approval."
             ),
             when=(
                 "Use for temporary calculations or workspace-scoped file transforms. "

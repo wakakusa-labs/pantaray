@@ -20,6 +20,7 @@ function blocker(
     toolId,
     intentClass,
     commandSummary,
+    reviewReason: null,
   };
 }
 

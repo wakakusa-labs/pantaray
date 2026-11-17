@@ -317,6 +317,8 @@ export type ApprovalBlocker = {
   tool_id: string;
   intent_class: string;
   command_summary: JsonObject;
+  // Why the approval review left this request to the user, when it said.
+  review_reason: string | null;
 };
 
 export type SessionResumedEvent = OrchestrationEventEnvelope<

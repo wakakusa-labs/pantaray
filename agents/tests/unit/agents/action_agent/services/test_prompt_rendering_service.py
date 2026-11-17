@@ -50,8 +50,8 @@ def test_workspace_path_contract_uses_full_access_read_scope() -> None:
         in rendered
     )
     assert (
-        "An `apply_patch` path, `bash.cwd`, or `run_python.cwd` outside Workspace Roots waits for the user "
-        "to approve that one call" in rendered
+        "An `apply_patch` path, `bash.cwd`, or `run_python.cwd` outside Workspace Roots needs approval "
+        "for that one call" in rendered
     )
 
 

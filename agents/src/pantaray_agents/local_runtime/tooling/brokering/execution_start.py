@@ -11,7 +11,6 @@ second time.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
 
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import BrokerPolicyError
@@ -20,7 +19,7 @@ from ..action_subagent_resource_authority import (
     ActionSubagentResourceActorError,
     ActionSubagentResourceWriteDeniedError,
 )
-from ..models import ToolInvocationStartInput
+from ..models import ApprovalSource, ToolInvocationStartInput
 from ..repository import claim_approval_execution_start
 from .action_subagent_broker_authority import ACTION_SUBAGENT_WRITE_DENIED
 from .broker_common import BrokerContext
@@ -46,7 +45,7 @@ def claim_approved_execution_start(
     tool_request_id: str,
     action_id: str,
     approval_session_id: str | None,
-    approval_source: Literal["settings", "prompt"],
+    approval_source: ApprovalSource,
     tool_invocation_id: str,
     started_at: str,
     invocation: ToolInvocationStartInput | None,

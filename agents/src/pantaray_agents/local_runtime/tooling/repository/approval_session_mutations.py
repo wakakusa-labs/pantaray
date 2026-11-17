@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import Literal
 
 from ...storage.transactions import immediate_transaction
 from ..models import (
     ApprovalSessionMutationResult,
+    ApprovalSource,
     ToolInvocationStartInput,
 )
 from .approval_sessions import _load_approval_session_by_request_in_connection
@@ -188,7 +188,7 @@ def claim_approval_execution_start(
     tool_request_id: str,
     action_id: str,
     approval_session_id: str | None,
-    approval_source: Literal["settings", "prompt"],
+    approval_source: ApprovalSource,
     tool_invocation_id: str,
     started_at: str,
     invocation: ToolInvocationStartInput | None,
@@ -342,5 +342,34 @@ def record_review_approval_in_connection(
             tool_request_id,
             approval_session_id,
         ),
+    )
+    return cursor.rowcount == 1
+
+
+def record_review_question_in_connection(
+    *,
+    connection: sqlite3.Connection,
+    user_id: str,
+    action_id: str,
+    tool_request_id: str,
+    approval_session_id: str,
+    reason: str,
+) -> bool:
+    """Keep the review's reason on a pending request it left to the user."""
+
+    cursor = connection.execute(
+        """
+        UPDATE approval_sessions
+        SET review_reason = ?
+        WHERE
+            user_id = ?
+            AND action_id = ?
+            AND tool_request_id = ?
+            AND approval_session_id = ?
+            AND approval_source = 'prompt'
+            AND status = 'pending'
+            AND review_reason IS NULL
+        """,
+        (reason, user_id, action_id, tool_request_id, approval_session_id),
     )
     return cursor.rowcount == 1

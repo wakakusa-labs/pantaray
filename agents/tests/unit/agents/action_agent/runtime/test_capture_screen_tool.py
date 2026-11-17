@@ -19,6 +19,9 @@ from tests.unit.local_runtime.broker_test_support import (
 )
 
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime import (
+    approval_preparation,
+)
+from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime import (
     capture_screen as capture_screen_module,
 )
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.shared import (
@@ -28,6 +31,7 @@ from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.shared im
 )
 from pantaray_agents.agents.action_agent.runtime.state import create_initial_state
 from pantaray_agents.agents.action_agent.tools import CAPTURE_SCREEN_TOOL
+from pantaray_agents.agents.core.mixins.llm_usage import CountingSink
 from pantaray_agents.local_runtime.runtime.one_shot_requests import OneShotRequests
 from pantaray_agents.local_runtime.runtime.screen_capture_broker import (
     ScreenCaptureCaptured,
@@ -223,9 +227,22 @@ async def test_every_capture_pauses_before_it_is_requested(
 ) -> None:
     db_path, context = _bootstrap(tmp_path)
     _bind(monkeypatch, db_path=db_path)
+    monkeypatch.setattr(
+        approval_preparation, "read_local_runtime_db_config", lambda: (db_path, 1_000)
+    )
+    state = _state(context)
 
-    preparation = await _preflight(_state(context))
+    preparation = await _preflight(state)
+    # A capture is never put to the approval review: its model is never asked.
+    reviewed = await approval_preparation.approved_by_review(
+        SimpleNamespace(client=None),
+        state,
+        sink=CountingSink(),  # type: ignore[arg-type]
+        preflight=preparation,
+        args={"app_name": APP_NAME},
+    )
 
+    assert reviewed is False
     assert isinstance(preparation.control, ApprovalRequiredToolControl)
     assert preparation.result.status == "processing"
     # The user approves the named app, which is exactly what Electron is asked for.
@@ -236,6 +253,7 @@ async def test_every_capture_pauses_before_it_is_requested(
         tool_request_id=TOOL_REQUEST_ID,
     )
     assert pending is not None
+    assert (pending.status, pending.review_reason) == ("pending", None)
     assert pending.command_summary_json["app_name"] == APP_NAME
     # The capture is what needs consent, so nothing may have been asked of the
     # desktop client before the user answered.

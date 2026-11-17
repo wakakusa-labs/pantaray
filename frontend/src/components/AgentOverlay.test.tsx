@@ -160,6 +160,7 @@ function withApprovalBlocker(
           toolRequestId: 'tool-request-1',
           toolId,
           intentClass: 'process_exec_local',
+          reviewReason: null,
           commandSummary,
         },
       ],

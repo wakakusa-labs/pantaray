@@ -45,6 +45,7 @@ from pantaray_agents.local_runtime.runtime.job_payload_models import (
     ActionSubagentJobPayload,
 )
 from pantaray_agents.tasks.internal_jobs.action_subagent_broker import (
+    ApprovalReviewer,
     build_action_subagent_broker_tools,
 )
 from pantaray_agents.tasks.internal_jobs.action_subagent_history import (
@@ -121,6 +122,7 @@ SUBAGENT_CONCURRENCY: dict[str, ToolConcurrency] = {
                 busy_timeout_ms=0,
                 payload=cast(ActionSubagentJobPayload, {}),
             ),
+            reviewer=cast(ApprovalReviewer, None),
         )
     },
     SUBMIT_SUBAGENT_REPORT_TOOL_ID: ToolConcurrency("run_ending"),

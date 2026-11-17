@@ -3,7 +3,7 @@
 The page is printed exactly as ``render_html_page`` shows it
 (``broker_direct_render_html``). The PDF is written under ``apply_patch``'s rules
 for one file: the same writable paths and approval summary, so a folder outside
-the registered workspaces asks the user every time; the same recheck of the
+the registered workspaces needs approval every time; the same recheck of the
 destination before writing; and the workspace root lock while it is written.
 """
 

@@ -221,6 +221,7 @@ async def test_a_subagent_refusal_reaches_the_child_with_its_repair_guidance(
         tool_request_id="request-1",
         call_id="call_a",
         agents_md=cast(Any, None),
+        reviewer=cast(Any, None),
     )
 
     assert result.output == {

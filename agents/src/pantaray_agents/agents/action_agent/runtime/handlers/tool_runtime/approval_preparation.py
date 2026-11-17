@@ -11,6 +11,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pantaray_agents.agents.action_agent.runtime.stop_watch import (
+    ActionStopRequested,
+    ActionStopWatch,
+    build_action_stop_probe,
+)
 from pantaray_agents.agents.action_agent.services.token_accounting_service import (
     StateTokenSink,
 )
@@ -30,6 +35,7 @@ from pantaray_agents.local_runtime.tooling.tool_result_finalization import (
 )
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.utils.trace_context import get_trace_context
 
 from .shared import (
     APPROVAL_DENIED_OUTPUT_KIND,
@@ -56,17 +62,27 @@ async def approved_by_review(
     if not isinstance(control, ApprovalRequiredToolControl):
         return False
     db_path, busy_timeout_ms = read_local_runtime_db_config()
-    return await review_pending_approval(
-        db_path=db_path,
-        busy_timeout_ms=busy_timeout_ms,
-        client=agent.client,
-        sink=sink,
-        user_id=str(state["user_id"]),
-        action_id=str(state["action_id"]),
-        approval_session_id=control.approval_session_id,
-        tool_request_id=control.tool_request_id,
-        args=args,
-    )
+    trace = get_trace_context()
+    # The call around this may be one a Stop does not interrupt (apply_patch);
+    # the review is only a wait, so a Stop ends it and the call is not approved.
+    async with ActionStopWatch(probe=build_action_stop_probe(state)) as watch:
+        try:
+            return await watch.run(
+                review_pending_approval(
+                    db_path=db_path,
+                    busy_timeout_ms=busy_timeout_ms,
+                    client=agent.client,
+                    sink=sink,
+                    user_id=str(state["user_id"]),
+                    action_id=str(state["action_id"]),
+                    job_id=trace.local_job_id if trace is not None else None,
+                    approval_session_id=control.approval_session_id,
+                    tool_request_id=control.tool_request_id,
+                    args=args,
+                )
+            )
+        except ActionStopRequested:
+            return False
 
 
 def build_approval_required_preparation(

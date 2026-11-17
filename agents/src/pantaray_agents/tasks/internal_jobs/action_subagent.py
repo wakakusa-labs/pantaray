@@ -173,7 +173,7 @@ async def _execute_action_subagent_job(
     stop_watch: ActionStopWatch,
 ) -> ActionSubagentTerminalSuccess:
     sink = CountingSink()
-    reviewer = ApprovalReviewer(client=runner.client, sink=sink)
+    reviewer = ApprovalReviewer(client=runner.client, sink=sink, stop_watch=stop_watch)
     tunables = load_local_runtime_tunables().action_agent
     check_cancel = functools.partial(
         _raise_if_cancellation_requested,

@@ -12,6 +12,10 @@ from pantaray_agents.agents.action_agent.runtime.agents_md import (
 from pantaray_agents.agents.action_agent.runtime.checkout_status import (
     checkout_statuses,
 )
+from pantaray_agents.agents.action_agent.runtime.stop_watch import (
+    ActionStopRequested,
+    ActionStopWatch,
+)
 from pantaray_agents.agents.action_agent.tools.apply_patch_tool import APPLY_PATCH_TOOL
 from pantaray_agents.agents.action_agent.tools.base import ToolDefinition
 from pantaray_agents.agents.action_agent.tools.bash_tool import (
@@ -152,10 +156,11 @@ def build_action_subagent_broker_tools(
 
 @dataclass(frozen=True, slots=True)
 class ApprovalReviewer:
-    """The child's model client and token count, for the approval review."""
+    """The child's model client, token count and Stop watch, for the review."""
 
     client: LLMClientProtocol
     sink: TokenSink
+    stop_watch: ActionStopWatch
 
 
 async def execute_action_subagent_broker_tool(
@@ -190,13 +195,11 @@ async def execute_action_subagent_broker_tool(
             requested_at=now_utc_iso(),
         )
     except BrokerApprovalRequiredError as exc:
-        if await review_pending_approval(
+        if await _approved_by_review(
+            reviewer,
             db_path=db_path,
             busy_timeout_ms=busy_timeout_ms,
-            client=reviewer.client,
-            sink=reviewer.sink,
-            user_id=payload["user_id"],
-            action_id=payload["action_id"],
+            payload=payload,
             approval_session_id=exc.approval_session_id,
             tool_request_id=tool_request_id,
             args=args,
@@ -346,6 +349,36 @@ def _bounded_failure_message(outcome: BrokerToolOutcome) -> str:
     message = outcome.failure.message if outcome.failure else "Tool failed."
     head = message[:ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT]
     return head if len(head) == len(message) else f"{head}\n[truncated]"
+
+
+async def _approved_by_review(
+    reviewer: ApprovalReviewer,
+    *,
+    db_path: Path,
+    busy_timeout_ms: int,
+    payload: ActionSubagentJobPayload,
+    approval_session_id: str,
+    tool_request_id: str,
+    args: dict[str, JSONValue],
+) -> bool:
+    # The review is only a wait, even inside a call a Stop does not interrupt.
+    try:
+        return await reviewer.stop_watch.run(
+            review_pending_approval(
+                db_path=db_path,
+                busy_timeout_ms=busy_timeout_ms,
+                client=reviewer.client,
+                sink=reviewer.sink,
+                user_id=payload["user_id"],
+                action_id=payload["action_id"],
+                job_id=payload["job_id"],
+                approval_session_id=approval_session_id,
+                tool_request_id=tool_request_id,
+                args=args,
+            )
+        )
+    except ActionStopRequested:
+        return False
 
 
 def _approval_pause(

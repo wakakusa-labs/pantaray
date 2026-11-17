@@ -46,6 +46,7 @@ from pantaray_agents.schema.agent.action_message_codec import (
 from pantaray_agents.schema.agent.base import JSONValue
 
 from .action_message_models import ACTION_HOST_STEP_NAMES
+from .action_stop_signal import action_stop_requested_in_connection
 from .utc_timestamps import now_utc_iso
 
 if TYPE_CHECKING:
@@ -205,6 +206,7 @@ async def review_pending_approval(
     sink: TokenSink,
     user_id: str,
     action_id: str,
+    job_id: str | None,
     approval_session_id: str,
     tool_request_id: str,
     args: dict[str, JSONValue],
@@ -212,7 +214,8 @@ async def review_pending_approval(
     """Whether the review approved the pending request, so it runs unasked.
 
     A request the user or a stop decided while the review ran keeps that
-    decision. A request reviewed before keeps waiting for the user.
+    decision, and a run stopped meanwhile (``job_id`` names its job) gets no
+    approval. A request reviewed before keeps waiting for the user.
     """
 
     with sqlite3.connect(db_path) as connection:
@@ -234,6 +237,12 @@ async def review_pending_approval(
         configure_connection(connection, busy_timeout_ms)
         with immediate_transaction(connection):
             if verdict.decision == "allow":
+                # Read in the same transaction as the write: a Stop committed
+                # before it never lets the call start.
+                if action_stop_requested_in_connection(
+                    connection, user_id=user_id, action_id=action_id, job_id=job_id
+                ):
+                    return False
                 return record_review_approval_in_connection(
                     connection=connection,
                     user_id=user_id,

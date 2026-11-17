@@ -1224,6 +1224,77 @@ _ASK = '{"decision": "ask_user", "reason": "You did not ask to write there."}'
 _ALLOW = '{"decision": "allow", "reason": "You asked to save notes there."}'
 
 
+async def _patch_outside_the_workspace(
+    tmp_path: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+    client: SimpleNamespace,
+) -> tuple[ToolExecutionResult, Path, Path]:
+    db_path = tmp_path / "runtime.db"
+    apply_migrations(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        migrations=load_default_migrations(),
+    )
+    bootstrap_local_tooling_catalog(db_path=db_path, busy_timeout_ms=1_000)
+    _insert_test_action(
+        db_path=db_path,
+        user_id="user-123",
+        action_id="act-123",
+        created_at="2025-01-01T00:00:00Z",
+    )
+    context = ensure_action_scratch_execution_context(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        user_id="user-123",
+        action_id="act-123",
+        started_at="2025-01-01T00:00:00Z",
+        allowed_tool_ids=("apply_patch",),
+    )
+    outside = tmp_path_factory.mktemp("outside-folder").resolve()
+    monkeypatch.setenv("LOCAL_DB_PATH", str(db_path))
+    monkeypatch.setenv("LOCAL_DB_BUSY_TIMEOUT_MS", "1000")
+
+    agent = MagicMock()
+    agent.client = client
+    state = _base_state()
+    state["manifest_id"] = context.manifest_id
+    state["execution_session_id"] = context.execution_session_id
+    state["execution_network_policy"] = context.network_policy
+
+    # A run of a local job, so a Stop can reach it.
+    with TraceContextManager(local_job_id="job-1"):
+        result = await run_tool(
+            agent,
+            APPLY_PATCH_TOOL,
+            args={
+                "changes": [
+                    {
+                        "op": "add",
+                        "path": str(outside / "notes.txt"),
+                        "new_lines": ["line-2"],
+                        "trailing_newline": True,
+                    }
+                ]
+            },
+            state=state,  # type: ignore[arg-type]
+            sink=CountingSink(),
+            runtime=MagicMock(),
+            step_number=1,
+            actor="goal_worker",
+        )
+    return result, db_path, outside
+
+
+def _approval_row(db_path: Path) -> tuple[object, ...]:
+    with sqlite3.connect(db_path) as connection:
+        return connection.execute(
+            "SELECT status, approval_source, review_reason, "
+            "(SELECT COUNT(*) FROM tool_invocations), tool_request_id "
+            "FROM approval_sessions"
+        ).fetchone()
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("review", "status", "session"),
@@ -1252,68 +1323,49 @@ async def test_run_tool_puts_a_write_outside_the_workspace_to_the_approval_revie
     status: str,
     session: tuple[object, ...],
 ) -> None:
-    db_path = tmp_path / "runtime.db"
-    apply_migrations(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        migrations=load_default_migrations(),
-    )
-    bootstrap_local_tooling_catalog(db_path=db_path, busy_timeout_ms=1_000)
-    _insert_test_action(
-        db_path=db_path,
-        user_id="user-123",
-        action_id="act-123",
-        created_at="2025-01-01T00:00:00Z",
-    )
-    context = ensure_action_scratch_execution_context(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        user_id="user-123",
-        action_id="act-123",
-        started_at="2025-01-01T00:00:00Z",
-        allowed_tool_ids=("apply_patch",),
-    )
-    outside = tmp_path_factory.mktemp("outside-folder").resolve()
-    monkeypatch.setenv("LOCAL_DB_PATH", str(db_path))
-    monkeypatch.setenv("LOCAL_DB_BUSY_TIMEOUT_MS", "1000")
-
-    agent = MagicMock()
-    agent.client = _review_client(review)
-    state = _base_state()
-    state["manifest_id"] = context.manifest_id
-    state["execution_session_id"] = context.execution_session_id
-    state["execution_network_policy"] = context.network_policy
-
-    result = await run_tool(
-        agent,
-        APPLY_PATCH_TOOL,
-        args={
-            "changes": [
-                {
-                    "op": "add",
-                    "path": str(outside / "notes.txt"),
-                    "new_lines": ["line-2"],
-                    "trailing_newline": True,
-                }
-            ]
-        },
-        state=state,  # type: ignore[arg-type]
-        sink=CountingSink(),
-        runtime=MagicMock(),
-        step_number=1,
-        actor="goal_worker",
+    result, db_path, outside = await _patch_outside_the_workspace(
+        tmp_path, tmp_path_factory, monkeypatch, _review_client(review)
     )
 
     assert result.status == status
     assert (outside / "notes.txt").exists() == (status == "success")
-    with sqlite3.connect(db_path) as connection:
-        approval_row = connection.execute(
-            "SELECT status, approval_source, review_reason, "
-            "(SELECT COUNT(*) FROM tool_invocations), tool_request_id "
-            "FROM approval_sessions"
-        ).fetchone()
+    approval_row = _approval_row(db_path)
     assert approval_row[:4] == session
-    assert approval_row[4].startswith("act-123:")
+    assert str(approval_row[4]).startswith("act-123:")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "answers", [False, True], ids=["while-waiting", "as-it-allows"]
+)
+async def test_a_stop_during_the_approval_review_approves_and_writes_nothing(
+    tmp_path,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+    answers: bool,
+) -> None:
+    async def generate_content(**_kwargs: object) -> SimpleNamespace:
+        # The user presses Stop while the review is in flight.
+        with sqlite3.connect(tmp_path / "runtime.db") as connection:
+            connection.execute(
+                "UPDATE agent_actions SET status = 'canceled' WHERE action_id = 'act-123'"
+            )
+        if not answers:
+            await asyncio.Event().wait()
+        return SimpleNamespace(text=_ALLOW, usage_metadata=None)
+
+    client = SimpleNamespace(
+        aio=SimpleNamespace(models=SimpleNamespace(generate_content=generate_content)),
+        files=None,
+    )
+    async with asyncio.timeout(5):
+        result, db_path, outside = await _patch_outside_the_workspace(
+            tmp_path, tmp_path_factory, monkeypatch, client
+        )
+
+    assert result.status == "processing"
+    assert not (outside / "notes.txt").exists()
+    assert _approval_row(db_path)[:4] == ("pending", "prompt", None, 0)
 
 
 @pytest.mark.asyncio

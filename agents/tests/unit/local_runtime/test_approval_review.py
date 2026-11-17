@@ -12,9 +12,11 @@ from pantaray_agents.local_runtime.tooling import approval_review
 from pantaray_agents.local_runtime.tooling.approval_review import (
     ApprovalReviewRequest,
     ApprovalReviewVerdict,
+    DeclinedOperation,
     PendingCommand,
     PendingIntegrationWrite,
     RequestTextNotByUser,
+    UserMessage,
     build_approval_review_payload,
     review_approval,
 )
@@ -23,7 +25,7 @@ from pantaray_llm.errors import LlmProxyExecutionError
 from pantaray_llm.profiles import APPROVAL_REVIEW_PROFILE_ID
 
 _REQUEST = ApprovalReviewRequest(
-    user_messages=("Export report.html to PDF",),
+    conversation=(UserMessage("Export report.html to PDF"),),
     request_text_not_by_user=RequestTextNotByUser(
         source="todo", text="Report", declined=False
     ),
@@ -36,7 +38,6 @@ _REQUEST = ApprovalReviewRequest(
         justification="Open the page in a browser and save it as a PDF.",
     ),
     workspace_folders=("/work",),
-    declined_by_user=(),
 )
 
 
@@ -131,7 +132,7 @@ def test_a_review_that_runs_past_its_timeout_gives_no_verdict(
 def test_the_review_request_has_no_place_for_tool_output() -> None:
     with pytest.raises(TypeError):
         ApprovalReviewRequest(  # type: ignore[call-arg]
-            user_messages=(),
+            conversation=(),
             request_text_not_by_user=None,
             operation=_REQUEST.operation,
             workspace_folders=(),
@@ -142,7 +143,10 @@ def test_the_review_request_has_no_place_for_tool_output() -> None:
     integration = json.loads(
         build_approval_review_payload(
             ApprovalReviewRequest(
-                user_messages=("Post the summary to #general",),
+                conversation=(
+                    UserMessage("Post the summary to #general"),
+                    DeclinedOperation(_REQUEST.operation),
+                ),
                 request_text_not_by_user=None,
                 operation=PendingIntegrationWrite(
                     toolkit="slack",
@@ -153,18 +157,16 @@ def test_the_review_request_has_no_place_for_tool_output() -> None:
                     justification=None,
                 ),
                 workspace_folders=(),
-                declined_by_user=(_REQUEST.operation,),
             )
         )
     )
 
     # Every field the model reads; a new one has to be added here on purpose.
     assert set(command) == {
-        "user_messages",
+        "conversation",
         "request_text_not_by_user",
         "operation",
         "workspace_folders",
-        "declined_by_user",
     }
     assert set(command["operation"]) == {
         "tool",
@@ -192,4 +194,7 @@ def test_the_review_request_has_no_place_for_tool_output() -> None:
         "id": "acct-work",
         "label": "work@example.com",
     }
-    assert integration["declined_by_user"] == [command["operation"]]
+    assert integration["conversation"] == [
+        {"kind": "user_message", "text": "Post the summary to #general"},
+        {"kind": "declined_operation", "operation": command["operation"]},
+    ]

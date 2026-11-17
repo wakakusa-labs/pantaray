@@ -13,6 +13,7 @@ import json
 import sqlite3
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -24,10 +25,13 @@ from pantaray_agents.local_runtime.storage.transactions import immediate_transac
 from pantaray_agents.local_runtime.tooling.approval_review import (
     ApprovalReviewRequest,
     CommandReviewKind,
+    ConversationEntry,
+    DeclinedOperation,
     PendingCommand,
     PendingIntegrationWrite,
     PendingOperation,
     RequestTextNotByUser,
+    UserMessage,
     review_approval,
 )
 from pantaray_agents.local_runtime.tooling.brokering.command_approval_summaries import (
@@ -77,7 +81,7 @@ ORDER BY step.step_number, step.step_id
 # its turn's key. Design limit: the newest 20 messages; widen it when
 # chat-started tasks still ask about requests the user made further back.
 _CHAT_WORDS_SQL = """
-SELECT json_extract(payload, '$.text') AS text FROM chat_items
+SELECT json_extract(payload, '$.text') AS text, created_at FROM chat_items
 WHERE user_id = :user_id AND kind = 'user_message' AND created_at <= :handed_at
   AND length(json_extract(payload, '$.text')) > 0
   AND created_at > COALESCE((
@@ -93,7 +97,7 @@ ORDER BY sequence DESC LIMIT 20
 # The user's own declines in an Action. Design limit: the newest 10; raise it
 # when a review allows something the user declined further back.
 _DECLINED_SQL = """
-SELECT tool_id, command_summary_json FROM approval_sessions
+SELECT tool_id, command_summary_json, decided_at FROM approval_sessions
 WHERE user_id = ? AND action_id = ? AND approval_source = 'prompt'
   AND status = 'denied'
 ORDER BY decided_at DESC LIMIT 10
@@ -116,16 +120,20 @@ class ActionRequestRow:
     suggestion_declined: bool
 
 
+# An entry of the review's conversation and when it happened (UTC ISO 8601).
+type Timed[T] = tuple[str, T]
+
+
 def action_request_words(
     rows: Iterable[ActionRequestRow],
-    chat_words: Callable[[ActionRequestRow], tuple[str, ...]],
-) -> tuple[tuple[str, ...], RequestTextNotByUser | None]:
+    chat_words: Callable[[ActionRequestRow], tuple[Timed[UserMessage], ...]],
+) -> tuple[tuple[Timed[UserMessage], ...], RequestTextNotByUser | None]:
     """The user's own messages, and the task text the user did not write.
 
     ``chat_words`` reads the user's chat messages behind a chat instruction.
     """
 
-    user_messages: list[str] = []
+    user_messages: list[Timed[UserMessage]] = []
     not_by_user: RequestTextNotByUser | None = None
     for row in rows:
         if row.step_type == "assistant_message":
@@ -161,10 +169,23 @@ def action_request_words(
                 source="suggestion_accepted", text=message.content, declined=False
             )
             if message.supplement is not None:
-                user_messages.append(message.supplement)
+                user_messages.append((row.created_at, UserMessage(message.supplement)))
             continue
-        user_messages.append(message.content)
+        user_messages.append((row.created_at, UserMessage(message.content)))
     return tuple(user_messages), not_by_user
+
+
+def ordered_conversation(
+    *entries: Iterable[Timed[ConversationEntry]],
+) -> tuple[ConversationEntry, ...]:
+    """The entries oldest first, so a decline is read against what came after."""
+
+    # Parsed, not compared as text: stored times differ in their offset spelling.
+    timed = sorted(
+        (entry for group in entries for entry in group),
+        key=lambda entry: datetime.fromisoformat(entry[0]),
+    )
+    return tuple(entry for _at, entry in timed)
 
 
 def pending_operation(
@@ -290,7 +311,7 @@ def action_request_rows(
 
 def read_chat_words(
     connection: sqlite3.Connection, *, user_id: str, row: ActionRequestRow
-) -> tuple[str, ...]:
+) -> tuple[Timed[UserMessage], ...]:
     """The user's chat messages that led to the hand-off ``row``, oldest first."""
 
     # "chat-turn/<turn key>/<tool>/<n>": hand-offs of the same turn share a window.
@@ -299,19 +320,19 @@ def read_chat_words(
         _CHAT_WORDS_SQL,
         {"user_id": user_id, "handed_at": row.created_at, "turn": turn},
     ).fetchall()
-    return tuple(str(text) for (text,) in reversed(texts))
+    return tuple((str(at), UserMessage(str(text))) for text, at in reversed(texts))
 
 
 def declined_operations(
     connection: sqlite3.Connection, *, user_id: str, action_id: str
-) -> tuple[PendingOperation, ...]:
-    """What the user declined in this Action, newest first.
+) -> tuple[Timed[DeclinedOperation], ...]:
+    """What the user declined in this Action and when, newest first.
 
     A subagent's requests carry its parent's Action id, so they count here too.
     """
 
-    declined: list[PendingOperation] = []
-    for tool_id, summary_json in connection.execute(
+    declined: list[Timed[DeclinedOperation]] = []
+    for tool_id, summary_json, decided_at in connection.execute(
         _DECLINED_SQL, (user_id, action_id)
     ):
         summary = json.loads(str(summary_json))
@@ -320,7 +341,7 @@ def declined_operations(
             tool_id=str(tool_id), summary=summary, args=summary
         )
         if operation is not None:
-            declined.append(operation)
+            declined.append((str(decided_at), DeclinedOperation(operation)))
     return tuple(declined)
 
 
@@ -360,14 +381,14 @@ def _load_review_request(
         manifest_id=str(session["manifest_id"]),
     )
     return ApprovalReviewRequest(
-        user_messages=user_messages,
+        conversation=ordered_conversation(
+            user_messages,
+            declined_operations(connection, user_id=user_id, action_id=action_id),
+        ),
         request_text_not_by_user=not_by_user,
         operation=operation,
         workspace_folders=tuple(
             str(root.canonical_real_path) for root in roots if root.can_apply_patch
-        ),
-        declined_by_user=declined_operations(
-            connection, user_id=user_id, action_id=action_id
         ),
     )
 
@@ -377,6 +398,7 @@ __all__ = [
     "action_request_rows",
     "action_request_words",
     "declined_operations",
+    "ordered_conversation",
     "pending_operation",
     "read_chat_words",
     "review_pending_approval",

@@ -9,6 +9,7 @@ from pantaray_agents.local_runtime.runtime.action_approval_review import (
     action_request_rows,
     action_request_words,
     declined_operations,
+    ordered_conversation,
     read_chat_words,
 )
 from pantaray_agents.local_runtime.runtime.action_message_models import (
@@ -24,7 +25,12 @@ from pantaray_agents.local_runtime.runtime.action_suggestion_reply import (
 )
 from pantaray_agents.local_runtime.storage.migrations import load_default_migrations
 from pantaray_agents.local_runtime.tooling.approval_review import (
+    ApprovalReviewRequest,
+    DeclinedOperation,
+    PendingCommand,
     RequestTextNotByUser,
+    UserMessage,
+    build_approval_review_payload,
 )
 from pantaray_agents.schema.agent.action_message import (
     ActionUserMessageInput,
@@ -88,8 +94,9 @@ def test_only_the_users_own_words_are_the_users_messages() -> None:
         _user(ACTION_RESUME_REQUEST_TEXT, step_name=ACTION_RESUME_STEP_NAME),
     )
 
-    assert action_request_words(rows, lambda _row: ("Put it on the drive.",)) == (
-        ("Send it to me first.", "Put it on the drive."),
+    chat = (("c", UserMessage("Put it on the drive.")),)
+    assert action_request_words(rows, lambda _row: chat) == (
+        (("t", UserMessage("Send it to me first.")), *chat),
         RequestTextNotByUser(
             source="todo", text="Draft the reply to the vendor.", declined=False
         ),
@@ -106,7 +113,7 @@ def test_an_accepted_suggestion_stays_accepted() -> None:
     )
 
     assert action_request_words((accepted,), _no_chat) == (
-        ("Keep it to five lines.",),
+        (("t", UserMessage("Keep it to five lines.")),),
         RequestTextNotByUser(
             source="suggestion_accepted",
             text="Summarize this week's discussion.",
@@ -130,7 +137,7 @@ def test_a_reply_to_a_suggestion_is_never_its_acceptance() -> None:
     )
 
     assert action_request_words(question, _no_chat) == (
-        ("What would it include?",),
+        (("t", UserMessage("What would it include?")),),
         RequestTextNotByUser(
             source="suggestion_reply",
             text="Shall I post the summary to #general?",
@@ -138,7 +145,7 @@ def test_a_reply_to_a_suggestion_is_never_its_acceptance() -> None:
         ),
     )
     assert action_request_words(go_ahead, _no_chat) == (
-        ("お願い",),
+        (("t", UserMessage("お願い")),),
         RequestTextNotByUser(
             source="suggestion_reply",
             text="The report draft could use a summary.",
@@ -241,7 +248,16 @@ def test_a_chat_hand_off_reads_the_users_messages_since_the_last_one(
         ]
 
     # Never the chat's own reply, nor what led to the earlier hand-off.
-    assert words == [("Export the report as a PDF.", "Put it on my Desktop.")] * 2
+    assert (
+        words
+        == [
+            (
+                ("t3", UserMessage("Export the report as a PDF.")),
+                ("t5", UserMessage("Put it on my Desktop.")),
+            )
+        ]
+        * 2
+    )
 
 
 def test_what_the_user_declined_in_the_action_reaches_the_review(
@@ -279,9 +295,9 @@ def test_what_the_user_declined_in_the_action_reaches_the_review(
             connection, user_id="user-1", action_id="action-1"
         )
 
-    assert [operation.command for operation in declined] == [  # type: ignore[union-attr]
-        "rm -rf ~/Archive",
-        "git push --force",
+    assert [(at, entry.operation.command) for at, entry in declined] == [  # type: ignore[union-attr]
+        ("t2", "rm -rf ~/Archive"),
+        ("t1", "git push --force"),
     ]
 
 
@@ -309,4 +325,44 @@ def test_a_reply_knows_from_storage_that_its_offer_was_declined(
 
     assert [(row.source_suggestion_id, row.suggestion_declined) for row in rows] == [
         ("s-1", True)
+    ]
+
+
+def test_a_decline_is_read_against_what_the_user_wrote_after_it() -> None:
+    push = PendingCommand(
+        tool="bash",
+        kinds=frozenset({"login_environment"}),
+        command="git push origin main",
+        cwd="/w",
+        additional_write_folders=(),
+        justification=None,
+    )
+    ask = UserMessage("Push it to GitHub.")
+
+    def payload(ask_at: str, declined_at: str) -> list[object]:
+        conversation = ordered_conversation(
+            (("2026-11-18T00:00:00Z", UserMessage("Fix the typo.")), (ask_at, ask)),
+            ((declined_at, DeclinedOperation(push)),),
+        )
+        request = ApprovalReviewRequest(
+            conversation=conversation,
+            request_text_not_by_user=None,
+            operation=push,
+            workspace_folders=("/w",),
+        )
+        return json.loads(build_approval_review_payload(request))["conversation"]
+
+    asked_then_declined = payload("2026-11-18T00:01:00Z", "2026-11-18T00:02:00Z")
+    # Older rows spell the offset as +00:00; the order is by time, not by text.
+    declined_then_asked = payload("2026-11-18T00:03:00Z", "2026-11-18T00:02:00+00:00")
+
+    assert [entry["kind"] for entry in asked_then_declined] == [  # type: ignore[index]
+        "user_message",
+        "user_message",
+        "declined_operation",
+    ]
+    assert [entry["kind"] for entry in declined_then_asked] == [  # type: ignore[index]
+        "user_message",
+        "declined_operation",
+        "user_message",
     ]

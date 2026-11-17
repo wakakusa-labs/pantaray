@@ -28,6 +28,11 @@ from pantaray_agents.agents.action_agent.runtime.handlers.tools import (
     run_tool,
 )
 from pantaray_agents.agents.action_agent.runtime.state import create_initial_state
+from pantaray_agents.agents.action_agent.services.token_accounting_service import (
+    ActionTokenAccountingService,
+    StateTokenSink,
+    TokenAccountingDeps,
+)
 from pantaray_agents.agents.action_agent.tools import (
     APPLY_PATCH_TOOL,
     BASH_TOOL,
@@ -61,6 +66,7 @@ from pantaray_agents.local_runtime.tooling.tool_result_validation import (
     ToolOutputValidationError,
 )
 from pantaray_agents.schema.action_conversation import ActionStepEventData
+from pantaray_agents.schema.agent.base import AgentError
 from pantaray_agents.schema.repositories.repository import RepositoryErrorKind
 from pantaray_agents.utils.trace_context import TraceContextManager
 from pantaray_llm.errors import LlmProxyExecutionError
@@ -1229,6 +1235,7 @@ async def _patch_outside_the_workspace(
     tmp_path_factory: pytest.TempPathFactory,
     monkeypatch: pytest.MonkeyPatch,
     client: SimpleNamespace,
+    sink: StateTokenSink | None = None,
 ) -> tuple[ToolExecutionResult, Path, Path]:
     db_path = tmp_path / "runtime.db"
     apply_migrations(
@@ -1278,7 +1285,7 @@ async def _patch_outside_the_workspace(
                 ]
             },
             state=state,  # type: ignore[arg-type]
-            sink=CountingSink(),
+            sink=sink or CountingSink(),
             runtime=MagicMock(),
             step_number=1,
             actor="goal_worker",
@@ -1462,3 +1469,45 @@ async def test_run_tool_records_actual_bash_cwd_and_runtime_timeout_in_local_aud
         ).fetchone()
 
     assert invocation_row == (str(executable_path.parent), 12_345)
+
+
+@pytest.mark.asyncio
+async def test_a_review_that_spends_the_token_budget_approves_and_runs_nothing(
+    tmp_path,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def generate_content(**_kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(
+            text=_ALLOW,
+            usage_metadata={"prompt_token_count": 500, "candidates_token_count": 20},
+        )
+
+    client = SimpleNamespace(
+        aio=SimpleNamespace(models=SimpleNamespace(generate_content=generate_content)),
+        files=None,
+    )
+    state = _base_state()
+    state["token_budget"] = 100
+    sink = StateTokenSink(
+        ActionTokenAccountingService(
+            TokenAccountingDeps(
+                build_agent_error=lambda **values: AgentError.model_validate(
+                    {"severity": "error", **values}
+                )
+            )
+        ),
+        state,  # type: ignore[arg-type]
+    )
+
+    def written() -> set[Path]:
+        return set(tmp_path_factory.getbasetemp().glob("outside-folder*/notes.txt"))
+
+    before = written()
+    with pytest.raises(TokenBudgetExceeded):
+        await _patch_outside_the_workspace(
+            tmp_path, tmp_path_factory, monkeypatch, client, sink
+        )
+
+    assert written() == before
+    assert _approval_row(tmp_path / "runtime.db")[:4] == ("pending", "prompt", None, 0)

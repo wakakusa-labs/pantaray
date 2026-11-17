@@ -88,13 +88,29 @@ type PendingOperation = PendingCommand | PendingIntegrationWrite
 
 
 @dataclass(frozen=True, slots=True)
+class UserMessage:
+    """Something the user wrote."""
+
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class DeclinedOperation:
+    """An operation the user declined when asked."""
+
+    operation: PendingOperation
+
+
+type ConversationEntry = UserMessage | DeclinedOperation
+
+
+@dataclass(frozen=True, slots=True)
 class ApprovalReviewRequest:
-    user_messages: tuple[str, ...]
+    # What the user wrote and declined in this Action, oldest first.
+    conversation: tuple[ConversationEntry, ...]
     request_text_not_by_user: RequestTextNotByUser | None
     operation: PendingOperation
     workspace_folders: tuple[str, ...]
-    # Operations the user declined earlier in this Action, newest first.
-    declined_by_user: tuple[PendingOperation, ...]
 
 
 class ApprovalReviewVerdict(BaseModel):
@@ -111,7 +127,7 @@ def build_approval_review_payload(request: ApprovalReviewRequest) -> str:
 
     not_by_user = request.request_text_not_by_user
     payload: dict[str, JSONValue] = {
-        "user_messages": list(request.user_messages),
+        "conversation": [_render_entry(entry) for entry in request.conversation],
         "request_text_not_by_user": (
             None
             if not_by_user is None
@@ -123,11 +139,19 @@ def build_approval_review_payload(request: ApprovalReviewRequest) -> str:
         ),
         "operation": _render_operation(request.operation),
         "workspace_folders": list(request.workspace_folders),
-        "declined_by_user": [
-            _render_operation(declined) for declined in request.declined_by_user
-        ],
     }
     return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def _render_entry(entry: ConversationEntry) -> dict[str, JSONValue]:
+    match entry:
+        case UserMessage():
+            return {"kind": "user_message", "text": entry.text}
+        case DeclinedOperation():
+            return {
+                "kind": "declined_operation",
+                "operation": _render_operation(entry.operation),
+            }
 
 
 def _render_operation(operation: PendingOperation) -> dict[str, JSONValue]:
@@ -174,6 +198,8 @@ async def review_approval(
     the user's selected model, and its tokens count toward the Action's usage.
     """
 
+    # A spent budget ends the Action before another model call, this one too.
+    sink.guard()
     prompt = prompt_loader.load_config(APPROVAL_REVIEW_PROMPT_NAME)
     timeout_seconds = load_local_runtime_tunables().approval_review.timeout_seconds
     try:
@@ -209,8 +235,9 @@ async def review_approval(
 
 
 def _record_usage(sink: TokenSink, usage: LlmUsage) -> None:
-    # A spent budget stops the Action at its next model call, not this review.
-    sink.record(usage, stage=APPROVAL_REVIEW_PROMPT_NAME, may_raise=False)
+    # A review that spends the budget raises: nothing is approved, and the
+    # Action ends on the budget error before the operation starts.
+    sink.record(usage, stage=APPROVAL_REVIEW_PROMPT_NAME, may_raise=True)
 
 
 __all__ = [
@@ -218,10 +245,13 @@ __all__ = [
     "ApprovalReviewRequest",
     "ApprovalReviewVerdict",
     "CommandReviewKind",
+    "ConversationEntry",
+    "DeclinedOperation",
     "PendingCommand",
     "PendingIntegrationWrite",
     "PendingOperation",
     "RequestTextNotByUser",
+    "UserMessage",
     "build_approval_review_payload",
     "review_approval",
 ]

@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { useId, type ReactNode } from 'react';
 
 import { useI18n } from '@/context/useI18n';
 
@@ -42,11 +42,14 @@ export function ProgressDayPane({
   recordFailure,
   onOpenEvidence,
   onDeleteRecord,
+  pageControls,
 }: {
   row: ProgressPeriodView;
   /** The page the day is on, which carries its records. */
   page: TodoProgressPage;
   projectName: ProjectNameOf;
+  /** The page's controls for the pane (its close), at the end of its header. */
+  pageControls: ReactNode;
 } & RecordActions) {
   const i18n = useI18n();
   const { t } = i18n;
@@ -54,9 +57,12 @@ export function ProgressDayPane({
   const records = recordsFor(row.record_ids, indexRecords(page.records));
   return (
     <section className="todo-progress-day" aria-labelledby={headingId}>
-      <header className="todo-progress-day__head">
-        <span className="todo-progress-day__crumb">{t('todoProgress.title')}</span>
+      {/* The pane's header row, like a conversation's: the day, then the page's controls. */}
+      <header className="history-pane-header todo-progress-day__head">
         <h2 id={headingId}>{formatDay(i18n, row.start)}</h2>
+        <span className="todo-progress-day__controls">{pageControls}</span>
+      </header>
+      <div className="todo-progress-day__body">
         {/* Only what the day has; an empty day says so below. */}
         {records.length > 0 || row.checked.length > 0 ? (
           <p className="todo-progress-day__facts">
@@ -72,8 +78,6 @@ export function ProgressDayPane({
             ) : null}
           </p>
         ) : null}
-      </header>
-      <div className="todo-progress-day__body">
         {records.length === 0 && row.checked.length === 0 ? (
           <p className="todo-progress-day__empty">{t('todoProgress.day.empty')}</p>
         ) : null}

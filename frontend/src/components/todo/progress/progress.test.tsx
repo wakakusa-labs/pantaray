@@ -383,6 +383,7 @@ function renderDay(row: ProgressPeriodView, pendingRecordIds: ReadonlySet<string
         projectName={projectName}
         pendingRecordIds={pendingRecordIds}
         recordFailure={null}
+        pageControls={null}
         {...handlers}
       />
     )

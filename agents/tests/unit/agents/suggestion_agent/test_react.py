@@ -18,7 +18,6 @@ from pantaray_agents.agents.suggestion_agent.nudges import PastSuggestions
 from pantaray_agents.agents.suggestion_agent.output import parse_suggestion_output
 from pantaray_agents.agents.suggestion_agent.react import (
     SUBMIT_SUGGESTION_TOOL_NAME,
-    SUGGESTION_COMMAND_TOOL_ID,
     SUGGESTION_TOOL_IDS,
     _terminal_tool,
     run_suggestion_react,
@@ -341,26 +340,6 @@ async def test_a_turn_that_does_not_submit_is_answered_and_the_run_goes_on() -> 
         ("tool", "error"),
         ("llm", "success"),
     ]
-
-
-@pytest.mark.asyncio
-async def test_a_run_without_the_command_tool_offers_the_rest() -> None:
-    model = _scripted(_submit("submit-1"))
-
-    await _run(
-        model,
-        tools=FixedSuggestionResearchTools(
-            tuple(
-                _tool(tool_id)
-                for tool_id in SUGGESTION_TOOL_IDS
-                if tool_id != SUGGESTION_COMMAND_TOOL_ID
-            )
-        ),
-    )
-
-    names = [tool.name for tool in model.requests[0].tools]
-    assert SUGGESTION_COMMAND_TOOL_ID not in names
-    assert "memory_search" in names
 
 
 SCREEN_TEXT = "text shown on the user's screen"

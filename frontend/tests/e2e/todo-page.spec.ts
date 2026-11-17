@@ -845,7 +845,7 @@ test('the home lists every organization’s TODOs by project, with the rail and 
   page,
 }, info) => {
   await openHome(page);
-  await expect(page.getByRole('heading', { level: 1, name: 'すべての TODO' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'すべての TODO' })).toBeVisible();
   await expect(page.locator('.todo-screen__summary')).toHaveText('2 / 7 完了');
   await expect(page.getByRole('combobox', { name: '並び順' })).toHaveValue('added');
 
@@ -972,7 +972,7 @@ test('a selected TODO opens its conversation beside the list, where a reply acce
 
   await page.getByRole('button', { name: '会話を閉じる' }).click();
   await expect(page).toHaveURL(/#\/history$/);
-  await expect(page.getByRole('heading', { level: 1, name: 'すべての TODO' })).toBeFocused();
+  await expect(page.getByRole('region', { name: 'すべての TODO' })).toBeFocused();
 });
 
 test('the rail scopes the list to one organization, and a project shows its TODOs as one list', async ({
@@ -1009,8 +1009,8 @@ test('the rail scopes the list to one organization, and a project shows its TODO
 
   await sidebarOf(page).getByRole('button', { name: '見積もり', exact: true }).click();
   await expect(page).toHaveURL(/#\/history\?scope=organization:xer&project=project:estimate$/);
-  // One project: its name is the title, and its TODOs are one list with no group heading.
-  await expect(page.getByRole('heading', { level: 1, name: '見積もり' })).toBeVisible();
+  // One project: its name names the list, and its TODOs are one list with no group heading.
+  await expect(page.getByRole('region', { name: '見積もり', exact: true })).toBeVisible();
   await expect(groups(page)).toHaveCount(0);
   await expect(page.getByRole('list', { name: '見積もり' }).getByRole('checkbox')).toHaveCount(2);
   await expect(page.locator('.todo-screen__summary')).toHaveText('1 / 2 完了');
@@ -1171,7 +1171,7 @@ test('the deleted TODOs list what can still be restored', async ({ page }, info)
   await openHome(page);
   await sidebarOf(page).getByRole('button', { name: '削除した TODO' }).click();
   await expect(page).toHaveURL(/#\/history\?view=deleted$/);
-  await expect(page.getByRole('heading', { level: 1, name: '削除した TODO' })).toBeVisible();
+  await expect(page.getByRole('region', { name: '削除した TODO' })).toBeVisible();
   await expect(sidebarOf(page).getByRole('button', { name: '削除した TODO' })).toHaveAttribute(
     'aria-current',
     'true'
@@ -1186,7 +1186,7 @@ test('a narrow window stacks the conversation under the list header, with nothin
 }, info) => {
   await page.setViewportSize({ width: 900, height: 820 });
   await openHome(page);
-  await expect(page.getByRole('heading', { level: 1, name: 'すべての TODO' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'すべての TODO' })).toBeVisible();
   expect(await hasNoSideScroll(page)).toBe(true);
   await capture(page, info, 'narrow-list');
 
@@ -1415,10 +1415,14 @@ test('the conversation expands into the list’s place, shrinks back beside it, 
   await expect(pane.getByText('10 月分の変更点を下書きにまとめました。')).toBeVisible();
   await capture(page, info, 'beside-list-controls');
 
-  const listTitle = page.getByRole('heading', { level: 1, name: 'すべての TODO' });
+  const list = page.getByRole('region', { name: 'すべての TODO' });
+  // The controls stay where they were as the conversation expands and shrinks.
+  const controlTop = async (name: string) =>
+    (await pane.getByRole('button', { name }).boundingBox())!.y;
+  const besideTop = await controlTop('拡大');
   await pane.getByRole('button', { name: '拡大' }).click();
   await expect(page).toHaveURL(/#\/history\?todo=t-notes&expanded=1$/);
-  await expect(listTitle).toBeHidden();
+  await expect(list).toBeHidden();
   // The same conversation, not opened again, across the screen; its header clears the toggle.
   await expect(pane.getByText('10 月分の変更点を下書きにまとめました。')).toBeVisible();
   const screenBox = (await page.locator('.todo-screen').boundingBox())!;
@@ -1428,12 +1432,13 @@ test('the conversation expands into the list’s place, shrinks back beside it, 
   const header = (await pane.locator('header').first().boundingBox())!;
   expect(header.x).toBeGreaterThanOrEqual(toggle.x + toggle.width);
   await expect(pane.getByRole('button', { name: '縮小' })).toBeFocused();
+  expect(await controlTop('縮小')).toBe(besideTop);
   expect(await hasNoSideScroll(page)).toBe(true);
   await capture(page, info, 'expanded');
 
   await pane.getByRole('button', { name: '縮小' }).click();
   await expect(page).toHaveURL(/#\/history\?todo=t-notes$/);
-  await expect(listTitle).toBeVisible();
+  await expect(list).toBeVisible();
   await expect(page.getByRole('button', { name: /^リリースノートの下書きを書く/ })).toHaveAttribute(
     'aria-current',
     'true'
@@ -1442,7 +1447,7 @@ test('the conversation expands into the list’s place, shrinks back beside it, 
   await pane.getByRole('button', { name: '拡大' }).click();
   await pane.getByRole('button', { name: '会話を閉じる' }).click();
   await expect(page).toHaveURL(/#\/history$/);
-  await expect(listTitle).toBeFocused();
+  await expect(list).toBeFocused();
 });
 
 test('the rail’s ＋ adds an organization with its image shrunk to a small icon, and shows it', async ({
@@ -1575,7 +1580,7 @@ test('lines pasted into the bar open a draft beside the list, which registers wh
   await expect(page).not.toHaveURL(/import=/);
   await expect(openImportRows(page)).toHaveCount(0);
   await expect(page.getByText('3 件の TODO を登録しました。')).toHaveRole('status');
-  await expect(page.getByRole('heading', { level: 1, name: 'すべての TODO' })).toBeFocused();
+  await expect(page.getByRole('region', { name: 'すべての TODO' })).toBeFocused();
   // The new organization's project is read with the workspace, and lists its TODO.
   await expect(
     rowOf(page.getByRole('region', { name: 'サイト改修 取引先 B' }), 'トップページの見出しを直す')
@@ -1625,7 +1630,7 @@ test('a file attached in an organization drafts inside it, and やめる closes 
   await pane.getByRole('button', { name: 'やめる' }).click();
   await expect(pane).toHaveCount(0);
   await expect(openImportRows(page)).toHaveCount(0);
-  await expect(page.getByRole('heading', { level: 1, name: 'すべての TODO' })).toBeFocused();
+  await expect(page.getByRole('region', { name: 'すべての TODO' })).toBeFocused();
 });
 
 test('a draft left for another organization is listed over its TODOs, and reopens beside them', async ({

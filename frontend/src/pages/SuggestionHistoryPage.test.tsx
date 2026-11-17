@@ -375,7 +375,7 @@ it('shows what `?item=` names, the TODOs without one, and the chat for a malform
   cleanup();
 
   renderPage(['/history']);
-  expect(screen.getByRole('heading', { level: 1, name: 'すべての TODO' })).toBeInTheDocument();
+  expect(screen.getByRole('region', { name: 'すべての TODO' })).toBeInTheDocument();
   expect(screen.queryByRole('region', { name: 'chat' })).toBeNull();
   cleanup();
 
@@ -395,7 +395,7 @@ it('without the TODO list, shows the chat where `?item=` names nothing, as Histo
   withoutTodoList();
   renderPage(['/history']);
   expect(screen.getByRole('region', { name: 'chat' })).toBeInTheDocument();
-  expect(screen.queryByRole('heading', { level: 1, name: 'すべての TODO' })).toBeNull();
+  expect(screen.queryByRole('region', { name: 'すべての TODO' })).toBeNull();
   const sidebar = screen.getByRole('complementary', HISTORY_SIDEBAR);
   expect(within(sidebar).getByRole('button', { name: 'チャット' })).toHaveAttribute(
     'aria-current',
@@ -637,31 +637,31 @@ it("opens a TODO's conversation beside the list: its Action, its suggestion, or 
 
   await userEvent.click(screen.getByRole('button', { name: '会話を閉じる' }));
   expect(location()).toHaveTextContent(/^\/history$/);
-  expect(screen.getByRole('heading', { level: 1, name: 'すべての TODO' })).toHaveFocus();
+  expect(screen.getByRole('region', { name: 'すべての TODO' })).toHaveFocus();
   expect(screen.getByRole('complementary', SIDEBAR)).toBeVisible();
 });
 
 it("expands a TODO's conversation into the list's place, shrinks it back, and closes it", async () => {
   renderPage(['/history?scope=organization:O1']);
   await userEvent.click(await screen.findByRole('button', { name: /^TODO T1/ }));
-  const listTitle = screen.getByRole('heading', { level: 1, name: 'すべての TODO' });
+  const todoList = screen.getByRole('region', { name: 'すべての TODO' });
   await userEvent.click(screen.getByRole('button', { name: '拡大' }));
   expect(location()).toHaveTextContent('/history?scope=organization:O1&todo=T1&expanded=1');
   expect(screen.getByRole('region', { name: 'action A5' })).toBeInTheDocument();
-  expect(listTitle).not.toBeVisible();
+  expect(todoList).not.toBeVisible();
   // The same button turns over, so the focus stays on it.
   expect(screen.getByRole('button', { name: '縮小' })).toHaveFocus();
 
   await userEvent.click(screen.getByRole('button', { name: '縮小' }));
   expect(location()).toHaveTextContent(/^\/history\?scope=organization:O1&todo=T1$/);
-  expect(listTitle).toBeVisible();
+  expect(todoList).toBeVisible();
   expect(screen.getByRole('button', { name: /^TODO T1/ })).toHaveAttribute('aria-current', 'true');
 
   await userEvent.click(screen.getByRole('button', { name: '拡大' }));
   await userEvent.click(screen.getByRole('button', { name: '会話を閉じる' }));
   expect(location()).toHaveTextContent(/^\/history\?scope=organization:O1$/);
   expect(screen.queryByRole('region', { name: 'action A5' })).toBeNull();
-  expect(screen.getByRole('heading', { level: 1, name: 'すべての TODO' })).toHaveFocus();
+  expect(screen.getByRole('region', { name: 'すべての TODO' })).toHaveFocus();
 });
 
 it("shows a TODO's work, however it is named, as that TODO's conversation expanded", async () => {
@@ -715,7 +715,7 @@ it('closes a conversation that is no TODO’s to the TODO list, keeping the scop
   expect(within(pane).queryByRole('button', { name: '縮小' })).toBeNull();
   await userEvent.click(within(pane).getByRole('button', { name: '会話を閉じる' }));
   expect(location()).toHaveTextContent(/^\/history\?scope=organization:O1$/);
-  expect(screen.getByRole('heading', { level: 1, name: 'すべての TODO' })).toHaveFocus();
+  expect(screen.getByRole('region', { name: 'すべての TODO' })).toHaveFocus();
 });
 
 it('the sidebar lists the scope’s projects, and one selects its TODOs within the scope', async () => {
@@ -724,7 +724,7 @@ it('the sidebar lists the scope’s projects, and one selects its TODOs within t
   await userEvent.click(await within(sidebar).findByRole('button', { name: '採用' }));
   expect(location()).toHaveTextContent('/history?scope=none&project=project:P2');
   // One project is one list under its name, with no group heading.
-  expect(screen.getByRole('heading', { level: 1, name: '採用' })).toBeVisible();
+  expect(screen.getByRole('region', { name: '採用' })).toBeVisible();
   expect(projectGroups()).toHaveLength(0);
   const rows = within(screen.getByRole('list', { name: '採用' })).getAllByRole('checkbox');
   expect(rows.map((row) => row.getAttribute('aria-label'))).toEqual(['完了: TODO T3']);

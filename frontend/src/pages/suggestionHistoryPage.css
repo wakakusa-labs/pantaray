@@ -7,6 +7,10 @@
   /* The traffic lights' center line: trafficLightPosition's y (10px) plus half their 14px
      frame. The sidebar toggle, and the detail headers while the sidebar is hidden, sit on it. */
   --history-title-row-center: 17px;
+  /* A detail header's bottom padding that lifts its content's center onto that line. */
+  --history-title-row-lift: calc(
+    var(--app-pane-header-height) - 2 * var(--history-title-row-center)
+  );
   position: relative;
   display: flex;
   flex: 1;
@@ -97,8 +101,21 @@
   :is(.action-task__header, .suggestion-task__header),
 .history-page--sidebar-hidden > .todo-screen > .todo-screen__list > .todo-screen__header {
   margin-left: 54px;
-  padding-bottom: calc(var(--app-pane-header-height) - 2 * var(--history-title-row-center));
+  padding-bottom: var(--history-title-row-lift);
   padding-left: 0;
+}
+
+/* The pane beside the list (a conversation or an import) is in the row too, level with the list's
+   header, so expanding the conversation into the list's place leaves its controls where they
+   were. Clear of the toggle, it keeps its own start. Under the list's header, in a narrow
+   window, it is below the row. */
+@media (min-width: 1101px) {
+  .history-page--sidebar-hidden
+    > .todo-screen--with-pane
+    > .history-detail
+    :is(.action-task__header, .suggestion-task__header) {
+    padding-bottom: var(--history-title-row-lift);
+  }
 }
 
 /* Starts below the window's drag strip, level with the rail's first icon, so it stays clickable. */

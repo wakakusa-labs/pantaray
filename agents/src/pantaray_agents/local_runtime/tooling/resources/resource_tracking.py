@@ -226,7 +226,9 @@ def release_run_owned_resource(
 
     A process group is killed only while its pid still carries the recorded start
     signature, so a reused pid is never signalled; a temp dir is removed. A failed
-    cleanup stays registered for the periodic reaper and the run's own cleanup.
+    cleanup stays registered: the periodic reaper retries it even while the run
+    lives, and the run's own cleanup covers it too. A group whose leader is
+    already gone counts as cleaned (see ``resource_cleanup``'s design limit).
     Releasing an already cleaned or abandoned resource changes nothing. Returns
     the resource's status afterwards.
     """

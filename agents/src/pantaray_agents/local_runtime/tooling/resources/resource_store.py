@@ -247,7 +247,8 @@ def list_periodic_recoverable_tool_runtime_resources(
 
     The owner is the run's process when ``owner_process_id`` is set (the call
     that started it may already be over), else the invocation when one is
-    named, else the execution session.
+    named, else the execution session.  A run-owned row whose release already
+    failed is retried even while its run lives: the run gave it up.
     """
 
     with sqlite3.connect(db_path) as connection:
@@ -289,7 +290,8 @@ def list_periodic_recoverable_tool_runtime_resources(
                     (
                         resource.owner_process_id IS NOT NULL
                         AND (
-                            owner.status NOT IN ('enqueued', 'running', 'paused')
+                            resource.status = 'cleanup_failed'
+                            OR owner.status NOT IN ('enqueued', 'running', 'paused')
                             OR session.status IN (
                                 'completed', 'failed', 'canceled', 'expired'
                             )

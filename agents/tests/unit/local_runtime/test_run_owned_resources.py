@@ -19,6 +19,7 @@ from pantaray_agents.local_runtime.tooling.repository import complete_execution_
 from pantaray_agents.local_runtime.tooling.repository.executions import (
     record_tool_invocation_completion,
 )
+from pantaray_agents.local_runtime.tooling.resources import resource_tracking
 from pantaray_agents.local_runtime.tooling.resources.cancel_cleanup import (
     cleanup_action_runtime_resources,
 )
@@ -106,6 +107,14 @@ def _end_process(db_path: Path, process_id: str) -> None:
             "UPDATE processes SET status = 'completed', completed_at = ? "
             "WHERE process_id = ?",
             ("2026-03-23T00:00:09Z", process_id),
+        )
+
+
+def _set_process_status(db_path: Path, process_id: str, status: str) -> None:
+    with sqlite3.connect(db_path) as connection, connection:
+        connection.execute(
+            "UPDATE processes SET status = ? WHERE process_id = ?",
+            (status, process_id),
         )
 
 
@@ -324,6 +333,49 @@ def test_release_stops_the_process_and_removes_its_temp_dir(
 
     assert not process_exists(pid)
     assert not process_temp_dir.exists()
+
+
+@pytest.mark.parametrize("owner_status", ["running", "paused"])
+def test_sweep_retries_a_failed_release_while_the_run_lives(
+    tmp_path: Path,
+    spawned_pids: list[int],
+    monkeypatch: pytest.MonkeyPatch,
+    owner_status: str,
+) -> None:
+    db_path, context, pid, process_resource_id, process_temp_dir, temp_resource_id = (
+        _register_run_owned_process(
+            tmp_path=tmp_path,
+            spawned_pids=spawned_pids,
+            owner_process_id=ACTION_PROCESS_ID,
+        )
+    )
+    _set_process_status(db_path, ACTION_PROCESS_ID, owner_status)
+
+    def _fail_cleanup(resource: object) -> None:
+        raise OSError("resource busy")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(resource_tracking, "cleanup_runtime_resource", _fail_cleanup)
+        for resource_id in (process_resource_id, temp_resource_id):
+            assert (
+                release_run_owned_resource(
+                    db_path=db_path,
+                    busy_timeout_ms=BUSY_TIMEOUT_MS,
+                    resource_id=resource_id,
+                    released_at="2026-03-23T00:00:05Z",
+                )
+                == "cleanup_failed"
+            )
+
+    reconcile_tool_runtime_resources_for_periodic_reaper(
+        db_path=db_path, busy_timeout_ms=BUSY_TIMEOUT_MS
+    )
+
+    assert not process_exists(pid)
+    assert not process_temp_dir.exists()
+    assert _resource_status(db_path, process_resource_id) == "cleaned"
+    assert _resource_status(db_path, temp_resource_id) == "cleaned"
+    assert context.action_temp_dir.exists()
 
 
 def test_release_never_signals_a_reused_pid(

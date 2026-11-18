@@ -70,7 +70,6 @@ export function AgentsMdSection({ t }: { t: Translate }) {
             aria-labelledby={titleId}
             aria-describedby={descriptionId}
             aria-invalid={tooLong || undefined}
-            placeholder={t('settings.agentsMd.placeholder')}
             spellCheck={false}
             // Held while saving, so "saved" always describes the text on screen.
             readOnly={status === 'saving'}

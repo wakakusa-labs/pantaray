@@ -10,6 +10,9 @@ from pantaray_agents.local_runtime.storage.migrations import (
     MigrationError,
     apply_migrations,
 )
+from pantaray_agents.local_runtime.storage.sqlite_vector import (
+    load_sqlite_vector_extension,
+)
 from pantaray_agents.local_runtime.tooling.bootstrap import (
     bootstrap_local_tooling_catalog,
     ensure_action_scratch_execution_context,
@@ -36,6 +39,34 @@ RETIRED_CUTOVER_MIGRATION_NAME = "0075_formal_tool_step_cutover.sql"
 RETIRED_CUTOVER_CHECKSUM = (
     "d99a61325c2278fd4290af2130af90d66de85dc1283e34602b36127393e361db"
 )
+
+
+def _ensure_execution_context_on_old_schema(db_path: Path) -> ActionExecutionContext:
+    """Create the execution context with today's code on this older schema.
+
+    Today's resource insert names ``owner_process_id`` (migration 0145), so the
+    column exists only while the context is written; the later migration adds it
+    for real.
+    """
+
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "ALTER TABLE tool_runtime_resources ADD COLUMN owner_process_id TEXT"
+        )
+    context = ensure_action_scratch_execution_context(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        user_id="user-1",
+        action_id="action-1",
+        started_at="2026-08-11T00:00:00Z",
+        allowed_tool_ids=("bash",),
+    )
+    with sqlite3.connect(db_path) as connection:
+        load_sqlite_vector_extension(connection)
+        connection.execute(
+            "ALTER TABLE tool_runtime_resources DROP COLUMN owner_process_id"
+        )
+    return context
 
 
 def _insert_pre_action_creation_cutover_action(db_path: Path) -> None:
@@ -89,14 +120,7 @@ def test_migration_backfills_terminal_and_preflight_storage_provenance(
     )
     bootstrap_local_tooling_catalog(db_path=db_path, busy_timeout_ms=1_000)
     _insert_pre_action_creation_cutover_action(db_path)
-    context = ensure_action_scratch_execution_context(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        user_id="user-1",
-        action_id="action-1",
-        started_at="2026-08-11T00:00:00Z",
-        allowed_tool_ids=("bash",),
-    )
+    context = _ensure_execution_context_on_old_schema(db_path)
     terminal_metadata = _json_metadata(
         context.tool_results_path / "invocation-file" / f"output-{'1' * 32}.json"
     )
@@ -269,14 +293,7 @@ def test_v74_upgrade_removes_only_tool_action_steps(
     )
     bootstrap_local_tooling_catalog(db_path=db_path, busy_timeout_ms=1_000)
     _insert_pre_action_creation_cutover_action(db_path)
-    context = ensure_action_scratch_execution_context(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        user_id="user-1",
-        action_id="action-1",
-        started_at="2026-08-11T00:00:00Z",
-        allowed_tool_ids=("bash",),
-    )
+    context = _ensure_execution_context_on_old_schema(db_path)
     with sqlite3.connect(db_path) as connection:
         connection.executemany(
             """

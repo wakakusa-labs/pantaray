@@ -55,6 +55,11 @@ def build_tool_runtime_resource(row: sqlite3.Row) -> StoredToolRuntimeResource:
         else None,
         cleanup_attempts=int(row["cleanup_attempts"]),
         lock_id=str(row["lock_id"]) if row["lock_id"] is not None else None,
+        owner_process_id=(
+            str(row["owner_process_id"])
+            if row["owner_process_id"] is not None
+            else None
+        ),
     )
 
 

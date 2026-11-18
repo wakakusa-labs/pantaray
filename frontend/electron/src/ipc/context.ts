@@ -68,6 +68,7 @@ import type { createChatFetcher } from '../chat/chatFetch';
 import type { createTodoFetcher } from '../todos/todoFetch';
 import type { createTodoImportFetcher } from '../todos/todoImportFetch';
 import type { IntegrationSettingsApi } from '../settings/integrationSettingsFetch';
+import type { AgentsMdFile } from '../settings/agentsMd';
 import type {
   CreateNotificationIpcHandlers,
   AcceptActionRequest,
@@ -240,6 +241,9 @@ export type MainContext = {
     get: () => OverlayPlacements;
     set: (update: OverlayPlacementUpdate) => OverlayPlacements;
   };
+
+  /** `~/.pantaray/AGENTS.md`, the instructions every Action follows. */
+  agentsMd: AgentsMdFile;
 
   workspaceSettings: {
     get: () => Promise<WorkspaceSettings>;

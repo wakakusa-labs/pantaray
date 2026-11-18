@@ -418,6 +418,11 @@ declare global {
           cell: ElectronOverlayCell;
         }) => Promise<ElectronOverlayPlacements>;
       };
+      /** `~/.pantaray/AGENTS.md`; main fixes the path and refuses text over the Action's budget. */
+      agentsMd?: {
+        read: () => Promise<string>;
+        write: (content: string) => Promise<void>;
+      };
       workspaceSettings?: {
         get: () => Promise<ElectronWorkspaceSettings>;
         getCommandNetwork: () => Promise<CommandNetworkSettings>;

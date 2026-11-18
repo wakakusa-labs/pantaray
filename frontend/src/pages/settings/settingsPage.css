@@ -607,3 +607,29 @@
     width: 100%;
   }
 }
+
+/* The shared text field, grown for a multi-line instruction file. */
+.settings-agents-md-input {
+  height: auto;
+  line-height: 1.55;
+  min-height: 240px;
+  padding: var(--space-sm);
+  resize: vertical;
+  font: inherit;
+  font-size: 13px;
+}
+
+.settings-agents-md-hint {
+  margin-bottom: 0;
+}
+
+.settings-agents-md-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.settings-agents-md-error {
+  color: var(--danger-color);
+}

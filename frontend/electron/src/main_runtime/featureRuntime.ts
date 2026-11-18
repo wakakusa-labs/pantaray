@@ -60,6 +60,7 @@ import { presentRecordingIntro } from '../windows/recordingIntroWindow';
 import type { OnboardingState } from '../ipc/schemas/onboarding';
 import { createOnboardingStateStore } from '../settings/onboardingState';
 import { createOverlayPlacementStore } from '../settings/overlayPlacement';
+import { createAgentsMdFile } from '../settings/agentsMd';
 import { openRegisteredWorkspaceFolder } from '../settings/workspaceFolderOpen';
 import { createWorkspaceSettingsFetcher } from '../settings/workspaceSettingsFetch';
 import { createIntegrationSettingsFetcher } from '../settings/integrationSettingsFetch';
@@ -453,6 +454,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
           return result;
         },
         overlayPlacement,
+        agentsMd: createAgentsMdFile(app.getPath('home')),
         workspaceSettingsGet: workspaceSettingsFetch.get,
         workspaceSettingsGetReadAccessScope: workspaceSettingsFetch.getReadAccessScope,
         workspaceSettingsGetCommandNetwork: workspaceSettingsFetch.getCommandNetwork,

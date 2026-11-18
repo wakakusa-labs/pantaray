@@ -22,6 +22,7 @@ from pantaray_agents.schema.websocket.server_messages import (
     BrowserBackOperation,
     BrowserClickOperation,
     BrowserConsoleOperation,
+    BrowserHost,
     BrowserHoverOperation,
     BrowserPressOperation,
     BrowserRef,
@@ -58,8 +59,7 @@ class BrowserNavigateArgs(_StrictModel):
 
 
 class BrowserScreenshotArgs(_StrictModel):
-    """The viewport, or exactly one of ``ref``, ``full_page`` and ``printed_pages``."""
-
+    # The viewport, or exactly one of ``ref``, ``full_page`` and ``printed_pages``.
     action: Literal["screenshot"]
     ref: BrowserRef | None = None
     full_page: Literal[True] | None = None
@@ -83,8 +83,7 @@ class BrowserPrintArgs(_StrictModel):
 
 class BrowserAllowWritesArgs(_StrictModel):
     action: Literal["allow_writes"]
-    # An exact hostname: no scheme, port, path or user.
-    host: str = Field(pattern=r"^[^\s/:@?#]+$")
+    host: BrowserHost
     justification: str = Field(min_length=1, pattern=r"\S")
 
 

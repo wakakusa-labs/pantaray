@@ -11,6 +11,8 @@ from typing import Annotated, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from pantaray_agents.schema.websocket.server_messages import BrowserHost
+
 # Electron refuses a new host past this many per session, so no answer reports more.
 BROWSER_MAX_CONTACTED_HOSTS: Final = 50
 BROWSER_MAX_BLOCKED_REQUESTS: Final = 10
@@ -48,9 +50,7 @@ BrowserTruncation = Literal["snapshot_too_long", "page_too_tall", "console_too_l
 
 
 class BrowserContactedHost(_AnswerModel):
-    """A host the page reached. Never the URL: its path and query can carry tokens."""
-
-    host: str = Field(min_length=1, pattern=r"^\S+$")
+    host: BrowserHost  # Never the URL: its path and query can carry tokens.
     port: int = Field(ge=1, le=65_535)
 
 

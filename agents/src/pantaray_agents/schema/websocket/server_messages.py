@@ -241,6 +241,10 @@ class _BrowserModel(BaseModel):
 
 BrowserRef = Annotated[str, Field(min_length=1, pattern=r"^\S+$")]
 _BrowserId = Annotated[str, Field(min_length=1, pattern=r"\S")]
+# A host name or an IP literal, IPv6 without brackets, as the command network
+# reports one: never a scheme, user, port, path, query or fragment.
+_HOST = r"^(?:[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*\.?|[0-9A-Fa-f.]*:[0-9A-Fa-f:.]*)$"
+BrowserHost = Annotated[str, Field(pattern=_HOST)]
 
 
 class BrowserBackOperation(_BrowserModel):
@@ -312,8 +316,7 @@ class BrowserWebTarget(_BrowserModel):
 
 
 class BrowserFileTarget(_BrowserModel):
-    """A local document ``read`` may open, by its real path."""
-
+    # A local document ``read`` may open, by its real path.
     kind: Literal["file"]
     path: str = Field(pattern=r"^/")
 
@@ -324,8 +327,7 @@ class BrowserNavigateOperation(_BrowserModel):
 
 
 class BrowserScreenshotOperation(_BrowserModel):
-    """A PNG of the viewport, of one element (``ref``), or of the full page."""
-
+    # A PNG of the viewport, of one element (``ref``), or of the full page.
     action: Literal["screenshot"]
     ref: BrowserRef | None = None
     full_page: Literal[True] | None = None
@@ -369,18 +371,13 @@ class BrowserPagePolicy(_BrowserModel):
     private_roots: list[str]
     private_root_exceptions: list[str]
     secret_paths: list[SecretPathRule]
-    # External hosts this run may send writes to, by exact hostname.
-    write_hosts: list[str]
+    # External hosts this run may send writes to.
+    write_hosts: list[BrowserHost]
 
 
 class BrowserOperationRequestedMessage(_BrowserModel):
-    """The browser tool asks the desktop client to run one operation in a session.
-
-    WebSocket event: "browser_operation_requested"
-
-    A control message for the desktop client only; it is never forwarded to the
-    renderer. Electron answers with ``POST /local/action-browser``.
-    """
+    """WebSocket event "browser_operation_requested", for the desktop client only
+    and never forwarded to the renderer; answered by ``POST /local/action-browser``."""
 
     operation_request_id: _BrowserId = Field(description="Consumed once")
     session_id: _BrowserId = Field(description="Browser session the operation runs in")

@@ -20,6 +20,9 @@ const strict = <T extends z.ZodRawShape>(shape: T) => z.object(shape).strict();
 
 const NonBlankSchema = z.string().regex(/\S/);
 const RefSchema = z.string().regex(/^\S+$/);
+// A host name or an IP literal, IPv6 without brackets, as the command network reports one.
+const HOST = /^(?:[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*\.?|[0-9A-Fa-f.]*:[0-9A-Fa-f:.]*)$/;
+const HostSchema = z.string().regex(HOST);
 const Sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
 const PositiveIntSchema = z.number().int().positive();
 
@@ -81,8 +84,8 @@ const BrowserPagePolicySchema = strict({
   private_roots: z.array(z.string()),
   private_root_exceptions: z.array(z.string()),
   secret_paths: z.array(strict({ withheld: z.string(), excepted: z.string().nullable() })),
-  // External hosts this run may send writes to, by exact hostname.
-  write_hosts: z.array(z.string()),
+  // External hosts this run may send writes to.
+  write_hosts: z.array(HostSchema),
 });
 
 const BrowserOperationRequestSchema = strict({
@@ -100,7 +103,7 @@ const BrowserSessionCloseRequestSchema = strict({ session_id: NonBlankSchema });
 const ContactedHostsSchema = z
   .array(
     strict({
-      host: z.string().regex(/^\S+$/),
+      host: HostSchema,
       port: z.number().int().min(1).max(65_535),
     })
   )

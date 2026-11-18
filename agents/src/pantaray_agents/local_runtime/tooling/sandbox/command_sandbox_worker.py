@@ -493,21 +493,22 @@ async def _run_long_running(
             return_when=asyncio.FIRST_COMPLETED,
         )
         if parent.lost.done():
+            # Raises: the parent closed its pipe while the command ran.
             parent.lost.result()
-        if command.exited.done():
-            pass
-        elif temp_quota_task.done():
-            temp_quota_task.result()
-            ended_by = "temp_storage_limit"
-            _kill_command(transport)
-        else:
-            stop_task.result()
-            ended_by = "stop"
-            await _stop_command(
-                transport=transport,
-                command=command,
-                grace_seconds=request.stop_grace_ms / 1000,
-            )
+        # A command that exited on its own ends by "command" whatever else woke.
+        if not command.exited.done():
+            if temp_quota_task.done():
+                temp_quota_task.result()
+                ended_by = "temp_storage_limit"
+                _kill_command(transport)
+            else:
+                stop_task.result()
+                ended_by = "stop"
+                await _stop_command(
+                    transport=transport,
+                    command=command,
+                    grace_seconds=request.stop_grace_ms / 1000,
+                )
         returncode = await command.exited
         await asyncio.wait(
             (command.output_closed,), timeout=request.output_drain_ms / 1000

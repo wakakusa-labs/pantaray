@@ -148,16 +148,18 @@ async def _started(
     helper = await spawn_sandbox_helper(asyncio.create_subprocess_exec)
     try:
         assert helper.stdin is not None
-        helper.stdin.write(encode_message(request))
-        await helper.stdin.drain()
         async with asyncio.timeout(15):
+            helper.stdin.write(encode_message(request))
+            await helper.stdin.drain()
             yield _Parent(helper, request.request_id)
     finally:
-        # What the parent does after the exit report, or on any failure.
-        with suppress(ProcessLookupError):
+        # What the parent does after the exit report, or on any failure. A
+        # helper that died first leaves a group that answers EPERM on macOS.
+        with suppress(ProcessLookupError, PermissionError):
             os.killpg(helper.pid, signal.SIGKILL)
         # Reads what a test left unread: a paused pipe never sees its EOF.
-        await helper.communicate()
+        async with asyncio.timeout(15):
+            await helper.communicate()
 
 
 async def _wait_until_gone(pid_file: Path) -> None:
@@ -312,7 +314,8 @@ async def test_the_helper_kills_the_command_when_its_parent_dies(
     try:
         await _wait_until_gone(temp_dir / "descendant.pid")
     finally:
-        with suppress(ProcessLookupError):
+        # A group left with only unreaped exits answers EPERM on macOS.
+        with suppress(ProcessLookupError, PermissionError):
             os.killpg(helper_pid, signal.SIGKILL)
 
 

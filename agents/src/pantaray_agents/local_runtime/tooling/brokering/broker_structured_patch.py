@@ -163,7 +163,7 @@ def structured_patch_llm_feedback(code: str) -> str:
         return "PATCH_TARGET_EXISTS: use update for existing files."
     if code == PATCH_ERROR_TARGET_MISSING:
         return (
-            "PATCH_TARGET_MISSING: re-read the workspace and target an existing file."
+            "PATCH_TARGET_MISSING: use add to create a file, or target an existing one."
         )
     if code == PATCH_ERROR_TARGET_NOT_FILE:
         return "PATCH_TARGET_NOT_FILE: apply_patch can only update or delete files."

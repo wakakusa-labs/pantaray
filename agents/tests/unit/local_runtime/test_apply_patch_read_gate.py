@@ -50,7 +50,7 @@ from .broker_test_support import (
 from .resource_recovery_test_support import register_running_apply_patch_invocation
 
 TARGET_MISSING_FEEDBACK = (
-    "PATCH_TARGET_MISSING: re-read the workspace and target an existing file."
+    "PATCH_TARGET_MISSING: use add to create a file, or target an existing one."
 )
 TARGET_NOT_FILE_FEEDBACK = (
     "PATCH_TARGET_NOT_FILE: apply_patch can only update or delete files."

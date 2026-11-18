@@ -29,6 +29,8 @@ from .broker_common import BrokerContext
 @dataclass(frozen=True, slots=True)
 class OutsideWorkspacePatchTarget:
     path: Path
+    # The nearest existing folder above the path; an add creates the folders
+    # between them.
     folder: Path
 
 
@@ -50,9 +52,15 @@ def resolve_outside_workspace_patch_target(
     if _is_symlink_escape(context=context, candidate=candidate):
         return None
     target = candidate.resolve(strict=False)
-    if not _is_approvable_folder(context=context, folder=target.parent):
+    folder = next(parent for parent in target.parents if parent.is_dir())
+    # The target, not the folder: a folder above app storage that does not
+    # exist yet must not open a way into it.
+    if any(
+        path_is_within(path=target, root=root)
+        for root in app_owned_roots(context.db_path)
+    ):
         return None
-    return OutsideWorkspacePatchTarget(path=target, folder=target.parent)
+    return OutsideWorkspacePatchTarget(path=target, folder=folder)
 
 
 def resolve_outside_workspace_cwd(
@@ -85,15 +93,6 @@ def _is_symlink_escape(*, context: BrokerContext, candidate: Path) -> bool:
     )
 
 
-def _is_approvable_folder(*, context: BrokerContext, folder: Path) -> bool:
-    if not folder.is_dir():
-        return False
-    return not any(
-        path_is_within(path=folder, root=root)
-        for root in app_owned_roots(context.db_path)
-    )
-
-
 def outside_workspace_resolved_path(
     *,
     context: BrokerContext,
@@ -114,7 +113,7 @@ def outside_workspace_resolved_path(
     return ResolvedManifestPath(
         root=root,
         path=target.path,
-        root_relative_path=target.path.name,
+        root_relative_path=str(target.path.relative_to(target.folder)),
     )
 
 

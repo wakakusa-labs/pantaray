@@ -388,6 +388,18 @@ export type HtmlRenderRequestedEvent = OrchestrationEventEnvelope<
   }
 >;
 
+/** Desktop-only control messages, never forwarded to a renderer; `browser/browserContract.ts`
+ * parses the data, and the answer goes back over the local backend. */
+export type BrowserOperationRequestedEvent = OrchestrationEventEnvelope<
+  'browser_operation_requested',
+  unknown
+>;
+
+export type BrowserSessionCloseRequestedEvent = OrchestrationEventEnvelope<
+  'browser_session_close_requested',
+  unknown
+>;
+
 /**
  * An item appended to the owner's chat. Only the main window shows the chat, so main parses
  * the item and hands it to that window alone; it never reaches an Overlay.
@@ -417,6 +429,8 @@ export type OrchestrationServerEvent =
   | ProcessPausedActionEvent
   | ScreenCaptureRequestedEvent
   | HtmlRenderRequestedEvent
+  | BrowserOperationRequestedEvent
+  | BrowserSessionCloseRequestedEvent
   | ChatItemAppendedEvent
   | ChatTurnStateEvent
   | TodoChangedEvent
@@ -484,6 +498,18 @@ export function isHtmlRenderRequestedEvent(
   event: OrchestrationServerEvent
 ): event is HtmlRenderRequestedEvent {
   return event.event === 'html_render_requested';
+}
+
+export function isBrowserOperationRequestedEvent(
+  event: OrchestrationServerEvent
+): event is BrowserOperationRequestedEvent {
+  return event.event === 'browser_operation_requested';
+}
+
+export function isBrowserSessionCloseRequestedEvent(
+  event: OrchestrationServerEvent
+): event is BrowserSessionCloseRequestedEvent {
+  return event.event === 'browser_session_close_requested';
 }
 
 export function isChatItemAppendedEvent(

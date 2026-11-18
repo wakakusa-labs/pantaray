@@ -1,8 +1,8 @@
 """サーバー → クライアント WebSocketメッセージスキーマ"""
 
-from typing import Literal
+from typing import Annotated, Final, Literal, Self
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ..agent.base import AgentError, JSONValue
 from ..agent.suggestion import (
@@ -189,6 +189,8 @@ class SecretPathRule(BaseModel):
     JavaScript reads as they are.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     withheld: str = Field(description="ERE of the withheld paths")
     excepted: str | None = Field(description="ERE of the paths it leaves loadable")
 
@@ -226,6 +228,173 @@ class HtmlRenderRequestedMessage(BaseModel):
     allow_network: bool = Field(
         description="Whether the page may load http(s) sub-resources"
     )
+
+
+# The longest `wait` a browser operation may ask for; Electron's budget for a
+# `wait` is derived from it.
+BROWSER_MAX_WAIT_SECONDS: Final = 10
+
+
+class _BrowserModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+BrowserRef = Annotated[str, Field(min_length=1, pattern=r"^\S+$")]
+_BrowserId = Annotated[str, Field(min_length=1, pattern=r"\S")]
+# A host name or an IP literal, IPv6 without brackets, as the command network
+# reports one: never a scheme, user, port, path, query or fragment.
+_HOST = r"^(?:[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*\.?|[0-9A-Fa-f.]*:[0-9A-Fa-f:.]*)$"
+BrowserHost = Annotated[str, Field(pattern=_HOST)]
+
+
+class BrowserBackOperation(_BrowserModel):
+    action: Literal["back"]
+
+
+class BrowserSnapshotOperation(_BrowserModel):
+    action: Literal["snapshot"]
+    # None: the whole page; a ref: only that element's subtree.
+    ref: BrowserRef | None = None
+
+
+class BrowserClickOperation(_BrowserModel):
+    action: Literal["click"]
+    ref: BrowserRef
+
+
+class BrowserHoverOperation(_BrowserModel):
+    action: Literal["hover"]
+    ref: BrowserRef
+
+
+class BrowserTypeOperation(_BrowserModel):
+    action: Literal["type"]
+    ref: BrowserRef
+    text: str
+    submit: bool = False
+
+
+class BrowserPressOperation(_BrowserModel):
+    action: Literal["press"]
+    # One key or a chord such as "Control+A".
+    key: str = Field(min_length=1, pattern=r"\S")
+
+
+class BrowserSelectOperation(_BrowserModel):
+    action: Literal["select"]
+    ref: BrowserRef
+    values: list[str] = Field(min_length=1)
+
+
+class BrowserScrollOperation(_BrowserModel):
+    action: Literal["scroll"]
+    # None: the page itself.
+    ref: BrowserRef | None = None
+    direction: Literal["up", "down", "left", "right"]
+
+
+class BrowserWaitOperation(_BrowserModel):
+    # Wait until ``text`` shows, or for ``seconds``: exactly one of them.
+    action: Literal["wait"]
+    text: str | None = Field(default=None, min_length=1, pattern=r"\S")
+    seconds: float | None = Field(default=None, gt=0, le=BROWSER_MAX_WAIT_SECONDS)
+
+    @model_validator(mode="after")
+    def _exactly_one_condition(self) -> Self:
+        if (self.text is None) == (self.seconds is None):
+            raise ValueError("wait takes exactly one of text and seconds")
+        return self
+
+
+class BrowserConsoleOperation(_BrowserModel):
+    action: Literal["console"]
+
+
+class BrowserWebTarget(_BrowserModel):
+    kind: Literal["web"]
+    url: str = Field(pattern=r"^https?://\S+$")
+
+
+class BrowserFileTarget(_BrowserModel):
+    # A local document ``read`` may open, by its real path.
+    kind: Literal["file"]
+    path: str = Field(pattern=r"^/")
+
+
+class BrowserNavigateOperation(_BrowserModel):
+    action: Literal["navigate"]
+    target: Annotated[BrowserWebTarget | BrowserFileTarget, Field(discriminator="kind")]
+
+
+class BrowserScreenshotOperation(_BrowserModel):
+    # A PNG of the viewport, of one element (``ref``), or of the full page.
+    action: Literal["screenshot"]
+    ref: BrowserRef | None = None
+    full_page: Literal[True] | None = None
+
+    @model_validator(mode="after")
+    def _one_region(self) -> Self:
+        if self.ref is not None and self.full_page is not None:
+            raise ValueError("screenshot takes at most one of ref and full_page")
+        return self
+
+
+class BrowserPrintOperation(_BrowserModel):
+    # Print the page to a PDF, the artifact of the answer.
+    action: Literal["print"]
+
+
+BrowserOperation = Annotated[
+    BrowserNavigateOperation
+    | BrowserBackOperation
+    | BrowserSnapshotOperation
+    | BrowserClickOperation
+    | BrowserHoverOperation
+    | BrowserTypeOperation
+    | BrowserPressOperation
+    | BrowserSelectOperation
+    | BrowserScrollOperation
+    | BrowserWaitOperation
+    | BrowserScreenshotOperation
+    | BrowserPrintOperation
+    | BrowserConsoleOperation,
+    Field(discriminator="action"),
+]
+
+
+class BrowserPagePolicy(_BrowserModel):
+    """What the session's page may load, sent with every operation; the session
+    applies the latest. The roots and secret rules are those ``read`` applies."""
+
+    allow_network: bool
+    file_roots: list[str]
+    private_roots: list[str]
+    private_root_exceptions: list[str]
+    secret_paths: list[SecretPathRule]
+    # External hosts this run may send writes to.
+    write_hosts: list[BrowserHost]
+
+
+class BrowserOperationRequestedMessage(_BrowserModel):
+    """WebSocket event "browser_operation_requested", for the desktop client only
+    and never forwarded to the renderer; answered by ``POST /local/action-browser``."""
+
+    operation_request_id: _BrowserId = Field(description="Consumed once")
+    session_id: _BrowserId = Field(description="Browser session the operation runs in")
+    action_id: _BrowserId = Field(description="ID of the requesting Action")
+    process_id: _BrowserId = Field(description="Physical process ID of the owning run")
+    tool_request_id: _BrowserId = Field(description="Logical ID of the tool request")
+    operation: BrowserOperation = Field(
+        description="The validated action, local paths resolved to real paths"
+    )
+    policy: BrowserPagePolicy
+
+
+class BrowserSessionCloseRequestedMessage(_BrowserModel):
+    """WebSocket event "browser_session_close_requested": idempotent, and Electron
+    refuses any later operation naming the id."""
+
+    session_id: _BrowserId = Field(description="Browser session to close")
 
 
 class ProcessCompletedMessage(BaseModel):

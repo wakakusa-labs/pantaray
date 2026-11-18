@@ -27,6 +27,20 @@ CHILD_COUNT_MULTIPLIER = 4
 CHILD_COUNT_CAP = 128
 TEMP_DISK_RATIO = 0.05
 
+# Long-running processes (process_supervisor), all per process unless noted.
+# How long a start waits, once the command has started, for it to end before
+# returning it running: long enough to catch a command that fails at once,
+# such as on a busy port.
+PROCESS_START_WINDOW_MS = 2_000
+# How long a stop waits after SIGTERM before SIGKILL.
+PROCESS_STOP_GRACE_MS = 3_000
+# How long the helper still forwards output once the command has exited.
+PROCESS_OUTPUT_DRAIN_MS = 500
+# Unread output kept per stream between reads: its first and last halves.
+PROCESS_RETAINED_OUTPUT_BYTES = OUTPUT_FLOOR_BYTES
+# Processes one run may have running at once.
+PROCESS_RUN_LIMIT = 4
+
 
 @dataclass(frozen=True, slots=True)
 class BrokerLocalBudget:

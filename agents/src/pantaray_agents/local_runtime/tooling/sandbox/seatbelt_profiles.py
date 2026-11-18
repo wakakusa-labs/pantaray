@@ -8,7 +8,7 @@ from pantaray_agents.tools.files.pantaray_agents_md import (
 )
 from pantaray_agents.tools.files.secret_paths import SecretTier, secret_path_patterns
 
-from .command_sandbox_protocol import BrokerToSandboxCommandRequest
+from .command_sandbox_protocol import SandboxCommandSpec
 from .macos_runtime import toolchain_read_roots
 
 PROFILE_TEMPLATE_PATH = (
@@ -34,7 +34,7 @@ PLACEHOLDER_END = "}}"
 
 
 def render_seatbelt_profile(
-    request: BrokerToSandboxCommandRequest,
+    request: SandboxCommandSpec,
 ) -> str:
     template = PROFILE_TEMPLATE_PATH.read_text(encoding="utf-8")
     network_clause = _render_network_clause(request)
@@ -96,15 +96,15 @@ def _render_subpath_block(paths: Iterable[str]) -> str:
     return _render_clause_block(_render_subpath_clause(path) for path in paths)
 
 
-def _render_file_read_root_clauses(request: BrokerToSandboxCommandRequest) -> str:
+def _render_file_read_root_clauses(request: SandboxCommandSpec) -> str:
     return _render_subpath_block((*request.real_read_roots, request.app_runtime_root))
 
 
-def _render_file_write_root_clauses(request: BrokerToSandboxCommandRequest) -> str:
+def _render_file_write_root_clauses(request: SandboxCommandSpec) -> str:
     return _render_subpath_block(request.real_write_roots)
 
 
-def _render_private_storage_deny_rules(request: BrokerToSandboxCommandRequest) -> str:
+def _render_private_storage_deny_rules(request: SandboxCommandSpec) -> str:
     # The command's own temp dir lives in private storage too.
     readable = [request.temp_dir]
     writable = [request.temp_dir]
@@ -260,7 +260,7 @@ def _render_secret_path_denies(operations: str, *, tiers: Sequence[SecretTier]) 
     return "\n".join(denies)
 
 
-def _render_login_environment_clause(request: BrokerToSandboxCommandRequest) -> str:
+def _render_login_environment_clause(request: SandboxCommandSpec) -> str:
     if not request.use_login_environment:
         return ""
     # CLIs read their stored sign-ins through the Keychain service.
@@ -285,7 +285,7 @@ def _escape_seatbelt_string(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
-def _render_network_clause(request: BrokerToSandboxCommandRequest) -> str:
+def _render_network_clause(request: SandboxCommandSpec) -> str:
     if request.network_policy == "deny":
         return "(deny network*)"
     protected = _escape_seatbelt_string(request.protected_backend_address)

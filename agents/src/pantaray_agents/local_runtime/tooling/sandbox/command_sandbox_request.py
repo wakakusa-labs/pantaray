@@ -18,6 +18,8 @@ from ..models import BrokerNetworkPolicy
 from .command_sandbox_protocol import (
     ActionSandboxStorage,
     BrokerToSandboxCommandRequest,
+    BrokerToSandboxLongRunningRequest,
+    SandboxCommandSpec,
 )
 from .egress_proxy import EgressLease
 from .macos_runtime import (
@@ -140,6 +142,21 @@ def compose_sandbox_request(
         use_login_environment=use_login_environment,
         run_outside_sandbox=run_outside_sandbox,
         protected_backend_address=f"{address}:{port}",
+    )
+
+
+def to_long_running_request(
+    request: BrokerToSandboxCommandRequest, *, stop_grace_ms: int
+) -> BrokerToSandboxLongRunningRequest:
+    """The same command run long-running: its one-shot limits are dropped."""
+
+    return BrokerToSandboxLongRunningRequest.model_validate(
+        {
+            **{
+                name: getattr(request, name) for name in SandboxCommandSpec.model_fields
+            },
+            "stop_grace_ms": stop_grace_ms,
+        }
     )
 
 

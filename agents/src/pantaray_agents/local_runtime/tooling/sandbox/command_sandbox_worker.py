@@ -16,9 +16,14 @@ from pantaray_agents.utils.timestamps import format_iso8601_utc_z_milliseconds
 
 from .command_sandbox_protocol import (
     BrokerToSandboxCommandRequest,
+    BrokerToSandboxLongRunningRequest,
     SandboxCommandCompletion,
+    SandboxCommandSpec,
     SandboxLifecycleEvent,
     SandboxOutputChunk,
+    SandboxProcessExited,
+    SandboxProcessSpawnFailed,
+    SandboxStopRequest,
     decode_request,
     encode_message,
 )
@@ -64,7 +69,8 @@ async def _forward_stream(
     stream: asyncio.StreamReader,
     stream_name: Literal["stdout", "stderr"],
     request_id: str,
-    max_bytes: int,
+    # None for a long-running command, which no output volume ends.
+    max_bytes: int | None,
     capture: StreamCapture,
     budget_exceeded: asyncio.Event,
 ) -> None:
@@ -85,7 +91,7 @@ async def _forward_stream(
         seq += 1
         if not data:
             return
-        if capture.bytes_read > max_bytes:
+        if max_bytes is not None and capture.bytes_read > max_bytes:
             capture.limited = True
             budget_exceeded.set()
             return
@@ -123,7 +129,7 @@ def _profile_path(temp_dir: str) -> Path:
     return Path(temp_dir) / SANDBOX_PROFILE_NAME
 
 
-def _launch_argv(request: BrokerToSandboxCommandRequest) -> list[str]:
+def _launch_argv(request: SandboxCommandSpec) -> list[str]:
     if request.run_outside_sandbox:
         # The user approved this one command to run without the profile.
         return list(request.argv)
@@ -280,6 +286,146 @@ async def _run_helper(request: BrokerToSandboxCommandRequest) -> int:
     return 0
 
 
+def _kill_command(process: asyncio.subprocess.Process) -> None:
+    # The command may end between the check and the kill.
+    with suppress(ProcessLookupError):
+        process.kill()
+
+
+async def _read_stop_request(request_id: str) -> None:
+    """Return once the parent asks to stop the command.
+
+    End of input is not a stop: a parent that closed it still kills the group.
+    """
+
+    raw_line = await asyncio.to_thread(sys.stdin.buffer.readline)
+    if not raw_line:
+        await asyncio.Future()
+    stop = SandboxStopRequest.model_validate_json(raw_line)
+    if stop.request_id != request_id:
+        raise ValueError(f"stop request for another command: {stop.request_id}")
+
+
+async def _stop_command(
+    *,
+    process: asyncio.subprocess.Process,
+    finished: asyncio.Future[tuple[int, None, None]],
+    grace_seconds: float,
+) -> None:
+    # The command shares this helper's group, which the broker's group kill and
+    # startup recovery reach. The helper ignores the SIGTERM it sends there, so
+    # that it can still report how the command ended.
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    os.killpg(os.getpgrp(), signal.SIGTERM)
+    # Done once the command has exited and nothing else holds its output open.
+    await asyncio.wait((finished,), timeout=grace_seconds)
+    if not finished.done():
+        # Whatever else in the group ignored SIGTERM dies with the group kill
+        # the parent sends after the exit report.
+        _kill_command(process)
+
+
+async def _run_long_running(request: BrokerToSandboxLongRunningRequest) -> None:
+    """Stream output until the command ends, the parent stops it, or temp is full."""
+
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *_launch_argv(request),
+            cwd=request.cwd,
+            env=request.env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except OSError as error:
+        _emit_message(
+            SandboxProcessSpawnFailed(
+                request_id=request.request_id, error=f"{type(error).__name__}: {error}"
+            )
+        )
+        return
+    _emit_message(
+        SandboxLifecycleEvent(
+            request_id=request.request_id, event="started", at=_utc_now()
+        )
+    )
+    assert process.stdout is not None
+    assert process.stderr is not None
+    # Unwatched here: the quota task's own result ends the command, and no
+    # output volume does.
+    budget_exceeded = asyncio.Event()
+    stdout_task = asyncio.create_task(
+        _forward_stream(
+            stream=process.stdout,
+            stream_name="stdout",
+            request_id=request.request_id,
+            max_bytes=None,
+            capture=StreamCapture(),
+            budget_exceeded=budget_exceeded,
+        )
+    )
+    stderr_task = asyncio.create_task(
+        _forward_stream(
+            stream=process.stderr,
+            stream_name="stderr",
+            request_id=request.request_id,
+            max_bytes=None,
+            capture=StreamCapture(),
+            budget_exceeded=budget_exceeded,
+        )
+    )
+    process_wait = asyncio.create_task(process.wait())
+    finished = asyncio.gather(process_wait, stdout_task, stderr_task)
+    temp_quota_task = asyncio.create_task(
+        _monitor_temp_quota(
+            temp_dir=Path(request.temp_dir),
+            temp_storage_limit_bytes=request.temp_storage_limit_bytes,
+            budget_exceeded=budget_exceeded,
+        )
+    )
+    stop_task = asyncio.create_task(_read_stop_request(request.request_id))
+    ended_by: Literal["command", "stop", "temp_storage_limit"] = "command"
+    try:
+        await asyncio.wait(
+            (finished, temp_quota_task, stop_task),
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if finished.done():
+            await finished
+        elif temp_quota_task.done():
+            temp_quota_task.result()
+            ended_by = "temp_storage_limit"
+            _kill_command(process)
+        else:
+            stop_task.result()
+            ended_by = "stop"
+            await _stop_command(
+                process=process,
+                finished=finished,
+                grace_seconds=request.stop_grace_ms / 1000,
+            )
+        returncode = await process_wait
+    finally:
+        tasks = (
+            finished,
+            process_wait,
+            stdout_task,
+            stderr_task,
+            temp_quota_task,
+            stop_task,
+        )
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+    _emit_message(
+        SandboxProcessExited(
+            request_id=request.request_id,
+            ended_by=ended_by,
+            exit_code=returncode if returncode >= 0 else None,
+            signal=-returncode if returncode < 0 else None,
+        )
+    )
+
+
 async def _kill_group_when_broker_exits() -> None:
     """End the command once the broker that owns this group is gone.
 
@@ -297,7 +443,10 @@ async def _serve_request() -> None:
     raw_line = await asyncio.to_thread(sys.stdin.buffer.readline)
     request = decode_request(raw_line.decode("utf-8"))
     try:
-        await _run_helper(request)
+        if isinstance(request, BrokerToSandboxLongRunningRequest):
+            await _run_long_running(request)
+        else:
+            await _run_helper(request)
     except Exception:
         # This process boundary reports every helper failure: the broker shows
         # this stderr when the output ends without a completion receipt. A gone

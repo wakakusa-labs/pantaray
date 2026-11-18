@@ -19,6 +19,7 @@ from pantaray_agents.tools.files.manifest_paths import (
     resolve_process_cwd,
     validate_manifest_root,
 )
+from pantaray_agents.tools.files.pantaray_agents_md import holds_pantaray_agents_md
 from pantaray_agents.tools.files.private_storage import (
     PrivateAppStorage,
     private_app_storage_error,
@@ -32,6 +33,7 @@ from .broker_common import BrokerContext
 from .outside_workspace import (
     OutsideWorkspaceCwd,
     OutsideWorkspacePatchTarget,
+    outside_workspace_patch_target,
     resolve_outside_workspace_cwd,
     resolve_outside_workspace_patch_target,
 )
@@ -149,6 +151,9 @@ def resolve_write_tool_path(
     if is_private_storage(resolved.path):
         raise private_app_storage_error(code=WRITE_PATH_DENIED)
     refuse_withheld_paths(resolved.path)
+    if holds_pantaray_agents_md(resolved.path):
+        # Every write asks, even in a registered or granted folder.
+        return outside_workspace_patch_target(resolved.path)
     return resolved
 
 

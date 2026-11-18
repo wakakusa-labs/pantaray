@@ -199,6 +199,32 @@ async def test_approve_once_writes_only_that_call(
 
 
 @pytest.mark.asyncio
+async def test_approved_add_creates_missing_folders(
+    tmp_path: Path, outside: Path
+) -> None:
+    db_path, context = _bootstrap_runtime_db(tmp_path)
+    target = outside / "new" / "deeper" / "notes.txt"
+
+    with pytest.raises(BrokerApprovalRequiredError) as first:
+        await _patch(
+            db_path=db_path, context=context, request_id="req-1", args=_add_args(target)
+        )
+    # The consent names the nearest folder that exists, the one written into.
+    assert _approval_rows(db_path)[0][2]["outside_workspace"] == {
+        "folders": [{"path": str(outside), "display_name": outside.name}],
+        "can_allow_for_conversation": True,
+    }
+    assert not (outside / "new").exists()
+    _decide(db_path, first.value, "req-1", "approved_once")
+    outcome = await _patch(
+        db_path=db_path, context=context, request_id="req-1", args=_add_args(target)
+    )
+
+    assert outcome.status == "success"
+    assert target.read_text(encoding="utf-8") == "created\n"
+
+
+@pytest.mark.asyncio
 async def test_denied_outside_workspace_patch_is_not_written(
     tmp_path: Path, outside: Path
 ) -> None:
@@ -268,7 +294,7 @@ async def test_protected_paths_stay_hard_denied(tmp_path: Path, outside: Path) -
         "tool results through an outside link": str(outside / "results-link/x.txt"),
         "memory storage": str(memory_users / "notes.txt"),
         "app database folder": str(db_path.parent / "notes.txt"),
-        "missing parent folder": str(outside / "missing/notes.txt"),
+        "missing folder in app storage": str(db_path.parent / "missing/notes.txt"),
     }
     for index, (label, path) in enumerate(denied_paths.items()):
         with pytest.raises(BrokerPolicyError) as caught:

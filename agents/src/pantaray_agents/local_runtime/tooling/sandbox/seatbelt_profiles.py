@@ -3,6 +3,9 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from pathlib import Path, PurePosixPath
 
+from pantaray_agents.tools.files.pantaray_agents_md import (
+    pantaray_agents_md_write_patterns,
+)
 from pantaray_agents.tools.files.secret_paths import SecretTier, secret_path_patterns
 
 from .command_sandbox_protocol import BrokerToSandboxCommandRequest
@@ -64,11 +67,22 @@ def render_seatbelt_profile(
         raise RuntimeError("seatbelt profile contains an unresolved placeholder")
     # Last, so that no read or write root allowed above can reopen them. Writes
     # are denied too: renaming .env to x would make it readable as x.
-    return rendered + _render_secret_path_denies(
-        "file-read-data file-write*",
-        tiers=("app_secret",)
-        if request.use_login_environment
-        else ("app_secret", "cli_credential"),
+    return "\n".join(
+        (
+            rendered
+            + _render_secret_path_denies(
+                "file-read-data file-write*",
+                tiers=("app_secret",)
+                if request.use_login_environment
+                else ("app_secret", "cli_credential"),
+            ),
+            # Only an approved apply_patch writes the Pantaray-wide AGENTS.md.
+            *(
+                f'(deny file-write* (regex "{_escape_seatbelt_string(pattern)}"))'
+                for pattern in pantaray_agents_md_write_patterns()
+            ),
+            "",
+        )
     )
 
 

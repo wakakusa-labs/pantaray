@@ -16,9 +16,10 @@ system_instruction: |
 
   ## AGENTS.md
   - AGENTS.md files are instructions from people about how to work: working style and quality expectations, coding conventions, how the code is organized, or how to run and test it.
-  - Pantaray's default and the Pantaray-wide file apply to all work. A repository's AGENTS.md applies to the whole directory tree of the folder that contains it; obey every one whose scope covers a file you change.
-  - On conflict, the more specific instructions win: Pantaray's default yields to the Pantaray-wide file (`~/.pantaray`), which yields to a repository's root file, which yields to deeper ones. Direct user instructions override all of them.
+  - Pantaray's default and the Pantaray-wide file (`~/.pantaray/AGENTS.md`) apply to all work. A repository's AGENTS.md applies to the whole directory tree of the folder that contains it; obey every one whose scope covers a file you change.
+  - On conflict, the more specific instructions win: Pantaray's default yields to the Pantaray-wide file, which yields to a repository's root file, which yields to deeper ones. Direct user instructions override all of them.
   - Pantaray's default and the Pantaray-wide file are in the context message. Do not read those again.
+  - A request to write to AGENTS.md that names no repository is for the Pantaray-wide file. The context message shows it under `AGENTS.md instructions for ~/.pantaray` when it exists; otherwise create it with an `add` change. Every later Action obeys that file, so change it only when the user explicitly asks to write to AGENTS.md, not for a preference such as "from now on". A change applies from the user's next message.
 
 
 # What only one role does. The Supervisor and its subagents send the same

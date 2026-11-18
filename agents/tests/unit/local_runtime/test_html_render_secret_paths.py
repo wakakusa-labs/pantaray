@@ -37,7 +37,7 @@ def test_the_fixture_holds_the_rules_the_render_tools_send() -> None:
 
 @pytest.mark.parametrize(("text", "folded"), FIXTURES["folds"])
 def test_the_fixture_folds_names_as_the_file_tools_do(text: str, folded: str) -> None:
-    assert secret_paths._folded(text) == folded
+    assert secret_paths.apfs_folded(text) == folded
 
 
 @pytest.mark.parametrize(("path", "withheld"), FIXTURES["cases"])

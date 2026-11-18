@@ -6,13 +6,9 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { LocalOwnerContext } from '@/context/localOwnerContext';
 import { clearWorkspaceSettingsCache } from '@/pages/settings/components/workspaceSettingsCache';
 import type { WorkspaceSettings } from '@/pages/settings/components/workspaceSettingsModel';
-import {
-  useWorkspaceSettingsController,
-  workspacePendingKey,
-} from '@/pages/settings/useWorkspaceSettingsController';
+import { useWorkspaceSettingsController } from '@/pages/settings/useWorkspaceSettingsController';
 import type { TodoScopeQuery } from '../../../electron/src/todos/todoContracts';
 import { HistoryProjects } from './HistoryProjects';
-import { ProjectFolders } from './ProjectFolders';
 import { expectIconButtonTooltips, expectTooltipIsName } from '@/tests/iconTooltip';
 
 const t = (key: string, vars?: Record<string, string | number>) =>
@@ -95,7 +91,7 @@ function installApi() {
   });
 }
 
-/** A project's name: with the TODO list it selects the project, whose page shows its folders. */
+/** A project's name: with the TODO list it selects the project, and without it opens its folders. */
 const projectButton = (name: string) => screen.getByRole('button', { name });
 
 function Projects({
@@ -112,42 +108,24 @@ function Projects({
   const [selected, setSelected] = useState<string | null>(null);
   const workspace = useWorkspaceSettingsController(t);
   return (
-    <>
-      <HistoryProjects
-        projects={workspace}
-        creating={creating}
-        onCreatingChange={setCreating}
-        todos={
-          withTodos
-            ? { selectedProjectId: selected, openCounts, onSelectProject: setSelected, scope }
-            : null
-        }
-        t={t}
-      />
-      {/* The selected project's folders, as its page shows them. */}
-      {withTodos && selected && workspace.settings ? (
-        <ProjectFolders
-          projectId={selected}
-          folders={workspace.settings.folders.filter((folder) =>
-            folder.project_ids.includes(selected)
-          )}
-          isFolderPending={(folderId) =>
-            workspace.pending.has(workspacePendingKey.folder(folderId))
-          }
-          onOpenFolder={(folderId) => void workspace.openFolder(folderId)}
-          onRemoveFolder={(folderId) => workspace.removeFolderFromProject(folderId, selected)}
-          onAddFolder={() => void workspace.addFolderToProject(selected)}
-          t={t}
-        />
-      ) : null}
-    </>
+    <HistoryProjects
+      projects={workspace}
+      creating={creating}
+      onCreatingChange={setCreating}
+      todos={
+        withTodos
+          ? { selectedProjectId: selected, openCounts, onSelectProject: setSelected, scope }
+          : null
+      }
+      t={t}
+    />
   );
 }
 
-async function renderProjects(scope?: TodoScopeQuery) {
+async function renderProjects(scope?: TodoScopeQuery, withTodos = true) {
   render(
     <LocalOwnerContext.Provider value={{ kind: 'account', id: 'user-1' }}>
-      <Projects scope={scope} />
+      <Projects scope={scope} withTodos={withTodos} />
     </LocalOwnerContext.Provider>
   );
   await screen.findAllByRole('button', { name: /^history\.projects\.menu/u });
@@ -161,6 +139,16 @@ async function chooseFromMenu(projectName: string, item: string) {
     screen.getByRole('button', { name: `history.projects.menu {"name":"${projectName}"}` })
   );
   await userEvent.click(screen.getByRole('menuitem', { name: item }));
+}
+
+/** The project's folders, in the dialog its menu opens. */
+async function openFolders(projectName: string) {
+  await chooseFromMenu(projectName, 'history.projects.manageFolders');
+  return within(
+    screen.getByRole('dialog', {
+      name: `history.projects.foldersTitle {"name":"${projectName}"}`,
+    })
+  );
 }
 
 const originalShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
@@ -275,15 +263,16 @@ it('フォルダの追加は選んだフォルダをこのプロジェクトに�
   api.selectFolder.mockResolvedValue({ canceled: false, path: '/Users/me/own' });
   await renderProjects();
 
-  await chooseFromMenu('b', 'history.projects.addFolder');
+  const dialog = await openFolders('b');
+  await userEvent.click(dialog.getByRole('button', { name: 'history.projects.addFolder' }));
 
   expect(api.createFolder).not.toHaveBeenCalled();
   expect(api.updateFolderLinks).toHaveBeenCalledWith('own', {
     organizationIds: [],
     projectIds: ['a', 'b'],
   });
-  await userEvent.click(projectButton('b'));
-  const folders = within(screen.getByRole('list', { name: 'history.projects.folders' }));
+  const folders = within(dialog.getByRole('list', { name: 'history.projects.folders' }));
+  await waitFor(() => expect(folders.getAllByRole('listitem')).toHaveLength(2));
   expect(folders.getAllByRole('listitem').map((row) => row.textContent)).toEqual([
     '/Users/me/own',
     '/Users/me/shared',
@@ -315,10 +304,10 @@ it('組織はなしを含めて一つを選んで保存し、新しい組織も�
 
 it('フォルダを外すと、ほかのプロジェクトにもあるものはリンクだけ、このプロジェクトだけのものは登録ごと外す', async () => {
   await renderProjects();
-  await userEvent.click(projectButton('a'));
+  const dialog = await openFolders('a');
 
   await userEvent.click(
-    screen.getByRole('button', { name: 'history.projects.removeFolder {"name":"shared"}' })
+    dialog.getByRole('button', { name: 'history.projects.removeFolder {"name":"shared"}' })
   );
   expect(api.updateFolderLinks).toHaveBeenCalledWith('shared', {
     organizationIds: [],
@@ -327,12 +316,26 @@ it('フォルダを外すと、ほかのプロジェクトにもあるものは�
   expect(api.deleteFolder).not.toHaveBeenCalled();
 
   await userEvent.click(
-    screen.getByRole('button', { name: 'history.projects.removeFolder {"name":"own"}' })
+    dialog.getByRole('button', { name: 'history.projects.removeFolder {"name":"own"}' })
   );
   expect(api.deleteFolder).toHaveBeenCalledWith('own');
-  await waitFor(() =>
-    expect(screen.getByRole('button', { name: 'history.projects.addFolder' })).toHaveFocus()
-  );
+  await waitFor(() => expect(dialog.queryByRole('listitem')).toBeNull());
+  expect(dialog.getByRole('button', { name: 'history.projects.addFolder' })).toHaveFocus();
+});
+
+it('フォルダの管理は Esc でも閉じるでも閉じ、メニューのボタンへ戻る', async () => {
+  await renderProjects();
+
+  await openFolders('a');
+  // Escape is the dialog's cancel, which the test environment does not send from the key.
+  fireEvent(screen.getByRole('dialog'), new Event('cancel', { cancelable: true }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.getByRole('button', { name: 'history.projects.menu {"name":"a"}' })).toHaveFocus();
+
+  const dialog = await openFolders('b');
+  await userEvent.click(dialog.getByRole('button', { name: 'common.close' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.getByRole('button', { name: 'history.projects.menu {"name":"b"}' })).toHaveFocus();
 });
 
 it('フォルダの追加を待っている間は、そのフォルダを外せず、終わった後の内容で外す', async () => {
@@ -348,7 +351,8 @@ it('フォルダの追加を待っている間は、そのフォルダを外せ�
     }
   );
   api.selectFolder.mockResolvedValue({ canceled: false, path: '/Users/me/own' });
-  await renderProjects();
+  // Only without the TODO list are two projects' folders on screen at once.
+  await renderProjects(undefined, false);
   await userEvent.click(projectButton('a'));
 
   await chooseFromMenu('b', 'history.projects.addFolder');
@@ -380,7 +384,8 @@ it('フォルダ選択の間はほかの変更を受け付けず、選んだ後�
         choose = resolve;
       })
   );
-  await renderProjects();
+  // Only without the TODO list are two projects' folders on screen at once.
+  await renderProjects(undefined, false);
 
   await chooseFromMenu('b', 'history.projects.addFolder');
   await userEvent.click(projectButton('a'));
@@ -416,14 +421,14 @@ it('＋ はフォルダを選ばずに名前を聞き、Enter で作ったプロ
   expect(api.createProject).toHaveBeenCalledWith({ displayName: 'delta', organizationIds: [] });
   expect(api.selectFolder).not.toHaveBeenCalled();
   expect(projectButton('delta')).toHaveFocus();
-  await userEvent.click(projectButton('delta'));
-  await userEvent.click(screen.getByRole('button', { name: 'history.projects.addFolder' }));
+  const dialog = await openFolders('delta');
+  await userEvent.click(dialog.getByRole('button', { name: 'history.projects.addFolder' }));
   await waitFor(() =>
     expect(api.createFolder).toHaveBeenCalledWith(
       expect.objectContaining({ realPath: '/Users/me/delta', projectIds: ['p-delta'] })
     )
   );
-  expect(await screen.findByTitle('/Users/me/delta')).toBeInTheDocument();
+  expect(await dialog.findByTitle('/Users/me/delta')).toBeInTheDocument();
 });
 
 it('新しい名前は Esc や空のまま離れると取りやめて ＋ へ戻り、使われている名前は欄を残して知らせる', async () => {
@@ -455,8 +460,8 @@ it('Finder で開くはメニューに無く、フォルダの行ごとにその
   );
   await userEvent.keyboard('{Escape}');
 
-  await userEvent.click(projectButton('a'));
-  const folders = within(screen.getByRole('list', { name: 'history.projects.folders' }));
+  const dialog = await openFolders('a');
+  const folders = within(dialog.getByRole('list', { name: 'history.projects.folders' }));
   const shared = folders.getAllByRole('listitem')[1];
   await userEvent.click(
     within(shared).getByRole('button', { name: 'history.projects.openInFinder' })
@@ -470,9 +475,9 @@ it('フォルダの行は横に流れず、パス・Finder・外すを並べ、�
   store.folders[0].real_path = '/Users/me/Developer/clients/acme/very-long-folder-name/own';
   installApi();
   await renderProjects();
-  await userEvent.click(projectButton('a'));
+  const dialog = await openFolders('a');
 
-  const line = within(screen.getByRole('list', { name: 'history.projects.folders' })).getByRole(
+  const line = within(dialog.getByRole('list', { name: 'history.projects.folders' })).getByRole(
     'listitem'
   );
   // The cut path takes what is left of the line; the two buttons keep their place at its end.
@@ -530,7 +535,7 @@ it('名前でそのプロジェクトを選び、未完了の数を名前の説�
   expect(name).toHaveAccessibleDescription('history.projects.openCount {"count":3}');
   expect(screen.getByRole('button', { name: 'b' })).not.toHaveAccessibleDescription();
 
-  // The folders are on the project's page: the row has no chevron and opens nothing.
+  // The folders are in the menu's dialog: the row has no chevron and opens nothing.
   expect(name).not.toHaveAttribute('aria-expanded');
   expect(document.querySelector('.history-project__details')).toBeNull();
   await userEvent.click(name);

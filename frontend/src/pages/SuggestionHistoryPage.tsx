@@ -460,7 +460,6 @@ const SuggestionHistoryPage = () => {
           listShowsSelection={listShowsSelection}
           settings={settings}
           settingsFailed={settings === null && workspace.errorMessage !== null}
-          folderActions={workspace}
           onSelect={selectTodos}
           onOpenWork={select}
           onAddProject={addProject}

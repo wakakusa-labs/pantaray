@@ -104,37 +104,6 @@
   white-space: nowrap;
 }
 
-/* The project in view's folders under the header, as many lines as they take: a path is cut in
-   its middle only when it is wider than the whole line. */
-.todo-screen__folders {
-  display: flex;
-  align-items: baseline;
-  gap: 6px 12px;
-  padding: 2px 24px 12px;
-  color: var(--fog-text-3);
-  font-size: var(--text-meta-size);
-}
-
-.todo-screen__folders-label {
-  flex: none;
-}
-
-.todo-screen__folders .project-folders {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 20px;
-  min-width: 0;
-}
-
-.todo-screen__folders .project-folders ul {
-  display: contents;
-}
-
-.todo-screen__folders .project-folders__add {
-  margin: 0;
-}
-
 .todo-screen__range {
   flex: none;
   margin-right: 6px;

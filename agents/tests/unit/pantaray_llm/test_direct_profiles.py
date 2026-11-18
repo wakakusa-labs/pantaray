@@ -39,10 +39,14 @@ def _request(*, purpose: str = "action.executing", image: bool = False) -> LlmRe
 @pytest.mark.parametrize(
     ("provider", "model", "effort", "output_limit"),
     [
+        ("openai", "gpt-6.2-sol", "high", 65536),
+        ("openai", "gpt-6.2-astra", "high", 65536),
         ("openai", "gpt-6-luna", "high", 65536),
         ("openai", "gpt-5.6-terra", "high", 65536),
         ("openai", "gpt-5.6-sol", "high", 65536),
         ("openai", "gpt-5.6", "high", 65536),
+        ("openai_codex", "gpt-6.2-sol", "high", None),
+        ("openai_codex", "gpt-6.2-astra", "high", None),
         ("openai_codex", "gpt-6-luna", "high", None),
         ("openai_codex", "gpt-6-astra", "high", None),
         ("openai_codex", "gpt-6.1-sol", "high", None),

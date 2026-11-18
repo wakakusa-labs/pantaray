@@ -148,6 +148,8 @@ it('offers only selectable Codex models for ChatGPT', () => {
   expect([...picker.querySelectorAll('option')].map((option) => option.value)).toEqual([
     '',
     'gpt-6.1-sol',
+    'gpt-6.2-sol',
+    'gpt-6.2-astra',
     'gpt-6-luna',
     'gpt-6-astra',
     'gpt-6-sol',
@@ -156,6 +158,21 @@ it('offers only selectable Codex models for ChatGPT', () => {
   expect(screen.queryByRole('button', { name: /model/ })).toBeNull();
   fireEvent.change(picker, { target: { value: 'gpt-6-sol' } });
   expect(actions.saveModel).toHaveBeenCalledWith('gpt-6-sol');
+});
+
+it.each([
+  { method: 'chatgpt' as const, model: 'gpt-6.2-sol' },
+  { method: 'chatgpt' as const, model: 'gpt-6.2-astra' },
+  { method: 'api_key' as const, model: 'gpt-6.2-sol' },
+  { method: 'api_key' as const, model: 'gpt-6.2-astra' },
+])('selects and saves $model with $method', async ({ method, model }) => {
+  const actions = renderSection({ method, model: 'gpt-6.1-sol' });
+  const picker = screen.getByRole('combobox', { name: 'settings.aiConnection.modelLabel' });
+  expect(screen.getByRole('option', { name: model })).toBeInTheDocument();
+  fireEvent.change(picker, { target: { value: model } });
+  expect(actions.saveModel).toHaveBeenCalledWith(model);
+  expect(await screen.findByText('settings.aiConnection.model.saved')).toBeInTheDocument();
+  expect(picker).toHaveValue(model);
 });
 
 const MODEL_PICKER = { name: 'settings.aiConnection.modelLabel' };
@@ -202,6 +219,8 @@ it('lists every OpenAI model and offers to type another, saved on Enter', async 
   const picker = screen.getByRole('combobox', MODEL_PICKER);
   expect(optionLabels(picker)).toEqual([
     'gpt-6.1-sol',
+    'gpt-6.2-sol',
+    'gpt-6.2-astra',
     'gpt-6-luna',
     'settings.aiConnection.modelOther',
   ]);

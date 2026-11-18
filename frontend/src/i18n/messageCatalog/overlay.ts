@@ -90,6 +90,8 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.approvalRequired.integration.tool': 'Action',
     'overlay.approvalRequired.loginEnvironmentNotice':
       'It runs with access to your login information.',
+    'overlay.approvalRequired.backgroundNotice':
+      'It keeps running until the work ends or it is stopped.',
     'overlay.approvalRequired.command': 'Command',
     'overlay.approvalRequired.app': 'App',
     'overlay.approvalRequired.pythonCode': 'Python code',
@@ -215,6 +217,7 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.approvalRequired.operation.integration': '{service}（{account}）で書き込みます。',
     'overlay.approvalRequired.integration.tool': '操作',
     'overlay.approvalRequired.loginEnvironmentNotice': 'ログイン情報を使える状態で実行します。',
+    'overlay.approvalRequired.backgroundNotice': '作業が終わるか止めるまで動き続けます。',
     'overlay.approvalRequired.command': 'コマンド',
     'overlay.approvalRequired.app': 'アプリ',
     'overlay.approvalRequired.pythonCode': 'Pythonコード',

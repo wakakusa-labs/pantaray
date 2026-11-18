@@ -38,6 +38,8 @@ export type ApprovalDisplay = {
   // The operation line already says it; a reason headline replaces that line, so the
   // panel repeats this on its own.
   usesLoginEnvironment: boolean;
+  // The command keeps running after the call, until the work ends or it is stopped.
+  runsInBackground: boolean;
   // The command runs with the user's own permissions, so the panel states that
   // risk in Pantaray's words and offers only a one-time approval.
   runsOutsideSandbox: boolean;
@@ -192,10 +194,12 @@ export function buildApprovalDisplay(
 ): ApprovalDisplay {
   const toolDisplay = buildToolApprovalDisplay(approvalPanel, t);
   const reason = readStringValue(approvalPanel.commandSummary, 'reason');
+  const runsInBackground = approvalPanel.commandSummary.run_in_background === true;
   if (approvalPanel.commandSummary.run_outside_sandbox === true) {
     return {
       ...toolDisplay,
       reason,
+      runsInBackground,
       runsOutsideSandbox: true,
       outsideWorkspace: null,
       decisionLabelKeys: {
@@ -209,6 +213,7 @@ export function buildApprovalDisplay(
     return {
       ...toolDisplay,
       reason,
+      runsInBackground,
       runsOutsideSandbox: false,
       outsideWorkspace: null,
       decisionLabelKeys: {
@@ -230,6 +235,7 @@ export function buildApprovalDisplay(
     ...toolDisplay,
     ...question,
     reason,
+    runsInBackground,
     runsOutsideSandbox: false,
     outsideWorkspace,
     decisionLabelKeys: {

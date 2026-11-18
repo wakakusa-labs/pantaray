@@ -35,6 +35,7 @@ _REQUEST = ApprovalReviewRequest(
         command="chrome --headless --print-to-pdf report.html",
         cwd="/work",
         additional_write_folders=(),
+        run_in_background=False,
         justification="Open the page in a browser and save it as a PDF.",
     ),
     workspace_folders=("/work",),

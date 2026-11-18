@@ -25,6 +25,8 @@ system_instruction: |
     outside_write (writes outside the workspace folders), login_environment (runs
     with the user's real home, Keychain and signed-in tools), integration_write
     (changes something in a connected service through the user's account).
+    run_in_background true means the command keeps running after it starts,
+    until the work ends or it is stopped.
   - workspace_folders: the folders the user registered for this work.
 
   Needing review is not a reason to ask: every operation here needs it. Answer

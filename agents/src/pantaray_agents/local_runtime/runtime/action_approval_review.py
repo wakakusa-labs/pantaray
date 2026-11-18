@@ -269,6 +269,7 @@ def pending_operation(
         ),
         cwd=cwd if isinstance(cwd, str) and cwd else None,
         additional_write_folders=folders,
+        run_in_background=summary.get("run_in_background") is True,
         justification=reason if isinstance(reason, str) else None,
     )
 

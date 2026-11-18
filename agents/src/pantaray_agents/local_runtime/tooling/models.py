@@ -171,6 +171,9 @@ class ToolRuntimeResourceCreateInput(InternalStrictModel):
     process_start_signature: str | None
     resource_path: str | None
     lock_id: str | None = None
+    # The run (actor process) that owns the resource instead of the call that
+    # started it; see migration 0145. Requires ``tool_invocation_id``.
+    owner_process_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,6 +194,7 @@ class StoredToolRuntimeResource:
     cleanup_error: str | None
     cleanup_attempts: int
     lock_id: str | None = None
+    owner_process_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -53,6 +53,11 @@ def _cleanup_process_group(resource: StoredToolRuntimeResource) -> None:
     if identity_status == "unknown":
         raise RuntimeError("process identity could not be confirmed during cleanup")
     if identity_status == "mismatch_or_absent":
+        # Design limit: only the recorded leader's start signature proves the
+        # group is ours, so a group whose leader (the sandbox helper) was killed
+        # by SIGKILL while descendants live is not reached here; signalling the
+        # pgid unverified could hit an unrelated group after pid reuse. Revisit
+        # if groups are observed leaking after a helper's death.
         return
     if resource.pgid is None:
         raise RuntimeError("live process_group resource requires pgid")

@@ -32,6 +32,89 @@ class ActionSessionTempCleanupReceipt:
     root_cleanup_attempts: int
 
 
+@dataclass(frozen=True, slots=True)
+class ActionSessionTempCleanupCandidate:
+    user_id: str
+    action_id: str
+    execution_session_id: str
+
+
+def list_terminal_action_session_temp_cleanup_candidates(
+    *,
+    db_path: Path,
+    busy_timeout_ms: int,
+) -> tuple[ActionSessionTempCleanupCandidate, ...]:
+    with sqlite3.connect(db_path) as connection:
+        configure_connection(connection, busy_timeout_ms)
+        rows = connection.execute(
+            """
+            WITH RECURSIVE session_ancestors(
+                user_id, action_id, execution_session_id,
+                parent_execution_session_id, depth
+            ) AS (
+                SELECT DISTINCT session.user_id, session.action_id,
+                       session.execution_session_id,
+                       session.parent_execution_session_id, 0
+                FROM tool_runtime_resources AS resource
+                JOIN execution_sessions AS session
+                  ON session.execution_session_id = resource.execution_session_id
+                JOIN agent_actions AS action
+                  ON action.action_id = session.action_id
+                 AND action.user_id = session.user_id
+                WHERE resource.resource_kind = 'temp_dir'
+                  AND resource.action_id = session.action_id
+                  AND resource.tool_invocation_id IS NULL
+                  AND resource.status IN ('active', 'cleanup_failed')
+                  AND session.status IN (
+                      'completed', 'failed', 'canceled', 'expired'
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM jobs AS job
+                      JOIN processes AS process
+                        ON process.process_id = job.process_id
+                      JOIN workspace_manifests AS manifest
+                        ON manifest.user_id = session.user_id
+                       AND manifest.action_id = session.action_id
+                       AND manifest.execution_session_id = session.execution_session_id
+                       AND manifest.status = 'ready'
+                      WHERE job.user_id = session.user_id
+                        AND job.job_type = 'execute_action'
+                        AND job.status = 'running'
+                        AND job.logical_key = session.action_id
+                        AND process.user_id = session.user_id
+                        AND process.kind = 'action'
+                        AND process.status = 'running'
+                        AND process.action_id = session.action_id
+                        AND process.current_job_id = job.job_id
+                  )
+                UNION ALL
+                SELECT ancestor.user_id, ancestor.action_id,
+                       ancestor.execution_session_id,
+                       parent.parent_execution_session_id,
+                       ancestor.depth + 1
+                FROM session_ancestors AS ancestor
+                JOIN execution_sessions AS parent
+                  ON parent.execution_session_id = ancestor.parent_execution_session_id
+                 AND parent.user_id = ancestor.user_id
+                 AND parent.action_id = ancestor.action_id
+            )
+            SELECT user_id, action_id, execution_session_id
+            FROM session_ancestors
+            WHERE parent_execution_session_id IS NULL
+            ORDER BY user_id, action_id, depth DESC, execution_session_id
+            """
+        ).fetchall()
+    return tuple(
+        ActionSessionTempCleanupCandidate(
+            user_id=str(row["user_id"]),
+            action_id=str(row["action_id"]),
+            execution_session_id=str(row["execution_session_id"]),
+        )
+        for row in rows
+    )
+
+
 def load_action_session_temp_cleanup_receipt(
     *,
     db_path: Path,

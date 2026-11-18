@@ -176,7 +176,7 @@ def test_terminal_quiescent_session_receives_frozen_authority(
         "UPDATE tool_runtime_resources SET resource_path = '/wrong/session'",
         "UPDATE tool_runtime_resources SET action_id = 'action-other'",
         "UPDATE tool_runtime_resources SET status = 'cleaned', cleaned_at = 'now'",
-        "INSERT INTO tool_runtime_resources SELECT 'duplicate-root', execution_session_id, NULL, action_id, resource_kind, status, pid, pgid, process_start_signature, resource_path, created_at, updated_at, cleaned_at, cleanup_error, cleanup_attempts, lock_id FROM tool_runtime_resources WHERE resource_id = 'session-root'",
+        "INSERT INTO tool_runtime_resources SELECT 'duplicate-root', execution_session_id, NULL, action_id, resource_kind, status, pid, pgid, process_start_signature, resource_path, created_at, updated_at, cleaned_at, cleanup_error, cleanup_attempts, lock_id, owner_process_id FROM tool_runtime_resources WHERE resource_id = 'session-root'",
     ],
 )
 def test_ambiguous_live_or_path_inconsistent_evidence_fails_closed(
@@ -265,7 +265,8 @@ def test_running_child_session_retains_parent_until_terminal(tmp_path: Path) -> 
                 """INSERT INTO tool_runtime_resources
                 SELECT 'child-root', 'child-session', NULL, action_id,
                        resource_kind, status, pid, pgid, process_start_signature,
-                       ?, created_at, updated_at, NULL, NULL, 0, lock_id
+                       ?, created_at, updated_at, NULL, NULL, 0, lock_id,
+                       owner_process_id
                 FROM tool_runtime_resources WHERE resource_id = 'session-root'""",
                 (str(child_leaf),),
             )
@@ -308,7 +309,7 @@ def test_running_child_session_retains_parent_until_terminal(tmp_path: Path) -> 
     )
     _execute(
         db_path,
-        "INSERT INTO tool_runtime_resources SELECT 'duplicate-child-root', execution_session_id, NULL, action_id, resource_kind, status, pid, pgid, process_start_signature, resource_path, created_at, updated_at, cleaned_at, cleanup_error, cleanup_attempts, lock_id FROM tool_runtime_resources WHERE resource_id = 'child-root'",
+        "INSERT INTO tool_runtime_resources SELECT 'duplicate-child-root', execution_session_id, NULL, action_id, resource_kind, status, pid, pgid, process_start_signature, resource_path, created_at, updated_at, cleaned_at, cleanup_error, cleanup_attempts, lock_id, owner_process_id FROM tool_runtime_resources WHERE resource_id = 'child-root'",
     )
     assert _load(db_path) is None
     _execute(

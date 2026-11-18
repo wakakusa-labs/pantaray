@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import dataclass
 from pathlib import Path
 
 from pantaray_agents.action_status import ACTION_STATUS_PROCESSING
@@ -23,13 +22,6 @@ TERMINAL_RESOURCE_STATUSES: tuple[ToolRuntimeResourceStatus, ...] = (
 
 class ToolRuntimeResourceSessionConflictError(MigrationError):
     """Raised when resource creation cannot bind to its live session owner."""
-
-
-@dataclass(frozen=True, slots=True)
-class ActionSessionTempCleanupCandidate:
-    user_id: str
-    action_id: str
-    execution_session_id: str
 
 
 def create_tool_runtime_resource(
@@ -70,21 +62,28 @@ def create_tool_runtime_resource_in_connection(
             process_start_signature,
             resource_path,
             lock_id,
+            owner_process_id,
             created_at,
             updated_at,
             cleaned_at,
             cleanup_error,
             cleanup_attempts
         )
-        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0
+        SELECT
+            :resource_id, :execution_session_id, :tool_invocation_id, :action_id,
+            :resource_kind, :status, :pid, :pgid, :process_start_signature,
+            :resource_path, :lock_id, :owner_process_id, :created_at, :created_at,
+            NULL, NULL, 0
         FROM execution_sessions AS session
         LEFT JOIN tool_invocations AS invocation
-          ON invocation.invocation_id = ?
-        WHERE session.execution_session_id = ?
+          ON invocation.invocation_id = :tool_invocation_id
+        LEFT JOIN processes AS owner
+          ON owner.process_id = :owner_process_id
+        WHERE session.execution_session_id = :execution_session_id
           AND session.status = 'running'
-          AND session.action_id IS ?
+          AND session.action_id IS :action_id
           AND (
-              (? IS NULL AND invocation.invocation_id IS NULL)
+              (:tool_invocation_id IS NULL AND invocation.invocation_id IS NULL)
               OR (
                   invocation.execution_session_id = session.execution_session_id
                   AND invocation.user_id = session.user_id
@@ -92,31 +91,38 @@ def create_tool_runtime_resource_in_connection(
                   AND invocation.status IN ('queued', 'running')
               )
           )
+          AND (
+              :owner_process_id IS NULL
+              OR (
+                  invocation.invocation_id IS NOT NULL
+                  AND owner.user_id = session.user_id
+                  AND owner.action_id = session.action_id
+                  AND owner.kind IN ('action', 'action_subagent')
+                  AND owner.status = 'running'
+              )
+          )
         """,
-        (
-            resource.resource_id,
-            resource.execution_session_id,
-            resource.tool_invocation_id,
-            resource.action_id,
-            resource.resource_kind,
-            resource.status,
-            resource.pid,
-            resource.pgid,
-            resource.process_start_signature,
-            resource.resource_path,
-            resource.lock_id,
-            resource.created_at,
-            resource.created_at,
-            resource.tool_invocation_id,
-            resource.execution_session_id,
-            resource.action_id,
-            resource.tool_invocation_id,
-        ),
+        {
+            "resource_id": resource.resource_id,
+            "execution_session_id": resource.execution_session_id,
+            "tool_invocation_id": resource.tool_invocation_id,
+            "action_id": resource.action_id,
+            "resource_kind": resource.resource_kind,
+            "status": resource.status,
+            "pid": resource.pid,
+            "pgid": resource.pgid,
+            "process_start_signature": resource.process_start_signature,
+            "resource_path": resource.resource_path,
+            "lock_id": resource.lock_id,
+            "owner_process_id": resource.owner_process_id,
+            "created_at": resource.created_at,
+        },
     )
     if cursor.rowcount != 1:
         raise ToolRuntimeResourceSessionConflictError(
             "tool runtime resource creation rejected: session and optional invocation "
-            "must be running and exactly owned"
+            "must be running and exactly owned, and a run owner must be the running "
+            "Action or subagent process of a running invocation"
         )
 
 
@@ -238,6 +244,11 @@ def list_periodic_recoverable_tool_runtime_resources(
     never infer that an invocation is orphaned merely because it is currently
     marked ``queued`` or ``running``.  In-flight invocation recovery belongs to
     startup, cancellation, and timeout ownership paths.
+
+    The owner is the run's process when ``owner_process_id`` is set (the call
+    that started it may already be over), else the invocation when one is
+    named, else the execution session.  A run-owned row whose release already
+    failed is retried even while its run lives: the run gave it up.
     """
 
     with sqlite3.connect(db_path) as connection:
@@ -260,10 +271,13 @@ def list_periodic_recoverable_tool_runtime_resources(
                 resource.updated_at,
                 resource.cleaned_at,
                 resource.cleanup_error,
-                resource.cleanup_attempts
+                resource.cleanup_attempts,
+                resource.owner_process_id
             FROM tool_runtime_resources AS resource
             LEFT JOIN tool_invocations AS invocation
               ON invocation.invocation_id = resource.tool_invocation_id
+            LEFT JOIN processes AS owner
+              ON owner.process_id = resource.owner_process_id
             JOIN execution_sessions AS session
               ON session.execution_session_id = resource.execution_session_id
             WHERE resource.status IN ('active', 'cleanup_failed', 'abandoned')
@@ -274,13 +288,25 @@ def list_periodic_recoverable_tool_runtime_resources(
                        AND resource.tool_invocation_id IS NULL)
               AND (
                     (
-                        resource.tool_invocation_id IS NOT NULL
+                        resource.owner_process_id IS NOT NULL
+                        AND (
+                            resource.status = 'cleanup_failed'
+                            OR owner.status NOT IN ('enqueued', 'running', 'paused')
+                            OR session.status IN (
+                                'completed', 'failed', 'canceled', 'expired'
+                            )
+                        )
+                    )
+                    OR (
+                        resource.owner_process_id IS NULL
+                        AND resource.tool_invocation_id IS NOT NULL
                         AND invocation.status IN (
                             'completed', 'failed', 'canceled', 'timed_out'
                         )
                     )
                     OR (
-                        resource.tool_invocation_id IS NULL
+                        resource.owner_process_id IS NULL
+                        AND resource.tool_invocation_id IS NULL
                         AND session.status IN (
                             'completed', 'failed', 'canceled', 'expired'
                         )
@@ -290,82 +316,6 @@ def list_periodic_recoverable_tool_runtime_resources(
             """
         ).fetchall()
     return tuple(build_tool_runtime_resource(row) for row in rows)
-
-
-def list_terminal_action_session_temp_cleanup_candidates(
-    *,
-    db_path: Path,
-    busy_timeout_ms: int,
-) -> tuple[ActionSessionTempCleanupCandidate, ...]:
-    with sqlite3.connect(db_path) as connection:
-        configure_connection(connection, busy_timeout_ms)
-        rows = connection.execute(
-            """
-            WITH RECURSIVE session_ancestors(
-                user_id, action_id, execution_session_id,
-                parent_execution_session_id, depth
-            ) AS (
-                SELECT DISTINCT session.user_id, session.action_id,
-                       session.execution_session_id,
-                       session.parent_execution_session_id, 0
-                FROM tool_runtime_resources AS resource
-                JOIN execution_sessions AS session
-                  ON session.execution_session_id = resource.execution_session_id
-                JOIN agent_actions AS action
-                  ON action.action_id = session.action_id
-                 AND action.user_id = session.user_id
-                WHERE resource.resource_kind = 'temp_dir'
-                  AND resource.action_id = session.action_id
-                  AND resource.tool_invocation_id IS NULL
-                  AND resource.status IN ('active', 'cleanup_failed')
-                  AND session.status IN (
-                      'completed', 'failed', 'canceled', 'expired'
-                  )
-                  AND NOT EXISTS (
-                      SELECT 1
-                      FROM jobs AS job
-                      JOIN processes AS process
-                        ON process.process_id = job.process_id
-                      JOIN workspace_manifests AS manifest
-                        ON manifest.user_id = session.user_id
-                       AND manifest.action_id = session.action_id
-                       AND manifest.execution_session_id = session.execution_session_id
-                       AND manifest.status = 'ready'
-                      WHERE job.user_id = session.user_id
-                        AND job.job_type = 'execute_action'
-                        AND job.status = 'running'
-                        AND job.logical_key = session.action_id
-                        AND process.user_id = session.user_id
-                        AND process.kind = 'action'
-                        AND process.status = 'running'
-                        AND process.action_id = session.action_id
-                        AND process.current_job_id = job.job_id
-                  )
-                UNION ALL
-                SELECT ancestor.user_id, ancestor.action_id,
-                       ancestor.execution_session_id,
-                       parent.parent_execution_session_id,
-                       ancestor.depth + 1
-                FROM session_ancestors AS ancestor
-                JOIN execution_sessions AS parent
-                  ON parent.execution_session_id = ancestor.parent_execution_session_id
-                 AND parent.user_id = ancestor.user_id
-                 AND parent.action_id = ancestor.action_id
-            )
-            SELECT user_id, action_id, execution_session_id
-            FROM session_ancestors
-            WHERE parent_execution_session_id IS NULL
-            ORDER BY user_id, action_id, depth DESC, execution_session_id
-            """
-        ).fetchall()
-    return tuple(
-        ActionSessionTempCleanupCandidate(
-            user_id=str(row["user_id"]),
-            action_id=str(row["action_id"]),
-            execution_session_id=str(row["execution_session_id"]),
-        )
-        for row in rows
-    )
 
 
 def list_recoverable_tool_runtime_resources_for_action(
@@ -403,7 +353,10 @@ def list_recoverable_tool_runtime_resources_for_invocation(
     return _list_recoverable_resources(
         db_path=db_path,
         busy_timeout_ms=busy_timeout_ms,
-        where_clause="tool_invocation_id = ? AND status IN ('active', 'cleanup_failed')",
+        where_clause=(
+            "tool_invocation_id = ? AND owner_process_id IS NULL "
+            "AND status IN ('active', 'cleanup_failed')"
+        ),
         parameters=(invocation_id,),
     )
 
@@ -435,7 +388,8 @@ def _list_recoverable_resources(
                 updated_at,
                 cleaned_at,
                 cleanup_error,
-                cleanup_attempts
+                cleanup_attempts,
+                owner_process_id
             FROM tool_runtime_resources
             WHERE {where_clause}
             ORDER BY created_at ASC
@@ -580,7 +534,8 @@ def _load_tool_runtime_resource_in_connection(
             updated_at,
             cleaned_at,
             cleanup_error,
-            cleanup_attempts
+            cleanup_attempts,
+            owner_process_id
         FROM tool_runtime_resources
         WHERE resource_id = ?
         """,

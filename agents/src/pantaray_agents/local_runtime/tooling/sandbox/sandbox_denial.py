@@ -12,6 +12,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from pantaray_agents.tools.files.pantaray_agents_md import (
+    PANTARAY_AGENTS_MD_COMMAND_HINT,
+    names_pantaray_agents_md,
+)
 from pantaray_agents.tools.files.secret_paths import (
     secret_path_error,
     withheld_reason,
@@ -83,7 +87,8 @@ def sandbox_denial_hint(
 
     A denial that names a file holding secrets gets the file tools' refusal,
     whatever the exit status (grep exits 2): asking for write folders cannot
-    fix it, and the model must not look for another way in. With network on, a
+    fix it, and the model must not look for another way in. Neither can it fix
+    one that names the Pantaray-wide AGENTS.md, which only apply_patch writes. With network on, a
     refused direct connection is told apart from a refused write first: both
     can say "Operation not permitted".
     """
@@ -102,6 +107,8 @@ def sandbox_denial_hint(
             if withheld is not None:
                 error = secret_path_error(withheld)
                 return f"{error} {error.fix_hint}"
+            if names_pantaray_agents_md(cwd / token):
+                return PANTARAY_AGENTS_MD_COMMAND_HINT
     if is_likely_sandbox_denied(
         terminal_outcome=terminal_outcome,
         exit_code=exit_code,

@@ -192,3 +192,5 @@ async def test_commands_cannot_open_the_folder(tmp_path: Path, home: Path) -> No
         )
 
     assert caught.value.code == EXEC_WRITE_FOLDER_DENIED
+    # Not "request another folder", which would be refused again.
+    assert "apply_patch" in (caught.value.fix_hint or "")

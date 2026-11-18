@@ -6,6 +6,10 @@ from typing import cast
 
 from pantaray_agents.schema.read_access import READ_ACCESS_SCOPE_FULL_ACCESS
 from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files.pantaray_agents_md import (
+    PANTARAY_AGENTS_MD_COMMAND_HINT,
+    names_pantaray_agents_md,
+)
 
 from ..action_session_temp_paths import resolve_action_storage_paths
 from ..models import BrokerNetworkPolicy
@@ -104,6 +108,13 @@ def _resolve_write_folder(*, context: BrokerContext, raw_folder: str) -> Path | 
             f"{EXEC_WRITE_FOLDER_DENIED}: write folder must be absolute: {raw_folder}",
             code=EXEC_WRITE_FOLDER_DENIED,
             fix_hint="Use an absolute folder path, or one that starts with ~/.",
+        )
+    if names_pantaray_agents_md(folder):
+        raise BrokerPolicyError(
+            f"{EXEC_WRITE_FOLDER_DENIED}: this folder cannot be opened for writing: "
+            f"{raw_folder}",
+            code=EXEC_WRITE_FOLDER_DENIED,
+            fix_hint=PANTARAY_AGENTS_MD_COMMAND_HINT,
         )
     if not folder.is_dir():
         raise BrokerPolicyError(

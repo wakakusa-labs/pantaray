@@ -193,3 +193,20 @@ def test_a_denied_write_with_network_on_still_asks_for_write_folders(
     assert _hint(cwd=tmp_path, stderr=stderr, network_allowed=True) == (
         WRITE_FOLDER_REQUEST_HINT
     )
+
+
+def test_a_denied_pantaray_agents_md_points_to_apply_patch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    folder = tmp_path / ".pantaray"
+
+    for stderr in (
+        f"bash: {folder}/AGENTS.md: Operation not permitted\n",
+        f"mv: rename {folder} to {tmp_path}/x: Operation not permitted\n",
+    ):
+        hint = _hint(cwd=tmp_path, stderr=stderr)
+
+        assert hint is not None
+        assert "apply_patch" in hint
+        assert "additional_write_folders" not in hint

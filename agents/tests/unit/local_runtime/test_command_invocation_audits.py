@@ -11,8 +11,14 @@ from pantaray_agents.local_runtime.tooling.invocation_audit import (
     start_local_tool_invocation_audit,
 )
 from pantaray_agents.local_runtime.tooling.repository import (
+    CommandInvocationAuditUpsertInput,
     ToolInvocationSessionConflictError,
     complete_execution_session,
+    end_running_command_invocation_audit,
+    upsert_command_invocation_audit,
+)
+from pantaray_agents.local_runtime.tooling.repository.command_invocation_audits import (
+    CommandAuditOutcome,
 )
 
 from .broker_test_support import (
@@ -173,3 +179,116 @@ async def test_direct_capability_bash_writes_audit_without_approval_session(
 
     assert audit_row == (None, "exited", len(b"hello\n"))
     assert approval_count == (0,)
+
+
+def _write_command_audit(
+    db_path: Path,
+    *,
+    manifest_id: str,
+    execution_session_id: str,
+    step_id: str,
+    outcome: CommandAuditOutcome,
+) -> str:
+    invocation_id = start_local_tool_invocation_audit(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        user_id="user-1",
+        action_id="action-1",
+        step_id=step_id,
+        tool_id="bash",
+        manifest_id=manifest_id,
+        execution_session_id=execution_session_id,
+        args={"command": "npm run dev"},
+        tool_request_id=f"request-{step_id}",
+        started_at="2026-03-23T00:00:00Z",
+    )
+    upsert_command_invocation_audit(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        audit=CommandInvocationAuditUpsertInput(
+            invocation_id=invocation_id,
+            approval_session_id=None,
+            execution_kind="workspace_command",
+            executable_source_kind="trusted_system_executable",
+            resolved_executable_path="/bin/zsh",
+            terminal_outcome=outcome,
+            exit_code=None if outcome == "running" else 0,
+            signal=None,
+            stdout_bytes=10,
+            stderr_bytes=0,
+            stdout_max_bytes=100,
+            stderr_max_bytes=100,
+            temp_storage_limit_bytes=100,
+            child_count_limit=8,
+            open_file_lease_limit=8,
+            budget_exceeded_kind=None,
+            sandbox_violation_kind=None,
+            sandbox_violation_summary=None,
+            created_at="2026-03-23T00:00:01Z",
+            updated_at="2026-03-23T00:00:01Z",
+        ),
+    )
+    return invocation_id
+
+
+def _end(db_path: Path, invocation_id: str, *, updated_at: str) -> bool:
+    return end_running_command_invocation_audit(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        invocation_id=invocation_id,
+        terminal_outcome="signaled",
+        exit_code=None,
+        signal=15,
+        stdout_bytes=4_096,
+        stderr_bytes=12,
+        budget_exceeded_kind=None,
+        updated_at=updated_at,
+    )
+
+
+def _audit_row(db_path: Path, invocation_id: str) -> tuple[object, ...]:
+    with sqlite3.connect(db_path) as connection:
+        return connection.execute(
+            """
+            SELECT terminal_outcome, exit_code, signal, stdout_bytes,
+                   stderr_bytes, created_at, updated_at
+            FROM command_invocation_audits
+            WHERE invocation_id = ?
+            """,
+            (invocation_id,),
+        ).fetchone()
+
+
+def test_ending_a_running_audit_applies_once_and_leaves_ended_rows_alone(
+    tmp_path: Path,
+) -> None:
+    # Catches an end that misses its row, overwrites an end already written
+    # (a stop racing the process's own exit), or rewrites a one-shot command's
+    # audit, and a caller that cannot tell whether its end was recorded.
+    db_path, context = _bootstrap_runtime_db(tmp_path)
+    ids = {
+        "manifest_id": context.manifest_id,
+        "execution_session_id": context.execution_session_id,
+    }
+    running_id = _write_command_audit(
+        db_path, **ids, step_id="step-running", outcome="running"
+    )
+    ended_id = _write_command_audit(
+        db_path, **ids, step_id="step-ended", outcome="exited"
+    )
+    ended_before = _audit_row(db_path, ended_id)
+
+    assert _end(db_path, running_id, updated_at="2026-03-23T00:01:00Z") is True
+    assert _end(db_path, running_id, updated_at="2026-03-23T00:02:00Z") is False
+    assert _end(db_path, ended_id, updated_at="2026-03-23T00:02:00Z") is False
+
+    assert _audit_row(db_path, running_id) == (
+        "signaled",
+        None,
+        15,
+        4_096,
+        12,
+        "2026-03-23T00:00:01Z",
+        "2026-03-23T00:01:00Z",
+    )
+    assert _audit_row(db_path, ended_id) == ended_before

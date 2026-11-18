@@ -8,6 +8,7 @@ from typing import Literal
 from ...storage.migrations import MigrationError
 from .common import _configure_connection
 
+# How a command ended.
 TerminalOutcome = Literal[
     "exited",
     "signaled",
@@ -18,6 +19,9 @@ TerminalOutcome = Literal[
     "budget_exceeded",
     "broker_failed",
 ]
+# What an audit row records: a command still running after its call returned
+# has no end yet.
+CommandAuditOutcome = TerminalOutcome | Literal["running"]
 
 BudgetExceededKind = Literal[
     "stdout_limit",
@@ -43,7 +47,7 @@ class CommandInvocationAuditUpsertInput:
     execution_kind: str
     executable_source_kind: str
     resolved_executable_path: str
-    terminal_outcome: TerminalOutcome
+    terminal_outcome: CommandAuditOutcome
     exit_code: int | None
     signal: int | None
     stdout_bytes: int
@@ -158,3 +162,52 @@ def upsert_command_invocation_audit(
                     audit.updated_at,
                 ),
             )
+
+
+def end_running_command_invocation_audit(
+    *,
+    db_path: Path,
+    busy_timeout_ms: int,
+    invocation_id: str,
+    terminal_outcome: TerminalOutcome,
+    exit_code: int | None,
+    signal: int | None,
+    stdout_bytes: int,
+    stderr_bytes: int,
+    budget_exceeded_kind: BudgetExceededKind | None,
+    updated_at: str,
+) -> bool:
+    """Write how a running command ended to the row its starting call wrote.
+
+    Byte totals are over the command's whole life. Returns False, changing
+    nothing, when the invocation has no running row: its end is already written.
+    """
+
+    with sqlite3.connect(db_path) as connection:
+        _configure_connection(connection=connection, busy_timeout_ms=busy_timeout_ms)
+        with connection:
+            cursor = connection.execute(
+                """
+                UPDATE command_invocation_audits
+                SET terminal_outcome = ?,
+                    exit_code = ?,
+                    signal = ?,
+                    stdout_bytes = ?,
+                    stderr_bytes = ?,
+                    budget_exceeded_kind = ?,
+                    updated_at = ?
+                WHERE invocation_id = ?
+                  AND terminal_outcome = 'running'
+                """,
+                (
+                    terminal_outcome,
+                    exit_code,
+                    signal,
+                    stdout_bytes,
+                    stderr_bytes,
+                    budget_exceeded_kind,
+                    updated_at,
+                    invocation_id,
+                ),
+            )
+    return cursor.rowcount == 1

@@ -13,6 +13,7 @@ from .approval_sessions import (
 )
 from .command_invocation_audits import (
     CommandInvocationAuditUpsertInput,
+    end_running_command_invocation_audit,
     upsert_command_invocation_audit,
 )
 from .common import (
@@ -93,6 +94,7 @@ __all__ = [
     "delete_workspace_folder",
     "delete_workspace_organization",
     "delete_workspace_project",
+    "end_running_command_invocation_audit",
     "ensure_action_workspace_manifest",
     "list_workspace_settings",
     "load_read_access_scope",

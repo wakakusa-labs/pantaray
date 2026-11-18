@@ -73,6 +73,15 @@ TODO_REFUSALS: Final[dict[str, str]] = {
     ),
     "invalid_text": "The unit and the note must not be blank. Nothing was recorded.",
     "record_conflict": "This call already recorded different progress.",
+    "note_with_done": (
+        "done takes no note, so the TODO was not checked off. If anything is "
+        "left, report partial with the note saying what; if you need the user, "
+        "report needs_user."
+    ),
+    "note_missing": (
+        "partial and needs_user need the note saying what is left or what you "
+        "need from the user. Nothing was reported."
+    ),
 }
 
 ALREADY_RECORDED_MESSAGE: Final = (
@@ -139,9 +148,9 @@ UPDATE_TODO_TOOL = ToolDefinition.from_spec(
                         "minLength": 1,
                         "maxLength": _NOTE_MAX_LENGTH,
                     },
-                    required=True,
                     description=(
-                        "One short line for the TODO list; not shown for done."
+                        "One short line for the TODO list, for partial and "
+                        "needs_user only; omit it for done."
                     ),
                 ),
             )

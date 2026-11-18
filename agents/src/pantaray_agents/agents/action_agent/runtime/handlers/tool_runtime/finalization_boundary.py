@@ -22,8 +22,11 @@ from pantaray_agents.local_runtime.tooling.tool_result_finalization import (
     ActionStepToolResultOwner,
     FinalizedToolOutput,
     InvocationToolResultOwner,
+    ToolCallCanceled,
+    ToolInvocationCanceledFirstError,
     ToolResultCompletionScope,
     ToolResultFinalizationRequest,
+    canceled_tool_output,
     finalize_local_tool_result,
 )
 from pantaray_agents.local_runtime.tooling.tool_result_validation import (
@@ -34,6 +37,7 @@ from pantaray_agents.schema.tool_result import build_runtime_tool_error_output
 from pantaray_agents.utils.structured_logging import log_structured_event
 
 from .shared import (
+    FinalizedToolExecutionError,
     ToolCompletionAuditPersistenceError,
     ToolExecutionPreparation,
     ToolExecutionResult,
@@ -141,6 +145,11 @@ def finalize_action_tool_invocation(
 
     `error_status` selects the terminal status recorded for the `error` branch;
     a cancelled execution records `canceled` rather than `failed`.
+
+    When a cancel closed the row first, nothing is written and the call ends
+    with what the cancel stored: a `result` is superseded, so it raises the
+    canceled failure in its place; an `error` already ends the call, so it gets
+    the cancel's output.
     """
     if invocation_id is None:
         return None
@@ -176,15 +185,27 @@ def finalize_action_tool_invocation(
                     status=error_status,
                     completion_scope=completion_scope,
                 ),
-                output=build_runtime_tool_error_output(
-                    error_type=error.__class__.__name__,
-                    message=str(error),
-                    details=details,
+                output=(
+                    canceled_tool_output()
+                    if error_status == "canceled"
+                    else build_runtime_tool_error_output(
+                        error_type=error.__class__.__name__,
+                        message=str(error),
+                        details=details,
+                    )
                 ),
             ),
         )
     except ToolOutputValidationError:
         raise
+    except ToolInvocationCanceledFirstError as canceled_first:
+        if result is None:
+            return canceled_first.canceled_result
+        raise FinalizedToolExecutionError(
+            cause=ToolCallCanceled(),
+            finalized_output=canceled_first.canceled_result,
+            tool_invocation_id=invocation_id,
+        ) from canceled_first
     except Exception as exc:  # noqa: BLE001
         log_structured_event(
             logger,

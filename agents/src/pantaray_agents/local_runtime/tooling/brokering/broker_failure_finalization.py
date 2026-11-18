@@ -15,11 +15,12 @@ from ..sandbox.command_sandbox_client import canceled_command_output
 from ..tool_result_finalization import (
     FinalizedToolOutput,
     InvocationToolResultOwner,
+    ToolCallCanceled,
     ToolResultFinalizationRequest,
+    canceled_tool_output,
     finalize_local_tool_result,
 )
-
-BROKER_CANCELED_MESSAGE = "canceled before completion"
+from .broker_outcome import BrokerToolFailure, BrokerToolOutcome
 
 
 class NetworkReachedPolicyError(BrokerPolicyError):
@@ -109,10 +110,7 @@ def finalize_canceled_broker_invocation(
     """
 
     partial = canceled_command_output(error)
-    output = build_runtime_tool_error_output(
-        error_type="ToolCallCanceled",
-        message=BROKER_CANCELED_MESSAGE,
-    )
+    output = canceled_tool_output()
     if partial is not None:
         output = {
             **output,
@@ -135,4 +133,28 @@ def finalize_canceled_broker_invocation(
             stdout_text=partial.stdout if partial is not None else None,
             stderr_text=partial.stderr if partial is not None else None,
         ),
+    )
+
+
+def canceled_broker_tool_outcome(
+    *, invocation_id: str, canceled_result: FinalizedToolOutput
+) -> BrokerToolOutcome:
+    """The call's result once a cancel recorded first: what the cancel stored.
+
+    Nothing is persisted here; whatever the call produced after the cancel is
+    superseded by it.
+    """
+
+    canceled = ToolCallCanceled()
+    return BrokerToolOutcome(
+        status="error",
+        output=canceled_result.output,
+        output_storage_kind=canceled_result.storage_kind,
+        failure=BrokerToolFailure(
+            error_type=canceled.__class__.__name__, message=str(canceled)
+        ),
+        tool_invocation_id=invocation_id,
+        search_text=canceled_result.search_text,
+        stdout_text=canceled_result.stdout_text,
+        stderr_text=canceled_result.stderr_text,
     )

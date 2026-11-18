@@ -25,6 +25,7 @@ from ..resources.resource_tracking import (
 from ..sandbox.command_egress import run_command_via_sandbox
 from ..tool_result_finalization import (
     InvocationToolResultOwner,
+    ToolInvocationCanceledFirstError,
     ToolResultFinalizationRequest,
     finalize_local_tool_result,
 )
@@ -64,6 +65,7 @@ from .broker_direct_save_pdf import (
     run_save_html_as_pdf_executor,
 )
 from .broker_failure_finalization import (
+    canceled_broker_tool_outcome,
     finalize_broker_invocation_error,
     finalize_canceled_broker_invocation,
 )
@@ -352,6 +354,21 @@ def _build_validated_patch_request(
     )
 
 
+def _superseded_by_cancel(
+    canceled_first: ToolInvocationCanceledFirstError,
+) -> BrokerToolOutcome:
+    """The result of a call that finished after a cancel had closed its row."""
+
+    logger.info(
+        "tool invocation %s finished after it was canceled; the cancel stands",
+        canceled_first.invocation_id,
+    )
+    return canceled_broker_tool_outcome(
+        invocation_id=canceled_first.invocation_id,
+        canceled_result=canceled_first.canceled_result,
+    )
+
+
 def _checked_read_scope(context: BrokerContext) -> ReadScope:
     """The scope a read/search call runs in, once the Action's own checks pass."""
 
@@ -498,6 +515,9 @@ async def execute_broker_tool(
                 invocation_id=completion_invocation_id,
                 error=exc,
             )
+        except ToolInvocationCanceledFirstError:
+            # A cancel recorded first already wrote the terminal this would have.
+            pass
         except Exception:
             logger.exception(
                 "failed to finalize canceled tool invocation %s",
@@ -514,6 +534,8 @@ async def execute_broker_tool(
                 invocation_id=completion_invocation_id,
                 error=exc,
             )
+        except ToolInvocationCanceledFirstError as canceled_first:
+            return _superseded_by_cancel(canceled_first)
         except Exception as persistence_error:
             raise BrokerCompletionPersistenceError(
                 tool_invocation_id=completion_invocation_id
@@ -552,6 +574,8 @@ async def execute_broker_tool(
     except ToolOutputValidationError as output_error:
         output_error.tool_invocation_id = completion_invocation_id
         raise
+    except ToolInvocationCanceledFirstError as canceled_first:
+        return _superseded_by_cancel(canceled_first)
     except Exception as persistence_error:
         raise BrokerCompletionPersistenceError(
             tool_invocation_id=completion_invocation_id

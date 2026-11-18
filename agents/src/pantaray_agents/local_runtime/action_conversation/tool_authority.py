@@ -133,7 +133,7 @@ def _load_invocation_output_owner_id(
         WHERE invocations.user_id = ? AND invocations.action_id = ?
           AND invocations.step_id = ? AND invocations.tool_id = ?
           AND (invocations.status = ?
-               OR (? = 'error' AND invocations.status = 'completed'))
+               OR (? = 'error' AND invocations.status IN ('completed', 'canceled')))
           AND outputs.output_storage_kind = ?
         """,
         (

@@ -18,7 +18,6 @@ from pantaray_agents.local_runtime.storage.migrations import (
 )
 from pantaray_agents.local_runtime.todos.clock import TodoClock
 from pantaray_agents.local_runtime.todos.display import (
-    Done,
     Partial,
     Waiting,
     display_state,
@@ -119,7 +118,7 @@ def _message_only_response(*, answer: str) -> SuggestionAgentResponse:
         status=StatusType.SUCCESS,
         has_suggestion=True,
         interaction_contract="message_only",
-        todo=SuggestionTodo(text="Read the notice", outcome="done", note=None),
+        todo=SuggestionTodo(text="Read the notice", outcome="open", note=None),
     )
 
 
@@ -921,8 +920,8 @@ def _offer(todo: SuggestionTodo) -> SuggestionAgentResponse:
     ("todo", "expected"),
     [
         (
-            SuggestionTodo(text="Send the reply", outcome="done", note=None),
-            Done(by="ai", at=NOW.now),
+            SuggestionTodo(text="Send the reply", outcome="open", note=None),
+            Waiting(reason="reply", note=None),
         ),
         (
             SuggestionTodo(text="Send the reply", outcome="partial", note="Drafted."),
@@ -979,7 +978,7 @@ async def test_an_offer_is_saved_with_exactly_one_ai_todo_in_its_state(
 
 
 @pytest.mark.asyncio
-async def test_a_message_only_suggestion_is_an_ai_todo_already_done(
+async def test_a_message_only_suggestion_is_an_unchecked_ai_todo_without_a_report(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     db_path, _ = await _save_with_todo(
@@ -987,17 +986,13 @@ async def test_a_message_only_suggestion_is_an_ai_todo_already_done(
     )
 
     [row] = _todo_rows(db_path)
+    # Only the user checks it off, after looking at the work.
     assert (
         row["author"],
         row["checked_by"],
         row["checked_at"],
         row["report_kind"],
-    ) == (
-        "ai",
-        "ai",
-        NOW.now,
-        None,
-    )
+    ) == ("ai", None, None, None)
     # No target project was named, so the TODO has none.
     assert row["project_id"] is None
 
@@ -1024,7 +1019,7 @@ async def test_a_project_name_that_is_not_exactly_a_project_leaves_the_todo_with
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     response = _offer(
-        SuggestionTodo(text="Send the reply", outcome="done", note=None)
+        SuggestionTodo(text="Send the reply", outcome="open", note=None)
     ).model_copy(
         update={
             "target_context": SuggestionTargetContext(
@@ -1051,7 +1046,7 @@ async def test_a_todo_the_list_cannot_hold_fails_the_whole_save(
     )
 
     saved = await repo.save_suggestion(
-        _offer(SuggestionTodo(text="Send\nthe reply", outcome="done", note=None)),
+        _offer(SuggestionTodo(text="Send\nthe reply", outcome="open", note=None)),
         prompt_name="suggestion",
         prompt_version="1.0",
         on_committed=lambda: pytest.fail("nothing was committed"),

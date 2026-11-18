@@ -18,10 +18,11 @@ from .base import AgentRequest, AgentResponse, JSONValue, StatusType
 
 type SuggestionPayload = dict[str, JSONValue]
 type SuggestionInteractionContract = Literal["action_offer", "message_only"]
-# Where the Suggestion's work stands when its TODO is written: finished, made in
-# part with the rest left to the user, for Pantaray to carry on with, or waiting
-# on the user's answer to a notice.
-type SuggestionTodoOutcome = Literal["done", "partial", "continue", "needs_user"]
+# Where the Suggestion's work stands when its TODO is written: nothing left for
+# Pantaray, so the user takes it from here; made in part with the rest left to
+# the user; for Pantaray to carry on with; or waiting on the user's answer to a
+# notice. None of them starts the TODO checked; the user checks it off.
+type SuggestionTodoOutcome = Literal["open", "partial", "continue", "needs_user"]
 
 # File chips one notice can show; a run that names more is refused, not trimmed.
 SUGGESTION_ARTIFACTS_MAX_COUNT = 20
@@ -86,15 +87,13 @@ class SuggestionTodo(BaseModel):
 
     text: str = Field(description="The TODO list's line for the Suggestion's work")
     outcome: SuggestionTodoOutcome
-    # The line shown beside an unfinished TODO; a done TODO has none.
+    # Pantaray's line on where the work stands; an open TODO has none.
     note: str | None
 
     @model_validator(mode="after")
     def _note_follows_outcome(self) -> Self:
-        if (self.outcome == "done") != (self.note is None):
-            raise ValueError(
-                "note is required for an unfinished TODO and null when done"
-            )
+        if (self.outcome == "open") != (self.note is None):
+            raise ValueError("note is required unless the TODO is open, then null")
         return self
 
 

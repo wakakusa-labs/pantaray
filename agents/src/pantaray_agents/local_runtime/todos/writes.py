@@ -165,8 +165,8 @@ def build_suggestion_todo(
 ) -> Todo | Rejected[core.CreateRejection]:
     """The AI-written TODO a Suggestion becomes, before its project is known.
 
-    It starts today without a due date: checked when its work is done,
-    otherwise with the Suggestion's report on it.
+    It starts today, unchecked and without a due date, with the Suggestion's
+    report on it unless it is open.
     """
 
     created = core.create_todo(
@@ -182,12 +182,8 @@ def build_suggestion_todo(
     )
     if isinstance(created, Rejected):
         return created
-    if todo.outcome == "done":
-        checked = core.set_check(
-            created, by="ai", checked=True, now=clock.now, zone=clock.zone
-        )
-        assert isinstance(checked, CheckSet)  # A new TODO is not deleted.
-        return checked.todo
+    if todo.outcome == "open":
+        return created
     assert todo.note is not None  # SuggestionTodo requires it.
     reported = core.report_progress(
         created,

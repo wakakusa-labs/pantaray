@@ -42,20 +42,21 @@ _TODO_STATE_FIELDS: Mapping[
     SuggestionInteractionContract, tuple[tuple[SuggestionTodoOutcome, ...], str, str]
 ] = {
     "action_offer": (
-        ("done", "partial", "continue"),
-        "Where that work stands once the user has the message: done when "
-        "nothing is left to do, partial when Pantaray made part of it and the "
-        "rest is the user's, continue when Pantaray would carry on with the rest.",
+        ("open", "partial", "continue"),
+        "Where that work stands once the user has the message: open when "
+        "Pantaray has nothing left to do and the user takes it from here, "
+        "partial when Pantaray made part of it and the rest is the user's, "
+        "continue when Pantaray would carry on with the rest.",
         "For partial or continue, one short line on where the work stands; null "
-        "when done.",
+        "when open.",
     ),
     "message_only": (
-        ("done", "needs_user"),
+        ("open", "needs_user"),
         "needs_user when the message asks the user for an answer the work is "
-        "waiting on; done when it leaves nothing to answer, including a "
+        "waiting on; open when it leaves nothing to answer, including a "
         "recommendation the user acts on themselves.",
         "For needs_user, one short line naming the answer the work waits on; "
-        "null when done.",
+        "null when open.",
     ),
 }
 
@@ -190,10 +191,10 @@ def parse_written_suggestion(
     state = output.todo_state
     if state is None or state not in _TODO_STATE_FIELDS[contract][0]:
         raise ValueError(f"todo_state {state} is not one for {contract}")
-    if state == "done":
-        # A finished TODO shows no note, so one the model added is not kept.
+    if state == "open":
+        # An open TODO carries no report, so a note the model added is not kept.
         return WrittenSuggestion(
-            answer, SuggestionTodo(text=output.todo, outcome="done", note=None)
+            answer, SuggestionTodo(text=output.todo, outcome="open", note=None)
         )
     note = (output.todo_note or "").strip()
     if not note:

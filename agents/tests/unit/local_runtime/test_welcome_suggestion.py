@@ -240,7 +240,7 @@ async def test_the_suggestion_agent_does_not_see_the_welcome_as_a_past_suggestio
             thinking="thinking",
             status=StatusType.SUCCESS,
             has_suggestion=True,
-            todo=SuggestionTodo(text="Reply", outcome="done", note=None),
+            todo=SuggestionTodo(text="Reply", outcome="open", note=None),
             interaction_contract="message_only",
         ),
         prompt_name="suggestion",

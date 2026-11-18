@@ -326,9 +326,15 @@ async def test_a_read_image_is_sent_as_read_after_its_file_is_rewritten(
     assert outcome.output["kind"] == "attachment"
     (shown,) = outcome.output["attachments"]
     (kept,) = outcome.attachments
+    # Catches: the row's image and the one history sends naming different
+    # bytes, or read naming an image by its path instead of its bytes as every
+    # other image tool does.
+    digest = hashlib.sha256(payload).hexdigest()
     assert shown["source_kind"] == kept["source_kind"] == "local_image_blob"
     assert shown["storage_path"] == kept["storage_path"]
-    assert shown["ref"] == kept["ref"]
+    assert shown["ref"] == kept["ref"] == f"tool_attachment:{digest[:24]}"
+    assert shown["byte_size"] == kept["byte_size"] == len(payload)
+    assert kept["sha256"] == digest
     assert "sha256" not in shown
     # The next turn's request reads the history's attachment back as it was read.
     (file_input,) = collect_prompt_file_inputs(

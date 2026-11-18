@@ -37,14 +37,10 @@ def build_read_image(
     payload: bytes,
 ) -> ReadImage:
     sha256 = hashlib.sha256(payload).hexdigest()
-    attachment_id = _build_attachment_id(
-        display_path=display_path,
-        mime_type=mime_type,
-        sha256=sha256,
-    )
+    image_id = attachment_id(sha256)
     return ReadImage(
-        ref=f"{TOOL_ATTACHMENT_REF_PREFIX}{attachment_id}",
-        blob_ref=f"{ATTACHMENT_BLOB_REF_PREFIX}{attachment_id}",
+        ref=f"{TOOL_ATTACHMENT_REF_PREFIX}{image_id}",
+        blob_ref=f"{ATTACHMENT_BLOB_REF_PREFIX}{image_id}",
         display_path=display_path,
         mime_type=mime_type,
         payload=payload,
@@ -52,14 +48,21 @@ def build_read_image(
     )
 
 
-def _build_attachment_id(*, display_path: str, mime_type: str, sha256: str) -> str:
-    ref_input = f"{display_path}\0{mime_type}\0{sha256}".encode()
-    return hashlib.sha256(ref_input).hexdigest()[:ATTACHMENT_ID_HEX_LENGTH]
+def attachment_id(sha256: str) -> str:
+    """An image's attachment id: its own bytes' digest, shortened.
+
+    The id names the bytes alone, so the same image is one attachment wherever
+    it came from. History keeps every ref as it was written and nothing derives
+    one again, so a ref an earlier rule made still resolves.
+    """
+
+    return sha256[:ATTACHMENT_ID_HEX_LENGTH]
 
 
 __all__ = [
     "ATTACHMENT_BLOB_REF_PREFIX",
     "TOOL_ATTACHMENT_REF_PREFIX",
     "ReadImage",
+    "attachment_id",
     "build_read_image",
 ]

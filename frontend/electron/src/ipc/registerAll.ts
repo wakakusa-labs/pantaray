@@ -10,6 +10,7 @@ import type { MainContext } from './context';
 import type { RegisteredIpcChannels } from './registrar';
 import { createIpcRegistrar } from './registrar';
 
+import { registerAgentsMdHandlers } from './handlers/agentsMd';
 import { registerAiConnectionHandlers } from './handlers/aiConnection';
 import { registerAuthHandlers } from './handlers/auth';
 import { registerActionFileHandlers } from './handlers/actionFiles';
@@ -53,6 +54,7 @@ export function registerAllIpcHandlers(ctx: MainContext): RegisterAllResult {
   registerIntegrationHandlers(ctx, registrar);
   registerShortcutHandlers(ctx, registrar);
   registerOverlayPlacementHandlers(ctx, registrar);
+  registerAgentsMdHandlers(ctx, registrar);
   registerWorkspaceSettingsHandlers(ctx, registrar);
   registerActionFileHandlers(ctx, registrar);
   registerClipboardHandlers(ctx, registrar);

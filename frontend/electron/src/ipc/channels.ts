@@ -83,6 +83,9 @@ export const validInvokeChannels = [
   'shortcut:setAccelerator',
   'overlayPlacement:get',
   'overlayPlacement:set',
+  // Main window only: ~/.pantaray/AGENTS.md, whose path main fixes
+  'agentsMd:read',
+  'agentsMd:write',
   'workspaceSettings:get',
   'workspaceSettings:getReadAccessScope',
   'workspaceSettings:getCommandNetwork',

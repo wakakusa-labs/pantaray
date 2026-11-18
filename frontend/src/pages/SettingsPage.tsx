@@ -9,6 +9,7 @@ import { useI18n } from '@/context/useI18n';
 import type { MessageKey } from '@/i18n/types';
 import type { CapturePermission } from '../../electron/src/context/zaneiProcess';
 import { LanguageSection } from './settings/components/LanguageSection';
+import { AgentsMdSection } from './settings/components/AgentsMdSection';
 import { AiConnectionSettingsSection } from './settings/components/AiConnectionSettingsSection';
 import { ExecutionSettingsSection } from './settings/components/ExecutionSettingsSection';
 import { IdeFileRulesSection } from './settings/components/IdeFileRulesSection';
@@ -25,6 +26,7 @@ import './settings/settingsPage.css';
 
 type SettingsSectionId =
   | 'ai_connection'
+  | 'agents_md'
   | 'language'
   | 'execution'
   | 'integrations'
@@ -37,6 +39,7 @@ const SETTINGS_SECTIONS: SettingsSectionId[] = [
   'ai_connection',
   'screenshots',
   'integrations',
+  'agents_md',
   'execution',
   'overlay_position',
   'shortcuts',
@@ -45,7 +48,7 @@ const SETTINGS_SECTIONS: SettingsSectionId[] = [
 
 /**
  * Recording and execution act on the local owner's own data. The AI connection, the
- * language, the shortcut and the overlay position belong to the installation, and the connection section owns a
+ * instructions, the language, the shortcut and the overlay position belong to the installation, and the connection section owns a
  * browser sign-in that its unmount cancels, so none of them may hang off the owner.
  */
 const OWNER_SCOPED_SECTIONS: SettingsSectionId[] = ['execution', 'screenshots'];
@@ -77,6 +80,7 @@ const SettingsPage: React.FC = () => {
 
   const sectionLabels: Record<SettingsSectionId, string> = {
     ai_connection: t('settings.aiConnection.title'),
+    agents_md: t('settings.agentsMd.title'),
     language: t('settings.language.title'),
     execution: t('settings.execution.title'),
     integrations: t('settings.integrations.title'),
@@ -120,6 +124,7 @@ const SettingsPage: React.FC = () => {
           <LanguageSection language={language} setLanguage={setLanguage} t={t} />
         ) : null}
         {activeSection === 'integrations' ? <IntegrationSettings t={t} /> : null}
+        {activeSection === 'agents_md' ? <AgentsMdSection t={t} /> : null}
         {activeSection === 'shortcuts' ? <ShortcutSection t={t} /> : null}
         {activeSection === 'overlay_position' ? <OverlayPositionSection t={t} /> : null}
         {/* Editing the filter pauses the recorder, and that pause outlives a section

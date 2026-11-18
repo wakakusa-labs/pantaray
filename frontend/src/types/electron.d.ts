@@ -18,6 +18,11 @@ import type {
 } from '../../electron/src/context/zaneiProcess';
 import type { OnboardingState } from '../../electron/src/ipc/schemas/onboarding';
 import type {
+  AgentsMdReadResult,
+  AgentsMdWriteRequest,
+  AgentsMdWriteResult,
+} from '../../electron/src/ipc/schemas/agentsMd';
+import type {
   ConnectionCommand,
   ConnectionStateResult,
   ConnectionUpdateResult,
@@ -417,6 +422,14 @@ declare global {
           kind: ElectronOverlayPlacementKind;
           cell: ElectronOverlayCell;
         }) => Promise<ElectronOverlayPlacements>;
+      };
+      /**
+       * `~/.pantaray/AGENTS.md`; main fixes the path, refuses text over the Action's budget, and
+       * refuses a write when the file is no longer the revision it was read at.
+       */
+      agentsMd?: {
+        read: () => Promise<AgentsMdReadResult>;
+        write: (request: AgentsMdWriteRequest) => Promise<AgentsMdWriteResult>;
       };
       workspaceSettings?: {
         get: () => Promise<ElectronWorkspaceSettings>;

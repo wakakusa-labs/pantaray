@@ -31,6 +31,10 @@ function createSettingsApi({ ipcRenderer }) {
       get: () => ipcRenderer.invoke('overlayPlacement:get'),
       set: (update) => ipcRenderer.invoke('overlayPlacement:set', update),
     },
+    agentsMd: {
+      read: () => ipcRenderer.invoke('agentsMd:read'),
+      write: (content) => ipcRenderer.invoke('agentsMd:write', content),
+    },
     workspaceSettings: {
       get: () => ipcRenderer.invoke('workspaceSettings:get'),
       getReadAccessScope: () => ipcRenderer.invoke('workspaceSettings:getReadAccessScope'),

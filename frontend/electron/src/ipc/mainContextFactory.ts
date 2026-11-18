@@ -74,6 +74,7 @@ export function buildMainContext(params: {
   getGlobalShortcutState: MainContext['shortcut']['getState'];
   setGlobalShortcutAccelerator: MainContext['shortcut']['setAccelerator'];
   overlayPlacement: MainContext['overlayPlacement'];
+  agentsMd: MainContext['agentsMd'];
   workspaceSettingsGet: MainContext['workspaceSettings']['get'];
   workspaceSettingsGetReadAccessScope: MainContext['workspaceSettings']['getReadAccessScope'];
   workspaceSettingsGetCommandNetwork: MainContext['workspaceSettings']['getCommandNetwork'];
@@ -319,6 +320,8 @@ export function buildMainContext(params: {
     },
 
     overlayPlacement: params.overlayPlacement,
+
+    agentsMd: params.agentsMd,
 
     workspaceSettings: {
       get: async () => params.workspaceSettingsGet(),

@@ -446,8 +446,9 @@ async def _stop_command(
     # The command shares this helper's group, which the broker's group kill and
     # startup recovery reach; the helper outlives SIGTERM (see main).
     os.killpg(os.getpgrp(), signal.SIGTERM)
-    # Ends early once the command has exited and nothing holds its output open.
-    await asyncio.wait((command.exited, command.output_closed), timeout=grace_seconds)
+    # Ends as soon as the command exits; output a descendant still holds open
+    # gets only the drain window that follows every exit.
+    await asyncio.wait((command.exited,), timeout=grace_seconds)
     if not command.exited.done():
         # Whatever else in the group ignored SIGTERM dies with the group kill
         # the parent sends after the exit report.

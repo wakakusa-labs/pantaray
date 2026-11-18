@@ -389,6 +389,37 @@ async def test_stop_is_reported_while_a_descendant_holds_the_output(
     await _wait_until_gone(temp_dir / "descendant.pid")
 
 
+async def test_stop_reports_soon_after_the_command_exits_while_a_descendant_holds_the_output(
+    tmp_path: Path,
+) -> None:
+    temp_dir = tmp_path / "temp"
+    request = _request(
+        temp_dir,
+        "trap 'exit 7' TERM; (trap '' TERM; exec sleep 60) & "
+        f'echo $! > "$TMPDIR/descendant.pid"; echo {READY}; '
+        "while :; do sleep 0.05; done",
+        stop_grace_ms=5_000,
+        output_drain_ms=100,
+    )
+
+    async with _started(request) as parent:
+        await parent.wait_for_stdout(READY)
+        started = time.monotonic()
+        await parent.stop()
+        final = await parent.final_message()
+        elapsed = time.monotonic() - started
+
+    assert final == SandboxProcessExited(
+        request_id=request.request_id,
+        ended_by="stop",
+        exit_code=7,
+        signal=None,
+    )
+    # Exit plus the drain window, not the whole stop grace.
+    assert elapsed < 2.5
+    await _wait_until_gone(temp_dir / "descendant.pid")
+
+
 async def test_the_temp_limit_is_reported_while_a_descendant_holds_the_output(
     tmp_path: Path,
 ) -> None:

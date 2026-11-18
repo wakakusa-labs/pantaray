@@ -191,6 +191,18 @@ const TOOL_DISPLAY_NAMES = {
     enDone: 'Saved {subject}',
     enRunning: 'Saving {subject}',
   },
+  // ページを開く・読む・押す・入力する・撮る・PDF にするを 1 本で受ける。どの操作も
+  // 「ブラウザで確かめた」と言えば利用者には足りる。
+  browser: {
+    agentName: 'Browser',
+    icon: Globe,
+    ja: 'ブラウザで確認',
+    en: 'Check in the browser',
+    jaDone: 'ブラウザで確認しました {subject}',
+    jaRunning: 'ブラウザで確認しています {subject}',
+    enDone: 'Checked in the browser: {subject}',
+    enRunning: 'Checking in the browser: {subject}',
+  },
   list: {
     agentName: 'List Local Directory',
     icon: Folder,

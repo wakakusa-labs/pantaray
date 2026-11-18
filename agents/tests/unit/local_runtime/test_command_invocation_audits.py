@@ -20,6 +20,9 @@ from pantaray_agents.local_runtime.tooling.repository import (
 from pantaray_agents.local_runtime.tooling.repository.command_invocation_audits import (
     CommandAuditOutcome,
 )
+from pantaray_agents.local_runtime.tooling.resources.resource_recovery import (
+    reconcile_tool_runtime_resources_for_startup,
+)
 
 from .broker_test_support import (
     BROKER_ACTOR_PROCESS_ID,
@@ -291,4 +294,29 @@ def test_ending_a_running_audit_applies_once_and_leaves_ended_rows_alone(
         "2026-03-23T00:00:01Z",
         "2026-03-23T00:01:00Z",
     )
+    assert _audit_row(db_path, ended_id) == ended_before
+
+
+def test_startup_ends_rows_a_crash_left_running_as_unobserved(
+    tmp_path: Path,
+) -> None:
+    # Catches a row left running forever after the app quit or crashed under
+    # its process, an end recorded as an outcome the app never saw, and a
+    # startup that rewrites rows whose end was already written.
+    db_path, context = _bootstrap_runtime_db(tmp_path)
+    ids = {
+        "manifest_id": context.manifest_id,
+        "execution_session_id": context.execution_session_id,
+    }
+    running_id = _write_command_audit(
+        db_path, **ids, step_id="step-running", outcome="running"
+    )
+    ended_id = _write_command_audit(
+        db_path, **ids, step_id="step-ended", outcome="exited"
+    )
+    ended_before = _audit_row(db_path, ended_id)
+
+    reconcile_tool_runtime_resources_for_startup(db_path=db_path, busy_timeout_ms=1_000)
+
+    assert _audit_row(db_path, running_id)[:5] == ("broker_failed", None, None, 10, 0)
     assert _audit_row(db_path, ended_id) == ended_before

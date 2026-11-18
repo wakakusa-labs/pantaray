@@ -211,3 +211,26 @@ def end_running_command_invocation_audit(
                 ),
             )
     return cursor.rowcount == 1
+
+
+def end_unobserved_running_command_invocation_audits(
+    *, db_path: Path, busy_timeout_ms: int, updated_at: str
+) -> int:
+    """At startup: end every row still running as ``broker_failed``.
+
+    Its process belonged to the previous app run, which did not see how it
+    ended; its byte totals stay as last written. Returns how many were ended.
+    """
+
+    with sqlite3.connect(db_path) as connection:
+        _configure_connection(connection=connection, busy_timeout_ms=busy_timeout_ms)
+        with connection:
+            cursor = connection.execute(
+                """
+                UPDATE command_invocation_audits
+                SET terminal_outcome = 'broker_failed', updated_at = ?
+                WHERE terminal_outcome = 'running'
+                """,
+                (updated_at,),
+            )
+    return cursor.rowcount

@@ -2,16 +2,31 @@
 
 Every call returns the process as the supervisor finds it, in one shape, and
 turns the supervisor's refusals into errors that tell the model what to do.
+The starting call's command audit row is written as ``running`` and gets the
+process's end once a call, or the run's end, first sees it.
 """
 
 from __future__ import annotations
 
+import asyncio
+import logging
+import sqlite3
+from pathlib import Path
+from typing import cast
+
 from pydantic import BaseModel, ConfigDict
 
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.tools.contract import BrokerPolicyError
 
+from ...storage.migrations import MigrationError
+from ..repository.command_invocation_audits import (
+    TerminalOutcome,
+    end_running_command_invocation_audit,
+)
 from ..resources.resource_store import ToolRuntimeResourceSessionConflictError
 from ..sandbox.command_egress import command_network_unavailable_error
+from ..sandbox.command_sandbox_client import write_command_invocation_audit
 from ..sandbox.egress_proxy import EgressProxyStartError, NetworkDestination
 from ..sandbox.process_supervisor import (
     ProcessLimitError,
@@ -21,6 +36,7 @@ from ..sandbox.process_supervisor import (
     UnknownProcessError,
     read_process_output,
     start_process,
+    stop_owner_processes,
     stop_process,
 )
 from .broker_common import BrokerContext
@@ -34,6 +50,19 @@ from .process_protocol import (
 PROCESS_LIMIT_REACHED = "PROCESS_LIMIT_REACHED"
 PROCESS_NOT_FOUND = "PROCESS_NOT_FOUND"
 PROCESS_RUN_ENDING = "PROCESS_RUN_ENDING"
+
+# How an ended process is audited, in the outcomes a one-shot command has: a
+# stop is the run cancelling it, and a helper that never reported the end is
+# the broker's failure. A command that exits by a signal is ``signaled``.
+_OUTCOME_BY_STATUS: dict[ProcessStatus, TerminalOutcome] = {
+    "exited": "exited",
+    "stopped": "canceled",
+    "limit_exceeded": "budget_exceeded",
+    "spawn_failed": "spawn_failed",
+    "failed": "broker_failed",
+}
+
+logger = logging.getLogger(__name__)
 
 
 class ProcessToolOutput(BaseModel):
@@ -77,6 +106,62 @@ def _process_outcome(state: ProcessState) -> UnprojectedBrokerToolOutcome:
     )
 
 
+def _terminal_outcome(state: ProcessState) -> TerminalOutcome:
+    if state.status == "exited" and state.signal is not None:
+        return "signaled"
+    return _OUTCOME_BY_STATUS[state.status]
+
+
+def _end_audit(
+    *,
+    db_path: Path,
+    busy_timeout_ms: int,
+    invocation_id: str,
+    outcome: TerminalOutcome,
+    state: ProcessState | None,
+) -> None:
+    """Write how the process ended to its starting call's row, once.
+
+    ``state`` is None when the call ended without one: nothing observed the
+    process's output or exit.
+    """
+
+    try:
+        end_running_command_invocation_audit(
+            db_path=db_path,
+            busy_timeout_ms=busy_timeout_ms,
+            invocation_id=invocation_id,
+            terminal_outcome=outcome,
+            exit_code=None if state is None else state.exit_code,
+            signal=None if state is None else state.signal,
+            stdout_bytes=0 if state is None else state.stdout_bytes,
+            stderr_bytes=0 if state is None else state.stderr_bytes,
+            budget_exceeded_kind=(
+                "temp_storage_limit"
+                if state is not None and state.status == "limit_exceeded"
+                else None
+            ),
+            updated_at=now_utc_iso(),
+        )
+    except (sqlite3.Error, MigrationError):
+        # The call's own result goes on; the row stays running until startup
+        # recovery ends it as unobserved.
+        logger.exception(
+            "failed to audit the end of the process started by %s", invocation_id
+        )
+
+
+def _audit_end(*, db_path: Path, busy_timeout_ms: int, state: ProcessState) -> None:
+    if state.status != "running":
+        _end_audit(
+            db_path=db_path,
+            busy_timeout_ms=busy_timeout_ms,
+            invocation_id=state.tool_invocation_id,
+            outcome=_terminal_outcome(state),
+            state=state,
+        )
+
+
 def _listed(process_ids: tuple[str, ...]) -> str:
     return ", ".join(process_ids) if process_ids else "none"
 
@@ -87,8 +172,50 @@ async def start_background_command(
     """Start the command as a process of the calling run; returns it running,
     or ended when it ended within the start window."""
 
+    # Written before the start: a call cancelled in the start window, whose
+    # process the supervisor then stops, still leaves its row.
+    write_command_invocation_audit(
+        context=context,
+        request=request,
+        terminal_outcome="running",
+        exit_code=None,
+        signal_value=None,
+        stdout_bytes=0,
+        stderr_bytes=0,
+        budget_exceeded_kind=None,
+        sandbox_violation_kind=None,
+        sandbox_violation_summary=None,
+        updated_at=now_utc_iso(),
+    )
     try:
-        state = await start_process(
+        state = await _start(context=context, request=request)
+    except (Exception, asyncio.CancelledError) as exc:
+        _end_audit(
+            db_path=context.db_path,
+            busy_timeout_ms=context.busy_timeout_ms,
+            invocation_id=cast(str, request.tool_invocation_id),
+            outcome=(
+                "canceled"
+                if isinstance(exc, asyncio.CancelledError)
+                # Refused: the command was never started.
+                else "spawn_failed"
+                if isinstance(exc, BrokerPolicyError)
+                else "broker_failed"
+            ),
+            state=None,
+        )
+        raise
+    _audit_end(
+        db_path=context.db_path, busy_timeout_ms=context.busy_timeout_ms, state=state
+    )
+    return _process_outcome(state)
+
+
+async def _start(
+    *, context: BrokerContext, request: ValidatedCommandRequest
+) -> ProcessState:
+    try:
+        return await start_process(
             db_path=context.db_path,
             busy_timeout_ms=context.busy_timeout_ms,
             owner_process_id=context.actor_process_id,
@@ -109,7 +236,6 @@ async def start_background_command(
             "The command did not start: this run is ending.",
             code=PROCESS_RUN_ENDING,
         ) from exc
-    return _process_outcome(state)
 
 
 async def run_process_control(
@@ -139,7 +265,44 @@ async def run_process_control(
             fix_hint="Use a process_id a bash call with run_in_background "
             "returned in this run.",
         ) from exc
+    _audit_end(
+        db_path=context.db_path, busy_timeout_ms=context.busy_timeout_ms, state=state
+    )
     return _process_outcome(state)
+
+
+async def stop_run_processes(
+    *, db_path: Path, busy_timeout_ms: int, owner_process_ids: tuple[str, ...]
+) -> None:
+    """At the end of these runs: stop their processes, audit how each ended,
+    and let the supervisor forget them.
+
+    The stop and its audit run together on a thread of their own, so a caller
+    that is cancelled, or whose loop ends, still leaves every end audited.
+    """
+
+    if owner_process_ids:
+        await asyncio.to_thread(
+            asyncio.run,
+            _stop_and_audit(
+                db_path=db_path,
+                busy_timeout_ms=busy_timeout_ms,
+                owner_process_ids=owner_process_ids,
+            ),
+        )
+
+
+async def _stop_and_audit(
+    *, db_path: Path, busy_timeout_ms: int, owner_process_ids: tuple[str, ...]
+) -> None:
+    for states in await asyncio.gather(
+        *(
+            stop_owner_processes(owner_process_id=owner_process_id)
+            for owner_process_id in owner_process_ids
+        )
+    ):
+        for state in states:
+            _audit_end(db_path=db_path, busy_timeout_ms=busy_timeout_ms, state=state)
 
 
 __all__ = [
@@ -149,4 +312,5 @@ __all__ = [
     "ProcessToolOutput",
     "run_process_control",
     "start_background_command",
+    "stop_run_processes",
 ]

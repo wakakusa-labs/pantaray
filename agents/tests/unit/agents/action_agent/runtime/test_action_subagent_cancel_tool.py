@@ -56,6 +56,9 @@ async def test_cancel_requests_before_poll_and_returns_observed_result(
     def _cancel(**kwargs: object) -> None:
         events.append(kwargs["request"])
 
+    async def _stop(**kwargs: object) -> None:
+        events.append(("stop", kwargs["request"].child_process_id))  # type: ignore[attr-defined]
+
     async def _poll(**_kwargs: object) -> ActionSubagentWaitSnapshot:
         events.append("poll")
         return snapshot
@@ -65,6 +68,7 @@ async def test_cancel_requests_before_poll_and_returns_observed_result(
     monkeypatch.setattr(
         subagent_cancel, "request_action_subagent_cancellation", _cancel
     )
+    monkeypatch.setattr(subagent_cancel, "stop_action_subagent_child_processes", _stop)
     monkeypatch.setattr(subagent_cancel, "_poll_wait", _poll)
     with _trace():
         result = await execution.run_validated_tool_impl(
@@ -78,7 +82,11 @@ async def test_cancel_requests_before_poll_and_returns_observed_result(
             step_id="cancel-step",
         )
 
-    assert events[0].child_process_id == "child-1"  # type: ignore[attr-defined]
+    # Catches: a queued or paused child, which the request settles and whose
+    # claims it releases, keeping its processes running past them.
+    assert events[0] == ("stop", "child-1")
+    assert events[1].child_process_id == "child-1"  # type: ignore[attr-defined]
+    assert events[2] == "poll"
     assert result.output == snapshot.results[0]
     assert (result.subagent_collection_receipt is not None) is snapshot.all_terminal
 
@@ -100,6 +108,9 @@ async def test_cancel_rejects_goal_worker_and_wrong_child_before_poll(
         )
     cancel.assert_not_called()
     poll = AsyncMock()
+    monkeypatch.setattr(
+        subagent_cancel, "stop_action_subagent_child_processes", AsyncMock()
+    )
     monkeypatch.setenv("LOCAL_DB_PATH", "/tmp/runtime.db")
     monkeypatch.setenv("LOCAL_DB_BUSY_TIMEOUT_MS", "1000")
     cancel.side_effect = ActionSubagentCancelInputError("child is not owned")

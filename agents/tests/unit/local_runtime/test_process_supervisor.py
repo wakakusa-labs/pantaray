@@ -322,6 +322,30 @@ async def test_a_start_queued_behind_the_run_end_is_refused(run: _Run) -> None:
     run.assert_released()
 
 
+# Catches: a second run-end stop of the same run (a subagent's own end beside
+# the parent's cancel of it) returning while the first is still stopping its
+# processes, which let its caller release the run's claims over a live process.
+async def test_a_second_stop_of_a_run_waits_for_the_stop_in_progress(
+    run: _Run,
+) -> None:
+    started = await run.start(
+        f"echo $$ > command.pid; trap '' TERM; {LOOP_UNTIL_STOPPED}"
+    )
+    pid = await run.command_pid()
+    # The first stop waits out the grace, so the second arrives during it.
+    first = asyncio.create_task(run.stop_all())
+    await asyncio.sleep(0.1)
+
+    second = await run.stop_all()
+
+    assert not process_exists(pid)
+    assert [(state.process_id, state.status) for state in second] == [
+        (started.process_id, "stopped")
+    ]
+    assert await first == second
+    run.assert_released()
+
+
 async def _respond_ok(
     reader: asyncio.StreamReader, writer: asyncio.StreamWriter
 ) -> None:

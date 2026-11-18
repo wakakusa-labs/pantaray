@@ -13,6 +13,9 @@ from pantaray_agents.local_runtime.runtime.action_subagent_cancel import (
     ActionSubagentCancelRequest,
     request_action_subagent_cancellation,
 )
+from pantaray_agents.local_runtime.runtime.action_subagent_process_stop import (
+    stop_action_subagent_child_processes,
+)
 from pantaray_agents.local_runtime.runtime.action_subagent_wait import (
     ActionSubagentWaitInputError,
 )
@@ -45,17 +48,20 @@ async def run_cancel_subagent_tool(
     request = _build_wait_request(state=state, child_process_ids=(child_process_id,))
     db_path, busy_timeout_ms = read_local_runtime_db_config()
     started_at = now_utc_iso()
+    cancel_request = ActionSubagentCancelRequest(
+        user_id=request.user_id,
+        action_id=request.action_id,
+        parent_process_id=request.parent_process_id,
+        parent_job_id=request.parent_job_id,
+        child_process_id=child_process_id,
+    )
     try:
+        # The request settles a queued or paused child and releases its claims.
+        await stop_action_subagent_child_processes(
+            db_path=db_path, busy_timeout_ms=busy_timeout_ms, request=cancel_request
+        )
         request_action_subagent_cancellation(
-            db_path=db_path,
-            busy_timeout_ms=busy_timeout_ms,
-            request=ActionSubagentCancelRequest(
-                user_id=request.user_id,
-                action_id=request.action_id,
-                parent_process_id=request.parent_process_id,
-                parent_job_id=request.parent_job_id,
-                child_process_id=child_process_id,
-            ),
+            db_path=db_path, busy_timeout_ms=busy_timeout_ms, request=cancel_request
         )
         snapshot = await _poll_wait(
             db_path=db_path,

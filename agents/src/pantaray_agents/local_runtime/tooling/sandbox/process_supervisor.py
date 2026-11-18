@@ -291,6 +291,8 @@ class _ProcessSupervisor:
         # Serializes launches (for the per-run limit) and a run's end.
         self._start_lock = asyncio.Lock()
         self._closing: set[str] = set()  # Owners whose run end is stopping.
+        # Per owner, the run-end stop in progress, which later calls join.
+        self._stopping: dict[str, asyncio.Future[tuple[ProcessState, ...]]] = {}
         self._background: set[asyncio.Task[None]] = set()
 
     def ensure_loop(self) -> asyncio.AbstractEventLoop:
@@ -482,23 +484,29 @@ class _ProcessSupervisor:
     async def stop_owner(self, *, owner_process_id: str) -> tuple[ProcessState, ...]:
         """At the run's end: stop what it still runs and forget all of it.
 
-        Returns every process the run started, ended, in start order.
+        Returns every process the run started, ended, in start order. A call
+        made while another stops the same run waits for that stop and returns
+        what it returns.
         """
 
+        stopping = self._stopping.get(owner_process_id)
+        if stopping is None:
+            stopping = asyncio.ensure_future(self._stop_owner(owner_process_id))
+            self._stopping[owner_process_id] = stopping
+            stopping.add_done_callback(
+                lambda _: self._stopping.pop(owner_process_id, None)
+            )
+        # Not cancelled with the caller: nothing would stop them after the pop.
+        return await asyncio.shield(stopping)
+
+    async def _stop_owner(self, owner_process_id: str) -> tuple[ProcessState, ...]:
         async with self._start_lock:
             processes = self._owners.pop(owner_process_id, {})
             self._closing.add(owner_process_id)
-
-        async def stop_all() -> None:
-            try:
-                await asyncio.gather(
-                    *(_stop(process) for process in processes.values())
-                )
-            finally:
-                self._closing.discard(owner_process_id)
-
-        # Not cancelled with the caller: nothing would stop them after the pop.
-        await asyncio.shield(stop_all())
+        try:
+            await asyncio.gather(*(_stop(process) for process in processes.values()))
+        finally:
+            self._closing.discard(owner_process_id)
         return tuple(process.take_state() for process in processes.values())
 
 

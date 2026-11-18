@@ -69,6 +69,9 @@ class BrokerToSandboxLongRunningRequest(SandboxCommandSpec):
 
     # How long a stop waits after SIGTERM before SIGKILL.
     stop_grace_ms: int
+    # How long, once the command has exited, the helper still forwards output
+    # that something it started keeps writing, before it reports the exit.
+    output_drain_ms: int
 
 
 # Told apart by their own fields, which neither model lets the other carry.
@@ -137,6 +140,9 @@ class SandboxCommandCompletion(BaseModel):
 
 class SandboxProcessExited(BaseModel):
     """The long-running command ended; the last message of its stream.
+
+    Sent once the command itself has exited, after at most ``output_drain_ms``
+    more of the output that something it started still writes.
 
     Processes the command left in the group may still run: the parent kills the
     helper's group after this message, as it does after a one-shot receipt.

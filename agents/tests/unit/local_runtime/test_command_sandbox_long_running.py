@@ -42,7 +42,7 @@ READY = "ready"
 ONE_SHOT_TIMEOUT_MS = 100
 ONE_SHOT_OUTPUT_MAX_BYTES = 1024
 # Reaches the parent-exit watch: the helper is spawned by a parent that exits
-# once the command has started, without killing anything.
+# once the command is ready, without killing anything.
 ORPHANING_PARENT = """
 import asyncio, os, sys
 from pantaray_agents.local_runtime.tooling.sandbox.command_sandbox_client import (
@@ -53,7 +53,7 @@ async def main():
     helper = await spawn_sandbox_helper(asyncio.create_subprocess_exec)
     helper.stdin.write(sys.stdin.buffer.readline())
     await helper.stdin.drain()
-    while b'"started"' not in await helper.stdout.readline():
+    while b"ready" not in await helper.stdout.readline():
         pass
     print(helper.pid, flush=True)
     os._exit(0)
@@ -67,6 +67,7 @@ def _request(
     script: str,
     *,
     stop_grace_ms: int = 10_000,
+    output_drain_ms: int = 200,
     temp_storage_limit_bytes: int = 1_048_576,
     argv: list[str] | None = None,
     real_read_roots: list[str] | None = None,
@@ -94,7 +95,9 @@ def _request(
         # Skips seatbelt only, except where a test turns it on.
         run_outside_sandbox=run_outside_sandbox,
     )
-    return to_long_running_request(one_shot, stop_grace_ms=stop_grace_ms)
+    return to_long_running_request(
+        one_shot, stop_grace_ms=stop_grace_ms, output_drain_ms=output_drain_ms
+    )
 
 
 class _Parent:
@@ -153,7 +156,21 @@ async def _started(
         # What the parent does after the exit report, or on any failure.
         with suppress(ProcessLookupError):
             os.killpg(helper.pid, signal.SIGKILL)
-        await helper.wait()
+        # Reads what a test left unread: a paused pipe never sees its EOF.
+        await helper.communicate()
+
+
+async def _wait_until_gone(pid_file: Path) -> None:
+    async with asyncio.timeout(10):
+        while not pid_file.exists() or not pid_file.read_text().strip():
+            await asyncio.sleep(0.05)
+        pid = int(pid_file.read_text())
+        while True:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return
+            await asyncio.sleep(0.05)
 
 
 async def test_a_command_runs_past_the_one_shot_timeout_and_reports_its_exit(
@@ -276,8 +293,11 @@ async def test_the_helper_kills_the_command_when_its_parent_dies(
     tmp_path: Path,
 ) -> None:
     temp_dir = tmp_path / "temp"
-    pid_file = temp_dir / "command.pid"
-    request = _request(temp_dir, f'echo $$ > "{pid_file}"; exec sleep 60')
+    # A descendant, which only the group kill reaches.
+    request = _request(
+        temp_dir,
+        f'sleep 60 & echo $! > "$TMPDIR/descendant.pid"; echo {READY}; wait',
+    )
     parent = await asyncio.create_subprocess_exec(
         sys.executable,
         "-c",
@@ -290,16 +310,7 @@ async def test_the_helper_kills_the_command_when_its_parent_dies(
     )
     helper_pid = int(output)
     try:
-        async with asyncio.timeout(10):
-            while not pid_file.exists() or not pid_file.read_text().strip():
-                await asyncio.sleep(0.05)
-            command_pid = int(pid_file.read_text())
-            while True:
-                try:
-                    os.kill(command_pid, 0)
-                except ProcessLookupError:
-                    break
-                await asyncio.sleep(0.1)
+        await _wait_until_gone(temp_dir / "descendant.pid")
     finally:
         with suppress(ProcessLookupError):
             os.killpg(helper_pid, signal.SIGKILL)
@@ -328,3 +339,155 @@ async def test_a_long_running_command_runs_under_the_seatbelt_profile(
     assert final.exit_code not in (None, 0)
     assert (temp_dir / "inside.txt").read_text() == "in\n"
     assert not outside.exists()
+
+
+async def test_an_exit_is_reported_while_a_descendant_holds_the_output(
+    tmp_path: Path,
+) -> None:
+    temp_dir = tmp_path / "temp"
+    request = _request(
+        temp_dir, 'sleep 60 & echo $! > "$TMPDIR/descendant.pid"; echo bye'
+    )
+
+    async with _started(request) as parent:
+        final = await parent.final_message()
+
+    assert final == SandboxProcessExited(
+        request_id=request.request_id, ended_by="command", exit_code=0, signal=None
+    )
+    assert "".join(parent.stdout) == "bye\n"
+    # The parent's group kill takes what the command left behind.
+    await _wait_until_gone(temp_dir / "descendant.pid")
+
+
+async def test_stop_is_reported_while_a_descendant_holds_the_output(
+    tmp_path: Path,
+) -> None:
+    temp_dir = tmp_path / "temp"
+    request = _request(
+        temp_dir,
+        "trap '' TERM; (exec sleep 60) & "
+        f'echo $! > "$TMPDIR/descendant.pid"; echo {READY}; '
+        "while :; do sleep 0.05; done",
+        stop_grace_ms=200,
+    )
+
+    async with _started(request) as parent:
+        await parent.wait_for_stdout(READY)
+        await parent.stop()
+        final = await parent.final_message()
+
+    assert final == SandboxProcessExited(
+        request_id=request.request_id,
+        ended_by="stop",
+        exit_code=None,
+        signal=signal.SIGKILL,
+    )
+    await _wait_until_gone(temp_dir / "descendant.pid")
+
+
+async def test_the_temp_limit_is_reported_while_a_descendant_holds_the_output(
+    tmp_path: Path,
+) -> None:
+    temp_dir = tmp_path / "temp"
+    request = _request(
+        temp_dir,
+        '(exec sleep 60) & echo $! > "$TMPDIR/descendant.pid"; '
+        'head -c 131072 /dev/zero > "$TMPDIR/spill"; exec sleep 30',
+        temp_storage_limit_bytes=65_536,
+    )
+
+    async with _started(request) as parent:
+        final = await parent.final_message()
+
+    assert final == SandboxProcessExited(
+        request_id=request.request_id,
+        ended_by="temp_storage_limit",
+        exit_code=None,
+        signal=signal.SIGKILL,
+    )
+    await _wait_until_gone(temp_dir / "descendant.pid")
+
+
+async def test_a_command_reading_its_input_cannot_take_the_stop_request(
+    tmp_path: Path,
+) -> None:
+    request = _request(
+        tmp_path / "temp",
+        f'read line; echo "read:[$line]"; echo {READY}; while :; do sleep 0.05; done',
+    )
+
+    async with _started(request) as parent:
+        await parent.wait_for_stdout(READY)
+        await parent.stop()
+        final = await parent.final_message()
+
+    assert "read:[]" in "".join(parent.stdout)
+    assert final == SandboxProcessExited(
+        request_id=request.request_id,
+        ended_by="stop",
+        exit_code=None,
+        signal=signal.SIGTERM,
+    )
+
+
+async def test_stop_kills_in_time_while_the_parent_reads_no_output(
+    tmp_path: Path,
+) -> None:
+    temp_dir = tmp_path / "temp"
+    grace_ms, drain_ms = 200, 200
+    request = _request(
+        temp_dir,
+        "trap '' TERM; echo $$ > \"$TMPDIR/command.pid\"; exec yes",
+        stop_grace_ms=grace_ms,
+        output_drain_ms=drain_ms,
+    )
+
+    async with _started(request) as parent:
+        pid_file = temp_dir / "command.pid"
+        while not pid_file.exists() or not pid_file.read_text().strip():
+            await asyncio.sleep(0.05)
+        # Long enough for every pipe between the command and the test to fill.
+        await asyncio.sleep(0.5)
+        stopped_at = time.monotonic()
+        await parent.stop()
+        await _wait_until_gone(pid_file)
+        killed_after = time.monotonic() - stopped_at
+        final = await parent.final_message()
+
+    assert killed_after < (grace_ms + drain_ms) / 1000 + 1.5
+    assert final == SandboxProcessExited(
+        request_id=request.request_id,
+        ended_by="stop",
+        exit_code=None,
+        signal=signal.SIGKILL,
+    )
+
+
+async def test_the_helper_outlives_signals_the_command_sends_its_group(
+    tmp_path: Path,
+) -> None:
+    temp_dir = tmp_path / "temp"
+    request = _request(
+        temp_dir,
+        "trap '' TERM HUP INT; (exec sleep 60) & "
+        'echo $! > "$TMPDIR/descendant.pid"; '
+        f"kill 0; kill -HUP 0; kill -INT 0; echo {READY}; "
+        "while :; do sleep 0.05; done",
+        stop_grace_ms=200,
+    )
+
+    async with _started(request) as parent:
+        await parent.wait_for_stdout(READY)
+        await asyncio.sleep(0.2)
+        assert parent.helper.returncode is None
+        await parent.stop()
+        final = await parent.final_message()
+
+    assert final == SandboxProcessExited(
+        request_id=request.request_id,
+        ended_by="stop",
+        exit_code=None,
+        signal=signal.SIGKILL,
+    )
+    await _wait_until_gone(temp_dir / "descendant.pid")

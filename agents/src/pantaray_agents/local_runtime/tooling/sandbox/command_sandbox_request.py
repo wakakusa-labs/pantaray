@@ -146,7 +146,7 @@ def compose_sandbox_request(
 
 
 def to_long_running_request(
-    request: BrokerToSandboxCommandRequest, *, stop_grace_ms: int
+    request: BrokerToSandboxCommandRequest, *, stop_grace_ms: int, output_drain_ms: int
 ) -> BrokerToSandboxLongRunningRequest:
     """The same command run long-running: its one-shot limits are dropped."""
 
@@ -156,6 +156,7 @@ def to_long_running_request(
                 name: getattr(request, name) for name in SandboxCommandSpec.model_fields
             },
             "stop_grace_ms": stop_grace_ms,
+            "output_drain_ms": output_drain_ms,
         }
     )
 

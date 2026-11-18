@@ -876,13 +876,18 @@ it('says a list may be out of date when it fails to load again after a read', as
   expect(screen.getByRole('checkbox', { name: '完了: TODO T1' })).toBeVisible();
 });
 
-it('the project in view shows its folders under the header, to open in Finder or remove', async () => {
+it('a project’s menu manages its folders in a dialog, to open in Finder or remove', async () => {
   renderPage(['/history']);
   const sidebar = screen.getByRole('complementary', SIDEBAR);
-  expect(screen.queryByRole('list', { name: 'フォルダ' })).toBeNull();
   await userEvent.click(await within(sidebar).findByRole('button', { name: '見積もり' }));
+  // The project's TODO list does not list its folders.
+  expect(screen.queryByRole('list', { name: 'フォルダ' })).toBeNull();
 
-  const folders = screen.getByRole('list', { name: 'フォルダ' });
+  const menu = within(sidebar).getByRole('button', { name: '見積もり のメニュー' });
+  await userEvent.click(menu);
+  await userEvent.click(screen.getByRole('menuitem', { name: 'フォルダの管理' }));
+  const dialog = screen.getByRole('dialog', { name: '見積もり のフォルダ' });
+  const folders = within(dialog).getByRole('list', { name: 'フォルダ' });
   expect(within(folders).getByRole('button', { name: '/Users/me/work/estimates' })).toBeVisible();
   await userEvent.click(within(folders).getByRole('button', { name: 'Finder で開く' }));
   expect(openFolder).toHaveBeenCalledWith('F1');
@@ -890,7 +895,12 @@ it('the project in view shows its folders under the header, to open in Finder or
   // Only this project holds it, so it leaves the workspace.
   expect(deleteFolder).toHaveBeenCalledWith('F1');
   await waitFor(() => expect(within(folders).queryByRole('listitem')).toBeNull());
-  expect(screen.getByRole('button', { name: 'フォルダを追加' })).toHaveFocus();
+  expect(within(dialog).getByRole('button', { name: 'フォルダを追加' })).toHaveFocus();
+
+  // Escape is the dialog's cancel, which the test environment does not send from the key.
+  fireEvent(dialog, new Event('cancel', { cancelable: true }));
+  expect(screen.queryByRole('dialog', { name: '見積もり のフォルダ' })).toBeNull();
+  expect(menu).toHaveFocus();
 });
 
 it('the rail’s ＋ adds an organization, shows it, and returns focus to ＋', async () => {

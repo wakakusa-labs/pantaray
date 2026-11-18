@@ -480,7 +480,7 @@ async function openHome(page: Page, search = '', suggestion: OverlaySnapshot = S
               read_access_scope: 'workspace',
               organizations,
               projects,
-              // 見積もり's folders, shown under the header while it is in view.
+              // 見積もり's folders, managed in a dialog from its menu.
               folders: ['/Users/me/Developer/clients/xer/estimates', '/Users/me/Documents/xer'].map(
                 (path, index) => ({
                   folder_id: `folder-${index}`,
@@ -1009,21 +1009,28 @@ test('the rail scopes the list to one organization, and a project shows its TODO
   await expect(groups(page)).toHaveCount(0);
   await expect(page.getByRole('list', { name: '見積もり' }).getByRole('checkbox')).toHaveCount(2);
   await expect(page.locator('.todo-screen__summary')).toHaveText('1 / 2 完了');
-  // Its folders on one line under the header, each path cut in its middle.
-  const folders = page.getByRole('list', { name: 'フォルダ' });
+  // Its folders are not above the list; they are managed in a dialog from its menu.
+  await expect(page.getByRole('list', { name: 'フォルダ' })).toHaveCount(0);
+  const menu = sidebarOf(page).getByRole('button', { name: '見積もり のメニュー' });
+  await menu.click();
+  await page.getByRole('menuitem', { name: 'フォルダの管理' }).click();
+  const dialog = page.getByRole('dialog', { name: '見積もり のフォルダ' });
+  const folders = dialog.getByRole('list', { name: 'フォルダ' });
   await expect(folders.getByRole('listitem')).toHaveCount(2);
   await expect(
     folders.getByRole('button', { name: '/Users/me/Developer/clients/xer/estimates' })
   ).toBeVisible();
-  expect(await hasNoSideScroll(page)).toBe(true);
-  await capture(page, info, 'list-project-folders');
+  await expect(dialog.getByRole('button', { name: 'フォルダを追加' })).toBeVisible();
+  await capture(page, info, 'list-project-folders-dialog');
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(menu).toBeFocused();
 
-  // A TODO's conversation opens beside the one list; the folders stay under the header.
+  // A TODO's conversation opens beside the one list.
   await page.getByRole('button', { name: /^見積書を再提出する/ }).click();
   await expect(page.getByRole('region', { name: '見積書を再提出する' })).toBeVisible();
-  await expect(folders).toBeVisible();
   expect(await hasNoSideScroll(page)).toBe(true);
-  await capture(page, info, 'list-project-folders-conversation');
+  await capture(page, info, 'list-project-conversation');
 });
 
 test('期限順 puts the open TODOs by due date before the done ones, and stays in the address', async ({

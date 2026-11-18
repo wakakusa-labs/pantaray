@@ -20,6 +20,7 @@ import type { TodoScopeQuery } from '../../../electron/src/todos/todoContracts';
 import { HistoryDeleteDialog } from './HistoryDeleteDialog';
 import { HistoryProjectOrganizationDialog } from './HistoryProjectOrganizationDialog';
 import { HistoryProjectRow, ProjectNameField } from './HistoryProjectRow';
+import { ProjectFoldersDialog } from './ProjectFoldersDialog';
 import './historyProjects.css';
 
 export type WorkspaceProjects = Pick<
@@ -38,7 +39,10 @@ export type WorkspaceProjects = Pick<
   | 'busy'
 >;
 
-type OpenDialog = { kind: 'delete' | 'organizations' | 'goal'; project: WorkspaceProject };
+type OpenDialog = {
+  kind: 'delete' | 'folders' | 'organizations' | 'goal';
+  project: WorkspaceProject;
+};
 
 /** What the TODO list adds to the projects: each one selects its TODOs. */
 export type ProjectTodos = {
@@ -56,10 +60,11 @@ const menuButtonId = (projectId: string) => `history-project-menu:${projectId}`;
 /**
  * The sidebar's projects, managed in place: ＋ names a new project, which then takes its folders;
  * with the TODO list it is made in the rail's organization in view, so ＋ is hidden while all of
- * them are. Each row's menu renames it, adds folders, sets its organization (and, with the TODO list, its
- * goal), or deletes it, and rows are dragged into order. With the TODO list a row's name shows
- * that project's TODOs; without it the name opens its folders, as before the TODO list. The
- * conversations below are not filtered by it.
+ * them are. Each row's menu renames it, manages its folders in a dialog (without the TODO list,
+ * adds one), sets its organization (and, with the TODO list, its goal), or deletes it, and rows
+ * are dragged into order. With the TODO list a row's name shows that project's TODOs; without it
+ * the name opens its folders, as before the TODO list. The conversations below are not filtered
+ * by it.
  */
 export function HistoryProjects({
   projects,
@@ -131,10 +136,16 @@ export function HistoryProjects({
   const menuItems = (project: WorkspaceProject) => {
     return [
       { label: t('history.projects.rename'), onSelect: () => setRenamingId(project.project_id) },
-      {
-        label: t('history.projects.addFolder'),
-        onSelect: () => void projects.addFolderToProject(project.project_id),
-      },
+      // Without the TODO list the row lists its folders itself, as before the TODO list.
+      todos
+        ? {
+            label: t('history.projects.manageFolders'),
+            onSelect: () => setDialog({ kind: 'folders', project }),
+          }
+        : {
+            label: t('history.projects.addFolder'),
+            onSelect: () => void projects.addFolderToProject(project.project_id),
+          },
       {
         label: t('history.projects.setOrganization'),
         onSelect: () => setDialog({ kind: 'organizations', project }),
@@ -244,6 +255,20 @@ export function HistoryProjects({
           )}
           onCancel={() => closeDialog(dialog.project)}
           onConfirm={() => void confirmDelete(dialog.project)}
+        />
+      ) : null}
+      {dialog?.kind === 'folders' ? (
+        <ProjectFoldersDialog
+          project={dialog.project}
+          folders={foldersOf(dialog.project.project_id)}
+          isFolderPending={(folderId) => pending.has(workspacePendingKey.folder(folderId))}
+          onOpenFolder={(folderId) => void projects.openFolder(folderId)}
+          onRemoveFolder={(folderId) =>
+            projects.removeFolderFromProject(folderId, dialog.project.project_id)
+          }
+          onAddFolder={() => void projects.addFolderToProject(dialog.project.project_id)}
+          t={t}
+          onClose={() => closeDialog(dialog.project)}
         />
       ) : null}
       {dialog?.kind === 'organizations' && settings ? (

@@ -32,7 +32,7 @@ export type ProjectRowTodo = {
 
 /**
  * One project in the sidebar. With the TODO list its name selects its TODOs, with how many are
- * open beside it, and its folders are on the project's page; without it the name, chevron and
+ * open beside it, and its folders are managed from its menu; without it the name, chevron and
  * all, toggles its folders and organization, as before the TODO list. Its 「…」 menu holds the
  * actions, and it is dragged by the row (or moved from the keyboard by its handle).
  */

@@ -4,8 +4,6 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AiConnectionNotice } from '@/components/AiConnectionNotice';
 import { OpenWorkContext } from '@/components/action-conversation/sentMessageRefs';
 import { PageControlButton } from '@/components/task/PageControlButton';
-import type { WorkspaceProjects } from '@/components/history/HistoryProjects';
-import { ProjectFolders } from '@/components/history/ProjectFolders';
 import { DeletedTodoRow } from '@/components/todo/DeletedTodoRow';
 import { OpenTodoImportRows } from '@/components/todo/OpenTodoImportRows';
 import { ProgressScreen } from '@/components/todo/progress/ProgressScreen';
@@ -19,7 +17,6 @@ import { useI18n } from '@/context/useI18n';
 import type { TaskPreview } from '@/components/task/taskFiles';
 import type { HistorySelection } from '@/history/historySelection';
 import type { WorkspaceSettings } from '@/pages/settings/components/workspaceSettingsModel';
-import { workspacePendingKey } from '@/pages/settings/useWorkspaceSettingsController';
 import { groupTodosByProject, todoProjectSlots } from '@/todos/groupTodosByProject';
 import type { TodoListSort, TodoSelection } from '@/todos/todoSelection';
 import { useDeletedTodos } from '@/todos/useDeletedTodos';
@@ -55,19 +52,13 @@ const startProblemMessage = (problem: TodoImportProblem) =>
     ? 'todo.import.filesUnavailable'
     : 'todo.import.startFailed';
 
-/** What the header's folders of the project in view are changed with. */
-type ProjectFolderActions = Pick<
-  WorkspaceProjects,
-  'pending' | 'addFolderToProject' | 'removeFolderFromProject' | 'openFolder'
->;
-
 /**
  * The home page's TODO list: every TODO in view, by project while several projects are in view
- * and as one list for one project (or their progress, or the deleted TODOs), with the folders of
- * the one project in view under its header, and beside the list the conversation of the TODO
- * selected, or the draft of an import started from the add bar. The conversation expands into the
- * list's place and shrinks back beside it, the same pane all along. What is shown is the page's URL;
- * this reads and writes the TODOs through the TODO hooks and draws them with the TODO parts.
+ * and as one list for one project (or their progress, or the deleted TODOs), and beside the list
+ * the conversation of the TODO selected, or the draft of an import started from the add bar. The
+ * conversation expands into the list's place and shrinks back beside it, the same pane all along.
+ * What is shown is the page's URL; this reads and writes the TODOs through the TODO hooks and
+ * draws them with the TODO parts.
  */
 export function TodoScreen({
   selection,
@@ -75,7 +66,6 @@ export function TodoScreen({
   listShowsSelection,
   settings,
   settingsFailed,
-  folderActions,
   onSelect,
   onOpenWork,
   onAddProject,
@@ -94,7 +84,6 @@ export function TodoScreen({
   settings: WorkspaceSettings | null;
   /** The workspace could not be read, so the TODOs cannot be put in their projects. */
   settingsFailed: boolean;
-  folderActions: ProjectFolderActions;
   onSelect: (next: TodoSelection) => void;
   /** A work named in a conversation opens in the page's main area. */
   onOpenWork: (work: HistorySelection) => void;
@@ -413,29 +402,6 @@ export function TodoScreen({
             </select>
           ) : null}
         </header>
-        {showingList && settings && selectedProjectId !== null ? (
-          <div className="todo-screen__folders">
-            <span className="todo-screen__folders-label" aria-hidden="true">
-              {t('history.projects.folders')}
-            </span>
-            <ProjectFolders
-              key={selectedProjectId}
-              projectId={selectedProjectId}
-              folders={settings.folders.filter((folder) =>
-                folder.project_ids.includes(selectedProjectId)
-              )}
-              isFolderPending={(folderId) =>
-                folderActions.pending.has(workspacePendingKey.folder(folderId))
-              }
-              onOpenFolder={(folderId) => void folderActions.openFolder(folderId)}
-              onRemoveFolder={(folderId) =>
-                folderActions.removeFolderFromProject(folderId, selectedProjectId)
-              }
-              onAddFolder={() => void folderActions.addFolderToProject(selectedProjectId)}
-              t={t}
-            />
-          </div>
-        ) : null}
         <div className="todo-screen__scroll">
           <AiConnectionNotice />
           {showingList && registered !== null ? (

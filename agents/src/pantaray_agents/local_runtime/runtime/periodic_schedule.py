@@ -21,6 +21,7 @@ from .activity_summary_scheduler import (
     run_activity_summary_scheduler_once,
 )
 from .admission import admission_is_open
+from .browser_relay import sweep_browser_sessions
 from .insight_queue import (
     SHORT_INSIGHT_WINDOW_SECONDS,
     enqueue_due_short_insight_job,
@@ -223,6 +224,17 @@ def build_periodic_schedule(
             is_ready=_owner_is_settled,
             run=lambda context: purge_expired_todos(
                 user_id=context.owner_user_id, now=now_utc_iso()
+            ),
+        ),
+        PeriodicTask(
+            name="browser_sessions",
+            interval_seconds=LOCAL_RUNTIME_PERIODIC_REAPER_INTERVAL_SECONDS,
+            is_ready=lambda _context: True,
+            run=lambda context: asyncio.run(
+                sweep_browser_sessions(
+                    db_path=context.db_path,
+                    busy_timeout_ms=context.busy_timeout_ms,
+                )
             ),
         ),
     )

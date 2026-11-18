@@ -275,8 +275,26 @@ async def stop_run_processes(
     *, db_path: Path, busy_timeout_ms: int, owner_process_ids: tuple[str, ...]
 ) -> None:
     """At the end of these runs: stop their processes, audit how each ended,
-    and let the supervisor forget them."""
+    and let the supervisor forget them.
 
+    The stop and its audit run together on a thread of their own, so a caller
+    that is cancelled, or whose loop ends, still leaves every end audited.
+    """
+
+    if owner_process_ids:
+        await asyncio.to_thread(
+            asyncio.run,
+            _stop_and_audit(
+                db_path=db_path,
+                busy_timeout_ms=busy_timeout_ms,
+                owner_process_ids=owner_process_ids,
+            ),
+        )
+
+
+async def _stop_and_audit(
+    *, db_path: Path, busy_timeout_ms: int, owner_process_ids: tuple[str, ...]
+) -> None:
     for states in await asyncio.gather(
         *(
             stop_owner_processes(owner_process_id=owner_process_id)

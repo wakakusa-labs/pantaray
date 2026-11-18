@@ -8,12 +8,16 @@ from pathlib import Path
 
 import pytest
 
+from pantaray_agents.local_runtime.runtime import (
+    action_subagent_process_stop as process_stop,
+)
 from pantaray_agents.local_runtime.runtime.action_approval_projection import (
     ACTION_APPROVAL_SNAPSHOT_EVENT,
 )
 from pantaray_agents.local_runtime.runtime.action_cancel_repository import (
     ActionCancelRepository,
     ActionCancelResult,
+    ActionCancelStateConflictError,
 )
 from pantaray_agents.local_runtime.runtime.action_subagent_pause import (
     ActionSubagentApprovalPause,
@@ -331,6 +335,39 @@ def test_stop_fences_a_parent_without_a_worker_while_a_child_runs(
     assert _child_state(db_path, running_child) == ("canceled", 1, "canceled", 0)
     if root_session is not None:
         assert _approval_statuses(db_path)[root_session] == "interrupted"
+
+
+# Catches: a late Stop aimed at an earlier run stopping the processes of the
+# current run's children before its transaction refuses it, and a Stop that
+# names no run stopping other children than the active run's.
+def test_a_stop_stops_only_the_processes_of_the_run_it_stops(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path, context = _stop_ready_runtime(tmp_path)
+    child = _spawn_child(db_path, context, index=1)
+    _claim_child(db_path, worker="worker-a")
+    stopped: list[tuple[str, ...]] = []
+
+    async def record(**kwargs: object) -> None:
+        stopped.append(kwargs["owner_process_ids"])  # type: ignore[arg-type]
+
+    monkeypatch.setattr(process_stop, "stop_run_processes", record)
+    repository = ActionCancelRepository(
+        db_path=db_path, busy_timeout_ms=spawn.BUSY_TIMEOUT_MS
+    )
+    with pytest.raises(ActionCancelStateConflictError):
+        asyncio.run(
+            repository.cancel_processing_action(
+                user_id="user-1",
+                action_id="action-1",
+                expected_process_id="earlier-process",
+                completed_at=STOP_AT,
+                process_completed_event_id="stale-stop",
+            )
+        )
+    _stop(db_path)
+
+    assert stopped == [(), (child["process_id"],)]
 
 
 def test_stop_terminalizes_a_parked_parent_that_owns_no_child(tmp_path: Path) -> None:

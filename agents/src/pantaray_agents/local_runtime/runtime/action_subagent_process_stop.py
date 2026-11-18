@@ -19,10 +19,9 @@ from ..tooling.brokering.broker_process import stop_run_processes
 from .action_subagent_cancel import ActionSubagentCancelRequest
 from .job_types import ACTION_SUBAGENT_PROCESS_KIND
 
-# Every live child of the Action belongs to its one active parent run.
 _LIVE_CHILDREN_SQL = """
 SELECT process_id FROM processes
-WHERE user_id = ? AND action_id = ? AND kind = ?
+WHERE user_id = ? AND action_id = ? AND kind = ? AND parent_process_id = ?
   AND status IN ('enqueued', 'running', 'paused')
 """
 
@@ -39,9 +38,18 @@ def _live_children(
 
 
 async def stop_action_subagent_processes(
-    *, db_path: Path, busy_timeout_ms: int, user_id: str, action_id: str
+    *,
+    db_path: Path,
+    busy_timeout_ms: int,
+    user_id: str,
+    action_id: str,
+    parent_process_id: str,
 ) -> None:
-    """Before the parent's terminal or the user's Stop settles every child."""
+    """Before the parent run's terminal or a Stop of it settles its children.
+
+    Only that run's children: a late Stop or terminal of an earlier run must
+    not stop the children of the run after it.
+    """
 
     # Read in place like the transaction it precedes; with no live child
     # nothing here suspends.
@@ -49,7 +57,7 @@ async def stop_action_subagent_processes(
         db_path,
         busy_timeout_ms,
         "",
-        (user_id, action_id, ACTION_SUBAGENT_PROCESS_KIND),
+        (user_id, action_id, ACTION_SUBAGENT_PROCESS_KIND, parent_process_id),
     )
     await stop_run_processes(
         db_path=db_path,
@@ -67,13 +75,13 @@ async def stop_action_subagent_child_processes(
     child_process_ids = _live_children(
         db_path,
         busy_timeout_ms,
-        " AND process_id = ? AND parent_process_id = ?",
+        " AND process_id = ?",
         (
             request.user_id,
             request.action_id,
             ACTION_SUBAGENT_PROCESS_KIND,
-            request.child_process_id,
             request.parent_process_id,
+            request.child_process_id,
         ),
     )
     await stop_run_processes(

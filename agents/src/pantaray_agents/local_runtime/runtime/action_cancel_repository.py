@@ -121,13 +121,19 @@ class ActionCancelRepository:
             raise MigrationError("LOCAL_DB_BUSY_TIMEOUT_MS must be a positive integer")
         if not user_id.strip() or not action_id.strip():
             raise ValueError("user_id and action_id must not be empty")
-        # The transaction below settles the children and releases their claims.
-        await stop_action_subagent_processes(
-            db_path=self.db_path,
-            busy_timeout_ms=self.busy_timeout_ms,
-            user_id=user_id,
-            action_id=action_id,
+        # The transaction below settles the run's children and releases their
+        # claims; it refuses a Stop whose run is no longer the active one.
+        stopped_process_id = expected_process_id or self._active_process_id(
+            user_id=user_id, action_id=action_id
         )
+        if stopped_process_id is not None:
+            await stop_action_subagent_processes(
+                db_path=self.db_path,
+                busy_timeout_ms=self.busy_timeout_ms,
+                user_id=user_id,
+                action_id=action_id,
+                parent_process_id=stopped_process_id,
+            )
 
         with sqlite3.connect(self.db_path) as connection:
             connection.row_factory = sqlite3.Row
@@ -290,6 +296,38 @@ class ActionCancelRepository:
                     process_id=runtime.process_id,
                     execution_session_ids=execution_session_ids,
                 )
+
+    def _active_process_id(self, *, user_id: str, action_id: str) -> str | None:
+        """The run the transaction would stop, or None when it would refuse."""
+
+        with sqlite3.connect(self.db_path) as connection:
+            connection.row_factory = sqlite3.Row
+            configure_connection(connection, self.busy_timeout_ms)
+            action_row = connection.execute(
+                "SELECT suggestion_id, status FROM agent_actions "
+                "WHERE action_id = ? AND user_id = ?",
+                (action_id, user_id),
+            ).fetchone()
+            if action_row is None:
+                return None
+            status = str(action_row["status"]).strip().lower()
+            if status not in {"queued", ACTION_STATUS_PROCESSING}:
+                return None
+            raw_suggestion_id = action_row["suggestion_id"]
+            try:
+                return _load_active_action_runtime(
+                    connection=connection,
+                    user_id=user_id,
+                    action_id=action_id,
+                    suggestion_id=(
+                        str(raw_suggestion_id)
+                        if raw_suggestion_id is not None
+                        else None
+                    ),
+                    queued=status == "queued",
+                ).process_id
+            except ActionCancelStateConflictError:
+                return None
 
 
 def action_stop_fence_is_recorded(

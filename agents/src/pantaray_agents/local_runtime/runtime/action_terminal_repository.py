@@ -69,6 +69,7 @@ class ActionTerminalRepository:
             busy_timeout_ms=self.busy_timeout_ms,
             user_id=command.user_id,
             action_id=command.action_id,
+            parent_process_id=command.process_id,
         )
 
         with sqlite3.connect(self.db_path) as connection:

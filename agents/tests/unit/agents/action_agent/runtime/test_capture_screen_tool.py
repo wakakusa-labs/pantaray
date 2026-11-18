@@ -315,10 +315,13 @@ async def test_captured_image_becomes_a_verified_tool_attachment(
     assert result.status == "success"
     assert result.attachments is not None
     attachment = result.attachments[0]
-    assert attachment["ref"].startswith("tool_attachment:")
+    # Catches: the screenshot history sends and the one the row shows naming
+    # different bytes (the output entry below names the same ref and size).
+    assert attachment["ref"] == f"tool_attachment:{PNG_SHA256[:24]}"
     assert attachment["source_kind"] == "local_image_blob"
     assert attachment["storage_path"] == STORAGE_PATH
     assert attachment["sha256"] == PNG_SHA256
+    assert attachment["byte_size"] == len(PNG_BYTES)
     output = result.output
     assert isinstance(output, dict)
     assert output["captured_at"] == "2026-09-27T06:50+09:00"

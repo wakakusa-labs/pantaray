@@ -26,14 +26,13 @@ import hashlib
 from dataclasses import dataclass
 
 from pantaray_agents.agents.action_agent.runtime.tool_attachments import (
-    LocalImageAttachment,
+    coerce_tool_attachments,
 )
 from pantaray_agents.agents.action_agent.tools import ToolDefinition
 from pantaray_agents.agents.action_agent.tools.capture_screen_tool import (
     CAPTURE_SCREEN_TIMEOUT_MS,
     CAPTURE_SCREEN_TOOL_ID,
 )
-from pantaray_agents.agents.core.llm_file_inputs import TOOL_ATTACHMENT_REF_PREFIX
 from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_db_config
 from pantaray_agents.local_runtime.runtime.local_image_store import (
     read_local_image_blob,
@@ -44,6 +43,9 @@ from pantaray_agents.local_runtime.runtime.screen_capture_broker import (
     ScreenCaptureRefused,
     announce_screen_capture_request,
     screen_capture_broker,
+)
+from pantaray_agents.local_runtime.runtime.tool_image_attachments import (
+    assemble_tool_image,
 )
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
@@ -60,10 +62,6 @@ from pantaray_agents.local_runtime.tooling.models import ApprovalSource
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.tool_result import build_runtime_tool_error_output
 from pantaray_agents.tools.contract import BrokerPolicyError
-from pantaray_agents.tools.files.attachment_reference import (
-    ATTACHMENT_BLOB_REF_PREFIX,
-    ATTACHMENT_ID_HEX_LENGTH,
-)
 from pantaray_agents.utils.local_time import describe_local_time
 from pantaray_agents.utils.trace_context import get_trace_context
 
@@ -437,20 +435,9 @@ def _captured_result(
                 "reported. No image is available."
             ),
         )
-    attachment_id = sha256[:ATTACHMENT_ID_HEX_LENGTH]
-    ref = f"{TOOL_ATTACHMENT_REF_PREFIX}{attachment_id}"
-    display_path = f"screen-{attachment_id}.png"
-    attachment: LocalImageAttachment = {
-        "type": "file",
-        "ref": ref,
-        "blob_ref": f"{ATTACHMENT_BLOB_REF_PREFIX}{attachment_id}",
-        "display_path": display_path,
-        "mime_type": blob.mime_type,
-        "byte_size": len(blob.payload),
-        "sha256": sha256,
-        "source_kind": "local_image_blob",
-        "storage_path": blob.storage_path,
-    }
+    image = assemble_tool_image(
+        blob, display_name=lambda image_id: f"screen-{image_id}.png"
+    )
     captured_at = describe_local_time(captured.captured_at, None)
     output: dict[str, JSONValue] = {
         "status": "captured",
@@ -459,22 +446,11 @@ def _captured_result(
         "width_px": captured.width_px,
         "height_px": captured.height_px,
         "message": (
-            f"Captured the window of {captured.app_name} at {captured_at}. {ref}"
+            f"Captured the window of {captured.app_name} at {captured_at}. {image.ref}"
         ),
         # The durable step row keeps only this output, so the conversation read model
-        # can name the image only if the output names it. The logical storage_path is
-        # user-scoped metadata, never an absolute path and never the bytes.
-        "attachments": [
-            {
-                "type": "file",
-                "source_kind": "local_image_blob",
-                "mime_type": blob.mime_type,
-                "path": display_path,
-                "storage_path": blob.storage_path,
-                "ref": ref,
-                "byte_size": len(blob.payload),
-            }
-        ],
+        # can name the image only if the output names it.
+        "attachments": [image.output_entry],
     }
     return UnprojectedToolExecutionResult(
         step_id=step.step_id,
@@ -483,7 +459,7 @@ def _captured_result(
         started_at=step.requested_at,
         completed_at=now_utc_iso(),
         output=output,
-        attachments=[attachment],
+        attachments=coerce_tool_attachments([image.attachment]),
     )
 
 

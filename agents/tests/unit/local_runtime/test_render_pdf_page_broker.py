@@ -11,7 +11,6 @@ from __future__ import annotations
 import hashlib
 import sys
 from pathlib import Path
-from typing import cast
 
 import pytest
 
@@ -132,19 +131,23 @@ async def test_render_returns_each_page_as_an_image_stored_for_the_model(
     for page in parsed.attachments:
         assert page.ref in parsed.message
 
+    # Catches: a page whose row and whose history attachment name different
+    # stored bytes, or pages paired with each other's images.
     for attachment, declared in zip(
         outcome.attachments, parsed.attachments, strict=True
     ):
         assert attachment["source_kind"] == "local_image_blob"
         assert attachment["mime_type"] == "image/webp"
         assert attachment["storage_path"] == declared.storage_path
+        assert attachment["ref"] == declared.ref
+        assert attachment["byte_size"] == declared.byte_size
         blob = read_local_image_blob(
             user_id=_USER_ID, storage_path=declared.storage_path
         )
         assert blob is not None and len(blob.payload) == declared.byte_size
         digest = hashlib.sha256(blob.payload).hexdigest()
         assert digest == attachment["sha256"]
-        assert cast(str, declared.ref).endswith(digest[:24])
+        assert declared.ref == f"tool_attachment:{digest[:24]}"
 
 
 @pytest.mark.parametrize(

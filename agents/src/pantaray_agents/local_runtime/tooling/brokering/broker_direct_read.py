@@ -15,6 +15,9 @@ from __future__ import annotations
 from pantaray_agents.local_runtime.runtime.local_image_store import (
     write_local_image_blob,
 )
+from pantaray_agents.local_runtime.runtime.tool_image_attachments import (
+    assemble_tool_image,
+)
 from pantaray_agents.tools.files.read import run_read
 from pantaray_agents.tools.files.read_contract import ReadToolArgs
 from pantaray_agents.tools.files.read_scope import ReadScope
@@ -32,40 +35,14 @@ def run_read_executor(
     blob = write_local_image_blob(
         user_id=user_id, payload=image.payload, mime_type=image.mime_type
     )
+    kept = assemble_tool_image(blob, display_name=lambda _id: image.display_path)
     return UnprojectedBrokerToolOutcome(
         status="success",
-        output={
-            **result.output,
-            # Durable history keeps this output, so the attachment names the
-            # kept copy by its user-scoped storage_path, never by path or bytes.
-            "attachments": [
-                {
-                    "type": "file",
-                    "source_kind": "local_image_blob",
-                    "mime_type": image.mime_type,
-                    "path": image.display_path,
-                    "storage_path": blob.storage_path,
-                    "ref": image.ref,
-                    "byte_size": image.byte_size,
-                }
-            ],
-        },
+        output={**result.output, "attachments": [kept.output_entry]},
         search_text=result.search_text,
         file_paths=result.file_paths,
         file_reference_paths=result.file_reference_paths,
-        attachments=(
-            {
-                "type": "file",
-                "source_kind": "local_image_blob",
-                "ref": image.ref,
-                "blob_ref": image.blob_ref,
-                "display_path": image.display_path,
-                "mime_type": image.mime_type,
-                "byte_size": image.byte_size,
-                "sha256": image.sha256,
-                "storage_path": blob.storage_path,
-            },
-        ),
+        attachments=(kept.attachment,),
     )
 
 

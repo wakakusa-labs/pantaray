@@ -118,8 +118,7 @@ class BrowserToolArgs(
 
 
 class BrowserImageAttachment(_StrictModel):
-    """A stored screenshot or printed page, named by its user-scoped storage path."""
-
+    # A stored screenshot or printed page, named by its user-scoped storage path.
     type: Literal["file"]
     source_kind: Literal["local_image_blob"]
     mime_type: str
@@ -168,8 +167,7 @@ class BrowserPrintOutput(_BrowserPageOutput):
 
 
 class BrowserControlOutput(_StrictModel):
-    """``allow_writes`` and ``close``: no page is read, so there is no data."""
-
+    # ``allow_writes`` and ``close``: no page is read, so there is no data.
     status: Literal["ok"]
     action: Literal["allow_writes", "close"]
 

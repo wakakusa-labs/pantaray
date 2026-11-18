@@ -172,6 +172,7 @@ export const BrowserOperationAnswerSchema = strict({
         'BROWSER_TIMED_OUT',
         'BROWSER_RENDERER_CRASHED',
         'BROWSER_SESSION_GONE',
+        'BROWSER_ACTION_FAILED',
       ]),
       message: z.string(),
       network: ContactedHostsSchema,

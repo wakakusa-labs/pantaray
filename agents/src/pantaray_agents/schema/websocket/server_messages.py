@@ -290,8 +290,7 @@ class BrowserScrollOperation(_BrowserModel):
 
 
 class BrowserWaitOperation(_BrowserModel):
-    """Wait until ``text`` shows, or for ``seconds``: exactly one of them."""
-
+    # Wait until ``text`` shows, or for ``seconds``: exactly one of them.
     action: Literal["wait"]
     text: str | None = Field(default=None, min_length=1, pattern=r"\S")
     seconds: float | None = Field(default=None, gt=0, le=BROWSER_MAX_WAIT_SECONDS)
@@ -339,8 +338,7 @@ class BrowserScreenshotOperation(_BrowserModel):
 
 
 class BrowserPrintOperation(_BrowserModel):
-    """Print the page to a PDF, the artifact of the answer."""
-
+    # Print the page to a PDF, the artifact of the answer.
     action: Literal["print"]
 
 

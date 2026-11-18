@@ -28,6 +28,8 @@ BrowserEngineFailureCode = Literal[
     "BROWSER_TIMED_OUT",
     "BROWSER_RENDERER_CRASHED",
     "BROWSER_SESSION_GONE",
+    # A valid page or ref, but Chromium could not carry the operation out.
+    "BROWSER_ACTION_FAILED",
 ]
 
 BrowserBlockedReason = Literal[
@@ -110,7 +112,7 @@ class BrowserOperationSucceeded(_AnswerModel):
 class BrowserOperationFailed(_AnswerModel):
     status: Literal["failed"]
     code: BrowserEngineFailureCode
-    message: str
+    message: str  # Electron's own words, never page text.
     network: list[BrowserContactedHost] = Field(max_length=BROWSER_MAX_CONTACTED_HOSTS)
 
 

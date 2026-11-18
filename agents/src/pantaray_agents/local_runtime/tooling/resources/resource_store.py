@@ -344,6 +344,30 @@ def list_recoverable_tool_runtime_resources_for_action(
     )
 
 
+def list_run_owner_process_ids_for_action_session(
+    *,
+    db_path: Path,
+    busy_timeout_ms: int,
+    action_id: str,
+    execution_session_id: str,
+) -> tuple[str, ...]:
+    """Every run (the Action's, a subagent's) that started a process in the
+    session, whether or not its processes are still running."""
+
+    with sqlite3.connect(db_path) as connection:
+        configure_connection(connection, busy_timeout_ms)
+        rows = connection.execute(
+            """
+            SELECT DISTINCT owner_process_id FROM tool_runtime_resources
+            WHERE action_id = ? AND execution_session_id = ?
+              AND owner_process_id IS NOT NULL
+            ORDER BY owner_process_id
+            """,
+            (action_id, execution_session_id),
+        ).fetchall()
+    return tuple(str(row[0]) for row in rows)
+
+
 def list_recoverable_tool_runtime_resources_for_invocation(
     *,
     db_path: Path,

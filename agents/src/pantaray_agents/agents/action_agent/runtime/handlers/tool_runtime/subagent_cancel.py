@@ -18,6 +18,9 @@ from pantaray_agents.local_runtime.runtime.action_subagent_wait import (
 )
 from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_db_config
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
+from pantaray_agents.local_runtime.tooling.brokering.broker_process import (
+    stop_run_processes,
+)
 from pantaray_agents.schema.agent.action_subagent import (
     ActionSubagentCollectionReceipt,
 )
@@ -56,6 +59,15 @@ async def run_cancel_subagent_tool(
                 parent_job_id=request.parent_job_id,
                 child_process_id=child_process_id,
             ),
+        )
+        # A queued or approval-paused child is settled by the request itself,
+        # its claims released, with no worker of its own left to stop what it
+        # still runs. A running child would stop them at its own end; this
+        # only stops them sooner.
+        await stop_run_processes(
+            db_path=db_path,
+            busy_timeout_ms=busy_timeout_ms,
+            owner_process_ids=(child_process_id,),
         )
         snapshot = await _poll_wait(
             db_path=db_path,

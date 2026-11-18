@@ -12,6 +12,9 @@ from ..models import (
     StoredToolRuntimeResource,
     ToolRuntimeResourceStatus,
 )
+from ..repository.command_invocation_audits import (
+    end_unobserved_running_command_invocation_audits,
+)
 from ..repository.executions import ToolInvocationTerminalStateError
 from ..tool_result_finalization import (
     InvocationToolResultOwner,
@@ -378,11 +381,17 @@ def reconcile_tool_runtime_resources_for_startup(
     db_path: Path,
     busy_timeout_ms: int,
 ) -> int:
-    return _reconcile_tool_runtime_resources(
+    resource_count = _reconcile_tool_runtime_resources(
         trigger="startup",
         db_path=db_path,
         busy_timeout_ms=busy_timeout_ms,
     )
+    # The previous app run's long-running commands are gone, their groups
+    # reaped above, and nothing saw how they ended.
+    end_unobserved_running_command_invocation_audits(
+        db_path=db_path, busy_timeout_ms=busy_timeout_ms, updated_at=now_utc_iso()
+    )
+    return resource_count
 
 
 def reconcile_tool_runtime_resources_for_periodic_reaper(

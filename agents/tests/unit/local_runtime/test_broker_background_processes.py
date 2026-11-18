@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
+from pantaray_agents.agents.action_agent.runtime.stop_watch import (
+    ActionStopRequested,
+    ActionStopWatch,
+)
 from pantaray_agents.local_runtime.tooling.brokering.broker import (
     BrokerApprovalRequiredError,
     BrokerToolOutcome,
@@ -21,6 +26,9 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
 )
 from pantaray_agents.local_runtime.tooling.repository.command_network_settings import (
     update_command_network_enabled,
+)
+from pantaray_agents.local_runtime.tooling.resources.cancel_cleanup import (
+    cancel_action_runtime_resources,
 )
 from pantaray_agents.local_runtime.tooling.resources.resource_cleanup import (
     process_exists,
@@ -80,6 +88,18 @@ class _Action:
         assert outcome.status == "success", outcome.output
         assert isinstance(outcome.output, dict)
         return outcome.output
+
+    def audit(self, request_id: str) -> tuple[object, ...]:
+        """The command audit row of the call with ``request_id``."""
+
+        with sqlite3.connect(self.db_path) as connection:
+            return connection.execute(
+                "SELECT audit.terminal_outcome, audit.exit_code, audit.signal "
+                "FROM command_invocation_audits AS audit "
+                "JOIN tool_invocations USING (invocation_id) "
+                "WHERE tool_invocations.tool_request_id = ?",
+                (request_id,),
+            ).fetchone()
 
     async def refused(
         self, tool_id: str, args: dict[str, JSONValue], *, request_id: str
@@ -152,6 +172,7 @@ async def test_a_background_command_is_started_read_and_stopped(
     assert started["status"] == "running"
     assert started["process_id"] == "p1"
     assert "listening" not in str(started["stdout"])
+    assert action.audit("start") == ("running", None, None)
     pid_file = action.workspace / "server.pid"
     await _until(lambda: pid_file.exists() and bool(pid_file.read_text().strip()))
     command_pid = int(pid_file.read_text())
@@ -184,11 +205,71 @@ async def test_a_background_command_is_started_read_and_stopped(
 
     stopped = await action.call("stop_process", {"process_id": "p1"}, request_id="stop")
     assert stopped["status"] == "stopped"
+    assert action.audit("start") == ("canceled", None, stopped["signal"])
     await _until(lambda: not process_exists(command_pid))
     again = await action.call(
         "stop_process", {"process_id": "p1"}, request_id="stop-again"
     )
     assert again["status"] == "stopped"
+
+
+# Catches: a user's Stop that leaves the model's read waiting for its whole
+# wait, and a run end that leaves the run's processes running, unaudited, or
+# still held by the supervisor (with their unread output) after the run.
+@needs_seatbelt
+@pytest.mark.asyncio
+async def test_a_stop_ends_a_waiting_read_and_the_run_end_stops_the_processes(
+    action: _Action,
+) -> None:
+    await action.call(
+        "bash",
+        {
+            "command": "echo $$ > server.pid; while :; do sleep 0.05; done",
+            "run_in_background": True,
+        },
+        request_id="start",
+    )
+    pid_file = action.workspace / "server.pid"
+    await _until(lambda: pid_file.exists() and bool(pid_file.read_text().strip()))
+    command_pid = int(pid_file.read_text())
+    stop_requested = asyncio.Event()
+    async with ActionStopWatch(
+        probe=stop_requested.is_set, poll_interval_seconds=0.05
+    ) as stop_watch:
+        read = asyncio.ensure_future(
+            stop_watch.run(
+                action.call(
+                    "read_process_output",
+                    {"process_id": "p1", "wait_seconds": 15},
+                    request_id="read",
+                )
+            )
+        )
+        await asyncio.sleep(0.3)
+        stop_requested.set()
+        with pytest.raises(ActionStopRequested):
+            await asyncio.wait_for(read, 5)
+    # Only the read ended; stopping the process is the run end's.
+    assert process_exists(command_pid)
+
+    await asyncio.wait_for(
+        cancel_action_runtime_resources(
+            db_path=action.db_path,
+            busy_timeout_ms=1_000,
+            action_id="action-1",
+            execution_session_id=action.execution_session_id,
+        ),
+        WAIT_TIMEOUT_S,
+    )
+
+    assert not process_exists(command_pid)
+    outcome, exit_code, signal = action.audit("start")
+    assert (outcome, exit_code) == ("canceled", None)
+    assert signal is not None
+    forgotten = await action.refused(
+        "read_process_output", {"process_id": "p1"}, request_id="read-after-end"
+    )
+    assert forgotten.code == "PROCESS_NOT_FOUND"
 
 
 # Catches: a command that ends at once being reported as running, or its
@@ -206,6 +287,7 @@ async def test_a_command_that_ends_in_the_start_window_returns_its_end(
     assert ended["status"] == "exited"
     assert ended["exit_code"] == 3
     assert ended["stderr"] == "port in use\n"
+    assert action.audit("start") == ("exited", 3, None)
 
 
 # Catches: run_in_background left out of the approval summary, which would let

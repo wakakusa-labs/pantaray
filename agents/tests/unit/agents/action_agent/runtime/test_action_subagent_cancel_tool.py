@@ -56,6 +56,9 @@ async def test_cancel_requests_before_poll_and_returns_observed_result(
     def _cancel(**kwargs: object) -> None:
         events.append(kwargs["request"])
 
+    async def _stop(**kwargs: object) -> None:
+        events.append(kwargs["owner_process_ids"])
+
     async def _poll(**_kwargs: object) -> ActionSubagentWaitSnapshot:
         events.append("poll")
         return snapshot
@@ -65,6 +68,7 @@ async def test_cancel_requests_before_poll_and_returns_observed_result(
     monkeypatch.setattr(
         subagent_cancel, "request_action_subagent_cancellation", _cancel
     )
+    monkeypatch.setattr(subagent_cancel, "stop_run_processes", _stop)
     monkeypatch.setattr(subagent_cancel, "_poll_wait", _poll)
     with _trace():
         result = await execution.run_validated_tool_impl(
@@ -79,6 +83,9 @@ async def test_cancel_requests_before_poll_and_returns_observed_result(
         )
 
     assert events[0].child_process_id == "child-1"  # type: ignore[attr-defined]
+    # Catches: a paused or queued child, settled by the request with no worker
+    # left to stop them, leaving its processes running past its claims.
+    assert events[1:] == [("child-1",), "poll"]
     assert result.output == snapshot.results[0]
     assert (result.subagent_collection_receipt is not None) is snapshot.all_terminal
 
@@ -100,6 +107,8 @@ async def test_cancel_rejects_goal_worker_and_wrong_child_before_poll(
         )
     cancel.assert_not_called()
     poll = AsyncMock()
+    stop = AsyncMock()
+    monkeypatch.setattr(subagent_cancel, "stop_run_processes", stop)
     monkeypatch.setenv("LOCAL_DB_PATH", "/tmp/runtime.db")
     monkeypatch.setenv("LOCAL_DB_BUSY_TIMEOUT_MS", "1000")
     cancel.side_effect = ActionSubagentCancelInputError("child is not owned")
@@ -114,3 +123,5 @@ async def test_cancel_rejects_goal_worker_and_wrong_child_before_poll(
                 actor="supervisor",
             )
     poll.assert_not_awaited()
+    # Catches: stopping the processes of a run this parent does not own.
+    stop.assert_not_awaited()

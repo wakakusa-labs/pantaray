@@ -80,6 +80,9 @@ from pantaray_agents.local_runtime.runtime.db_execution_context import (
 from pantaray_agents.local_runtime.runtime.job_executor import (
     persist_local_job_transition_with_retry,
 )
+from pantaray_agents.local_runtime.tooling.brokering.broker_process import (
+    stop_run_processes,
+)
 from pantaray_agents.tasks.types import ActionSubagentJobPayload
 from pantaray_agents.tools.contract import (
     ReactToolCall,
@@ -348,12 +351,22 @@ def run_action_subagent_job(payload: ActionSubagentJobPayload) -> None:
             )
         )
     except ActionSubagentApprovalPause as pause:
-        _persist_pause_until_success(
-            db_path=db_context.db_path,
-            busy_timeout_ms=db_context.busy_timeout_ms,
-            payload=payload,
-            pause=pause,
-        )
+        # The child's processes keep running while it waits for the decision.
+        if (
+            _persist_pause_until_success(
+                db_path=db_context.db_path,
+                busy_timeout_ms=db_context.busy_timeout_ms,
+                payload=payload,
+                pause=pause,
+            )
+            is not None
+        ):
+            # A cancel won over the pause and settled the child.
+            _stop_processes(
+                db_path=db_context.db_path,
+                busy_timeout_ms=db_context.busy_timeout_ms,
+                payload=payload,
+            )
         return
     except _ActionSubagentCancellationObserved:
         _persist_terminal_until_success(
@@ -410,8 +423,8 @@ def _persist_pause_until_success(
     busy_timeout_ms: int,
     payload: ActionSubagentJobPayload,
     pause: ActionSubagentApprovalPause,
-) -> None:
-    persist_local_job_transition_with_retry(
+) -> ActionSubagentTerminalResult | None:
+    return persist_local_job_transition_with_retry(
         operation=lambda: pause_action_subagent_for_approval(
             db_path=db_path,
             busy_timeout_ms=busy_timeout_ms,
@@ -429,6 +442,9 @@ def _persist_terminal_until_success(
     payload: ActionSubagentJobPayload,
     result: ActionSubagentTerminalResult,
 ) -> ActionSubagentTerminalResult:
+    # The terminal releases the child's claims; nothing it started may still
+    # write there once they are released.
+    _stop_processes(db_path=db_path, busy_timeout_ms=busy_timeout_ms, payload=payload)
     return persist_local_job_transition_with_retry(
         operation=lambda: finalize_action_subagent_terminal(
             db_path=db_path,
@@ -437,6 +453,18 @@ def _persist_terminal_until_success(
             result=result,
         ),
         retry_event="LOCAL_ACTION_SUBAGENT_TERMINAL_RETRYING",
+    )
+
+
+def _stop_processes(
+    *, db_path: Path, busy_timeout_ms: int, payload: ActionSubagentJobPayload
+) -> None:
+    asyncio.run(
+        stop_run_processes(
+            db_path=db_path,
+            busy_timeout_ms=busy_timeout_ms,
+            owner_process_ids=(payload["process_id"],),
+        )
     )
 
 

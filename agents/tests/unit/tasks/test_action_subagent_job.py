@@ -1141,6 +1141,43 @@ def test_cancel_before_the_gated_pause_commits_settles_canceled_and_interrupts(
     _assert_canceled(db_path)
 
 
+def _record_process_stops(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[tuple[tuple[str, ...], int]]:
+    """Each stop of a child's processes, with how many claims it still held."""
+
+    stops: list[tuple[tuple[str, ...], int]] = []
+
+    async def record(
+        *, db_path: Path, busy_timeout_ms: int, owner_process_ids: tuple[str, ...]
+    ) -> None:
+        with sqlite3.connect(db_path) as connection:
+            held = connection.execute(
+                "SELECT COUNT(*) FROM action_subagent_resource_claims "
+                "WHERE child_process_id='child-process' AND released_at IS NULL"
+            ).fetchone()[0]
+        stops.append((owner_process_ids, held))
+
+    monkeypatch.setattr(subagent_job, "stop_run_processes", record)
+    return stops
+
+
+# Catches: a child's processes stopped by its approval pause (they keep running
+# while the user decides), left running past its end, or stopped only after
+# its terminal released the claims they may still write under.
+def test_a_childs_processes_outlive_its_approval_pause_and_stop_before_its_claims_go(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    stops = _record_process_stops(monkeypatch)
+    db_path, payload, session_id, request_id = _pause_gated_child(monkeypatch, tmp_path)
+    assert stops == []
+
+    _decide(db_path, session_id, request_id, "approved_once")
+    _resume_child(monkeypatch, db_path, payload)
+
+    assert stops == [(("child-process",), 1)]
+
+
 _BASH_CALL = LlmToolCall(
     call_id="call-bash", name="bash", arguments={"command": "pwd", "cwd": "."}
 )

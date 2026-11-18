@@ -49,11 +49,14 @@ from pantaray_agents.tools.contract import BrokerPolicyError
 from pantaray_agents.tools.files.manifest_paths import (
     ResolvedManifestPath,
 )
+from pantaray_agents.tools.files.pantaray_agents_md import (
+    AGENTS_MD_FILENAME,
+    pantaray_agents_md_path,
+)
 from pantaray_agents.tools.files.secret_paths import withheld_reason
 
 logger = logging.getLogger(__name__)
 
-AGENTS_MD_FILENAME = "AGENTS.md"
 PANTARAY_AGENTS_MD_DISPLAY_DIR = "~/.pantaray"
 # Codex's default project_doc_max_bytes (codex-rs/core/src/config/mod.rs,
 # AGENTS_MD_MAX_BYTES): room for any real instruction file while one runaway
@@ -84,7 +87,7 @@ PANTARAY_DEFAULT_AGENTS_MD = _render_block(
 def load_pantaray_agents_md() -> str:
     """The Pantaray-wide instructions block, or ``""`` when there is none."""
 
-    path = Path.home() / ".pantaray" / AGENTS_MD_FILENAME
+    path = pantaray_agents_md_path()
     # A link to .env or ~/.aws/credentials would put the secret in the prompt.
     if withheld_reason(path, credentials_readable=False) is not None:
         logger.warning("Skipping AGENTS.md that leads to a secrets file: %s", path)

@@ -79,7 +79,7 @@ def withheld_reason(path: Path, *, credentials_readable: bool) -> SecretWithheld
     """
 
     for candidate in dict.fromkeys((path, path.resolve(strict=False))):
-        text = _folded(candidate.as_posix())
+        text = apfs_folded(candidate.as_posix())
         for rule, withheld, excepted in _compiled(_folded_home()):
             if credentials_readable and rule.tier == "cli_credential":
                 continue
@@ -98,7 +98,7 @@ def withheld_folder_reason(folder: Path) -> SecretWithheld | None:
 
     # A trailing slash stands for "something in this folder": only the folder
     # rules match it, never a file-name rule.
-    text = _folded(f"{folder.as_posix().rstrip('/')}/")
+    text = apfs_folded(f"{folder.as_posix().rstrip('/')}/")
     for rule, withheld, _ in _compiled(_folded_home()):
         if withheld.search(text):
             return SecretWithheld(path=folder, reason=rule.description)
@@ -126,7 +126,7 @@ def secret_path_error(withheld: SecretWithheld) -> BrokerPolicyError:
     )
 
 
-def _folded(text: str) -> str:
+def apfs_folded(text: str) -> str:
     # Canonical caseless form, which APFS uses to compare names.
     return unicodedata.normalize("NFD", unicodedata.normalize("NFD", text).casefold())
 
@@ -134,7 +134,7 @@ def _folded(text: str) -> str:
 def _folded_home() -> Path:
     # Folded like the paths it is matched against, so a home such as
     # /Users/José matches in whichever Unicode form a path spells it.
-    return Path(_folded(_home().as_posix()))
+    return Path(apfs_folded(_home().as_posix()))
 
 
 def _home() -> Path:
@@ -157,13 +157,13 @@ def _compiled(
 
 
 def _rules(home: Path) -> tuple[SecretPathPattern, ...]:
-    home_prefix = f"^{_literal(home.as_posix().rstrip('/'))}/"
+    home_prefix = f"^{ere_literal(home.as_posix().rstrip('/'))}/"
 
     def under(relative: str) -> str:
-        return f"{home_prefix}{_literal(relative)}/"
+        return f"{home_prefix}{ere_literal(relative)}/"
 
     def exactly(relative: str) -> str:
-        return f"{home_prefix}{_literal(relative)}$"
+        return f"{home_prefix}{ere_literal(relative)}$"
 
     def folder(relative: str, holds: str) -> SecretPathPattern:
         return SecretPathPattern(
@@ -186,16 +186,16 @@ def _rules(home: Path) -> tuple[SecretPathPattern, ...]:
     def names(*options: str) -> str:
         return "(" + "|".join(options) + ")"
 
-    env = _literal(".env")
-    env_dot = _literal(".env.")
-    env_templates = names(*(_literal(suffix) for suffix in _ENV_TEMPLATE_SUFFIXES))
+    env = ere_literal(".env")
+    env_dot = ere_literal(".env.")
+    env_templates = names(*(ere_literal(suffix) for suffix in _ENV_TEMPLATE_SUFFIXES))
     ssh_allowed = names(
-        _literal("config"),
-        _literal("known_hosts") + "[^/]*",
-        "[^/]*" + _literal(".pub"),
+        ere_literal("config"),
+        ere_literal("known_hosts") + "[^/]*",
+        "[^/]*" + ere_literal(".pub"),
     )
-    ssh_key = names(*(_literal(f"id_{kind}") for kind in _SSH_KEY_KINDS))
-    credential_names = names(*(_literal(name) for name in _CREDENTIAL_FILE_NAMES))
+    ssh_key = names(*(ere_literal(f"id_{kind}") for kind in _SSH_KEY_KINDS))
+    credential_names = names(*(ere_literal(name) for name in _CREDENTIAL_FILE_NAMES))
     return (
         SecretPathPattern(
             tier="app_secret",
@@ -265,7 +265,7 @@ _BRACKETED = frozenset(".*+?(){}|$")
 _ESCAPED = frozenset("^[]\\")
 
 
-def _literal(text: str) -> str:
+def ere_literal(text: str) -> str:
     """A case-insensitive ERE matching exactly ``text``."""
 
     return "".join(_literal_char(char) for char in text)
@@ -286,6 +286,8 @@ __all__ = [
     "SecretPathPattern",
     "SecretTier",
     "SecretWithheld",
+    "apfs_folded",
+    "ere_literal",
     "refuse_withheld_paths",
     "secret_path_error",
     "secret_path_patterns",

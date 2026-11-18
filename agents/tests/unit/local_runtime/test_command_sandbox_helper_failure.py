@@ -116,6 +116,24 @@ async def test_failed_helper_keeps_its_group_when_the_broker_is_gone(
         await process.wait()
 
 
+async def test_a_one_shot_command_signaling_its_group_leaves_the_helper_reporting(
+    tmp_path: Path,
+) -> None:
+    def build_request(temp_dir: Path) -> BrokerToSandboxCommandRequest:
+        return _sleeping_command(temp_dir).model_copy(
+            update={"argv": ["/bin/sh", "-c", "kill -HUP 0; kill -INT 0; kill 0"]}
+        )
+
+    async with asyncio.timeout(15):
+        terminal_outcome, output = await run_unrecorded_sandbox_command(
+            db_path=tmp_path / "runtime.db", build_request=build_request
+        )
+
+    # The helper, the tracked group leader, survived to send its receipt.
+    assert terminal_outcome == "signaled"
+    assert output.signal == signal.SIGHUP
+
+
 def test_temp_usage_skips_a_file_removed_during_the_walk(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

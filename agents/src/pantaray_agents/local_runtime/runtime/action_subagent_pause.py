@@ -99,6 +99,49 @@ def pause_action_subagent_for_approval(
 ) -> ActionSubagentTerminalResult | None:
     """Park the running child on its approval anchor, or let a cancel win."""
 
+    return _pause(
+        db_path=db_path,
+        busy_timeout_ms=busy_timeout_ms,
+        payload=payload,
+        pause=pause,
+        settle_cancel=True,
+    )
+
+
+def park_action_subagent_for_approval(
+    *,
+    db_path: Path,
+    busy_timeout_ms: int,
+    payload: ActionSubagentJobPayload,
+    pause: ActionSubagentApprovalPause,
+) -> bool:
+    """Park the running child on its approval anchor; ``False``, writing
+    nothing, when a cancel was requested first.
+
+    The child then stops its processes before the pause that settles it as
+    canceled releases its claims.
+    """
+
+    return (
+        _pause(
+            db_path=db_path,
+            busy_timeout_ms=busy_timeout_ms,
+            payload=payload,
+            pause=pause,
+            settle_cancel=False,
+        )
+        is None
+    )
+
+
+def _pause(
+    *,
+    db_path: Path,
+    busy_timeout_ms: int,
+    payload: ActionSubagentJobPayload,
+    pause: ActionSubagentApprovalPause,
+    settle_cancel: bool,
+) -> ActionSubagentTerminalResult | None:
     paused_at = now_utc_iso()
     with sqlite3.connect(db_path) as connection:
         configure_connection(connection, busy_timeout_ms)
@@ -110,6 +153,8 @@ def pause_action_subagent_for_approval(
             if row is None:
                 raise LocalJobEnvelopeIntegrityError("Subagent pause job is missing")
             if row[0] is not None:
+                if not settle_cancel:
+                    return build_action_subagent_canceled_result()
                 _interrupt_approval_session(
                     connection,
                     user_id=payload["user_id"],
@@ -393,7 +438,7 @@ def anchor_blocker(anchor: dict[str, JSONValue]) -> dict[str, JSONValue]:
         for field in ("approval_session_id", "tool_request_id", "tool_id")
     ):
         raise LocalJobEnvelopeIntegrityError("Subagent pause anchor blocker is invalid")
-    return cast(dict[str, JSONValue], blocker)
+    return blocker
 
 
 def anchor_object(raw: object) -> dict[str, JSONValue]:

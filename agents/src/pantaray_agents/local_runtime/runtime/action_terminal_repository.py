@@ -29,6 +29,7 @@ from .action_subagent_parent_lifecycle import (
     resolve_action_terminal_cancel_winner_in_connection,
     settle_action_subagent_children_in_connection,
 )
+from .action_subagent_process_stop import stop_action_subagent_processes
 from .action_terminal_handoff import (
     apply_action_terminal_handoff_in_connection,
     validate_action_terminal_handoff_in_connection,
@@ -62,6 +63,13 @@ class ActionTerminalRepository:
             raise MigrationError("LOCAL_DB_BUSY_TIMEOUT_MS must be a positive integer")
         if not job_id.strip():
             raise MigrationError("job_id must not be empty")
+        # The transaction below settles the children and releases their claims.
+        await stop_action_subagent_processes(
+            db_path=self.db_path,
+            busy_timeout_ms=self.busy_timeout_ms,
+            user_id=command.user_id,
+            action_id=command.action_id,
+        )
 
         with sqlite3.connect(self.db_path) as connection:
             configure_connection(connection, self.busy_timeout_ms)

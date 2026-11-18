@@ -13,14 +13,14 @@ from pantaray_agents.local_runtime.runtime.action_subagent_cancel import (
     ActionSubagentCancelRequest,
     request_action_subagent_cancellation,
 )
+from pantaray_agents.local_runtime.runtime.action_subagent_process_stop import (
+    stop_action_subagent_child_processes,
+)
 from pantaray_agents.local_runtime.runtime.action_subagent_wait import (
     ActionSubagentWaitInputError,
 )
 from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_db_config
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
-from pantaray_agents.local_runtime.tooling.brokering.broker_process import (
-    stop_run_processes,
-)
 from pantaray_agents.schema.agent.action_subagent import (
     ActionSubagentCollectionReceipt,
 )
@@ -48,26 +48,20 @@ async def run_cancel_subagent_tool(
     request = _build_wait_request(state=state, child_process_ids=(child_process_id,))
     db_path, busy_timeout_ms = read_local_runtime_db_config()
     started_at = now_utc_iso()
+    cancel_request = ActionSubagentCancelRequest(
+        user_id=request.user_id,
+        action_id=request.action_id,
+        parent_process_id=request.parent_process_id,
+        parent_job_id=request.parent_job_id,
+        child_process_id=child_process_id,
+    )
     try:
-        request_action_subagent_cancellation(
-            db_path=db_path,
-            busy_timeout_ms=busy_timeout_ms,
-            request=ActionSubagentCancelRequest(
-                user_id=request.user_id,
-                action_id=request.action_id,
-                parent_process_id=request.parent_process_id,
-                parent_job_id=request.parent_job_id,
-                child_process_id=child_process_id,
-            ),
+        # The request settles a queued or paused child and releases its claims.
+        await stop_action_subagent_child_processes(
+            db_path=db_path, busy_timeout_ms=busy_timeout_ms, request=cancel_request
         )
-        # A queued or approval-paused child is settled by the request itself,
-        # its claims released, with no worker of its own left to stop what it
-        # still runs. A running child would stop them at its own end; this
-        # only stops them sooner.
-        await stop_run_processes(
-            db_path=db_path,
-            busy_timeout_ms=busy_timeout_ms,
-            owner_process_ids=(child_process_id,),
+        request_action_subagent_cancellation(
+            db_path=db_path, busy_timeout_ms=busy_timeout_ms, request=cancel_request
         )
         snapshot = await _poll_wait(
             db_path=db_path,

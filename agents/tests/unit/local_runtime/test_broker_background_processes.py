@@ -272,6 +272,34 @@ async def test_a_stop_ends_a_waiting_read_and_the_run_end_stops_the_processes(
     assert forgotten.code == "PROCESS_NOT_FOUND"
 
 
+# Catches: a start cancelled (a Stop, a tool timeout) in the start window
+# leaving no audit row for a command that ran, or one left running.
+@needs_seatbelt
+@pytest.mark.asyncio
+async def test_a_start_cancelled_in_its_window_is_audited_as_canceled(
+    action: _Action, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(runtime_policy, "PROCESS_START_WINDOW_MS", 10_000)
+    start = asyncio.ensure_future(
+        action.call(
+            "bash",
+            {
+                "command": "echo $$ > server.pid; while :; do sleep 0.05; done",
+                "run_in_background": True,
+            },
+            request_id="start",
+        )
+    )
+    pid_file = action.workspace / "server.pid"
+    await _until(lambda: pid_file.exists() and bool(pid_file.read_text().strip()))
+    start.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await start
+
+    await _until(lambda: not process_exists(int(pid_file.read_text())))
+    assert action.audit("start") == ("canceled", None, None)
+
+
 # Catches: a command that ends at once being reported as running, or its
 # output lost, when it ends within the start window.
 @needs_seatbelt

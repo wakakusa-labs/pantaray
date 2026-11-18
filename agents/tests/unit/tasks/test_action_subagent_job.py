@@ -10,7 +10,15 @@ from typing import cast
 
 import pytest
 
+from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime import (
+    subagent_cancel,
+)
+from pantaray_agents.agents.action_agent.runtime.state import ActionAgentState
+from pantaray_agents.agents.action_agent.tools import CANCEL_SUBAGENT_TOOL
 from pantaray_agents.conversation import provider_turns
+from pantaray_agents.local_runtime.runtime import (
+    action_subagent_process_stop as process_stop,
+)
 from pantaray_agents.local_runtime.runtime.action_subagent_approval import (
     ActionSubagentApprovalDecisionError,
     apply_action_subagent_approval_decision,
@@ -63,6 +71,16 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_outcome import (
 from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
     ValidatedCommandRequest,
 )
+from pantaray_agents.local_runtime.tooling.repository.command_network_settings import (
+    update_command_network_enabled,
+)
+from pantaray_agents.local_runtime.tooling.resources.resource_cleanup import (
+    process_exists,
+)
+from pantaray_agents.local_runtime.tooling.sandbox import runtime_policy
+from pantaray_agents.local_runtime.tooling.sandbox.process_supervisor import (
+    stop_owner_processes,
+)
 from pantaray_agents.local_runtime.tooling.sandbox.sandbox_denial import (
     WRITE_FOLDER_REQUEST_HINT,
 )
@@ -80,6 +98,7 @@ from pantaray_agents.tasks.internal_jobs import (
 )
 from pantaray_agents.tasks.types import ActionSubagentJobPayload
 from pantaray_agents.utils.llm_types import GenerateContentConfig
+from pantaray_agents.utils.trace_context import TraceContextManager
 from pantaray_llm.contracts.action_turn import (
     LlmActionTurnRequest,
     LlmActionTurnResponse,
@@ -1116,16 +1135,17 @@ def test_cancel_before_the_gated_pause_commits_settles_canceled_and_interrupts(
         claim_workspace=True,
     )
     _gate_edits(monkeypatch)
-    real_pause = subagent_job.pause_action_subagent_for_approval
+    stops = _record_process_stops(monkeypatch)
+    real_park = subagent_job.park_action_subagent_for_approval
 
     def cancel_then_pause(**kwargs: object) -> object:
         _request_cancel(db_path, payload)
-        return real_pause(**kwargs)  # type: ignore[arg-type]
+        return real_park(**kwargs)  # type: ignore[arg-type]
 
     client = _Client(calls=(_APPLY_PATCH_CALL,))
     monkeypatch.setattr(subagent_job, "build_local_llm_proxy_client", lambda: client)
     monkeypatch.setattr(
-        subagent_job, "pause_action_subagent_for_approval", cancel_then_pause
+        subagent_job, "park_action_subagent_for_approval", cancel_then_pause
     )
     with bind_local_runtime_db_execution_context(
         db_path=db_path, busy_timeout_ms=1_000
@@ -1139,6 +1159,9 @@ def test_cancel_before_the_gated_pause_commits_settles_canceled_and_interrupts(
             "SELECT status FROM approval_sessions"
         ).fetchone() == ("interrupted",)
     _assert_canceled(db_path)
+    # Catches: the pause settling the canceled child, and releasing its
+    # claims, before its processes are stopped.
+    assert stops == [(("child-process",), 1)]
 
 
 def _record_process_stops(
@@ -1176,6 +1199,130 @@ def test_a_childs_processes_outlive_its_approval_pause_and_stop_before_its_claim
     _resume_child(monkeypatch, db_path, payload)
 
     assert stops == [(("child-process",), 1)]
+
+
+# Catches: a parent's cancel stopping the processes of a child it does not
+# own (another run's, named by the model), or not those of its own child.
+@pytest.mark.asyncio
+async def test_a_cancel_stops_only_a_live_child_of_the_parent_that_asks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    db_path, _payload = _running_child(tmp_path, profile_id=ACTION_EXECUTING_PROFILE_ID)
+    stopped: list[tuple[str, ...]] = []
+
+    async def record(**kwargs: object) -> None:
+        stopped.append(kwargs["owner_process_ids"])  # type: ignore[arg-type]
+
+    monkeypatch.setattr(process_stop, "stop_run_processes", record)
+    for parent_process_id in ("parent-process", "other-parent"):
+        await process_stop.stop_action_subagent_child_processes(
+            db_path=db_path,
+            busy_timeout_ms=1_000,
+            request=ActionSubagentCancelRequest(
+                user_id="user-1",
+                action_id="action-1",
+                parent_process_id=parent_process_id,
+                parent_job_id="parent-job",
+                child_process_id="child-process",
+            ),
+        )
+
+    assert stopped == [("child-process",), ()]
+
+
+_BACKGROUND_BASH_CALL = LlmToolCall(
+    call_id="call-server",
+    name="bash",
+    arguments={
+        "command": "echo $$ > server.pid; while :; do sleep 0.05; done",
+        "run_in_background": True,
+    },
+)
+
+
+# Catches: the parent's cancel settling an approval-paused child, and releasing
+# its claims, while a process the child started still runs and can write there.
+@pytest.mark.skipif(
+    not Path("/usr/bin/sandbox-exec").is_file(), reason="needs macOS seatbelt"
+)
+@pytest.mark.asyncio
+async def test_cancelling_a_paused_child_stops_its_process_before_its_claims_go(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(runtime_policy, "PROCESS_START_WINDOW_MS", 300)
+    monkeypatch.setattr(runtime_policy, "PROCESS_STOP_GRACE_MS", 300)
+    # Command temp dirs go under ~/Library/Caches.
+    (tmp_path / "home").mkdir()
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    _gate_edits(monkeypatch)
+    db_path, payload = _running_child(
+        tmp_path, profile_id=ACTION_EXECUTING_PROFILE_ID, claim_workspace=True
+    )
+    update_command_network_enabled(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        user_id="user-1",
+        command_network_enabled=False,
+        now=TIMESTAMP,
+    )
+    client = _Client(calls=(_BACKGROUND_BASH_CALL, _APPLY_PATCH_CALL))
+    monkeypatch.setattr(subagent_job, "build_local_llm_proxy_client", lambda: client)
+    with bind_local_runtime_db_execution_context(
+        db_path=db_path, busy_timeout_ms=1_000
+    ):
+        await asyncio.to_thread(subagent_job.run_action_subagent_job, payload)
+    pid_file = _workspace(db_path) / "server.pid"
+    command_pid = int(pid_file.read_text())
+    assert process_exists(command_pid)
+
+    real_request = subagent_cancel.request_action_subagent_cancellation
+    seen_at_request: list[tuple[bool, int]] = []
+
+    def request(**kwargs: object) -> None:
+        with sqlite3.connect(db_path) as connection:
+            held = connection.execute(
+                "SELECT COUNT(*) FROM action_subagent_resource_claims "
+                "WHERE released_at IS NULL"
+            ).fetchone()[0]
+        seen_at_request.append((process_exists(command_pid), held))
+        real_request(**kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(
+        subagent_cancel, "request_action_subagent_cancellation", request
+    )
+    monkeypatch.setenv("LOCAL_DB_PATH", str(db_path))
+    monkeypatch.setenv("LOCAL_DB_BUSY_TIMEOUT_MS", "1000")
+    try:
+        with TraceContextManager(
+            user_id="user-1",
+            action_id="action-1",
+            local_job_id="parent-job",
+            extra={"process_id": "parent-process"},
+        ):
+            await asyncio.wait_for(
+                subagent_cancel.run_cancel_subagent_tool(
+                    step_id="cancel-step",
+                    tool_def=CANCEL_SUBAGENT_TOOL,
+                    args={"child_process_id": "child-process"},
+                    state=cast(
+                        ActionAgentState, {"user_id": "user-1", "action_id": "action-1"}
+                    ),
+                    actor="supervisor",
+                ),
+                20,
+            )
+    finally:
+        await asyncio.wait_for(
+            stop_owner_processes(owner_process_id="child-process"), 20
+        )
+
+    assert seen_at_request == [(False, 1)]
+    with sqlite3.connect(db_path) as connection:
+        assert connection.execute(
+            "SELECT process.status, claim.released_at IS NOT NULL "
+            "FROM processes AS process JOIN action_subagent_resource_claims AS claim "
+            "ON claim.child_process_id = process.process_id"
+        ).fetchall() == [("canceled", 1)]
 
 
 _BASH_CALL = LlmToolCall(

@@ -62,6 +62,7 @@ from pantaray_agents.local_runtime.runtime.action_subagent_cancel import (
 )
 from pantaray_agents.local_runtime.runtime.action_subagent_pause import (
     ActionSubagentApprovalPause,
+    park_action_subagent_for_approval,
     pause_action_subagent_for_approval,
 )
 from pantaray_agents.local_runtime.runtime.action_subagent_terminal import (
@@ -352,20 +353,29 @@ def run_action_subagent_job(payload: ActionSubagentJobPayload) -> None:
         )
     except ActionSubagentApprovalPause as pause:
         # The child's processes keep running while it waits for the decision.
-        if (
-            _persist_pause_until_success(
-                db_path=db_context.db_path,
-                busy_timeout_ms=db_context.busy_timeout_ms,
+        # A cancel requested first makes the pause the terminal that releases
+        # the claims, so they stop before it; a later cancel stops them itself.
+        db_path, busy_timeout_ms = db_context.db_path, db_context.busy_timeout_ms
+        if not _persist_pause_until_success(
+            functools.partial(
+                park_action_subagent_for_approval,
+                db_path=db_path,
+                busy_timeout_ms=busy_timeout_ms,
                 payload=payload,
                 pause=pause,
             )
-            is not None
         ):
-            # A cancel won over the pause and settled the child.
             _stop_processes(
-                db_path=db_context.db_path,
-                busy_timeout_ms=db_context.busy_timeout_ms,
-                payload=payload,
+                db_path=db_path, busy_timeout_ms=busy_timeout_ms, payload=payload
+            )
+            _persist_pause_until_success(
+                functools.partial(
+                    pause_action_subagent_for_approval,
+                    db_path=db_path,
+                    busy_timeout_ms=busy_timeout_ms,
+                    payload=payload,
+                    pause=pause,
+                )
             )
         return
     except _ActionSubagentCancellationObserved:
@@ -417,20 +427,9 @@ def _execution_error_code(exc: Exception) -> str:
     return ACTION_SUBAGENT_EXECUTION_FAILED
 
 
-def _persist_pause_until_success(
-    *,
-    db_path: Path,
-    busy_timeout_ms: int,
-    payload: ActionSubagentJobPayload,
-    pause: ActionSubagentApprovalPause,
-) -> ActionSubagentTerminalResult | None:
+def _persist_pause_until_success[ResultT](operation: Callable[[], ResultT]) -> ResultT:
     return persist_local_job_transition_with_retry(
-        operation=lambda: pause_action_subagent_for_approval(
-            db_path=db_path,
-            busy_timeout_ms=busy_timeout_ms,
-            payload=payload,
-            pause=pause,
-        ),
+        operation=operation,
         retry_event="LOCAL_ACTION_SUBAGENT_APPROVAL_PAUSE_RETRYING",
     )
 

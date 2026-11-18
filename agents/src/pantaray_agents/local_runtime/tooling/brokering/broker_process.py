@@ -12,6 +12,7 @@ import asyncio
 import logging
 import sqlite3
 from pathlib import Path
+from typing import cast
 
 from pydantic import BaseModel, ConfigDict
 
@@ -20,7 +21,6 @@ from pantaray_agents.tools.contract import BrokerPolicyError
 
 from ...storage.migrations import MigrationError
 from ..repository.command_invocation_audits import (
-    BudgetExceededKind,
     TerminalOutcome,
     end_running_command_invocation_audit,
 )
@@ -106,42 +106,59 @@ def _process_outcome(state: ProcessState) -> UnprojectedBrokerToolOutcome:
     )
 
 
-def _terminal_outcome(
-    state: ProcessState,
-) -> tuple[TerminalOutcome, BudgetExceededKind | None]:
+def _terminal_outcome(state: ProcessState) -> TerminalOutcome:
     if state.status == "exited" and state.signal is not None:
-        return "signaled", None
-    budget_kind: BudgetExceededKind | None = (
-        "temp_storage_limit" if state.status == "limit_exceeded" else None
-    )
-    return _OUTCOME_BY_STATUS[state.status], budget_kind
+        return "signaled"
+    return _OUTCOME_BY_STATUS[state.status]
 
 
-def _audit_end(*, db_path: Path, busy_timeout_ms: int, state: ProcessState) -> None:
-    """Write how the process ended to its starting call's row, once."""
+def _end_audit(
+    *,
+    db_path: Path,
+    busy_timeout_ms: int,
+    invocation_id: str,
+    outcome: TerminalOutcome,
+    state: ProcessState | None,
+) -> None:
+    """Write how the process ended to its starting call's row, once.
 
-    if state.status == "running":
-        return
-    outcome, budget_kind = _terminal_outcome(state)
+    ``state`` is None when the call ended without one: nothing observed the
+    process's output or exit.
+    """
+
     try:
         end_running_command_invocation_audit(
             db_path=db_path,
             busy_timeout_ms=busy_timeout_ms,
-            invocation_id=state.tool_invocation_id,
+            invocation_id=invocation_id,
             terminal_outcome=outcome,
-            exit_code=state.exit_code,
-            signal=state.signal,
-            stdout_bytes=state.stdout_bytes,
-            stderr_bytes=state.stderr_bytes,
-            budget_exceeded_kind=budget_kind,
+            exit_code=None if state is None else state.exit_code,
+            signal=None if state is None else state.signal,
+            stdout_bytes=0 if state is None else state.stdout_bytes,
+            stderr_bytes=0 if state is None else state.stderr_bytes,
+            budget_exceeded_kind=(
+                "temp_storage_limit"
+                if state is not None and state.status == "limit_exceeded"
+                else None
+            ),
             updated_at=now_utc_iso(),
         )
     except (sqlite3.Error, MigrationError):
-        # The output was already taken for this call; the row stays running
-        # until startup recovery ends it as unobserved.
+        # The call's own result goes on; the row stays running until startup
+        # recovery ends it as unobserved.
         logger.exception(
-            "failed to audit the end of the process started by %s",
-            state.tool_invocation_id,
+            "failed to audit the end of the process started by %s", invocation_id
+        )
+
+
+def _audit_end(*, db_path: Path, busy_timeout_ms: int, state: ProcessState) -> None:
+    if state.status != "running":
+        _end_audit(
+            db_path=db_path,
+            busy_timeout_ms=busy_timeout_ms,
+            invocation_id=state.tool_invocation_id,
+            outcome=_terminal_outcome(state),
+            state=state,
         )
 
 
@@ -155,8 +172,50 @@ async def start_background_command(
     """Start the command as a process of the calling run; returns it running,
     or ended when it ended within the start window."""
 
+    # Written before the start: a call cancelled in the start window, whose
+    # process the supervisor then stops, still leaves its row.
+    write_command_invocation_audit(
+        context=context,
+        request=request,
+        terminal_outcome="running",
+        exit_code=None,
+        signal_value=None,
+        stdout_bytes=0,
+        stderr_bytes=0,
+        budget_exceeded_kind=None,
+        sandbox_violation_kind=None,
+        sandbox_violation_summary=None,
+        updated_at=now_utc_iso(),
+    )
     try:
-        state = await start_process(
+        state = await _start(context=context, request=request)
+    except (Exception, asyncio.CancelledError) as exc:
+        _end_audit(
+            db_path=context.db_path,
+            busy_timeout_ms=context.busy_timeout_ms,
+            invocation_id=cast(str, request.tool_invocation_id),
+            outcome=(
+                "canceled"
+                if isinstance(exc, asyncio.CancelledError)
+                # Refused: the command was never started.
+                else "spawn_failed"
+                if isinstance(exc, BrokerPolicyError)
+                else "broker_failed"
+            ),
+            state=None,
+        )
+        raise
+    _audit_end(
+        db_path=context.db_path, busy_timeout_ms=context.busy_timeout_ms, state=state
+    )
+    return _process_outcome(state)
+
+
+async def _start(
+    *, context: BrokerContext, request: ValidatedCommandRequest
+) -> ProcessState:
+    try:
+        return await start_process(
             db_path=context.db_path,
             busy_timeout_ms=context.busy_timeout_ms,
             owner_process_id=context.actor_process_id,
@@ -177,29 +236,6 @@ async def start_background_command(
             "The command did not start: this run is ending.",
             code=PROCESS_RUN_ENDING,
         ) from exc
-    outcome = None if state.status == "running" else _terminal_outcome(state)
-    try:
-        write_command_invocation_audit(
-            context=context,
-            request=request,
-            terminal_outcome="running" if outcome is None else outcome[0],
-            exit_code=state.exit_code,
-            signal_value=state.signal,
-            stdout_bytes=state.stdout_bytes,
-            stderr_bytes=state.stderr_bytes,
-            budget_exceeded_kind=None if outcome is None else outcome[1],
-            sandbox_violation_kind=None,
-            sandbox_violation_summary=state.error,
-            updated_at=now_utc_iso(),
-        )
-    except (sqlite3.Error, MigrationError):
-        # A process nobody audited, whose id the failed call never returns,
-        # must not keep running.
-        await stop_process(
-            owner_process_id=context.actor_process_id, process_id=state.process_id
-        )
-        raise
-    return _process_outcome(state)
 
 
 async def run_process_control(

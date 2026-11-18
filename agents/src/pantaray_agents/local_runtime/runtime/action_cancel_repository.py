@@ -52,6 +52,7 @@ from .action_message_process_fence import (
 from .action_subagent_parent_lifecycle import (
     settle_action_subagent_children_in_connection,
 )
+from .action_subagent_process_stop import stop_action_subagent_processes
 from .action_terminal_repository import (
     finalize_action_job_terminal_in_connection,
 )
@@ -120,6 +121,13 @@ class ActionCancelRepository:
             raise MigrationError("LOCAL_DB_BUSY_TIMEOUT_MS must be a positive integer")
         if not user_id.strip() or not action_id.strip():
             raise ValueError("user_id and action_id must not be empty")
+        # The transaction below settles the children and releases their claims.
+        await stop_action_subagent_processes(
+            db_path=self.db_path,
+            busy_timeout_ms=self.busy_timeout_ms,
+            user_id=user_id,
+            action_id=action_id,
+        )
 
         with sqlite3.connect(self.db_path) as connection:
             connection.row_factory = sqlite3.Row

@@ -54,6 +54,13 @@ class Stopped:
 
 
 @dataclass(frozen=True, slots=True)
+class HandedOver:
+    """A Suggestion's TODO Pantaray has nothing left on: the user's from here."""
+
+    kind: Literal["handed_over"] = "handed_over"
+
+
+@dataclass(frozen=True, slots=True)
 class NotStarted:
     # `scheduled`: its start date, which the view carries, has not come yet.
     # `unscheduled`: it has no start date, so the AI waits for the user to set one.
@@ -61,7 +68,9 @@ class NotStarted:
     kind: Literal["not_started"] = "not_started"
 
 
-type TodoDisplayState = Done | Working | Waiting | Partial | Stopped | NotStarted
+type TodoDisplayState = (
+    Done | Working | Waiting | Partial | Stopped | HandedOver | NotStarted
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,9 +132,9 @@ def _action_state(todo: Todo, conversation: ActionConversation) -> TodoDisplaySt
 def _suggestion_state(todo: Todo, answered: bool) -> TodoDisplayState:
     report = todo.ai_report
     if report is None:
-        # A done Suggestion TODO the user unchecked: the Suggestion's reply
-        # flow is how it continues.
-        return Waiting(reason="reply", note=None)
+        # The Suggestion left nothing for Pantaray to carry on, so nothing
+        # waits on the user either: the TODO is theirs to check after looking.
+        return HandedOver()
     # Nothing starts this work but the user's answer; once they dismissed the
     # Suggestion, its work stays where it stopped.
     if report.kind == "continue" and not answered:

@@ -1,6 +1,7 @@
 """SuggestionAgent コンテキスト関連テスト"""
 
 from datetime import UTC, datetime, timedelta
+from typing import get_args
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -29,6 +30,7 @@ from pantaray_agents.agents.suggestion_agent.context_types import (
     SuggestionOpenTodo,
     SuggestionOpenTodos,
     SuggestionStableMemoryContext,
+    SuggestionTodoState,
     normalize_activity_description_rows,
     normalize_activity_summary_row,
 )
@@ -676,6 +678,13 @@ def test_open_todos_render_one_line_each_after_the_omitted_count() -> None:
     )
     assert format_open_todos(todos, max_chars=0) == "[5 older open TODOs not shown]"
     assert format_open_todos(SuggestionOpenTodos(), max_chars=0) == "(No open TODOs.)"
+
+
+def test_every_open_todo_state_renders() -> None:
+    # A state the TODO list adds must reach the judge, not fail its run.
+    for state in get_args(SuggestionTodoState.__value__):
+        todos = SuggestionOpenTodos(items=(SuggestionOpenTodo("T", None, None, state),))
+        assert format_open_todos(todos, max_chars=1_000).startswith("- T (no project; ")
 
 
 def test_reply_and_result_previews_are_bounded() -> None:

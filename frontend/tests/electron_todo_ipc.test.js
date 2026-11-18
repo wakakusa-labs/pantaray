@@ -35,6 +35,12 @@ const STATE_VARIANTS = [
   { state: { kind: 'partial', note: 'Drafted half' } },
   { state: { kind: 'stopped', outcome: 'failed' } },
   { state: { kind: 'stopped', outcome: 'canceled' } },
+  {
+    state: { kind: 'handed_over' },
+    author: 'ai',
+    origin: 'suggestion',
+    conversation: { kind: 'suggestion', suggestion_id: 's-2' },
+  },
   { state: { kind: 'not_started', reason: 'scheduled' }, due: null },
   { state: { kind: 'not_started', reason: 'unscheduled' }, starts_on: null },
   { deletion_request: { request_id: 'req-1', reason: 'Duplicate' }, author: 'ai' },

@@ -89,7 +89,7 @@ async def _save_offer(
 
 @pytest.mark.parametrize(
     ("outcome", "state"),
-    [("open", "waiting"), ("partial", "partial"), ("continue", "waiting")],
+    [("open", "handed_over"), ("partial", "partial"), ("continue", "waiting")],
 )
 async def test_the_popup_names_the_todo_as_the_list_does(
     tmp_path: Path,

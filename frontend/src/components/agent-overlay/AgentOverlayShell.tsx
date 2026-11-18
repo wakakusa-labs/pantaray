@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import type { PointerEvent, ReactNode, RefObject } from 'react';
 import overlayBackground from '@/assets/images/agentoverlay_back.png';
 import { useI18n } from '@/context/useI18n';
+import type { MessageKey } from '@/i18n/types';
 import { OpenWorkContext } from '@/components/action-conversation/sentMessageRefs';
 import type { WorkKey } from '@/components/chat/chatTimeline';
 import { splitWorkKey } from '@/history/historySelection';
@@ -89,11 +90,13 @@ const TodoState = styled.span<{ $waiting: boolean }>`
   }
 `;
 
+// A TODO handed over to the user has nothing to say, like an ordinary one.
 const TODO_STATE_LABEL = {
   waiting: 'todo.state.waiting',
   partial: 'todo.state.partial',
   done: 'todo.state.done',
-} as const;
+  handed_over: null,
+} as const satisfies Record<NonNullable<SuggestionTodoView['state']>, MessageKey | null>;
 
 const SCROLL_INDICATOR_HIDE_DELAY_MS = 700;
 
@@ -275,6 +278,7 @@ const AgentOverlayShell = ({
   const expandButtonRef = useRef<HTMLButtonElement>(null);
   useCollapsedFocusBoundary(resolvedScrollableRef, !isExpanded, expandButtonRef);
   const { t } = useI18n();
+  const todoStateLabel = todo?.state ? TODO_STATE_LABEL[todo.state] : null;
   // The work this panel stands for: its Action, or the suggestion until one exists.
   const work: { kind: WorkRefKind; id: string } | null =
     actionId !== null
@@ -423,10 +427,8 @@ const AgentOverlayShell = ({
             {todo ? (
               <TodoHeading>
                 <h1>{todo.text}</h1>
-                {todo.state ? (
-                  <TodoState $waiting={todo.state === 'waiting'}>
-                    {t(TODO_STATE_LABEL[todo.state])}
-                  </TodoState>
+                {todoStateLabel ? (
+                  <TodoState $waiting={todo.state === 'waiting'}>{t(todoStateLabel)}</TodoState>
                 ) : null}
               </TodoHeading>
             ) : null}

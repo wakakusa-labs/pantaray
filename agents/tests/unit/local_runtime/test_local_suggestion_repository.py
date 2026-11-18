@@ -18,6 +18,7 @@ from pantaray_agents.local_runtime.storage.migrations import (
 )
 from pantaray_agents.local_runtime.todos.clock import TodoClock
 from pantaray_agents.local_runtime.todos.display import (
+    HandedOver,
     Partial,
     Waiting,
     display_state,
@@ -921,7 +922,7 @@ def _offer(todo: SuggestionTodo) -> SuggestionAgentResponse:
     [
         (
             SuggestionTodo(text="Send the reply", outcome="open", note=None),
-            Waiting(reason="reply", note=None),
+            HandedOver(),
         ),
         (
             SuggestionTodo(text="Send the reply", outcome="partial", note="Drafted."),

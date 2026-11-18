@@ -37,6 +37,10 @@ from .broker_test_support import BROKER_ACTOR_PROCESS_ID, _bootstrap_runtime_db
 # Bounds every broker call; none should take more than a few seconds.
 WAIT_TIMEOUT_S = 20
 TOOL_IDS = ("bash", "read_process_output", "stop_process")
+# A background start always runs under seatbelt: run_outside_sandbox is refused.
+needs_seatbelt = pytest.mark.skipif(
+    not Path("/usr/bin/sandbox-exec").is_file(), reason="needs macOS seatbelt"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,6 +133,7 @@ async def _until(condition: Callable[[], bool]) -> None:
 # the owner not being the calling run, results outside the tools' output
 # schema, a stop that leaves the command running, and refusals the model
 # cannot act on because they do not name the running processes.
+@needs_seatbelt
 @pytest.mark.asyncio
 async def test_a_background_command_is_started_read_and_stopped(
     action: _Action, monkeypatch: pytest.MonkeyPatch
@@ -188,6 +193,7 @@ async def test_a_background_command_is_started_read_and_stopped(
 
 # Catches: a command that ends at once being reported as running, or its
 # output lost, when it ends within the start window.
+@needs_seatbelt
 @pytest.mark.asyncio
 async def test_a_command_that_ends_in_the_start_window_returns_its_end(
     action: _Action,

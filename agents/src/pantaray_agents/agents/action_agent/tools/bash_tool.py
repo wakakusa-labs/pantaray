@@ -115,7 +115,9 @@ BASH_TOOL_FIELD_PRESENTATION = (
             "the output so far, or with how the command ended if it already "
             "did. Read its later output with read_process_output, and stop it "
             "with stop_process as soon as it is no longer needed; whatever is "
-            "still running is stopped when your work ends. Cannot be combined "
+            "still running is stopped when your work ends. With the command "
+            "network setting off, localhost is blocked too, so a dev server "
+            "cannot be reached unless the network is on. Cannot be combined "
             "with run_outside_sandbox."
         ),
     ),

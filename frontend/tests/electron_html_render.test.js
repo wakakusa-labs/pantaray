@@ -16,6 +16,7 @@ const {
   createActionFileProtocolHandler,
 } = require('../electron/dist/protocol/actionFileProtocol.js');
 const { buildActionFileUrl } = require('../electron/dist/protocol/actionFileUrl.js');
+const { decideFileAccess } = require('../electron/dist/browser/pagePolicy.js');
 const PDF = Buffer.from('%PDF-1.7 rendered');
 
 /** A fake session and window factory; `load` and `print` script each render. */
@@ -83,14 +84,7 @@ function loadWithElectron(electron, modulePath = MODULE_PATH) {
 
 const loadHtmlRender = (electron) => loadWithElectron(electron);
 
-const {
-  decideFileAccess,
-  decideNetworkRequest,
-  foldPath,
-  htmlRenderPdfPath,
-  isSecretPath,
-  isWithinRoot,
-} = loadHtmlRender(fakeElectron().electron);
+const { decideNetworkRequest, htmlRenderPdfPath } = loadHtmlRender(fakeElectron().electron);
 /** The runtime's rules for one home folder, its folds and its verdicts (Python reads it too). */
 const SECRET_PATHS = JSON.parse(
   fs.readFileSync(path.join(__dirname, '../shared/secret_paths.fixtures.json'), 'utf8')
@@ -138,58 +132,6 @@ function assertTornDown(fake) {
   assert.deepEqual(fake.ses.cleared.sort(), ['cache', 'storage']);
   assert.deepEqual(fake.ses.proxies.at(-1), { mode: 'system' });
 }
-
-const notSameDirectory = () => false;
-
-test('file access mirrors PrivateAppStorage.hides() under the read roots', () => {
-  const scope = {
-    fileRoots: ['/work'],
-    privateRoots: ['/work/.pantaray'],
-    privateRootExceptions: ['/work/.pantaray/published'],
-  };
-  const decide = (target) => decideFileAccess(target, scope, notSameDirectory);
-  assert.equal(decide('/work/deck/img.png'), null);
-  assert.equal(decide('/work'), null);
-  assert.equal(decide('/workshop/img.png'), 'outside_read_scope');
-  assert.equal(decide('/etc/passwd'), 'outside_read_scope');
-  assert.equal(decide('/work/.pantaray/db.sqlite'), 'outside_read_scope');
-  assert.equal(decide('/work/.pantaray'), 'outside_read_scope');
-  assert.equal(decide('/work/.pantaray/published/chart.png'), null);
-  assert.equal(
-    decideFileAccess('/Users/me/secret.txt', { ...scope, fileRoots: ['/'] }, notSameDirectory),
-    null
-  );
-});
-
-test('a private root reached under another letter case is still private', () => {
-  const sameDirectory = (left, right) => left.toLowerCase() === right.toLowerCase();
-  const scope = {
-    fileRoots: ['/'],
-    privateRoots: ['/Users/me/Library/Pantaray'],
-    privateRootExceptions: [],
-  };
-  assert.equal(
-    decideFileAccess('/Users/me/library/pantaray/db.sqlite', scope, sameDirectory),
-    'outside_read_scope'
-  );
-  // The name matches but the directory is another one.
-  assert.equal(
-    isWithinRoot('/other/pantaray/x', '/Users/me/Library/Pantaray', () => false),
-    false
-  );
-});
-
-test('a path folds as the runtime folds it', () => {
-  for (const [text, folded] of SECRET_PATHS.folds) {
-    assert.equal(foldPath(text), folded, JSON.stringify(text));
-  }
-});
-
-test("the runtime's secret rules withhold here what its file tools withhold", () => {
-  for (const [target, withheld] of SECRET_PATHS.cases) {
-    assert.equal(isSecretPath([target], SECRET_PATHS.rules), withheld, JSON.stringify(target));
-  }
-});
 
 test('a page never loads a file holding secrets, by its name or by where it leads', async () => {
   const work = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-html-secret-')));
@@ -680,6 +622,8 @@ test('a preview whose render fails reads as render_failed', async () => {
   assert.deepEqual(await h.read(deck), { kind: 'unavailable', reason: 'render_failed' });
   assertTornDown(h);
 });
+
+const notSameDirectory = () => false;
 
 test('the preview loads its own folder in private storage, and no private storage below it', () => {
   const { previewFileScope } = loadWithElectron(fakeElectron().electron, PREVIEW_MODULE_PATH);

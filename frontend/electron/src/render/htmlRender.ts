@@ -21,28 +21,26 @@ import { BrowserWindow, session, type WebContents } from 'electron';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 
 import { writeFileAtomic } from '../atomicFile';
+import {
+  LOCAL_SCHEMES,
+  reachedHost,
+  serveFile,
+  type ContactedHost,
+  type FileAccessScope,
+} from '../browser/pagePolicy';
 import { LocalBackendRequestError } from '../localBackend/client';
 import { keepWindowOnItsDocument } from '../security/windowOpenPolicy';
 
-/**
- * One of the runtime's rules for files that hold secrets (`secret_paths`): a path matching
- * `withheld` and not `excepted`, POSIX EREs that read the same as JavaScript regexes.
- */
-export type SecretPathRule = { withheld: string; excepted: string | null };
-
-/**
- * The local files a page may load: under a file root, not in private app storage, and not
- * holding secrets.
- */
-export type FileAccessScope = {
-  fileRoots: string[];
-  privateRoots: string[];
-  privateRootExceptions: string[];
-  secretPaths: SecretPathRule[];
-};
+// The task preview takes its file rules from here.
+export {
+  isWithinRoot,
+  sameDirectoryOnDisk,
+  type FileAccessScope,
+  type SameDirectory,
+} from '../browser/pagePolicy';
 
 /** One page to print and what it may load. */
 export type HtmlRenderInput = FileAccessScope & {
@@ -65,9 +63,6 @@ export type BlockedRequestReason =
   | 'too_many_hosts';
 
 export type BlockedRequest = { reason: BlockedRequestReason; url: string };
-
-/** A host the page reached; never the URL, whose path and query can carry tokens. */
-export type ContactedHost = { host: string; port: number };
 
 export type HtmlRenderFailureCode =
   | 'HTML_LOAD_FAILED'
@@ -97,9 +92,6 @@ export type HtmlRenderOutcome =
   | { answer: Extract<HtmlRenderAnswer, { status: 'rendered' }>; pdf: Buffer }
   | { answer: Extract<HtmlRenderAnswer, { status: 'failed' }>; pdf: null };
 
-/** Whether two paths name the same existing directory. */
-export type SameDirectory = (left: string, right: string) => boolean;
-
 /** The runtime waits 30 s for the answer; this leaves it time to read the PDF. */
 const RENDER_BUDGET_MS = 20_000;
 const MAX_PDF_BYTES = 100 * 1024 * 1024;
@@ -109,85 +101,19 @@ const MAX_BLOCKED_REPORTED = 10;
  * a request to a new host is refused, so every host a page reaches is reported.
  */
 const MAX_HOSTS_REPORTED = 50;
-const DEFAULT_PORTS: Readonly<Record<string, number>> = { 'http:': 80, 'https:': 443 };
 /** No `persist:` prefix: the session lives in memory only. */
 const RENDER_PARTITION = 'html-render';
 /** The id becomes a file name, so it may not carry a separator or a dot segment. */
 const RENDER_REQUEST_ID = /^[A-Za-z0-9_-]{1,128}$/;
-const LOCAL_SCHEMES = new Set(['file:', 'data:', 'blob:', 'about:']);
 /**
  * With the network off, every connection Chromium makes outside `webRequest` (WebRTC
  * over TCP, preconnects) goes to a proxy nothing listens on, loopback included.
  */
 const DEAD_PROXY = { proxyRules: 'http://127.0.0.1:9', proxyBypassRules: '<-loopback>' };
-/** The types a deck loads; anything else is served without one and sniffed. */
-const CONTENT_TYPES: Readonly<Record<string, string>> = {
-  '.html': 'text/html',
-  '.htm': 'text/html',
-  '.css': 'text/css',
-  '.js': 'text/javascript',
-  '.mjs': 'text/javascript',
-  '.json': 'application/json',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.woff': 'font/woff',
-  '.woff2': 'font/woff2',
-  '.ttf': 'font/ttf',
-  '.otf': 'font/otf',
-};
-
-/**
- * Every local document is sandboxed without `allow-modals`, so `print()` and the
- * other dialogs do nothing. The flags pass to every frame below it, including one
- * Chromium runs in its own renderer (a sandboxed iframe), where no script injected
- * from here would reach: `window.print()` there opens the system print panel even
- * for a hidden window. Same-origin keeps local fonts and data loadable.
- */
-const DOCUMENT_SANDBOX = 'sandbox allow-scripts allow-same-origin';
-
-/**
- * Mirror of the runtime's `is_within_any` for one root: lexically below it, or below
- * an ancestor that is the same directory under another letter case (APFS).
- */
-export function isWithinRoot(target: string, root: string, sameDirectory: SameDirectory): boolean {
-  const prefix = root.endsWith(path.sep) ? root : root + path.sep;
-  if (target === root || target.startsWith(prefix)) return true;
-  const rootName = path.basename(root).toLowerCase();
-  for (let ancestor = target; path.dirname(ancestor) !== ancestor; ) {
-    if (path.basename(ancestor).toLowerCase() === rootName && sameDirectory(ancestor, root)) {
-      return true;
-    }
-    ancestor = path.dirname(ancestor);
-  }
-  return false;
-}
-
-/**
- * Whether the page may load this resolved local file: under a file root, and not in
- * private app storage unless under one of its exceptions (the runtime's
- * `PrivateAppStorage.hides()`). Null allows it.
- */
-export function decideFileAccess(
-  realPath: string,
-  scope: FileAccessScope,
-  sameDirectory: SameDirectory
-): BlockedRequestReason | null {
-  const within = (roots: string[]) =>
-    roots.some((root) => isWithinRoot(realPath, root, sameDirectory));
-  if (!within(scope.fileRoots)) return 'outside_read_scope';
-  if (within(scope.privateRoots) && !within(scope.privateRootExceptions)) {
-    return 'outside_read_scope';
-  }
-  return null;
-}
 
 /**
  * Whether a request may leave the machine. Local schemes are not network (file is
- * judged by `decideFileAccess`); with the network allowed only reads over http(s)
+ * judged by `serveFile`); with the network allowed only reads over http(s)
  * go out, and never as a frame: a remote page embedded in the deck runs its own
  * code in its own renderer and is no resource of the deck. Null allows it.
  */
@@ -208,39 +134,6 @@ export function decideNetworkRequest(
   return isWeb && isRead && request.resourceType !== 'subFrame' ? null : 'not_allowed';
 }
 
-/** U+0131 uppercases to `I`, yet its case fold is itself. */
-const DOTLESS_I = '\u0131';
-
-/**
- * A path as APFS compares names, the runtime's `_folded`: NFD, case fold, NFD. JavaScript has
- * no case fold; lower, upper, then lower again gives the fold's ASCII letters (`ſ` to `s`, `ß`
- * and `ẞ` to `ss`, `ﬁ` to `fi`, the Kelvin sign to `k`), and mapping each character alone folds
- * a final sigma to `σ` as the case fold does. Scripts whose fold is uppercase (Cherokee) fold
- * apart from Python's; no rule depends on that, since the rules bracket only ASCII letters and
- * the home folder in them is folded here as the paths are.
- */
-export function foldPath(text: string): string {
-  const fold = (char: string) =>
-    char === DOTLESS_I ? char : char.toLowerCase().toUpperCase().toLowerCase();
-  return Array.from(text.normalize('NFD'), fold).join('').normalize('NFD');
-}
-
-/**
- * Whether a file holds secrets by the name the page asked for or the real path it resolves to,
- * as the runtime's `withheld_reason` judges both. Each rule is folded like the paths: it spells
- * the home folder as the OS stores it, so `/Users/José` matches in either Unicode form, and
- * folding leaves its regex syntax alone. A directory is never served, so `directories_exempt`
- * changes nothing here and is not sent.
- */
-export function isSecretPath(paths: string[], rules: SecretPathRule[]): boolean {
-  const folded = paths.map(foldPath);
-  return rules.some((rule) => {
-    const withheld = new RegExp(foldPath(rule.withheld));
-    const excepted = rule.excepted === null ? null : new RegExp(foldPath(rule.excepted));
-    return folded.some((text) => withheld.test(text) && excepted?.test(text) !== true);
-  });
-}
-
 /** Where the PDF goes; the runtime derives the same path from the same id. */
 export function htmlRenderPdfPath(localArtifactRoot: string, renderRequestId: string): string {
   if (!RENDER_REQUEST_ID.test(renderRequestId)) {
@@ -255,64 +148,6 @@ class RenderFailure extends Error {
     message: string
   ) {
     super(message);
-  }
-}
-
-export function sameDirectoryOnDisk(left: string, right: string): boolean {
-  const a = fs.statSync(left, { throwIfNoEntry: false });
-  const b = fs.statSync(right, { throwIfNoEntry: false });
-  return (
-    a !== undefined &&
-    b !== undefined &&
-    a.isDirectory() &&
-    b.isDirectory() &&
-    a.dev === b.dev &&
-    a.ino === b.ino
-  );
-}
-
-/**
- * Serves an allowed local file from the descriptor that was checked, so a link
- * swapped after the check cannot serve another file. A file that does not exist
- * fails as Chromium's loader would; a directory is never listed.
- */
-async function serveFile(
-  url: string,
-  scope: FileAccessScope,
-  block: (reason: BlockedRequestReason, url: string) => void
-): Promise<Response> {
-  const requestedPath = fileURLToPath(url);
-  let file: fs.promises.FileHandle;
-  try {
-    // Non-blocking, so a FIFO cannot hold the open.
-    file = await fs.promises.open(requestedPath, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
-  } catch {
-    return Response.error();
-  }
-  try {
-    const opened = await file.stat();
-    const realPath = await fs.promises.realpath(requestedPath);
-    const reason = isSecretPath([requestedPath, realPath], scope.secretPaths)
-      ? 'not_allowed'
-      : decideFileAccess(realPath, scope, sameDirectoryOnDisk);
-    const checked = await fs.promises.stat(realPath);
-    if (reason !== null || checked.dev !== opened.dev || checked.ino !== opened.ino) {
-      block(reason ?? 'outside_read_scope', url);
-      return Response.error();
-    }
-    if (!opened.isFile()) {
-      block('not_allowed', url);
-      return Response.error();
-    }
-    const contentType = CONTENT_TYPES[path.extname(realPath).toLowerCase()];
-    return new Response(await file.readFile(), {
-      headers: {
-        'Content-Security-Policy': DOCUMENT_SANDBOX,
-        ...(contentType === undefined ? {} : { 'Content-Type': contentType }),
-      },
-    });
-  } finally {
-    await file.close();
   }
 }
 
@@ -387,10 +222,8 @@ async function renderHtml(request: HtmlRenderInput): Promise<HtmlRenderOutcome> 
   const network = new Map<string, ContactedHost>();
   /** Records an allowed URL's host; a local scheme reaches none. Refuses a host past the cap. */
   const reach = (url: string): BlockedRequestReason | null => {
-    const { protocol, hostname, port } = new URL(url);
-    const defaultPort = DEFAULT_PORTS[protocol];
-    if (defaultPort === undefined) return null;
-    const contacted = { host: hostname, port: port === '' ? defaultPort : Number(port) };
+    const contacted = reachedHost(new URL(url));
+    if (contacted === null) return null;
     const key = `${contacted.host}:${contacted.port}`;
     if (!network.has(key) && network.size >= MAX_HOSTS_REPORTED) return 'too_many_hosts';
     network.set(key, contacted);

@@ -107,6 +107,21 @@ BASH_TOOL_FIELD_PRESENTATION = (
         ),
     ),
     BrokerToolFieldPresentation(
+        name="run_in_background",
+        description=(
+            "Default false. Set true for a command meant to keep running, such "
+            "as a dev server or a file watcher, not to wait less for a build or "
+            "test. The call returns after a few seconds with a process_id and "
+            "the output so far, or with how the command ended if it already "
+            "did. Read its later output with read_process_output, and stop it "
+            "with stop_process as soon as it is no longer needed; whatever is "
+            "still running is stopped when your work ends. With the command "
+            "network setting off, localhost is blocked too, so a dev server "
+            "cannot be reached unless the network is on. Cannot be combined "
+            "with run_outside_sandbox."
+        ),
+    ),
+    BrokerToolFieldPresentation(
         name="run_outside_sandbox",
         description=(
             "Default false. Set true only to rerun a command important to the "
@@ -130,6 +145,22 @@ BASH_TOOL_FIELD_PRESENTATION = (
     *WRITE_FOLDER_REQUEST_FIELD_PRESENTATION,
 )
 
+# Where a command connected through Pantaray's proxy.
+_NETWORK_OUTPUT_SCHEMA: dict[str, JSONValue] = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "host": {"type": "string"},
+            "port": {"type": "integer"},
+            "connections": {"type": "integer"},
+            "failed": {"type": "integer"},
+            "bytes_sent": {"type": "integer"},
+            "bytes_received": {"type": "integer"},
+        },
+    },
+}
+
 # Shared with run_python, which returns the same command result.
 COMMAND_OUTPUT_SCHEMA: dict[str, JSONValue] = {
     "type": "object",
@@ -138,23 +169,47 @@ COMMAND_OUTPUT_SCHEMA: dict[str, JSONValue] = {
         "exit_code": {"type": "integer"},
         "stdout": {"type": "string"},
         "stderr": {"type": "string"},
-        # Where the command connected through Pantaray's proxy.
-        "network": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "host": {"type": "string"},
-                    "port": {"type": "integer"},
-                    "connections": {"type": "integer"},
-                    "failed": {"type": "integer"},
-                    "bytes_sent": {"type": "integer"},
-                    "bytes_received": {"type": "integer"},
-                },
-            },
-        },
+        "network": _NETWORK_OUTPUT_SCHEMA,
     },
     "required": ["status", "exit_code", "stdout", "stderr"],
+    "additionalProperties": False,
+}
+
+# A process started with run_in_background, as bash, read_process_output and
+# stop_process return it.
+PROCESS_OUTPUT_SCHEMA: dict[str, JSONValue] = {
+    "type": "object",
+    "properties": {
+        "process_id": {"type": "string"},
+        "status": {
+            "type": "string",
+            "enum": [
+                "running",
+                "exited",
+                "stopped",
+                "limit_exceeded",
+                "spawn_failed",
+                "failed",
+            ],
+        },
+        "exit_code": {"type": "integer"},
+        "signal": {"type": "integer"},
+        "error": {"type": "string"},
+        "stdout": {"type": "string"},
+        "stderr": {"type": "string"},
+        "stdout_dropped_bytes": {"type": "integer"},
+        "stderr_dropped_bytes": {"type": "integer"},
+        "network": _NETWORK_OUTPUT_SCHEMA,
+    },
+    "required": [
+        "process_id",
+        "status",
+        "stdout",
+        "stderr",
+        "stdout_dropped_bytes",
+        "stderr_dropped_bytes",
+        "network",
+    ],
     "additionalProperties": False,
 }
 
@@ -189,7 +244,7 @@ BASH_TOOL = ToolDefinition.from_spec(
                 "execution workspace and path arguments are relative to cwd. "
                 "Use $TMPDIR for temporary files. TMPDIR, and HOME unless "
                 "use_login_environment is set or the command runs outside the "
-                "sandbox, are temporary and removed after this call. Commands "
+                "sandbox, are temporary and removed when the command ends. Commands "
                 "and descendants follow the user's command network setting and "
                 "workspace file permissions. With network on, connections go "
                 "through Pantaray's proxy, which HTTP(S) clients and git (also "
@@ -200,9 +255,11 @@ BASH_TOOL = ToolDefinition.from_spec(
                 "that hold secrets, such as .env files and credential stores "
                 "(~/.ssh keys, ~/.aws/credentials); with use_login_environment "
                 "the credential stores become readable, .env files never. "
-                "This call waits for completion and has a finite execution timeout. "
-                "Do not use interactive prompts, sudo, or background processes "
-                "intended to survive this call. Shell startup files are not loaded."
+                "Without run_in_background, the call waits for the command to end, "
+                "with a finite execution timeout, and anything it leaves running "
+                "is killed then; start dev servers and watchers with "
+                "run_in_background instead. Do not use interactive prompts or "
+                "sudo. Shell startup files are not loaded."
             ),
         ),
         concurrency=ToolConcurrency("sequential"),
@@ -216,7 +273,7 @@ BASH_TOOL = ToolDefinition.from_spec(
             fields=BASH_TOOL_FIELD_PRESENTATION,
             description=_BASH_INPUT_DESCRIPTION,
         ),
-        output_schema=COMMAND_OUTPUT_SCHEMA,
+        output_schema={"oneOf": [COMMAND_OUTPUT_SCHEMA, PROCESS_OUTPUT_SCHEMA]},
     )
 )
 

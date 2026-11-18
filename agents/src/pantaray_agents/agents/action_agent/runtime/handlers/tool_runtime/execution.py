@@ -43,9 +43,11 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
     GLOB_TOOL_ID,
     GREP_TOOL_ID,
     LIST_TOOL_ID,
+    READ_PROCESS_OUTPUT_TOOL_ID,
     READ_TOOL_ID,
     RENDER_HTML_PAGE_TOOL_ID,
     RENDER_PDF_PAGE_TOOL_ID,
+    STOP_PROCESS_TOOL_ID,
 )
 from pantaray_agents.local_runtime.tooling.invocation_audit import BROKERED_TOOL_IDS
 from pantaray_agents.local_runtime.tooling.tool_result_validation import (
@@ -123,6 +125,9 @@ NON_PREFLIGHT_BROKERED_TOOL_IDS = frozenset(
         LIST_TOOL_ID,
         GLOB_TOOL_ID,
         GREP_TOOL_ID,
+        # They reach only processes this run's approved bash calls started.
+        READ_PROCESS_OUTPUT_TOOL_ID,
+        STOP_PROCESS_TOOL_ID,
     }
 )
 PREFLIGHT_APPROVAL_BROKERED_TOOL_IDS = (

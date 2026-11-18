@@ -29,6 +29,7 @@ from pantaray_agents.tools.files.render_pages import (
 
 from ..models import ApprovalSource, BrokerNetworkPolicy
 from ..sandbox.egress_proxy import NetworkDestination
+from .process_protocol import ReadProcessOutputToolArgs, StopProcessToolArgs
 
 BrokerExecutionPath = Literal[
     "broker_direct_read",
@@ -41,6 +42,8 @@ BrokerExecutionPath = Literal[
     "broker_direct_save_pdf",
     "broker_sandbox_command",
     "broker_sandbox_python",
+    "broker_process_read",
+    "broker_process_stop",
 ]
 BrokerCapability = Literal["scoped_read", "scoped_write", "process_exec_local"]
 BrokerApprovalPolicy = Literal["none", "prompt_each_time", "durable_grant"]
@@ -141,6 +144,7 @@ class SandboxedBashToolArgs(_JustifiedCommandArgs):
     command: str = Field(min_length=1, pattern=r"\S")
     cwd: str | None = Field(default=None, min_length=1, pattern=r"\S")
     use_login_environment: bool = False
+    run_in_background: bool = False
 
 
 class BashToolArgs(SandboxedBashToolArgs):
@@ -160,6 +164,11 @@ class BashToolArgs(SandboxedBashToolArgs):
         if self.run_outside_sandbox and self.additional_write_folders:
             raise ValueError(
                 "additional_write_folders cannot be combined with run_outside_sandbox"
+            )
+        # A process left running is held to the sandbox it started in.
+        if self.run_outside_sandbox and self.run_in_background:
+            raise ValueError(
+                "run_in_background cannot be combined with run_outside_sandbox"
             )
         return self
 
@@ -389,6 +398,8 @@ type BrokerToolArgs = (
     | ApplyPatchToolArgs
     | BashToolArgs
     | RunPythonToolArgs
+    | ReadProcessOutputToolArgs
+    | StopProcessToolArgs
 )
 
 
@@ -542,6 +553,8 @@ class ValidatedCommandRequest(BaseModel):
     use_login_environment: bool
     # Only an approved Action bash call sets it; see build_validated_command_request.
     run_outside_sandbox: bool
+    # Only a bash call sets it: the command is started as a process of the run.
+    run_in_background: bool
     generated_python_code: str | None = None
     real_read_roots: list[str]
     real_write_roots: list[str]

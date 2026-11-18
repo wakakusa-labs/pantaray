@@ -26,6 +26,10 @@ from pantaray_agents.agents.action_agent.tools.discovery_tools import (
     GREP_TOOL,
     LIST_TOOL,
 )
+from pantaray_agents.agents.action_agent.tools.process_tools import (
+    READ_PROCESS_OUTPUT_TOOL,
+    STOP_PROCESS_TOOL,
+)
 from pantaray_agents.agents.action_agent.tools.read_tool import READ_TOOL
 from pantaray_agents.agents.action_agent.tools.run_python_tool import RUN_PYTHON_TOOL
 from pantaray_agents.agents.action_agent.tools.schema_types import (
@@ -88,6 +92,8 @@ _CHILD_BROKER_TOOLS = (
     GREP_TOOL,
     APPLY_PATCH_TOOL,
     ACTION_SUBAGENT_BASH_TOOL,
+    READ_PROCESS_OUTPUT_TOOL,
+    STOP_PROCESS_TOOL,
     RUN_PYTHON_TOOL,
 )
 APPROVAL_DENIED_MESSAGE = (

@@ -390,6 +390,7 @@ def test_every_approved_folder_is_rechecked_before_launch(
             timeout_ms=1_000,
             use_login_environment=False,
             run_outside_sandbox=False,
+            run_in_background=False,
             reason=None,
             outside_workspace_folders=(first, second),
         )

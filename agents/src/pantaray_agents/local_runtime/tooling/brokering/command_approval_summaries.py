@@ -32,6 +32,7 @@ def build_bash_summary(
     timeout_ms: int,
     use_login_environment: bool,
     run_outside_sandbox: bool,
+    run_in_background: bool,
     reason: str | None,
     outside_workspace_folders: tuple[Path, ...] = (),
 ) -> dict[str, JSONValue]:
@@ -44,6 +45,10 @@ def build_bash_summary(
         # The model's user-facing justification, shown as the approval question.
         "reason": reason,
     }
+    if run_in_background:
+        # Named so that approving the call in the foreground does not approve
+        # it left running.
+        summary["run_in_background"] = True
     if run_outside_sandbox:
         # The approval UI keys its risk wording on this, and the invocation's
         # stored summary records that the approved call ran unsandboxed. No

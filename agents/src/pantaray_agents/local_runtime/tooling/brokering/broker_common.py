@@ -41,6 +41,8 @@ GREP_TOOL_ID = "grep"
 APPLY_PATCH_TOOL_ID = "apply_patch"
 BASH_TOOL_ID = "bash"
 RUN_PYTHON_TOOL_ID = "run_python"
+READ_PROCESS_OUTPUT_TOOL_ID = "read_process_output"
+STOP_PROCESS_TOOL_ID = "stop_process"
 RUNNING_SESSION_STATUS = "running"
 ALLOWED_CAPABILITIES_KEY = "allowed_capabilities"
 APPROVAL_STATUS_PENDING: Literal["pending"] = "pending"
@@ -490,7 +492,9 @@ __all__ = [
     "READ_TOOL_ID",
     "RENDER_HTML_PAGE_TOOL_ID",
     "RENDER_PDF_PAGE_TOOL_ID",
+    "READ_PROCESS_OUTPUT_TOOL_ID",
     "RUN_PYTHON_TOOL_ID",
+    "STOP_PROCESS_TOOL_ID",
     "SAVE_HTML_AS_PDF_TOOL_ID",
     "apply_approval_decision",
     "create_settings_approval_session",

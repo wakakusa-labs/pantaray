@@ -9,6 +9,7 @@ from typing import cast
 
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_args import (
     ToolArgs,
+    optional_string_arg,
     require_string_arg,
     require_string_list_arg,
 )
@@ -64,7 +65,7 @@ def run_todo_tool(
             user_id=user_id,
             todo_id=todo_id,
             status=cast("TodoStatus", require_string_arg(args, "status")),
-            note=require_string_arg(args, "note"),
+            note=optional_string_arg(args, "note"),
         )
     elif tool_def.tool_id == RECORD_PROGRESS_TOOL_ID:
         output = _record_progress(
@@ -90,16 +91,21 @@ def run_todo_tool(
 
 
 def _update_todo(
-    *, user_id: str, todo_id: TodoId, status: TodoStatus, note: str
+    *, user_id: str, todo_id: TodoId, status: TodoStatus, note: str | None
 ) -> dict[str, JSONValue]:
     clock = read_todo_clock()
     if status == "done":
+        # A note beside done is work left over; refuse rather than drop it.
+        if note is not None:
+            return _refused(Rejected("note_with_done"))
         checked = set_todo_check(
             user_id=user_id, todo_id=todo_id, by="ai", checked=True, clock=clock
         )
         if checked is None or isinstance(checked, Rejected):
             return _refused(checked)
         return {"status": "checked"}
+    if note is None:
+        return _refused(Rejected("note_missing"))
     report = AiReport(
         kind=status, note=_one_line(note), run_id=_current_run_id(), at=clock.now
     )

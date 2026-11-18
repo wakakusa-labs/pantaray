@@ -21,6 +21,7 @@ from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.todo impo
 )
 from pantaray_agents.agents.action_agent.runtime.state import ActionAgentState
 from pantaray_agents.agents.action_agent.tools import TODO_TOOL_IDS, TOOL_REGISTRY
+from pantaray_agents.agents.action_agent.tools.todo_tools import TODO_REFUSALS
 from pantaray_agents.local_runtime.todos import core, pickup
 from pantaray_agents.local_runtime.todos.action_link import (
     read_todo_for_action,
@@ -105,6 +106,10 @@ def _call(todo_id: str, tool_id: str, **args: JSONValue) -> JSONValue:
     return result.output
 
 
+def _refusal(reason: str) -> JSONValue:
+    return {"status": "refused", "reason": reason, "message": TODO_REFUSALS[reason]}
+
+
 def _stored(todo_id: str) -> Todo:
     entry = read_todo(user_id=USER, todo_id=todo_id)
     assert entry is not None
@@ -181,9 +186,7 @@ def test_the_supervisor_reads_the_todo_tool_rule_only_while_the_todo_list_is_on(
 def test_done_checks_by_ai_and_adds_the_next_weekly_instance(db: Path) -> None:
     todo = _write("Water the plants", due=WEEKLY)
 
-    assert _call(todo.todo_id, "update_todo", status="done", note="Watered.") == {
-        "status": "checked"
-    }
+    assert _call(todo.todo_id, "update_todo", status="done") == {"status": "checked"}
 
     assert _stored(todo.todo_id).check == TodoCheck(by="ai", at=NOW.now)
     with closing(sqlite3.connect(db)) as connection:
@@ -205,6 +208,30 @@ def test_a_report_carries_the_running_process_as_its_run(db: Path) -> None:
     assert _stored(todo.todo_id).ai_report == AiReport(
         kind="needs_user", note="Which address?", run_id="run-1", at=NOW.now
     )
+
+
+def test_done_with_a_note_is_refused_and_leaves_the_todo_unchecked(db: Path) -> None:
+    todo = _write("Make models X and Y selectable")
+
+    output = _call(
+        todo.todo_id, "update_todo", status="done", note="Commit and open the PR."
+    )
+
+    assert output == _refusal("note_with_done")
+    stored = _stored(todo.todo_id)
+    assert stored.check is None and stored.ai_report is None
+
+
+@pytest.mark.parametrize("status", ["partial", "needs_user"])
+def test_a_report_without_a_note_is_refused_and_writes_nothing(
+    db: Path, status: str
+) -> None:
+    todo = _write("Send the quote")
+
+    output = _call(todo.todo_id, "update_todo", status=status)
+
+    assert output == _refusal("note_missing")
+    assert _stored(todo.todo_id).ai_report is None
 
 
 def test_a_deletion_the_user_declined_cannot_be_requested_again(db: Path) -> None:

@@ -59,7 +59,7 @@ test('IPC preload exposes workspace, shortcut, overlay placement, and AGENTS.md 
   void api.overlayPlacement.get();
   void api.overlayPlacement.set({ kind: 'started', cell: { row: 2, column: 4 } });
   void api.agentsMd.read();
-  void api.agentsMd.write('Lead with the answer.');
+  void api.agentsMd.write({ content: 'Lead with the answer.', expectedRevision: null });
 
   assert.deepEqual(calls, [
     ['workspaceSettings:getCommandNetwork'],
@@ -72,7 +72,7 @@ test('IPC preload exposes workspace, shortcut, overlay placement, and AGENTS.md 
     ['overlayPlacement:get'],
     ['overlayPlacement:set', { kind: 'started', cell: { row: 2, column: 4 } }],
     ['agentsMd:read'],
-    ['agentsMd:write', 'Lead with the answer.'],
+    ['agentsMd:write', { content: 'Lead with the answer.', expectedRevision: null }],
   ]);
 });
 

@@ -852,34 +852,54 @@ test('recording:askForPermission and recording:openPermissionSettings require a 
 test('agentsMd:write writes only ~/.pantaray/AGENTS.md and refuses text over the Action budget', async (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-agents-md-ipc-'));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
-  const { ipcMain } = buildCtx({ agentsMd: createAgentsMdFile(home) });
+  const { ctx, ipcMain } = buildCtx({ agentsMd: createAgentsMdFile(home) });
   const write = getInvoke(ipcMain, 'agentsMd:write');
   const read = getInvoke(ipcMain, 'agentsMd:read');
   const filePath = path.join(home, '.pantaray', 'AGENTS.md');
   const elsewhere = path.join(home, 'elsewhere.md');
 
-  assert.equal(await read(), '');
-  // A path from the renderer is not an argument main takes.
-  await write('Lead with the answer.', elsewhere);
+  assert.deepEqual(await read(), { kind: 'loaded', content: '', revision: null });
+  // A path from the renderer is not something main takes, as an argument or a field.
+  await assert.rejects(
+    write({ content: 'x', expectedRevision: null, path: elsewhere }),
+    rejectsValidation('agentsMd:write')
+  );
+  const saved = await write(
+    { content: 'Lead with the answer.', expectedRevision: null },
+    elsewhere
+  );
+  assert.equal(saved.kind, 'saved');
   assert.equal(fs.readFileSync(filePath, 'utf8'), 'Lead with the answer.');
   assert.equal(fs.existsSync(elsewhere), false);
   assert.deepEqual(fs.readdirSync(home), ['.pantaray']);
-  assert.equal(await read(), 'Lead with the answer.');
+  assert.deepEqual(await read(), {
+    kind: 'loaded',
+    content: 'Lead with the answer.',
+    revision: saved.revision,
+  });
+
+  // A stale revision is answered as data and recorded as a failed write.
+  assert.deepEqual(await write({ content: 'stale', expectedRevision: null }), { kind: 'conflict' });
+  assert.deepEqual(
+    ctx.security.auditMutation.calls.map((call) => call[1]),
+    ['succeeded', 'failed']
+  );
 
   // The limit counts UTF-8 bytes: three-byte characters reach it in a third of the length.
   const atLimit =
     'あ'.repeat(Math.floor(AGENTS_MD_MAX_BYTES / 3)) + 'a'.repeat(AGENTS_MD_MAX_BYTES % 3);
-  await write(atLimit);
+  const full = await write({ content: atLimit, expectedRevision: saved.revision });
   assert.equal(fs.statSync(filePath).size, AGENTS_MD_MAX_BYTES);
   for (const invalid of [
-    `${atLimit}a`,
-    'あ'.repeat(AGENTS_MD_MAX_BYTES / 2),
+    { content: `${atLimit}a`, expectedRevision: full.revision },
+    { content: 'あ'.repeat(AGENTS_MD_MAX_BYTES / 2), expectedRevision: full.revision },
+    { content: 'x', expectedRevision: 'not-a-revision' },
+    { content: 'x' },
+    'x',
     undefined,
     null,
-    42,
-    { content: 'x' },
   ]) {
     await assert.rejects(write(invalid), rejectsValidation('agentsMd:write'));
   }
-  assert.equal(await read(), atLimit);
+  assert.equal((await read()).content, atLimit);
 });

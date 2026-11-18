@@ -175,6 +175,10 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.agentsMd.loading': 'Loading…',
     'settings.agentsMd.loadFailed': 'Could not load the instructions.',
     'settings.agentsMd.tooLong': 'Too long to save. Shorten it a little.',
+    'settings.agentsMd.fileTooLarge':
+      'The file is too long to open here. Shorten ~/.pantaray/AGENTS.md first.',
+    'settings.agentsMd.conflict': 'The file changed elsewhere, so this was not saved.',
+    'settings.agentsMd.reload': 'Load the latest',
     'settings.readAccessScope.title': 'Read access',
     'settings.readAccessScope.workspace': 'Workspace only',
     'settings.readAccessScope.fullAccess': 'Full local filesystem',
@@ -461,6 +465,10 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.agentsMd.loading': '読み込み中…',
     'settings.agentsMd.loadFailed': '指示を読み込めませんでした。',
     'settings.agentsMd.tooLong': '長すぎて保存できません。少し短くしてください。',
+    'settings.agentsMd.fileTooLarge':
+      'ファイルが長すぎるため、ここでは開けません。先に ~/.pantaray/AGENTS.md を短くしてください。',
+    'settings.agentsMd.conflict': 'ほかの場所でファイルが変わったため、保存していません。',
+    'settings.agentsMd.reload': '最新の内容を読み込む',
     'settings.readAccessScope.title': '読み取り範囲',
     'settings.readAccessScope.workspace': 'ワークスペースのみ',
     'settings.readAccessScope.fullAccess': 'ローカル全体',

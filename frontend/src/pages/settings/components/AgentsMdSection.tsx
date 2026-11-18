@@ -1,52 +1,89 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 
-import { AGENTS_MD_MAX_BYTES, utf8ByteLength } from '../../../../electron/src/ipc/schemas/agentsMd';
+import {
+  AGENTS_MD_MAX_BYTES,
+  utf8ByteLength,
+  type AgentsMdRevision,
+} from '../../../../electron/src/ipc/schemas/agentsMd';
 import type { Translate } from '../types';
 
-type SaveStatus = 'saving' | 'saved' | 'saveFailed' | null;
+type View =
+  | { kind: 'loading' }
+  | { kind: 'load_failed' }
+  | { kind: 'too_large' }
+  | { kind: 'editing'; content: string; revision: AgentsMdRevision };
+type SaveStatus = 'saving' | 'saved' | 'saveFailed' | 'conflict' | null;
+
+async function readView(): Promise<View> {
+  try {
+    const api = window.electron?.agentsMd;
+    if (!api) throw new Error('AGENTS.md bridge is unavailable.');
+    const result = await api.read();
+    return result.kind === 'too_large'
+      ? result
+      : { kind: 'editing', content: result.content, revision: result.revision };
+  } catch {
+    return { kind: 'load_failed' };
+  }
+}
 
 /** Edits `~/.pantaray/AGENTS.md` in place; the file is the only copy. */
 export function AgentsMdSection({ t }: { t: Translate }) {
   const titleId = useId();
   const descriptionId = useId();
-  const [content, setContent] = useState<string | null>(null);
-  const [loadFailed, setLoadFailed] = useState(false);
+  const editorRef = useRef<HTMLTextAreaElement>(null);
+  const focusEditorAfterLoad = useRef(false);
+  const [view, setView] = useState<View>({ kind: 'loading' });
   const [status, setStatus] = useState<SaveStatus>(null);
 
   useEffect(() => {
     let cancelled = false;
-    const load = async () => {
-      try {
-        const api = window.electron?.agentsMd;
-        if (!api) throw new Error('AGENTS.md bridge is unavailable.');
-        const text = await api.read();
-        if (!cancelled) setContent(text);
-      } catch {
-        if (!cancelled) setLoadFailed(true);
-      }
-    };
-    void load();
+    void readView().then((next) => {
+      if (!cancelled) setView(next);
+    });
     return () => {
       cancelled = true;
     };
   }, []);
 
+  // The reload button goes away with the conflict, so focus moves to the text it loaded.
+  useEffect(() => {
+    if (view.kind === 'editing' && focusEditorAfterLoad.current) {
+      focusEditorAfterLoad.current = false;
+      editorRef.current?.focus();
+    }
+  }, [view]);
+
+  const content = view.kind === 'editing' ? view.content : null;
   // Main refuses the same limit; checking here says why before the user presses save.
   const tooLong = content !== null && utf8ByteLength(content) > AGENTS_MD_MAX_BYTES;
 
   const save = async () => {
-    if (content === null || status === 'saving' || tooLong) return;
+    if (view.kind !== 'editing' || status === 'saving' || tooLong) return;
     setStatus('saving');
     try {
       const api = window.electron?.agentsMd;
       if (!api) throw new Error('AGENTS.md bridge is unavailable.');
-      await api.write(content);
+      const result = await api.write({ content: view.content, expectedRevision: view.revision });
+      if (result.kind === 'conflict') {
+        // The edits stay on screen; only the user's reload replaces them.
+        setStatus('conflict');
+        return;
+      }
+      setView({ kind: 'editing', content: view.content, revision: result.revision });
       setStatus('saved');
     } catch {
       setStatus('saveFailed');
     }
   };
 
+  const reload = async () => {
+    setStatus(null);
+    focusEditorAfterLoad.current = true;
+    setView(await readView());
+  };
+
+  const failed = tooLong || status === 'saveFailed' || status === 'conflict';
   return (
     <div className="dashboard-section execution-settings-section">
       <div>
@@ -57,15 +94,20 @@ export function AgentsMdSection({ t }: { t: Translate }) {
           {t('settings.agentsMd.description')}
         </p>
       </div>
-      {loadFailed ? (
+      {view.kind === 'load_failed' || view.kind === 'too_large' ? (
         <p className="settings-section-status settings-section-error" role="alert">
-          {t('settings.agentsMd.loadFailed')}
+          {t(
+            view.kind === 'too_large'
+              ? 'settings.agentsMd.fileTooLarge'
+              : 'settings.agentsMd.loadFailed'
+          )}
         </p>
-      ) : content === null ? (
+      ) : view.kind === 'loading' ? (
         <p className="settings-section-status">{t('settings.agentsMd.loading')}</p>
       ) : (
         <>
           <textarea
+            ref={editorRef}
             className="history-filter-input settings-agents-md-input"
             aria-labelledby={titleId}
             aria-describedby={descriptionId}
@@ -73,9 +115,9 @@ export function AgentsMdSection({ t }: { t: Translate }) {
             spellCheck={false}
             // Held while saving, so "saved" always describes the text on screen.
             readOnly={status === 'saving'}
-            value={content}
+            value={view.content}
             onChange={(event) => {
-              setContent(event.target.value);
+              setView({ ...view, content: event.target.value });
               setStatus(null);
             }}
           />
@@ -90,7 +132,7 @@ export function AgentsMdSection({ t }: { t: Translate }) {
             </button>
             <span
               className={
-                tooLong || status === 'saveFailed'
+                failed
                   ? 'settings-section-status settings-agents-md-error'
                   : 'settings-section-status'
               }
@@ -102,6 +144,11 @@ export function AgentsMdSection({ t }: { t: Translate }) {
                   ? t(`settings.agentsMd.${status}`)
                   : ''}
             </span>
+            {status === 'conflict' ? (
+              <button type="button" className="settings-text-button" onClick={() => void reload()}>
+                {t('settings.agentsMd.reload')}
+              </button>
+            ) : null}
           </div>
         </>
       )}

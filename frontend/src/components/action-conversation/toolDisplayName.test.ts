@@ -22,6 +22,7 @@ const REGISTERED_TOOL_IDS = [
   'render_pdf_page',
   'render_html_page',
   'save_html_as_pdf',
+  'browser',
   'list',
   'glob',
   'grep',
@@ -81,6 +82,7 @@ describe('resolveToolDisplay', () => {
     ['Look At Document Pages', 'ページを見る', 'Look at pages'],
     ['Look At HTML Pages', 'HTML のページを見る', 'Look at HTML pages'],
     ['Save HTML As PDF', 'HTML を PDF に保存', 'Save HTML as PDF'],
+    ['Browser', 'ブラウザで確認', 'Check in the browser'],
   ])('resolves %s to the same tool in both languages', (label, ja, en) => {
     expect(resolveToolDisplay(label, 'ja')).toEqual({
       key: expect.any(String),

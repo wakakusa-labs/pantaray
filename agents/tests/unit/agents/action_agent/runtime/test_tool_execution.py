@@ -1603,14 +1603,14 @@ async def test_tool_finishing_after_an_outside_cancel_ends_canceled(
         )
 
     assert raised.value.tool_invocation_id == canceled_ids[0]
-    assert raised.value.finalized_output.output["error"]["error_type"] == (
-        ToolCallCanceled.__name__
-    )
     if after_cancel == "return":
         assert isinstance(raised.value.cause, ToolCallCanceled)
     status, output_json = _invocation_terminal(db_path, canceled_ids[0])
     assert status == "canceled"
     assert "ActionCanceledToolInvocation" in output_json
+    # The error step is saved with the output the cancel stored, not a new one.
+    assert raised.value.finalized_output.output == json.loads(output_json)
+    assert raised.value.finalized_output.owner_kind == "tool_invocation"
 
 
 @pytest.mark.asyncio

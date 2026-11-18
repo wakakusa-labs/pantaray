@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import sqlite3
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.tool_result import (
@@ -17,6 +19,7 @@ from pantaray_agents.tools.files.manifest_paths import (
     load_tool_results_root,
 )
 
+from ..storage.migrations import MigrationError
 from .action_file_read_memory import build_action_file_read_memory_input
 from .models import (
     TOOL_INVOCATION_TERMINAL_STATUSES,
@@ -27,7 +30,7 @@ from .models import (
     ToolOutputOwnerKind,
     ToolOutputStorageKind,
 )
-from .repository import load_tool_definition
+from .repository import _configure_connection, load_tool_definition
 from .repository.executions import (
     ToolInvocationTerminalStateError,
     load_tool_invocation_completion_context,
@@ -68,23 +71,6 @@ def canceled_tool_output() -> dict[str, JSONValue]:
     error = ToolCallCanceled()
     return build_runtime_tool_error_output(
         error_type=error.__class__.__name__, message=str(error)
-    )
-
-
-def cancel_recorded_first(error: BaseException) -> bool:
-    """Whether a terminal write was refused because a cancel had closed the row.
-
-    Cancelling an Action closes its in-flight invocations from outside the call
-    (``cancel_inflight_tool_invocation``) while the call itself can keep running
-    to its end. That cancel is the invocation's terminal fact; the call's own
-    late write losing to it is the expected end of the race, not a persistence
-    failure. Any other terminal conflict has no legitimate concurrent writer and
-    stays a failure.
-    """
-
-    return (
-        isinstance(error, ToolInvocationTerminalStateError)
-        and error.current_status == "canceled"
     )
 
 
@@ -140,6 +126,32 @@ class FinalizedToolOutput:
     search_text: str | None
     stdout_text: str | None
     stderr_text: str | None
+
+
+class ToolInvocationCanceledFirstError(ToolInvocationTerminalStateError):
+    """A terminal write lost to a cancel that had already closed the invocation.
+
+    Cancelling an Action closes its in-flight invocations from outside the call
+    (``cancel_inflight_tool_invocation``) while the call itself can keep running
+    to its end. That cancel is the invocation's terminal fact, so the late write
+    losing to it is the expected end of the race, not a persistence failure.
+    ``canceled_result`` is what the cancel stored: the call's result from now on.
+    Raised only once the late write left nothing behind; any other terminal
+    conflict has no legitimate concurrent writer and stays a plain failure.
+    """
+
+    def __init__(
+        self,
+        conflict: ToolInvocationTerminalStateError,
+        *,
+        canceled_result: FinalizedToolOutput,
+    ) -> None:
+        super().__init__(
+            invocation_id=conflict.invocation_id,
+            current_status=conflict.current_status,
+            requested_status=conflict.requested_status,
+        )
+        self.canceled_result = canceled_result
 
 
 def finalize_local_tool_result(
@@ -358,10 +370,63 @@ def _store_terminal_result(
         try:
             discard_stored_tool_result(stored)
         except OSError as cleanup_error:
+            # The result this write stored is now owned by no row. That is a
+            # storage failure of its own, whatever the write lost to.
+            logger.error(
+                "Tool result rollback failed; the stored result is orphaned: "
+                "invocation_id=%s completion_error=%s cleanup_error=%s",
+                owner.invocation_id,
+                completion_error.__class__.__name__,
+                cleanup_error,
+            )
             completion_error.add_note(f"tool result rollback failed: {cleanup_error}")
+            raise completion_error from cleanup_error
+        if (
+            isinstance(completion_error, ToolInvocationTerminalStateError)
+            and completion_error.current_status == "canceled"
+        ):
+            raise ToolInvocationCanceledFirstError(
+                completion_error,
+                canceled_result=_load_canceled_result(
+                    db_path=db_path,
+                    busy_timeout_ms=busy_timeout_ms,
+                    invocation_id=owner.invocation_id,
+                ),
+            ) from completion_error
         raise
     _release_durable_result(stored, owner_id=owner.invocation_id)
     return stored
+
+
+def _load_canceled_result(
+    *, db_path: Path, busy_timeout_ms: int, invocation_id: str
+) -> FinalizedToolOutput:
+    with sqlite3.connect(db_path) as connection:
+        _configure_connection(connection=connection, busy_timeout_ms=busy_timeout_ms)
+        row = connection.execute(
+            """
+            SELECT outputs.output_json, outputs.output_storage_kind,
+                   outputs.search_text, outputs.stdout_text, outputs.stderr_text
+            FROM tool_invocations AS invocations
+            JOIN tool_outputs AS outputs
+              ON outputs.invocation_id = invocations.invocation_id
+             AND outputs.output_id = invocations.invocation_id
+            WHERE invocations.invocation_id = ? AND invocations.status = 'canceled'
+            """,
+            (invocation_id,),
+        ).fetchone()
+    if row is None or row["output_storage_kind"] not in {"inline_json", "action_file"}:
+        raise MigrationError(
+            f"canceled tool invocation has no stored result: {invocation_id}"
+        )
+    return FinalizedToolOutput(
+        output=cast(JSONValue, json.loads(row["output_json"])),
+        storage_kind=cast(ToolOutputStorageKind, row["output_storage_kind"]),
+        owner_kind="tool_invocation",
+        search_text=row["search_text"],
+        stdout_text=row["stdout_text"],
+        stderr_text=row["stderr_text"],
+    )
 
 
 def _release_durable_result(
@@ -459,9 +524,9 @@ __all__ = [
     "TIMEOUT_CLEANUP_EVENT_TYPE",
     "TIMEOUT_TOOL_OUTPUT_ERROR_TYPE",
     "ToolCallCanceled",
+    "ToolInvocationCanceledFirstError",
     "ToolResultCompletionScope",
     "ToolResultFinalizationRequest",
-    "cancel_recorded_first",
     "canceled_tool_output",
     "finalize_local_tool_result",
 ]

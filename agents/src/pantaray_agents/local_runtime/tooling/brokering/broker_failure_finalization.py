@@ -136,20 +136,25 @@ def finalize_canceled_broker_invocation(
     )
 
 
-def canceled_broker_tool_outcome(*, invocation_id: str) -> BrokerToolOutcome:
-    """The call's result once a cancel recorded first: canceled, written by no one.
+def canceled_broker_tool_outcome(
+    *, invocation_id: str, canceled_result: FinalizedToolOutput
+) -> BrokerToolOutcome:
+    """The call's result once a cancel recorded first: what the cancel stored.
 
-    The row already holds the canceler's output, so nothing is persisted here.
-    Whatever the call produced after the cancel is superseded by it.
+    Nothing is persisted here; whatever the call produced after the cancel is
+    superseded by it.
     """
 
     canceled = ToolCallCanceled()
     return BrokerToolOutcome(
         status="error",
-        output=canceled_tool_output(),
-        output_storage_kind="inline_json",
+        output=canceled_result.output,
+        output_storage_kind=canceled_result.storage_kind,
         failure=BrokerToolFailure(
             error_type=canceled.__class__.__name__, message=str(canceled)
         ),
         tool_invocation_id=invocation_id,
+        search_text=canceled_result.search_text,
+        stdout_text=canceled_result.stdout_text,
+        stderr_text=canceled_result.stderr_text,
     )

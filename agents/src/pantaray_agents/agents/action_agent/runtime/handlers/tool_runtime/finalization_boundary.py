@@ -23,9 +23,9 @@ from pantaray_agents.local_runtime.tooling.tool_result_finalization import (
     FinalizedToolOutput,
     InvocationToolResultOwner,
     ToolCallCanceled,
+    ToolInvocationCanceledFirstError,
     ToolResultCompletionScope,
     ToolResultFinalizationRequest,
-    cancel_recorded_first,
     canceled_tool_output,
     finalize_local_tool_result,
 )
@@ -147,8 +147,9 @@ def finalize_action_tool_invocation(
     a cancelled execution records `canceled` rather than `failed`.
 
     When a cancel closed the row first, nothing is written and the call ends
-    canceled: a `result` is superseded, so it raises the canceled failure in
-    its place; an `error` already ends the call, so it gets the canceled output.
+    with what the cancel stored: a `result` is superseded, so it raises the
+    canceled failure in its place; an `error` already ends the call, so it gets
+    the cancel's output.
     """
     if invocation_id is None:
         return None
@@ -197,23 +198,15 @@ def finalize_action_tool_invocation(
         )
     except ToolOutputValidationError:
         raise
+    except ToolInvocationCanceledFirstError as canceled_first:
+        if result is None:
+            return canceled_first.canceled_result
+        raise FinalizedToolExecutionError(
+            cause=ToolCallCanceled(),
+            finalized_output=canceled_first.canceled_result,
+            tool_invocation_id=invocation_id,
+        ) from canceled_first
     except Exception as exc:  # noqa: BLE001
-        if cancel_recorded_first(exc):
-            canceled = FinalizedToolOutput(
-                output=canceled_tool_output(),
-                storage_kind="inline_json",
-                owner_kind="tool_invocation",
-                search_text=None,
-                stdout_text=None,
-                stderr_text=None,
-            )
-            if result is None:
-                return canceled
-            raise FinalizedToolExecutionError(
-                cause=ToolCallCanceled(),
-                finalized_output=canceled,
-                tool_invocation_id=invocation_id,
-            ) from exc
         log_structured_event(
             logger,
             level="error",

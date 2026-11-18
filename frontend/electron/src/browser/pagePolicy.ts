@@ -50,7 +50,6 @@ const DEFAULT_PORTS: Readonly<Record<string, number>> = {
   'ws:': 80,
   'wss:': 443,
 };
-const LOOPBACK_ADDRESSES = new Set(['::1', '::', '0.0.0.0']);
 const WEB_SOCKET_SCHEMES = new Set(['ws:', 'wss:']);
 /** The methods that only read; anything else sends data a page could lose to its host. */
 const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
@@ -225,18 +224,29 @@ export function reachedHost(url: URL): ContactedHost | null {
 }
 
 /**
- * Whether a normalized host is this machine: the names Chromium resolves to loopback, 127/8,
- * `::1`, the unspecified addresses (a connection to them reaches this machine), and IPv4 mapped
- * into IPv6, which the URL parser writes in hex (`::ffff:7f00:1`).
+ * A host name or IP literal (IPv6 without brackets) in `reachedHost`'s form, so an approved
+ * host compares equal to the request that reaches it; null when it does not parse as a host.
+ */
+function normalizedHost(host: string): string | null {
+  try {
+    return reachedHost(new URL(`http://${host.includes(':') ? `[${host}]` : host}/`))?.host ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether a normalized host names this machine: the names Chromium resolves to loopback, 127/8
+ * and `::1`. Another name for it is judged as an external host, which only narrows it.
  */
 function isLoopbackHost(host: string): boolean {
   const name = host.replace(/\.$/, '');
-  if (name === 'localhost' || name.endsWith('.localhost')) return true;
-  if (LOOPBACK_ADDRESSES.has(host) || /^127\.\d+\.\d+\.\d+$/.test(host)) return true;
-  const mapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(host);
-  if (mapped === null) return false;
-  const high = parseInt(mapped[1], 16);
-  return high >> 8 === 127 || (high === 0 && parseInt(mapped[2], 16) === 0);
+  return (
+    name === 'localhost' ||
+    name.endsWith('.localhost') ||
+    host === '::1' ||
+    /^127\.\d+\.\d+\.\d+$/.test(host)
+  );
 }
 
 export type BrowserRequestDecision =
@@ -248,9 +258,9 @@ export type BrowserRequestDecision =
  *
  * - A local scheme reaches no host; `serveFile` judges a file.
  * - With the network off nothing leaves the page, loopback included.
- * - With it on, loopback takes every method except at the backend's port, which every loopback
- *   name reaches. An external host takes reads only; another method or a WebSocket handshake
- *   needs the host among the run's `write_hosts`.
+ * - With it on, nothing goes to the backend's port, under any host name: a name can resolve to
+ *   this machine. Loopback takes every method. An external host takes reads only; another
+ *   method or a WebSocket handshake needs the host among the run's `write_hosts`.
  * - Past `BROWSER_MAX_CONTACTED_HOSTS` a new host is refused, so every host reached is reported.
  *   `contacted` is what the session reached so far.
  */
@@ -276,11 +286,13 @@ export function decideBrowserRequest(
   if (!context.policy.allow_network) return refuse('network_off');
   const reached = reachedHost(url);
   if (reached === null) return refuse('not_allowed');
-  if (isLoopbackHost(reached.host)) {
-    if (reached.port === context.backendPort) return refuse('not_allowed');
-  } else if (
+  // The backend listens on a local high port, so an external site on that very port is refused
+  // too; that is the accepted cost of judging without resolving names.
+  if (reached.port === context.backendPort) return refuse('not_allowed');
+  if (
+    !isLoopbackHost(reached.host) &&
     (WEB_SOCKET_SCHEMES.has(url.protocol) || !READ_METHODS.has(request.method)) &&
-    !context.policy.write_hosts.some((host) => host.toLowerCase() === reached.host)
+    !context.policy.write_hosts.some((host) => normalizedHost(host) === reached.host)
   ) {
     return refuse('write_not_approved');
   }

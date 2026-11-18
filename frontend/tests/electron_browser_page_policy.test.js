@@ -107,9 +107,10 @@ test('with the network off nothing leaves the page, loopback included', () => {
   }
 });
 
-// Catches: a page reaching the backend's own API through any name for this machine, or a
-// local dev server refused a write or its live-reload socket.
-test('with the network on, loopback takes every method except at the backend', () => {
+// Catches: a page reaching the backend's own API through any name for this machine, a DNS
+// name that resolves to it included, or a local dev server refused a write or its live-reload
+// socket.
+test('with the network on, loopback takes every method and nothing reaches the backend', () => {
   const cases = [
     ['http://localhost:3000/', 'GET', reached('localhost', 3000)],
     ['http://localhost:3000/api/items', 'POST', reached('localhost', 3000)],
@@ -128,6 +129,8 @@ test('with the network on, loopback takes every method except at the backend', (
     [`http://[::ffff:127.0.0.1]:${BACKEND_PORT}/`, 'GET', refused('not_allowed')],
     [`http://api.localhost:${BACKEND_PORT}/`, 'GET', refused('not_allowed')],
     [`ws://127.0.0.1:${BACKEND_PORT}/ws`, 'GET', refused('not_allowed')],
+    [`http://alias.example:${BACKEND_PORT}/health`, 'GET', refused('not_allowed')],
+    [`https://alias.example:${BACKEND_PORT}/`, 'HEAD', refused('not_allowed')],
   ];
   for (const [url, method, expected] of cases) {
     assert.deepEqual(decide(url, method), expected, `${method} ${url}`);
@@ -136,9 +139,12 @@ test('with the network on, loopback takes every method except at the backend', (
 
 // Catches: a page sending data to an external host it was not approved to write to, by
 // method or WebSocket, a name that only looks like loopback treated as loopback, or an
-// approved host missed by its letter case or IPv6 brackets.
+// approved host missed by its letter case, IPv6 brackets or another spelling of its address.
 test('an external host takes reads, and writes only once approved', () => {
-  const approved = { writeHosts: ['Forms.Example.com', '2001:db8::1'] };
+  // `:` passes the contract's host rule yet names no host; it matches nothing.
+  const approved = {
+    writeHosts: ['Forms.Example.com', '2001:0db8:0:0:0:0:0:1', '::ffff:192.0.2.1', ':'],
+  };
   const cases = [
     ['https://example.com/', 'GET', {}, reached('example.com', 443)],
     ['https://example.com/', 'HEAD', {}, reached('example.com', 443)],
@@ -154,6 +160,9 @@ test('an external host takes reads, and writes only once approved', () => {
     ['https://forms.example.com/submit', 'POST', approved, reached('forms.example.com', 443)],
     ['wss://forms.example.com/live', 'GET', approved, reached('forms.example.com', 443)],
     ['http://[2001:DB8::1]/submit', 'POST', approved, reached('2001:db8::1', 80)],
+    ['http://[::ffff:c000:201]/submit', 'POST', approved, reached('::ffff:c000:201', 80)],
+    ['http://[::ffff:192.0.2.1]/submit', 'PUT', approved, reached('::ffff:c000:201', 80)],
+    ['http://[::ffff:192.0.2.2]/submit', 'POST', approved, refused('write_not_approved')],
     ['https://other.example.com/submit', 'POST', approved, refused('write_not_approved')],
     ['ftp://example.com/a', 'GET', {}, refused('not_allowed')],
     ['chrome://settings', 'GET', {}, refused('not_allowed')],

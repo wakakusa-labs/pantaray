@@ -9,6 +9,7 @@ from pantaray_agents.local_runtime.tooling.repository.command_invocation_audits 
 )
 from pantaray_agents.local_runtime.tooling.sandbox.sandbox_denial import (
     NETWORK_DENIAL_HINT,
+    NETWORK_OFF_DENIAL_HINT,
     WRITE_FOLDER_REQUEST_HINT,
     is_likely_sandbox_denied,
     sandbox_denial_hint,
@@ -167,13 +168,56 @@ def test_a_refused_direct_connection_points_to_the_proxy(
     )
 
 
-def test_a_refused_connection_is_not_called_a_network_block_with_network_off(
+# Catches: with the network setting off, a refused connection or a dev server
+# that cannot listen on localhost read as a denied write (the model asks for
+# write folders that cannot help) or pointed to the proxy, which is not there.
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        # Seen with the real seatbelt helper and the network-off profile.
+        "Error: listen EPERM: operation not permitted 127.0.0.1:62606\n",
+        "Error: getaddrinfo ENOTFOUND localhost\n",
+        "curl: (7) Failed to connect to 127.0.0.1 port 62606 after 0 ms: "
+        "Couldn't connect to server\n",
+        "ping: sendto: Operation not permitted\n",
+        "Error: connect EPERM 127.0.0.1:62606 - Local (0.0.0.0:0)\n",
+        "urllib.error.URLError: <urlopen error [Errno 1] Operation not permitted>\n",
+        # python3 -m http.server --bind 127.0.0.1
+        '  File "/usr/lib/python3.12/socketserver.py", line 478, in server_bind\n'
+        "    self.socket.bind(self.server_address)\n"
+        "PermissionError: [Errno 1] Operation not permitted\n",
+    ],
+)
+def test_a_refused_connection_with_network_off_points_to_the_setting(
+    tmp_path: Path, stderr: str
+) -> None:
+    assert _hint(cwd=tmp_path, stderr=stderr) == NETWORK_OFF_DENIAL_HINT
+
+
+# Catches: the network-off check swallowing a genuine denied write, also one
+# whose path holds a socket word.
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "touch: out.txt: Operation not permitted\n",
+        "touch: connection.log: Operation not permitted\n",
+    ],
+)
+def test_a_denied_write_with_network_off_still_asks_for_write_folders(
+    tmp_path: Path, stderr: str
+) -> None:
+    assert _hint(cwd=tmp_path, stderr=stderr) == WRITE_FOLDER_REQUEST_HINT
+
+
+# Catches: the network-off hint replacing the refusal of a secret file, which
+# tells the model not to look for another way in.
+def test_a_denied_secret_file_with_network_off_is_still_withheld(
     tmp_path: Path,
 ) -> None:
-    # With network off the proxy is not there to point to.
-    stderr = "ping: sendto: Operation not permitted\n"
+    hint = _hint(cwd=tmp_path, stderr="cat: .env.connection: Operation not permitted\n")
 
-    assert _hint(cwd=tmp_path, stderr=stderr) == WRITE_FOLDER_REQUEST_HINT
+    assert hint is not None
+    assert "withheld" in hint
 
 
 def test_a_name_that_does_not_resolve_is_not_called_a_network_block(

@@ -200,6 +200,7 @@ PROCESS_OUTPUT_SCHEMA: dict[str, JSONValue] = {
         "stdout_dropped_bytes": {"type": "integer"},
         "stderr_dropped_bytes": {"type": "integer"},
         "network": _NETWORK_OUTPUT_SCHEMA,
+        "llm_feedback": {"type": "string"},
     },
     "required": [
         "process_id",

@@ -39,6 +39,7 @@ from ..sandbox.process_supervisor import (
     stop_owner_processes,
     stop_process,
 )
+from ..sandbox.sandbox_denial import sandbox_denial_hint
 from .broker_common import BrokerContext
 from .broker_outcome import UnprojectedBrokerToolOutcome
 from .broker_protocol import ValidatedCommandRequest
@@ -83,6 +84,24 @@ class ProcessToolOutput(BaseModel):
     stdout_dropped_bytes: int
     stderr_dropped_bytes: int
     network: list[NetworkDestination]
+    # For an exit the sandbox may have caused, as a one-shot command's error has.
+    llm_feedback: str | None = None
+
+
+def _denial_hint(state: ProcessState) -> str | None:
+    """The one-shot command's hint, read from the output this call returns."""
+
+    if state.exit_code is None:
+        return None
+    return sandbox_denial_hint(
+        terminal_outcome=_terminal_outcome(state),
+        exit_code=state.exit_code,
+        stdout=state.stdout.text,
+        stderr=state.stderr.text,
+        cwd=Path(state.request.cwd),
+        credentials_readable=state.request.use_login_environment,
+        network_allowed=state.request.network_policy == "allow",
+    )
 
 
 def _process_outcome(state: ProcessState) -> UnprojectedBrokerToolOutcome:
@@ -97,6 +116,7 @@ def _process_outcome(state: ProcessState) -> UnprojectedBrokerToolOutcome:
         stdout_dropped_bytes=state.stdout.dropped_bytes,
         stderr_dropped_bytes=state.stderr.dropped_bytes,
         network=list(state.network),
+        llm_feedback=_denial_hint(state),
     )
     return UnprojectedBrokerToolOutcome(
         status="success",

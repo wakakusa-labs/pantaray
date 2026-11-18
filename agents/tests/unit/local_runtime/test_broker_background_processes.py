@@ -40,6 +40,9 @@ from pantaray_agents.local_runtime.tooling.sandbox import runtime_policy
 from pantaray_agents.local_runtime.tooling.sandbox.process_supervisor import (
     stop_owner_processes,
 )
+from pantaray_agents.local_runtime.tooling.sandbox.sandbox_denial import (
+    NETWORK_OFF_DENIAL_HINT,
+)
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import BrokerPolicyError
 
@@ -337,7 +340,8 @@ async def test_a_start_cancelled_in_its_window_is_audited_as_canceled(
 
 
 # Catches: a command that ends at once being reported as running, or its
-# output lost, when it ends within the start window.
+# output lost, when it ends within the start window, and its own failure
+# called a sandbox block.
 @needs_seatbelt
 @pytest.mark.asyncio
 async def test_a_command_that_ends_in_the_start_window_returns_its_end(
@@ -352,6 +356,26 @@ async def test_a_command_that_ends_in_the_start_window_returns_its_end(
     assert ended["exit_code"] == 3
     assert ended["stderr"] == "port in use\n"
     assert action.audit("start") == ("exited", 3, None)
+    assert "llm_feedback" not in ended
+
+
+# Catches: a dev server that cannot listen because the network setting is off
+# ending with no hint, so the model cannot tell the setting blocked it.
+@needs_seatbelt
+@pytest.mark.asyncio
+async def test_a_background_command_blocked_by_the_network_setting_gets_the_hint(
+    action: _Action,
+) -> None:
+    # Node's error under the network-off profile, as the real helper showed it.
+    stderr = "Error: listen EPERM: operation not permitted 127.0.0.1:62606"
+    ended = await action.call(
+        "bash",
+        {"command": f"echo '{stderr}' >&2; exit 1", "run_in_background": True},
+        request_id="start",
+    )
+
+    assert ended["status"] == "exited"
+    assert ended["llm_feedback"] == NETWORK_OFF_DENIAL_HINT
 
 
 # Catches: run_in_background left out of the approval summary, which would let

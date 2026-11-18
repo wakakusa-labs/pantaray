@@ -68,6 +68,31 @@ _NETWORK_DENIAL_MARKERS = (
 # is a socket call, not a file write (ssh, nc, psql, ping, Python's urllib).
 _SOCKET_CALL_WORDS = ("connect", "sendto", "socket", "urlopen")
 
+NETWORK_OFF_DENIAL_HINT = (
+    "This may have been blocked because the user's command network setting is "
+    "off, which blocks every connection, localhost included. With it on, servers "
+    "on localhost and HTTP(S) through Pantaray's proxy work, but direct "
+    "connections to other hosts (ssh to a host, database clients) stay blocked. "
+    'If the task needs it, ask the user to turn on "Allow network access for '
+    'commands" in Settings.'
+)
+# With the network off, the diagnostics of a refused socket operation, as Node,
+# curl, Python's urllib and ping print them under the network-off profile. Each
+# names the operation, so a path that holds one of the words is not matched.
+_NETWORK_OFF_DENIAL_MARKERS = (
+    *_NETWORK_DENIAL_MARKERS,
+    "listen eperm",
+    "getaddrinfo enotfound localhost",
+    "failed to connect to localhost",
+    "failed to connect to 127.0.0.1",
+    "<urlopen error [errno 1] operation not permitted>",
+    "sendto: operation not permitted",
+)
+# Python's servers (http.server) print the refused bind() as a traceback whose
+# error line names no call, so both lines are needed.
+_PYTHON_BIND_CALL = "socket.bind("
+_PYTHON_EPERM = "permissionerror: [errno 1] operation not permitted"
+
 
 # What an error line can name a path as: `cat: .env: ...`, `[Errno 1] ...: '.env'`.
 _PATH_TOKEN = re.compile(r"[^\s:'\"`]+")
@@ -88,9 +113,10 @@ def sandbox_denial_hint(
     A denial that names a file holding secrets gets the file tools' refusal,
     whatever the exit status (grep exits 2): asking for write folders cannot
     fix it, and the model must not look for another way in. Neither can it fix
-    one that names the Pantaray-wide AGENTS.md, which only apply_patch writes. With network on, a
-    refused direct connection is told apart from a refused write first: both
-    can say "Operation not permitted".
+    one that names the Pantaray-wide AGENTS.md, which only apply_patch writes.
+    A refused connection is told apart from a refused write: both can say
+    "Operation not permitted". With network on that comes first; with network
+    off it comes after the refusals that name a file.
     """
 
     if terminal_outcome != "exited" or exit_code == 0:
@@ -109,6 +135,8 @@ def sandbox_denial_hint(
                 return f"{error} {error.fix_hint}"
             if names_pantaray_agents_md(cwd / token):
                 return PANTARAY_AGENTS_MD_COMMAND_HINT
+    if not network_allowed and _is_likely_network_off_denied(f"{stderr}\n{stdout}"):
+        return NETWORK_OFF_DENIAL_HINT
     if is_likely_sandbox_denied(
         terminal_outcome=terminal_outcome,
         exit_code=exit_code,
@@ -130,6 +158,13 @@ def _is_likely_network_denied(output: str) -> bool:
     return False
 
 
+def _is_likely_network_off_denied(output: str) -> bool:
+    lowered = output.lower()
+    if _PYTHON_BIND_CALL in lowered and _PYTHON_EPERM in lowered:
+        return True
+    return any(marker in lowered for marker in _NETWORK_OFF_DENIAL_MARKERS)
+
+
 def is_likely_sandbox_denied(
     *, terminal_outcome: TerminalOutcome, exit_code: int, stdout: str, stderr: str
 ) -> bool:
@@ -148,6 +183,7 @@ def is_likely_sandbox_denied(
 
 __all__ = [
     "NETWORK_DENIAL_HINT",
+    "NETWORK_OFF_DENIAL_HINT",
     "WRITE_FOLDER_REQUEST_HINT",
     "is_likely_sandbox_denied",
     "sandbox_denial_hint",

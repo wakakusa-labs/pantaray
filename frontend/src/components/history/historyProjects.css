@@ -360,7 +360,11 @@
   color: var(--fog-text);
 }
 
-/* In the dialog the folders read at the body's size, one a line. */
+/* In the dialog the folders read at the body's size, one a line, wide enough for a full path. */
+.project-folders-dialog {
+  max-width: min(640px, calc(100vw - 32px));
+}
+
 .project-folders-dialog .history-project__path,
 .project-folders-dialog .project-folders__add {
   font-size: 14px;

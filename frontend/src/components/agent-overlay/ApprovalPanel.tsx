@@ -260,6 +260,10 @@ export function ApprovalPanel({
   );
 
   const question = display.reason ?? t(display.operationKey, display.operationVars);
+  // Like the login notice, this stays in view whether or not a reason leads.
+  const backgroundNotice = display.runsInBackground ? (
+    <ApprovalOperationText>{t('overlay.approvalRequired.backgroundNotice')}</ApprovalOperationText>
+  ) : null;
   let body;
   if (display.runsOutsideSandbox) {
     // The model says what the run is for; Pantaray, not the model, says what
@@ -299,6 +303,7 @@ export function ApprovalPanel({
             {t('overlay.approvalRequired.loginEnvironmentNotice')}
           </ApprovalOperationText>
         ) : null}
+        {backgroundNotice}
         {folderPaths ? (
           <ApprovalDetailGroup>
             <ApprovalDetailLabel>
@@ -319,6 +324,7 @@ export function ApprovalPanel({
     body = (
       <>
         <ApprovalOperationText>{question}</ApprovalOperationText>
+        {backgroundNotice}
         {folderPaths}
         {toolDetails}
       </>

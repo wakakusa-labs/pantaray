@@ -12,6 +12,7 @@ from pantaray_agents.local_runtime.runtime.action_approval_review import (
     action_request_words,
     declined_operations,
     ordered_conversation,
+    pending_operation,
     read_chat_words,
     read_relayed_words,
 )
@@ -34,6 +35,9 @@ from pantaray_agents.local_runtime.tooling.approval_review import (
     RequestTextNotByUser,
     UserMessage,
     build_approval_review_payload,
+)
+from pantaray_agents.local_runtime.tooling.brokering.command_approval_summaries import (
+    build_bash_summary,
 )
 from pantaray_agents.schema.agent.action_message import (
     ActionUserMessageInput,
@@ -347,6 +351,7 @@ def test_a_decline_is_read_against_what_the_user_wrote_after_it() -> None:
         command="git push origin main",
         cwd="/w",
         additional_write_folders=(),
+        run_in_background=False,
         justification=None,
     )
     ask = UserMessage("Push it to GitHub.")
@@ -387,6 +392,7 @@ def test_a_relayed_old_request_stays_before_the_decline_it_led_to() -> None:
         command="git push origin main",
         cwd="/w",
         additional_write_folders=(),
+        run_in_background=False,
         justification=None,
     )
     asked = ChatMessage("i1", "2026-11-18T00:01:00Z", "Push it to GitHub.")
@@ -405,3 +411,36 @@ def test_a_relayed_old_request_stays_before_the_decline_it_led_to() -> None:
     )
 
     assert conversation == (UserMessage("Push it to GitHub."), DeclinedOperation(push))
+
+
+# Catches: run_in_background dropped between the stored summary and the review,
+# so a command left running is reviewed as if it ended with the call.
+def test_a_command_left_running_reaches_the_review_as_such() -> None:
+    def operation(*, run_in_background: bool) -> dict[str, object]:
+        summary = build_bash_summary(
+            command="gh run watch",
+            cwd_relative_path="/w",
+            timeout_ms=120_000,
+            use_login_environment=True,
+            run_outside_sandbox=False,
+            run_in_background=run_in_background,
+            reason="Watch the CI run with your GitHub account.",
+        )
+        pending = pending_operation(tool_id="bash", summary=summary, args={})
+        assert pending is not None
+        request = ApprovalReviewRequest(
+            conversation=(UserMessage("Watch the CI run."),),
+            request_text_not_by_user=None,
+            operation=pending,
+            workspace_folders=("/w",),
+        )
+        rendered: dict[str, object] = json.loads(
+            build_approval_review_payload(request)
+        )["operation"]
+        return rendered
+
+    background = operation(run_in_background=True)
+    foreground = operation(run_in_background=False)
+
+    assert background == {**foreground, "run_in_background": True}
+    assert "run_in_background" not in foreground

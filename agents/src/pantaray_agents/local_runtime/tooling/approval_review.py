@@ -68,6 +68,9 @@ class PendingCommand:
     # None for a file tool, which runs in no folder.
     cwd: str | None
     additional_write_folders: tuple[str, ...]
+    # The command keeps running after the call, until the work ends or it is
+    # stopped. It never needs review by itself; the review weighs it.
+    run_in_background: bool
     justification: str | None
 
 
@@ -163,6 +166,8 @@ def _render_operation(operation: PendingOperation) -> dict[str, JSONValue]:
                 "command": operation.command,
                 "cwd": operation.cwd,
                 "additional_write_folders": list(operation.additional_write_folders),
+                # Only a command left running carries it.
+                **({"run_in_background": True} if operation.run_in_background else {}),
                 "justification": operation.justification,
             }
         case PendingIntegrationWrite():

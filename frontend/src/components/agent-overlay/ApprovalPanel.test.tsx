@@ -88,6 +88,11 @@ const LOGIN_NOTICE = {
   en: 'It runs with access to your login information.',
 } as const;
 
+const BACKGROUND_NOTICE = {
+  ja: '作業が終わるか止めるまで動き続けます。',
+  en: 'It keeps running until the work ends or it is stopped.',
+} as const;
+
 function renderPanel(language: UiLanguage, blocker: ActionApprovalBlocker) {
   const handlers = {
     onDecide: vi.fn(),
@@ -365,6 +370,25 @@ describe('ApprovalPanel', () => {
       expect(screen.getByText(operation)).toBeTruthy();
       expect(screen.getByText('gh pr list').closest('details')).toBeNull();
       expect(container.querySelector('details')).toBeNull();
+      cleanup();
+    }
+  });
+
+  // Catches: a command left running approved as if it ended with the call, because
+  // the card looked the same as for a call in the foreground.
+  it('says a command keeps running, with or without a reason', () => {
+    for (const language of ['ja', 'en'] as const) {
+      for (const reason of [COMMAND_REASON, null]) {
+        renderPanel(
+          language,
+          bashBlocker({ ...LOGIN_ONLY_COMMAND_SUMMARY, reason, run_in_background: true })
+        );
+
+        expect(screen.getByText(BACKGROUND_NOTICE[language]).closest('details')).toBeNull();
+        cleanup();
+      }
+      renderPanel(language, bashBlocker({ ...LOGIN_ONLY_COMMAND_SUMMARY, reason: COMMAND_REASON }));
+      expect(screen.queryByText(BACKGROUND_NOTICE[language])).toBeNull();
       cleanup();
     }
   });

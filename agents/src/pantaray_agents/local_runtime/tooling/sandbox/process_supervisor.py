@@ -79,11 +79,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class ProcessState:
-    """A process as a start, read or stop finds it.
-
-    ``stdout`` and ``stderr`` hold what arrived since the previous call that
-    returned this process; the byte totals and ``network`` cover its whole life.
-    """
+    """A process as a call finds it: output since the previous call that
+    returned it; byte totals and ``network`` over its whole life."""
 
     process_id: str
     # The call that started it, whose audit row the process's end belongs to.
@@ -108,6 +105,10 @@ class UnknownProcessError(LookupError):
         super().__init__(f"no process {process_id!r} in this run")
         self.process_id = process_id
         self.running_ids = running_ids
+
+
+class ProcessRunEndingError(RuntimeError):
+    """The run is stopping its processes; it starts no more."""
 
 
 class ProcessLimitError(RuntimeError):
@@ -142,6 +143,8 @@ class _Process:
     ended: asyncio.Event = field(default_factory=asyncio.Event)
     end: _End | None = None
     stop_sent: bool = False
+    # Set when the supervisor killed a helper that did not report in time.
+    unreported_error: str | None = None
     # Held so the loop, which keeps tasks only weakly, does not drop it.
     watcher: asyncio.Task[None] | None = None
 
@@ -211,7 +214,8 @@ async def _read_messages(process: _Process) -> _End:
         return _End(status="failed", error=f"invalid command sandbox message: {exc}")
     return _End(
         status="failed",
-        error="command sandbox ended without reporting the command's end",
+        error=process.unreported_error
+        or "command sandbox ended without reporting the command's end",
     )
 
 
@@ -251,6 +255,25 @@ async def _stop(process: _Process) -> None:
             await process.helper.stdin.drain()
         except (BrokenPipeError, ConnectionResetError):
             pass  # The helper is gone; its watcher records how it ended.
+    # A command can freeze the helper (SIGSTOP to their shared group).
+    deadline_ms = (
+        runtime_policy.PROCESS_STOP_GRACE_MS
+        + runtime_policy.PROCESS_OUTPUT_DRAIN_MS
+        + runtime_policy.PROCESS_STOP_REPORT_MARGIN_MS
+    )
+    with suppress(TimeoutError):
+        async with asyncio.timeout(deadline_ms / 1000):
+            await process.ended.wait()
+            return
+    # Only while unreaped: a reaped helper's pid may belong to someone else.
+    if process.helper.returncode is None:
+        process.unreported_error = (
+            f"command sandbox did not report the stop within {deadline_ms} ms"
+        )
+        # Also ends a stopped process; the watcher, seeing the output end,
+        # records and releases it as for any helper death.
+        with suppress(ProcessLookupError, PermissionError):
+            os.killpg(process.helper.pid, signal.SIGKILL)
     await process.ended.wait()
 
 
@@ -262,13 +285,12 @@ class _ProcessSupervisor:
         self._thread_lock = threading.Lock()
         self._loop: asyncio.AbstractEventLoop | None = None
         # Per owner process id, its processes by id. Supervisor loop only.
-        # Design limit: an ended process stays, with its unread output, until
-        # its run ends; forget ended ones on read if runs are seen to start
-        # hundreds.
+        # Design limit: ended processes stay, unread output included, until the
+        # run ends; forget them on read if runs are seen to start hundreds.
         self._owners: dict[str, dict[str, _Process]] = {}
-        # Serializes launches, so the per-run limit holds, against each other
-        # and against a run's end.
+        # Serializes launches (for the per-run limit) and a run's end.
         self._start_lock = asyncio.Lock()
+        self._closing: set[str] = set()  # Owners whose run end is stopping.
         self._background: set[asyncio.Task[None]] = set()
 
     def ensure_loop(self) -> asyncio.AbstractEventLoop:
@@ -296,15 +318,13 @@ class _ProcessSupervisor:
         owner_process_id: str,
         request: ValidatedCommandRequest,
     ) -> ProcessState:
-        """Start ``request``'s command for the run ``owner_process_id``.
+        """Start the command for the run: ``running``, or ended within the window.
 
-        Returns it ``running`` with its output so far or, when it ended within
-        the start window, ended. Raises ``ProcessLimitError`` when the run
-        already has ``PROCESS_RUN_LIMIT`` running, ``EgressProxyStartError``
-        when its network cannot be set up, and the resource store's
+        Raises ``ProcessLimitError`` at ``PROCESS_RUN_LIMIT``,
+        ``ProcessRunEndingError`` while the run's end stops its processes,
+        ``EgressProxyStartError`` when its network cannot be set up, and
         ``ToolRuntimeResourceSessionConflictError`` when the run or the
-        starting call no longer runs. Cancelling the start stops the process.
-        """
+        starting call no longer runs. Cancelling the start stops the process."""
 
         # The launch is not cancelled with the caller, which could otherwise
         # interrupt it between spawning the helper and recording it.
@@ -352,6 +372,8 @@ class _ProcessSupervisor:
         if tool_invocation_id is None:
             raise ValueError("a long-running process needs the call that starts it")
         async with self._start_lock, AsyncExitStack() as held:
+            if owner_process_id in self._closing:
+                raise ProcessRunEndingError(f"run {owner_process_id!r} is ending")
             processes = self._owners.setdefault(owner_process_id, {})
             running_ids = _running_ids(processes)
             if len(running_ids) >= runtime_policy.PROCESS_RUN_LIMIT:
@@ -465,10 +487,18 @@ class _ProcessSupervisor:
 
         async with self._start_lock:
             processes = self._owners.pop(owner_process_id, {})
+            self._closing.add(owner_process_id)
+
+        async def stop_all() -> None:
+            try:
+                await asyncio.gather(
+                    *(_stop(process) for process in processes.values())
+                )
+            finally:
+                self._closing.discard(owner_process_id)
+
         # Not cancelled with the caller: nothing would stop them after the pop.
-        await asyncio.shield(
-            asyncio.gather(*(_stop(process) for process in processes.values()))
-        )
+        await asyncio.shield(stop_all())
         return tuple(process.take_state() for process in processes.values())
 
 
@@ -499,6 +529,7 @@ stop_owner_processes = _on_supervisor_loop(_SUPERVISOR.stop_owner)
 
 __all__ = [
     "ProcessLimitError",
+    "ProcessRunEndingError",
     "ProcessState",
     "ProcessStatus",
     "StreamOutput",

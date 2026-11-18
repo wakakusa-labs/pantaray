@@ -36,6 +36,9 @@ PROCESS_START_WINDOW_MS = 2_000
 PROCESS_STOP_GRACE_MS = 3_000
 # How long the helper still forwards output once the command has exited.
 PROCESS_OUTPUT_DRAIN_MS = 500
+# How long past the grace and the drain a stop waits for the helper's report
+# before killing its group itself (a command can freeze the helper).
+PROCESS_STOP_REPORT_MARGIN_MS = 2_000
 # Unread output kept per stream between reads: its first and last halves.
 PROCESS_RETAINED_OUTPUT_BYTES = OUTPUT_FLOOR_BYTES
 # Processes one run may have running at once.

@@ -68,6 +68,21 @@ _NETWORK_DENIAL_MARKERS = (
 # is a socket call, not a file write (ssh, nc, psql, ping, Python's urllib).
 _SOCKET_CALL_WORDS = ("connect", "sendto", "socket", "urlopen")
 
+NETWORK_OFF_DENIAL_HINT = (
+    "This may have been blocked because the user's command network setting is "
+    "off, which blocks every connection, localhost included: a server cannot "
+    "listen, and nothing can reach one. If the task needs it, tell the user it "
+    'works once they turn on "Allow network access for commands" in Settings.'
+)
+# With the network off, how a dev server and its clients fail on localhost (seen
+# with Node and curl under the network-off profile).
+_NETWORK_OFF_DENIAL_MARKERS = (
+    "listen eperm",
+    "getaddrinfo enotfound localhost",
+    "failed to connect to localhost",
+    "failed to connect to 127.0.0.1",
+)
+
 
 # What an error line can name a path as: `cat: .env: ...`, `[Errno 1] ...: '.env'`.
 _PATH_TOKEN = re.compile(r"[^\s:'\"`]+")
@@ -88,15 +103,18 @@ def sandbox_denial_hint(
     A denial that names a file holding secrets gets the file tools' refusal,
     whatever the exit status (grep exits 2): asking for write folders cannot
     fix it, and the model must not look for another way in. Neither can it fix
-    one that names the Pantaray-wide AGENTS.md, which only apply_patch writes. With network on, a
-    refused direct connection is told apart from a refused write first: both
-    can say "Operation not permitted".
+    one that names the Pantaray-wide AGENTS.md, which only apply_patch writes. A
+    refused connection is told apart from a refused write first: both can say
+    "Operation not permitted".
     """
 
     if terminal_outcome != "exited" or exit_code == 0:
         return None
-    if network_allowed and _is_likely_network_denied(f"{stderr}\n{stdout}"):
-        return NETWORK_DENIAL_HINT
+    if network_allowed:
+        if _is_likely_network_denied(f"{stderr}\n{stdout}"):
+            return NETWORK_DENIAL_HINT
+    elif _is_likely_network_off_denied(f"{stderr}\n{stdout}"):
+        return NETWORK_OFF_DENIAL_HINT
     for line in f"{stderr}\n{stdout}".splitlines():
         if not any(keyword in line.lower() for keyword in _DENIAL_KEYWORDS):
             continue
@@ -130,6 +148,13 @@ def _is_likely_network_denied(output: str) -> bool:
     return False
 
 
+def _is_likely_network_off_denied(output: str) -> bool:
+    lowered = output.lower()
+    return _is_likely_network_denied(output) or any(
+        marker in lowered for marker in _NETWORK_OFF_DENIAL_MARKERS
+    )
+
+
 def is_likely_sandbox_denied(
     *, terminal_outcome: TerminalOutcome, exit_code: int, stdout: str, stderr: str
 ) -> bool:
@@ -148,6 +173,7 @@ def is_likely_sandbox_denied(
 
 __all__ = [
     "NETWORK_DENIAL_HINT",
+    "NETWORK_OFF_DENIAL_HINT",
     "WRITE_FOLDER_REQUEST_HINT",
     "is_likely_sandbox_denied",
     "sandbox_denial_hint",

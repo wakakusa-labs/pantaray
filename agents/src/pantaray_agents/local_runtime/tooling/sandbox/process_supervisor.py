@@ -85,6 +85,8 @@ class ProcessState:
     process_id: str
     # The call that started it, whose audit row the process's end belongs to.
     tool_invocation_id: str
+    # What it was started with, which tells how a failure may have been blocked.
+    request: ValidatedCommandRequest
     status: ProcessStatus
     exit_code: int | None
     signal: int | None
@@ -131,6 +133,7 @@ class _End:
 class _Process:
     process_id: str
     tool_invocation_id: str
+    request: ValidatedCommandRequest
     request_id: str
     helper: asyncio.subprocess.Process
     lease: EgressLease | None
@@ -153,6 +156,7 @@ class _Process:
         return ProcessState(
             process_id=self.process_id,
             tool_invocation_id=self.tool_invocation_id,
+            request=self.request,
             status=end.status,
             exit_code=end.exit_code,
             signal=end.signal,
@@ -436,6 +440,7 @@ class _ProcessSupervisor:
             process = _Process(
                 process_id=process_id,
                 tool_invocation_id=tool_invocation_id,
+                request=request,
                 request_id=sandbox_request.request_id,
                 helper=helper,
                 lease=lease,

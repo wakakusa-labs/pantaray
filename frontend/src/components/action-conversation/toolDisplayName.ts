@@ -254,6 +254,28 @@ const TOOL_DISPLAY_NAMES = {
     enRunning: '{subject}',
     mono: true,
   },
+  // run_in_background で動かし続けているコマンド。process_id は利用者には意味がないので
+  // 行には出さない。
+  read_process_output: {
+    agentName: 'Read Process Output',
+    icon: Terminal,
+    ja: 'コマンドの出力を確認',
+    en: 'Check command output',
+    jaDone: 'コマンドの出力を確認しました',
+    jaRunning: 'コマンドの出力を確認しています',
+    enDone: 'Checked command output',
+    enRunning: 'Checking command output',
+  },
+  stop_process: {
+    agentName: 'Stop Process',
+    icon: Terminal,
+    ja: 'コマンドを止める',
+    en: 'Stop a command',
+    jaDone: 'コマンドを止めました',
+    jaRunning: 'コマンドを止めています',
+    enDone: 'Stopped a command',
+    enRunning: 'Stopping a command',
+  },
   capture_screen: {
     agentName: 'Capture Screen',
     icon: Camera,

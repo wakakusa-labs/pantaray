@@ -43,6 +43,10 @@ PROCESS_STOP_REPORT_MARGIN_MS = 2_000
 PROCESS_RETAINED_OUTPUT_BYTES = OUTPUT_FLOOR_BYTES
 # Processes one run may have running at once.
 PROCESS_RUN_LIMIT = 4
+# How long read_process_output waits for a process to end, in seconds: the
+# default when the call names none, and the most a call may name.
+PROCESS_READ_WAIT_DEFAULT_SECONDS = 5
+PROCESS_READ_WAIT_MAX_SECONDS = 60
 
 
 @dataclass(frozen=True, slots=True)

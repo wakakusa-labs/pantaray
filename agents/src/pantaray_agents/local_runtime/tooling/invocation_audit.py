@@ -16,11 +16,13 @@ from .brokering.broker_common import (
     GLOB_TOOL_ID,
     GREP_TOOL_ID,
     LIST_TOOL_ID,
+    READ_PROCESS_OUTPUT_TOOL_ID,
     READ_TOOL_ID,
     RENDER_HTML_PAGE_TOOL_ID,
     RENDER_PDF_PAGE_TOOL_ID,
     RUN_PYTHON_TOOL_ID,
     SAVE_HTML_AS_PDF_TOOL_ID,
+    STOP_PROCESS_TOOL_ID,
 )
 from .brokering.broker_protocol import ApplyPatchToolArgs
 from .brokering.broker_structured_patch import extract_structured_patch_paths
@@ -54,6 +56,8 @@ BROKERED_TOOL_IDS = frozenset(
         SAVE_HTML_AS_PDF_TOOL_ID,
         BASH_TOOL_ID,
         RUN_PYTHON_TOOL_ID,
+        READ_PROCESS_OUTPUT_TOOL_ID,
+        STOP_PROCESS_TOOL_ID,
     }
 )
 
@@ -129,6 +133,7 @@ def _build_valid_command_summary_json_for_audit(
             timeout_ms=default_timeout_ms or 0,
             use_login_environment=args.get("use_login_environment") is True,
             run_outside_sandbox=args.get("run_outside_sandbox") is True,
+            run_in_background=args.get("run_in_background") is True,
             reason=_justification(args),
         )
     if tool_id == RUN_PYTHON_TOOL_ID:

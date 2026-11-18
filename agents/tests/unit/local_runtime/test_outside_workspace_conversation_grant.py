@@ -333,6 +333,7 @@ async def test_conversation_grant_opens_every_folder_of_the_approval(
         timeout_ms=1_000,
         use_login_environment=False,
         run_outside_sandbox=False,
+        run_in_background=False,
         reason=None,
         outside_workspace_folders=(outside, second),
     )
@@ -490,6 +491,7 @@ def test_an_approval_of_several_folders_covers_a_call_only_once_each_is_open(
             timeout_ms=1_000,
             use_login_environment=False,
             run_outside_sandbox=False,
+            run_in_background=False,
             reason=None,
             outside_workspace_folders=folders,
         )

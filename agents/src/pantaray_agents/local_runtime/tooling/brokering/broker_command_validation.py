@@ -265,6 +265,7 @@ def build_validated_command_request(
         timeout_ms=runtime_budget.sandbox_launch.timeout_ms,
         use_login_environment=use_login_environment,
         run_outside_sandbox=run_outside_sandbox,
+        run_in_background=args.run_in_background,
         reason=args.justification,
         outside_workspace_folders=resolved_cwd.outside_workspace_folders,
     )
@@ -315,6 +316,7 @@ def build_validated_command_request(
         network_policy=_command_network_policy(context),
         use_login_environment=use_login_environment,
         run_outside_sandbox=run_outside_sandbox,
+        run_in_background=args.run_in_background,
         # The usual roots stay listed: their ancestor metadata grants let tools
         # such as git stat the parents of a workspace inside private storage.
         real_read_roots=[
@@ -426,6 +428,7 @@ def build_validated_python_request(
         network_policy=_command_network_policy(context),
         use_login_environment=False,
         run_outside_sandbox=False,
+        run_in_background=False,
         generated_python_code=args.code,
         real_read_roots=[
             *(["/"] if full_disk_read else []),

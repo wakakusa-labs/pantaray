@@ -40,6 +40,17 @@ from .egress_proxy import (
 COMMAND_NETWORK_UNAVAILABLE = "COMMAND_NETWORK_UNAVAILABLE"
 
 
+def command_network_unavailable_error() -> BrokerPolicyError:
+    """The refusal of a command whose egress lease could not be set up."""
+
+    return BrokerPolicyError(
+        "The command did not run: its network connection could not be set up.",
+        code=COMMAND_NETWORK_UNAVAILABLE,
+        fix_hint="Retry the call once; if it fails again, tell the user that "
+        "commands cannot reach the network right now.",
+    )
+
+
 def _network_output(destinations: Sequence[NetworkDestination]) -> list[JSONValue]:
     return [cast(JSONValue, asdict(destination)) for destination in destinations]
 
@@ -92,12 +103,7 @@ async def run_command_via_sandbox(
             sandbox_violation_summary=str(exc),
             updated_at=now_utc_iso(),
         )
-        raise BrokerPolicyError(
-            "The command did not run: its network connection could not be set up.",
-            code=COMMAND_NETWORK_UNAVAILABLE,
-            fix_hint="Retry the call once; if it fails again, tell the user that "
-            "commands cannot reach the network right now.",
-        ) from exc
+        raise command_network_unavailable_error() from exc
     except asyncio.CancelledError as canceled:
         # Canceled while the command ran, the cancellation carries what it had
         # written; canceled while the lease was closing, after the command had
@@ -124,4 +130,8 @@ async def run_command_via_sandbox(
     )
 
 
-__all__ = ["COMMAND_NETWORK_UNAVAILABLE", "run_command_via_sandbox"]
+__all__ = [
+    "COMMAND_NETWORK_UNAVAILABLE",
+    "command_network_unavailable_error",
+    "run_command_via_sandbox",
+]

@@ -35,6 +35,7 @@ from .native_tool_use import (
     build_native_action_tools,
     split_step_note,
 )
+from .process_tools import READ_PROCESS_OUTPUT_TOOL, STOP_PROCESS_TOOL
 from .read_tool import READ_TOOL
 from .remember_tool import REMEMBER_TOOL, REMEMBER_TOOL_ID
 from .render_html_page_tool import RENDER_HTML_PAGE_TOOL
@@ -111,6 +112,8 @@ __all__ = [
     "WAIT_SUBAGENTS_TOOL_ID",
     "APPLY_PATCH_TOOL",
     "BASH_TOOL",
+    "READ_PROCESS_OUTPUT_TOOL",
+    "STOP_PROCESS_TOOL",
     "CAPTURE_SCREEN_TOOL",
     "CAPTURE_SCREEN_TOOL_ID",
     "RUN_PYTHON_TOOL",
@@ -179,6 +182,8 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
         GREP_TOOL,
         APPLY_PATCH_TOOL,
         BASH_TOOL,
+        READ_PROCESS_OUTPUT_TOOL,
+        STOP_PROCESS_TOOL,
         RUN_PYTHON_TOOL,
         CAPTURE_SCREEN_TOOL,
         WRITE_SESSION_MEMORY_TOOL,
@@ -224,6 +229,8 @@ SUPERVISOR_SINGLE_REACT_TOOL_IDS: tuple[str, ...] = (
     GREP_TOOL.tool_id,
     APPLY_PATCH_TOOL.tool_id,
     BASH_TOOL.tool_id,
+    READ_PROCESS_OUTPUT_TOOL.tool_id,
+    STOP_PROCESS_TOOL.tool_id,
     RUN_PYTHON_TOOL.tool_id,
     CAPTURE_SCREEN_TOOL.tool_id,
     WRITE_SESSION_MEMORY_TOOL.tool_id,

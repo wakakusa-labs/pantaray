@@ -259,12 +259,17 @@ async def test_approved_folder_is_rechecked_before_the_write(
         )
     _decide(db_path, first.value, "req-1", "approved_once")
     real_plan = broker_direct.resolve_patch_mount_plan
+    resolutions: list[None] = []
 
     def retargeted_plan(**kwargs: object) -> broker_direct.PatchMountPlan:
         plan = real_plan(**kwargs)  # type: ignore[arg-type]
+        resolutions.append(None)
+        if len(resolutions) == 1:
+            return plan
         return replace(plan, outside_workspace_folder=elsewhere)
 
-    # Only the executor's re-resolution sees the moved folder.
+    # Only the executor's re-resolution, after the approval check, sees the
+    # moved folder.
     monkeypatch.setattr(broker_direct, "resolve_patch_mount_plan", retargeted_plan)
     with pytest.raises(BrokerPolicyError) as caught:
         await _patch(

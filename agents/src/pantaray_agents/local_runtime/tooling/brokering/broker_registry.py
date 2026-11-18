@@ -15,6 +15,7 @@ from pantaray_agents.tools.files.render_pages import (
     SaveHtmlAsPdfToolArgs,
 )
 
+from .broker_process import ProcessToolOutput
 from .broker_protocol import (
     ApplyPatchToolArgs,
     ApplyPatchToolOutput,
@@ -32,6 +33,7 @@ from .broker_protocol import (
     SaveHtmlAsPdfOutput,
     ToolError,
 )
+from .process_protocol import ReadProcessOutputToolArgs, StopProcessToolArgs
 
 
 class BrokerModelRegistry(BaseModel):
@@ -54,6 +56,8 @@ BROKER_MODEL_REGISTRY = BrokerModelRegistry(
         "SaveHtmlAsPdfToolArgs": SaveHtmlAsPdfToolArgs,
         "BashToolArgs": BashToolArgs,
         "RunPythonToolArgs": RunPythonToolArgs,
+        "ReadProcessOutputToolArgs": ReadProcessOutputToolArgs,
+        "StopProcessToolArgs": StopProcessToolArgs,
     },
     output_models={
         "ReadToolOutput": ReadToolOutput,
@@ -66,6 +70,7 @@ BROKER_MODEL_REGISTRY = BrokerModelRegistry(
         "SaveHtmlAsPdfOutput": SaveHtmlAsPdfOutput,
         "BashToolOutput": BashToolOutput,
         "RunPythonToolOutput": RunPythonToolOutput,
+        "ProcessToolOutput": ProcessToolOutput,
     },
     error_models={
         "ToolError": ToolError,
@@ -184,6 +189,30 @@ BROKER_TOOL_REGISTRY = BrokerToolRegistry(
             required_capabilities=["process_exec_local"],
             approval_policy="prompt_each_time",
             resource_kinds=["process_group", "temp_dir"],
+        ),
+        # Reach only the calling run's own processes, which its bash call was
+        # approved to start, so they are not approved again.
+        "read_process_output": BrokerManagedToolDefinition(
+            tool_id="read_process_output",
+            execution_path="broker_process_read",
+            path_access_kind="none",
+            input_model_ref="ReadProcessOutputToolArgs",
+            output_model_ref="ProcessToolOutput",
+            error_model_ref="ToolError",
+            required_capabilities=["process_exec_local"],
+            approval_policy="none",
+            resource_kinds=["none"],
+        ),
+        "stop_process": BrokerManagedToolDefinition(
+            tool_id="stop_process",
+            execution_path="broker_process_stop",
+            path_access_kind="none",
+            input_model_ref="StopProcessToolArgs",
+            output_model_ref="ProcessToolOutput",
+            error_model_ref="ToolError",
+            required_capabilities=["process_exec_local"],
+            approval_policy="none",
+            resource_kinds=["none"],
         ),
     }
 )

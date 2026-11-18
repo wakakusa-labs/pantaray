@@ -86,6 +86,8 @@ EXPECTED_CONCURRENCY: dict[str, ToolConcurrency] = {
             "remember",
             "apply_patch",
             "bash",
+            "read_process_output",
+            "stop_process",
             "run_python",
             "capture_screen",
             "render_pdf_page",

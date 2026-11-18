@@ -22,17 +22,20 @@ from .action_subagent_broker_authority import authorize_direct_workspace_writes
 from .broker_common import (
     BrokerContext,
     BrokerExecutionError,
+    ensure_tool_authorization,
 )
 from .broker_current_memory_patch import run_current_memory_patch
 from .broker_outcome import UnprojectedBrokerToolOutcome
 from .broker_patch_read_gate import needs_read_output
 from .broker_protocol import (
     ApplyPatchAddChange,
+    ApplyPatchToolArgs,
     ValidatedPatchRequest,
 )
 from .broker_structured_patch import (
     StructuredPatchError,
     apply_structured_workspace_patch,
+    extract_structured_patch_paths,
     read_structured_patch_target_text,
     structured_patch_llm_feedback,
 )
@@ -117,6 +120,48 @@ def build_patch_approval_summary(
             folder is not None
             and folder_can_be_granted(folder=folder, db_path=context.db_path)
         ),
+    )
+
+
+def build_validated_patch_request(
+    *,
+    context: BrokerContext,
+    args: ApplyPatchToolArgs,
+    tool_invocation_id: str | None,
+    tool_request_id: str,
+    requested_at: str,
+    preflight_only: bool,
+) -> ValidatedPatchRequest:
+    patch_paths = tuple(extract_structured_patch_paths(args.changes))
+    plan = resolve_patch_mount_plan(context=context, patch_paths=patch_paths)
+    if not preflight_only and (
+        tool_invocation_id is None or not tool_invocation_id.strip()
+    ):
+        raise BrokerPolicyError("tool_invocation_id is required for apply_patch")
+    command_summary = build_patch_approval_summary(
+        context=context, patch_paths=patch_paths, plan=plan
+    )
+    approval_session_id, approval_source = ensure_tool_authorization(
+        context=context,
+        tool_invocation_id=tool_invocation_id,
+        tool_request_id=tool_request_id,
+        command_summary=command_summary,
+        requested_at=requested_at,
+        require_user_prompt=plan.outside_workspace_folder is not None,
+    )
+    return ValidatedPatchRequest(
+        tool_invocation_id=tool_invocation_id or "",
+        manifest_id=context.manifest_id,
+        execution_session_id=context.execution_session.execution_session_id,
+        action_id=context.execution_session.action_id or "unknown",
+        approval_session_id=approval_session_id,
+        approval_source=approval_source,
+        changes=args.changes,
+        patch_paths=list(patch_paths),
+        command_summary_json=command_summary,
+        tool_request_id=tool_request_id,
+        requested_at=requested_at,
+        preflight_only=preflight_only,
     )
 
 

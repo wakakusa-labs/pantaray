@@ -49,14 +49,9 @@ from .broker_common import (
     FinalizedBrokerPolicyError,
     apply_approval_decision,
     ensure_session_capabilities,
-    ensure_tool_authorization,
     load_broker_context,
 )
-from .broker_direct import (
-    build_patch_approval_summary,
-    resolve_patch_mount_plan,
-    run_apply_patch_executor,
-)
+from .broker_direct import build_validated_patch_request, run_apply_patch_executor
 from .broker_direct_read import run_read_executor
 from .broker_direct_render_html import run_render_html_page_executor
 from .broker_direct_render_pdf import run_render_pdf_page_executor
@@ -75,6 +70,7 @@ from .broker_outcome import (
     project_broker_tool_outcome,
     read_tool_outcome,
 )
+from .broker_process import run_process_control, start_background_command
 from .broker_protocol import (
     ApplyPatchToolArgs,
     BashToolArgs,
@@ -98,8 +94,11 @@ from .broker_registry import (
     BROKER_TOOL_REGISTRY,
     validate_broker_registry,
 )
-from .broker_structured_patch import extract_structured_patch_paths
 from .execution_start import claim_broker_execution_start
+from .process_protocol import (
+    ValidatedReadProcessOutputRequest,
+    ValidatedStopProcessRequest,
+)
 
 
 class BrokerCompletionPersistenceError(RuntimeError):
@@ -121,13 +120,17 @@ _ARGS_REQUESTS: dict[
     | type[ValidatedRenderHtmlPageRequest]
     | type[ValidatedListRequest]
     | type[ValidatedGlobRequest]
-    | type[ValidatedGrepRequest],
+    | type[ValidatedGrepRequest]
+    | type[ValidatedReadProcessOutputRequest]
+    | type[ValidatedStopProcessRequest],
 ] = {
     "broker_direct_read": ValidatedReadRequest,
     "broker_direct_render_html": ValidatedRenderHtmlPageRequest,
     "broker_direct_list": ValidatedListRequest,
     "broker_direct_glob": ValidatedGlobRequest,
     "broker_direct_grep": ValidatedGrepRequest,
+    "broker_process_read": ValidatedReadProcessOutputRequest,
+    "broker_process_stop": ValidatedStopProcessRequest,
 }
 
 logger = logging.getLogger(__name__)
@@ -187,6 +190,8 @@ def _validate_request(
     | ValidatedListRequest
     | ValidatedGlobRequest
     | ValidatedGrepRequest
+    | ValidatedReadProcessOutputRequest
+    | ValidatedStopProcessRequest
     | ValidatedPatchRequest
     | ValidatedSaveHtmlAsPdfRequest
     | ValidatedCommandRequest,
@@ -255,7 +260,7 @@ def _validate_request(
         )
     if definition.execution_path == "broker_direct_patch":
         assert isinstance(request.args, ApplyPatchToolArgs)
-        return context, _build_validated_patch_request(
+        return context, build_validated_patch_request(
             context=context,
             args=request.args,
             tool_invocation_id=effective_invocation_id,
@@ -310,48 +315,6 @@ def _parse_args(
             f"{exc}",
             code=BROKER_TOOL_ARGS_INVALID,
         ) from exc
-
-
-def _build_validated_patch_request(
-    *,
-    context: BrokerContext,
-    args: ApplyPatchToolArgs,
-    tool_invocation_id: str | None,
-    tool_request_id: str,
-    requested_at: str,
-    preflight_only: bool,
-) -> ValidatedPatchRequest:
-    patch_paths = tuple(extract_structured_patch_paths(args.changes))
-    plan = resolve_patch_mount_plan(context=context, patch_paths=patch_paths)
-    if not preflight_only and (
-        tool_invocation_id is None or not tool_invocation_id.strip()
-    ):
-        raise BrokerPolicyError("tool_invocation_id is required for apply_patch")
-    command_summary = build_patch_approval_summary(
-        context=context, patch_paths=patch_paths, plan=plan
-    )
-    approval_session_id, approval_source = ensure_tool_authorization(
-        context=context,
-        tool_invocation_id=tool_invocation_id,
-        tool_request_id=tool_request_id,
-        command_summary=command_summary,
-        requested_at=requested_at,
-        require_user_prompt=plan.outside_workspace_folder is not None,
-    )
-    return ValidatedPatchRequest(
-        tool_invocation_id=tool_invocation_id or "",
-        manifest_id=context.manifest_id,
-        execution_session_id=context.execution_session.execution_session_id,
-        action_id=context.execution_session.action_id or "unknown",
-        approval_session_id=approval_session_id,
-        approval_source=approval_source,
-        changes=args.changes,
-        patch_paths=list(patch_paths),
-        command_summary_json=command_summary,
-        tool_request_id=tool_request_id,
-        requested_at=requested_at,
-        preflight_only=preflight_only,
-    )
 
 
 def _superseded_by_cancel(
@@ -493,16 +456,24 @@ async def execute_broker_tool(
                     request=validated.args,
                 )
             )
+        elif isinstance(
+            validated, (ValidatedReadProcessOutputRequest, ValidatedStopProcessRequest)
+        ):
+            outcome = await run_process_control(context=context, request=validated)
         else:
             verify_outside_workspace_folders_unchanged(
                 context=context, request=validated
             )
-            outcome = await run_command_via_sandbox(
-                context=context,
-                request=validated,
-                create_subprocess_exec=asyncio.create_subprocess_exec,
-                register_process_group_resource_fn=register_process_group_resource,
-                register_path_resource_fn=register_path_resource,
+            outcome = await (
+                start_background_command(context=context, request=validated)
+                if validated.run_in_background
+                else run_command_via_sandbox(
+                    context=context,
+                    request=validated,
+                    create_subprocess_exec=asyncio.create_subprocess_exec,
+                    register_process_group_resource_fn=register_process_group_resource,
+                    register_path_resource_fn=register_path_resource,
+                )
             )
     except asyncio.CancelledError as exc:
         # Cancellation (a user Stop, or the parallel batch timeout) does not reach

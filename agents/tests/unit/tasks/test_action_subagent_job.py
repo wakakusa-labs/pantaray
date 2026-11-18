@@ -54,6 +54,9 @@ from pantaray_agents.local_runtime.tooling.bootstrap import (
     ensure_action_scratch_execution_context,
 )
 from pantaray_agents.local_runtime.tooling.brokering import broker as broker_module
+from pantaray_agents.local_runtime.tooling.brokering import (
+    broker_direct as broker_direct_module,
+)
 from pantaray_agents.local_runtime.tooling.brokering.broker_outcome import (
     UnprojectedBrokerToolOutcome,
 )
@@ -872,12 +875,12 @@ def _gate_edits(monkeypatch: pytest.MonkeyPatch) -> None:
     The pause and resume are the same whichever request asks.
     """
 
-    real = broker_module.ensure_tool_authorization
+    real = broker_direct_module.ensure_tool_authorization
 
     def asking(**kwargs: object) -> tuple[str | None, str | None]:
         return real(**{**kwargs, "require_user_prompt": True})  # type: ignore[arg-type]
 
-    monkeypatch.setattr(broker_module, "ensure_tool_authorization", asking)
+    monkeypatch.setattr(broker_direct_module, "ensure_tool_authorization", asking)
 
 
 def _pause_gated_child(

@@ -28,6 +28,8 @@ const REGISTERED_TOOL_IDS = [
   'apply_patch',
   'bash',
   'run_python',
+  'read_process_output',
+  'stop_process',
   'capture_screen',
   'write_session_memory',
   'draft_final_answer',

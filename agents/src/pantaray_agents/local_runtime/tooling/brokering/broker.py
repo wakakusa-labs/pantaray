@@ -26,6 +26,7 @@ from ..sandbox.command_egress import run_command_via_sandbox
 from ..tool_result_finalization import (
     InvocationToolResultOwner,
     ToolResultFinalizationRequest,
+    cancel_recorded_first,
     finalize_local_tool_result,
 )
 from ..tool_result_validation import ToolOutputValidationError
@@ -64,7 +65,6 @@ from .broker_direct_save_pdf import (
     run_save_html_as_pdf_executor,
 )
 from .broker_failure_finalization import (
-    cancel_recorded_first,
     canceled_broker_tool_outcome,
     finalize_broker_invocation_error,
     finalize_canceled_broker_invocation,

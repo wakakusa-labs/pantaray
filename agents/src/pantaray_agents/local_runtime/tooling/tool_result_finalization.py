@@ -29,6 +29,7 @@ from .models import (
 )
 from .repository import load_tool_definition
 from .repository.executions import (
+    ToolInvocationTerminalStateError,
     load_tool_invocation_completion_context,
     record_tool_invocation_completion,
 )
@@ -52,6 +53,40 @@ ToolResultCompletionScope = Literal["execution", "invocation"]
 TIMEOUT_TOOL_OUTPUT_ERROR_TYPE = "ToolTimeoutError"
 TIMEOUT_CLEANUP_EVENT_TYPE = "timeout_cleanup_completed"
 TIMEOUT_CLEANUP_MESSAGE_SUFFIX = "timeout cleanup completed"
+
+
+class ToolCallCanceled(RuntimeError):
+    """The error a canceled call's result names, on every tool path."""
+
+    def __init__(self) -> None:
+        super().__init__("canceled before completion")
+
+
+def canceled_tool_output() -> dict[str, JSONValue]:
+    """The output of a call that ended canceled."""
+
+    error = ToolCallCanceled()
+    return build_runtime_tool_error_output(
+        error_type=error.__class__.__name__, message=str(error)
+    )
+
+
+def cancel_recorded_first(error: BaseException) -> bool:
+    """Whether a terminal write was refused because a cancel had closed the row.
+
+    Cancelling an Action closes its in-flight invocations from outside the call
+    (``cancel_inflight_tool_invocation``) while the call itself can keep running
+    to its end. That cancel is the invocation's terminal fact; the call's own
+    late write losing to it is the expected end of the race, not a persistence
+    failure. Any other terminal conflict has no legitimate concurrent writer and
+    stays a failure.
+    """
+
+    return (
+        isinstance(error, ToolInvocationTerminalStateError)
+        and error.current_status == "canceled"
+    )
+
 
 logger = logging.getLogger(__name__)
 
@@ -423,7 +458,10 @@ __all__ = [
     "InvocationToolResultOwner",
     "TIMEOUT_CLEANUP_EVENT_TYPE",
     "TIMEOUT_TOOL_OUTPUT_ERROR_TYPE",
+    "ToolCallCanceled",
     "ToolResultCompletionScope",
     "ToolResultFinalizationRequest",
+    "cancel_recorded_first",
+    "canceled_tool_output",
     "finalize_local_tool_result",
 ]

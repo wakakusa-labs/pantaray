@@ -11,18 +11,16 @@ from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.tool_result import build_runtime_tool_error_output
 from pantaray_agents.tools.contract import BrokerPolicyError
 
-from ..repository import ToolInvocationTerminalStateError
 from ..sandbox.command_sandbox_client import canceled_command_output
 from ..tool_result_finalization import (
     FinalizedToolOutput,
     InvocationToolResultOwner,
+    ToolCallCanceled,
     ToolResultFinalizationRequest,
+    canceled_tool_output,
     finalize_local_tool_result,
 )
 from .broker_outcome import BrokerToolFailure, BrokerToolOutcome
-
-BROKER_CANCELED_ERROR_TYPE = "ToolCallCanceled"
-BROKER_CANCELED_MESSAGE = "canceled before completion"
 
 
 class NetworkReachedPolicyError(BrokerPolicyError):
@@ -112,7 +110,7 @@ def finalize_canceled_broker_invocation(
     """
 
     partial = canceled_command_output(error)
-    output = _canceled_output()
+    output = canceled_tool_output()
     if partial is not None:
         output = {
             **output,
@@ -138,23 +136,6 @@ def finalize_canceled_broker_invocation(
     )
 
 
-def cancel_recorded_first(error: BaseException) -> bool:
-    """Whether a terminal write was refused because a cancel had closed the row.
-
-    Cancelling an Action closes its in-flight invocations from outside the call
-    (``cancel_inflight_tool_invocation``) while the call itself can keep running
-    to its end. That cancel is the
-    invocation's terminal fact; the call's own late write losing to it is the
-    expected end of the race, not a persistence failure. Any other terminal
-    conflict has no legitimate concurrent writer and stays a failure.
-    """
-
-    return (
-        isinstance(error, ToolInvocationTerminalStateError)
-        and error.current_status == "canceled"
-    )
-
-
 def canceled_broker_tool_outcome(*, invocation_id: str) -> BrokerToolOutcome:
     """The call's result once a cancel recorded first: canceled, written by no one.
 
@@ -162,20 +143,13 @@ def canceled_broker_tool_outcome(*, invocation_id: str) -> BrokerToolOutcome:
     Whatever the call produced after the cancel is superseded by it.
     """
 
+    canceled = ToolCallCanceled()
     return BrokerToolOutcome(
         status="error",
-        output=_canceled_output(),
+        output=canceled_tool_output(),
         output_storage_kind="inline_json",
         failure=BrokerToolFailure(
-            error_type=BROKER_CANCELED_ERROR_TYPE,
-            message=BROKER_CANCELED_MESSAGE,
+            error_type=canceled.__class__.__name__, message=str(canceled)
         ),
         tool_invocation_id=invocation_id,
-    )
-
-
-def _canceled_output() -> dict[str, JSONValue]:
-    return build_runtime_tool_error_output(
-        error_type=BROKER_CANCELED_ERROR_TYPE,
-        message=BROKER_CANCELED_MESSAGE,
     )

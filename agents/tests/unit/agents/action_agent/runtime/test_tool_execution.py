@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import sqlite3
 import stat
 from collections.abc import Iterator
@@ -54,6 +55,9 @@ from pantaray_agents.local_runtime.tooling.bootstrap import (
 from pantaray_agents.local_runtime.tooling.brokering.broker_outcome import (
     UnprojectedBrokerToolOutcome,
 )
+from pantaray_agents.local_runtime.tooling.resources.tool_invocation_recovery import (
+    cancel_inflight_tool_invocation,
+)
 from pantaray_agents.local_runtime.tooling.sandbox.runtime_policy import (
     BrokerLocalBudget,
     RuntimeBudgetResolution,
@@ -61,6 +65,7 @@ from pantaray_agents.local_runtime.tooling.sandbox.runtime_policy import (
 )
 from pantaray_agents.local_runtime.tooling.tool_result_finalization import (
     FinalizedToolOutput,
+    ToolCallCanceled,
 )
 from pantaray_agents.local_runtime.tooling.tool_result_validation import (
     ToolOutputValidationError,
@@ -427,7 +432,7 @@ async def test_run_tool_finalizes_invocation_when_cancelled(
 
     assert invocation_row == ("canceled",)
     assert output_row is not None
-    assert json.loads(str(output_row[0]))["error"]["error_type"] == "CancelledError"
+    assert json.loads(str(output_row[0]))["error"]["error_type"] == "ToolCallCanceled"
 
 
 @pytest.mark.asyncio
@@ -1511,3 +1516,132 @@ async def test_a_review_that_spends_the_token_budget_approves_and_runs_nothing(
 
     assert written() == before
     assert _approval_row(tmp_path / "runtime.db")[:4] == ("pending", "prompt", None, 0)
+
+
+def _cancel_running_invocation_from_outside(db_path: Path) -> str:
+    """What cancelling the Action does to a call that is still running."""
+
+    with sqlite3.connect(db_path) as connection:
+        (invocation_id,) = connection.execute(
+            "SELECT invocation_id FROM tool_invocations WHERE status = 'running'"
+        ).fetchone()
+    assert cancel_inflight_tool_invocation(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        invocation_id=invocation_id,
+        completed_at="2025-01-01T00:00:05Z",
+    ).canceled
+    return str(invocation_id)
+
+
+def _invocation_terminal(db_path: Path, invocation_id: str) -> tuple[str, str]:
+    with sqlite3.connect(db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT invocation.status, output.output_json
+            FROM tool_invocations AS invocation
+            JOIN tool_outputs AS output USING (invocation_id)
+            WHERE invocation.invocation_id = ?
+            """,
+            (invocation_id,),
+        ).fetchone()
+    return str(row[0]), str(row[1])
+
+
+def _lose_the_race_to_an_outside_cancel(
+    monkeypatch: pytest.MonkeyPatch, *, db_path: Path, after_cancel: str
+) -> list[str]:
+    from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime import (
+        execution as execution_module,
+    )
+
+    run_impl = execution_module.run_validated_tool_impl
+    canceled_ids: list[str] = []
+
+    async def _run_then_find_it_canceled(*args, **kwargs):
+        result = await run_impl(*args, **kwargs)
+        canceled_ids.append(_cancel_running_invocation_from_outside(db_path))
+        if after_cancel == "raise":
+            raise RuntimeError("the tool's own failure after the cancel")
+        if after_cancel == "cancelled":
+            raise asyncio.CancelledError
+        return result
+
+    monkeypatch.setattr(
+        execution_module, "run_validated_tool_impl", _run_then_find_it_canceled
+    )
+    return canceled_ids
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("after_cancel", ["return", "raise"])
+async def test_tool_finishing_after_an_outside_cancel_ends_canceled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    after_cancel: str,
+) -> None:
+    state = _install_local_runtime_context(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        allowed_tool_ids=(WRITE_SESSION_MEMORY_TOOL.tool_id,),
+    )
+    db_path = tmp_path / "runtime.db"
+    canceled_ids = _lose_the_race_to_an_outside_cancel(
+        monkeypatch, db_path=db_path, after_cancel=after_cancel
+    )
+
+    with pytest.raises(FinalizedToolExecutionError) as raised:
+        await run_tool(
+            MagicMock(),
+            WRITE_SESSION_MEMORY_TOOL,
+            args=_session_memory_args(),
+            state=state,  # type: ignore[arg-type]
+            sink=CountingSink(),
+            runtime=_runtime(),
+            step_number=1,
+            actor="supervisor",
+        )
+
+    assert raised.value.tool_invocation_id == canceled_ids[0]
+    assert raised.value.finalized_output.output["error"]["error_type"] == (
+        ToolCallCanceled.__name__
+    )
+    if after_cancel == "return":
+        assert isinstance(raised.value.cause, ToolCallCanceled)
+    status, output_json = _invocation_terminal(db_path, canceled_ids[0])
+    assert status == "canceled"
+    assert "ActionCanceledToolInvocation" in output_json
+
+
+@pytest.mark.asyncio
+async def test_cancellation_after_an_outside_cancel_is_not_an_audit_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    state = _install_local_runtime_context(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        allowed_tool_ids=(WRITE_SESSION_MEMORY_TOOL.tool_id,),
+    )
+    db_path = tmp_path / "runtime.db"
+    canceled_ids = _lose_the_race_to_an_outside_cancel(
+        monkeypatch, db_path=db_path, after_cancel="cancelled"
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await run_tool(
+            MagicMock(),
+            WRITE_SESSION_MEMORY_TOOL,
+            args=_session_memory_args(),
+            state=state,  # type: ignore[arg-type]
+            sink=CountingSink(),
+            runtime=_runtime(),
+            step_number=1,
+            actor="supervisor",
+        )
+
+    assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
+    status, output_json = _invocation_terminal(db_path, canceled_ids[0])
+    assert status == "canceled"
+    assert "ActionCanceledToolInvocation" in output_json

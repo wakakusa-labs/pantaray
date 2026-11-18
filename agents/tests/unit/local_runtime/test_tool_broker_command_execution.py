@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import sqlite3
 import sys
 from pathlib import Path
@@ -18,7 +20,16 @@ from pantaray_agents.local_runtime.tooling.bootstrap import (
     bootstrap_local_tooling_catalog,
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker import (
+    BrokerCompletionPersistenceError,
+    BrokerToolOutcome,
     execute_broker_tool,
+)
+from pantaray_agents.local_runtime.tooling.models import ToolInvocationCompletionInput
+from pantaray_agents.local_runtime.tooling.repository.executions import (
+    record_tool_invocation_completion,
+)
+from pantaray_agents.local_runtime.tooling.resources.tool_invocation_recovery import (
+    cancel_inflight_tool_invocation,
 )
 from pantaray_agents.local_runtime.tooling.sandbox.command_sandbox_protocol import (
     SandboxCommandCompletion,
@@ -235,3 +246,175 @@ async def test_bash_sandbox_request_uses_manifest_roots_without_workspace_id(
     assert repo_root.resolve() in real_write_roots
     assert str(read_blocked_root.resolve()) not in captured_payload["real_read_roots"]
     assert (read_blocked_root.resolve() in real_write_roots) is process_write
+
+
+def _cancel_from_outside(db_path: Path, invocation_id: str) -> None:
+    """What a Stop or a superseding user message does while the command runs."""
+
+    result = cancel_inflight_tool_invocation(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        invocation_id=invocation_id,
+        completed_at="2026-03-23T00:00:05Z",
+    )
+    assert result.canceled is True
+
+
+def _race_command_with_outside_cancel(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    db_path: Path,
+    after_cancel: str,
+) -> None:
+    """Close the invocation from outside the call before the broker writes it."""
+
+    from pantaray_agents.local_runtime.tooling.brokering import broker as broker_module
+
+    run_command = broker_module.run_command_via_sandbox
+
+    async def _run_then_lose_the_race(**kwargs):
+        outcome = await run_command(**kwargs)
+        _cancel_from_outside(db_path, kwargs["request"].tool_invocation_id)
+        if after_cancel == "raise":
+            raise RuntimeError("the command's own failure after the cancel")
+        if after_cancel == "cancelled":
+            raise asyncio.CancelledError
+        return outcome
+
+    monkeypatch.setattr(
+        broker_module, "run_command_via_sandbox", _run_then_lose_the_race
+    )
+
+
+def _invocation_terminal(db_path: Path, invocation_id: str) -> tuple[str, str]:
+    with sqlite3.connect(db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT invocation.status, output.output_json
+            FROM tool_invocations AS invocation
+            JOIN tool_outputs AS output USING (invocation_id)
+            WHERE invocation.invocation_id = ?
+            """,
+            (invocation_id,),
+        ).fetchone()
+    return str(row[0]), str(row[1])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("after_cancel", ["return", "raise"])
+async def test_command_finishing_after_an_outside_cancel_stays_canceled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    after_cancel: str,
+) -> None:
+    db_path, context = _bootstrap_runtime_db(tmp_path)
+    _stub_process_group_resource_registration(monkeypatch)
+    _stub_subprocess_exec(monkeypatch, stderr=b"build failed\n", returncode=1)
+    _race_command_with_outside_cancel(
+        monkeypatch, db_path=db_path, after_cancel=after_cancel
+    )
+
+    outcome = await execute_broker_tool(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        tool_id="bash",
+        user_id="user-1",
+        actor_process_id=BROKER_ACTOR_PROCESS_ID,
+        manifest_id=context.manifest_id,
+        execution_session_id=context.execution_session_id,
+        invocation_id="invocation-race",
+        tool_request_id="request-bash-race",
+        args={"command": "make build", "cwd": "."},
+    )
+
+    assert isinstance(outcome, BrokerToolOutcome)
+    assert outcome.status == "error"
+    assert outcome.failure is not None
+    assert outcome.failure.error_type == "ToolCallCanceled"
+    assert outcome.tool_invocation_id == "invocation-race"
+    status, output_json = _invocation_terminal(db_path, "invocation-race")
+    assert status == "canceled"
+    assert "ActionCanceledToolInvocation" in output_json
+
+
+@pytest.mark.asyncio
+async def test_cancellation_after_an_outside_cancel_is_not_logged_as_a_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    db_path, context = _bootstrap_runtime_db(tmp_path)
+    _stub_process_group_resource_registration(monkeypatch)
+    _stub_subprocess_exec(monkeypatch)
+    _race_command_with_outside_cancel(
+        monkeypatch, db_path=db_path, after_cancel="cancelled"
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await execute_broker_tool(
+            db_path=db_path,
+            busy_timeout_ms=1_000,
+            tool_id="bash",
+            user_id="user-1",
+            actor_process_id=BROKER_ACTOR_PROCESS_ID,
+            manifest_id=context.manifest_id,
+            execution_session_id=context.execution_session_id,
+            invocation_id="invocation-race",
+            tool_request_id="request-bash-race",
+            args={"command": "make build", "cwd": "."},
+        )
+
+    assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
+    status, output_json = _invocation_terminal(db_path, "invocation-race")
+    assert status == "canceled"
+    assert "ActionCanceledToolInvocation" in output_json
+
+
+@pytest.mark.asyncio
+async def test_terminal_conflict_without_a_cancel_is_a_persistence_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pantaray_agents.local_runtime.tooling.brokering import broker as broker_module
+
+    db_path, context = _bootstrap_runtime_db(tmp_path)
+    _stub_process_group_resource_registration(monkeypatch)
+    _stub_subprocess_exec(monkeypatch)
+    run_command = broker_module.run_command_via_sandbox
+
+    async def _run_then_find_it_completed(**kwargs):
+        outcome = await run_command(**kwargs)
+        record_tool_invocation_completion(
+            db_path=db_path,
+            busy_timeout_ms=1_000,
+            completion=ToolInvocationCompletionInput(
+                invocation_id=kwargs["request"].tool_invocation_id,
+                status="completed",
+                completed_at="2026-03-23T00:00:05Z",
+                output_json={"ok": True},
+                output_storage_kind="inline_json",
+                search_text=None,
+                stdout_text=None,
+                stderr_text=None,
+                redaction_applied=False,
+            ),
+        )
+        return outcome
+
+    monkeypatch.setattr(
+        broker_module, "run_command_via_sandbox", _run_then_find_it_completed
+    )
+
+    with pytest.raises(BrokerCompletionPersistenceError):
+        await execute_broker_tool(
+            db_path=db_path,
+            busy_timeout_ms=1_000,
+            tool_id="bash",
+            user_id="user-1",
+            actor_process_id=BROKER_ACTOR_PROCESS_ID,
+            manifest_id=context.manifest_id,
+            execution_session_id=context.execution_session_id,
+            invocation_id="invocation-race",
+            tool_request_id="request-bash-race",
+            args={"command": "make build", "cwd": "."},
+        )

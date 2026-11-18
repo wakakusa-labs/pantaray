@@ -448,6 +448,9 @@ def _record_every_periodic_runner(
         periodic_schedule, "run_local_periodic_reaper_once", record("reaper")
     )
     monkeypatch.setattr(
+        periodic_schedule, "sweep_browser_sessions", record_async("browser_sessions")
+    )
+    monkeypatch.setattr(
         periodic_schedule,
         "run_activity_summary_scheduler_once",
         record_async("activity_summary"),
@@ -496,9 +499,9 @@ def test_owner_scoped_tasks_wait_for_configure_and_run_on_the_next_tick(
         next_run_monotonic_by_task={task.name: 0.0 for task in schedule},
         now_monotonic=10.0,
     )
-    # The reaper and the catalog repair take no owner, so waiting to be told who
-    # the user is would only hold back recovery.
-    assert calls == ["reaper", "memory_repair"]
+    # The reaper, the browser sweep and the catalog repair take no owner, so
+    # waiting to be told who the user is would only hold back recovery.
+    assert calls == ["reaper", "memory_repair", "browser_sessions"]
     assert [unconfigured_next_runs[name] for name in OWNER_SCOPED_TASK_NAMES] == [
         0.0
     ] * len(OWNER_SCOPED_TASK_NAMES)
@@ -513,7 +516,7 @@ def test_owner_scoped_tasks_wait_for_configure_and_run_on_the_next_tick(
 
     # A withheld task keeps its deadline, so the tick right after `configure`
     # takes every window the first one would have.
-    assert calls[2:] == list(OWNER_SCOPED_TASK_NAMES)
+    assert calls[3:] == list(OWNER_SCOPED_TASK_NAMES)
 
 
 def test_owner_scoped_tasks_wait_while_an_identity_change_is_at_the_barrier(
@@ -534,7 +537,7 @@ def test_owner_scoped_tasks_wait_while_an_identity_change_is_at_the_barrier(
             now_monotonic=10.0,
         )
 
-    assert calls == ["reaper", "memory_repair"]
+    assert calls == ["reaper", "memory_repair", "browser_sessions"]
 
 
 def test_first_tick_runs_every_ready_task_once(
@@ -674,6 +677,7 @@ def test_due_tasks_run_in_declaration_order(
         "memory_embedding_projection",
         "todo_pickup",
         "todo_purge",
+        "browser_sessions",
     ]
 
 

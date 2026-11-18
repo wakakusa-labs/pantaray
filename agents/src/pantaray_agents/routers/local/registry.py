@@ -6,6 +6,7 @@ from pantaray_agents.orchestration import orchestration_ws_router
 from pantaray_agents.routers import (
     action,
     action_approval,
+    action_browser,
     action_html_render,
     action_messages,
     action_screen_capture,
@@ -33,6 +34,7 @@ def register_local_routers(app: FastAPI) -> None:
     app.include_router(action_tool_output.router)
     app.include_router(action_screen_capture.router)
     app.include_router(action_html_render.router)
+    app.include_router(action_browser.router)
     app.include_router(workspace_settings.router)
     app.include_router(workspace_organizations.router)
     app.include_router(integrations.router)

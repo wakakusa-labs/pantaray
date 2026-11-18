@@ -1,28 +1,25 @@
 """Run browser operations in Electron main, in the one session each run owns.
 
-A run, named by its ``actor_process_id``, owns at most one browser session. The
-runtime mints the session id; Electron opens the session on the first operation
-that names it and refuses every operation naming an id it was told to close. The
-registry is this process's memory under a lock: runs call in from worker threads
-with loops of their own, and run ends and the periodic sweep from others.
+A run (its ``actor_process_id``) owns at most one session, whose id the runtime
+mints; Electron refuses every operation naming an id it was told to close. The
+registry is in memory under a lock, since callers run on several threads.
 
-An operation is a one-shot request like an HTML render. It goes to the user's
-newest desktop session, and Electron answers it with ``POST /local/action-browser``.
-A PNG or PDF Electron says it wrote to
-``{artifact_root}/.tmp/browser/{operation_request_id}.{png|pdf}`` is re-read and
-checked against the claimed ``byte_size`` and ``sha256``. The file is removed on
-every path, answered or not.
+An operation is one-shot like an HTML render, answered with
+``POST /local/action-browser``. A PNG or PDF at
+``{artifact_root}/.tmp/browser/{operation_request_id}.{png|pdf}`` is checked
+against the claimed size and sha256 and removed on every path.
 
-Once a run's end has begun, no session is opened and no operation is sent for it.
-A close is idempotent and unanswered; the periodic sweep retries one that reached
-no desktop session, and drops an owner only once its run is over and every close
-it needed was delivered.
+No session is opened and no operation sent for a run whose end has begun: an
+in-memory fence until its status is written, the status after. Closes are
+idempotent and unanswered; the sweep retries undelivered ones and drops an owner
+once its run is over and its closes were delivered.
 """
 
 from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import os
 import sqlite3
 import threading
@@ -44,7 +41,6 @@ from pantaray_agents.schema.websocket.server_messages import (
 
 from ..storage.migrations.connection import configure_connection
 from .browser_contract import (
-    BrowserArtifactClaim,
     BrowserContactedHost,
     BrowserEngineFailureCode,
     BrowserOperationFailed,
@@ -54,6 +50,8 @@ from .deliverable_sessions import deliver_desktop_request
 from .one_shot_requests import OneShotRequests
 from .runtime_env import read_local_runtime_artifact_root
 
+logger = logging.getLogger(__name__)
+
 BROWSER_TEMP_DIRECTORY = ".tmp/browser"
 # Coupled to Electron's per-operation budgets (frontend/electron/src/browser): the
 # longest is navigate's 20 s, and a ``wait`` stays under it because its bound is
@@ -61,6 +59,9 @@ BROWSER_TEMP_DIRECTORY = ".tmp/browser"
 # Raise this whenever Electron's longest budget grows.
 _ELECTRON_LONGEST_OPERATION_BUDGET_SECONDS = 20.0
 BROWSER_RELAY_TIMEOUT_SECONDS = _ELECTRON_LONGEST_OPERATION_BUDGET_SECONDS + 10.0
+# A close is one small frame: still pending after this, the socket is stuck, and
+# the sweep on the shared worker must not wait on it.
+BROWSER_CLOSE_SEND_TIMEOUT_SECONDS = 5.0
 
 BrowserRelayFailureCode = (
     BrowserEngineFailureCode
@@ -85,9 +86,8 @@ WHERE status IN ('enqueued', 'running', 'paused') AND process_id IN ({placeholde
 
 @dataclass(frozen=True, slots=True)
 class BrowserOperationDone:
-    """Electron's answer, its artifact verified. ``artifact`` holds the bytes of the
-    PNG (``screenshot``) or PDF (``print``) that ``result.artifact`` describes, already
-    removed from disk; it is None for every other operation."""
+    """Electron's answer, verified. ``artifact`` is the PNG or PDF ``result.artifact``
+    describes, already removed from disk, for ``screenshot`` and ``print`` only."""
 
     result: BrowserOperationSucceeded
     artifact: bytes | None
@@ -131,6 +131,8 @@ def browser_operation_broker() -> OneShotRequests[BrowserAnswer]:
 
 async def request_browser_operation(
     *,
+    db_path: Path,
+    busy_timeout_ms: int,
     user_id: str,
     action_id: str,
     owner_process_id: str,
@@ -144,7 +146,9 @@ async def request_browser_operation(
     ``policy`` is what the page may load and write to from now on.
     """
 
-    session = _current_session(owner_process_id=owner_process_id, user_id=user_id)
+    session = _current_session(
+        db_path, busy_timeout_ms, owner_process_id=owner_process_id, user_id=user_id
+    )
     if session is None:
         return BrowserRelayFailed(
             code="BROWSER_SESSION_GONE",
@@ -182,7 +186,10 @@ async def request_browser_operation(
             )
         if isinstance(answer, BrowserOperationFailed):
             if answer.code in _SESSION_ENDING_CODES:
-                _forget_session(owner_process_id=owner_process_id, session=session)
+                with _LOCK:
+                    owner = _OWNERS.get(owner_process_id)
+                    if owner is not None and owner.current == session:
+                        owner.current = None
             return BrowserRelayFailed(
                 code=answer.code, message=answer.message, network=tuple(answer.network)
             )
@@ -215,12 +222,8 @@ async def close_browser_session(*, owner_process_id: str) -> None:
 
 
 async def end_browser_sessions(*, owner_process_ids: tuple[str, ...]) -> None:
-    """At the end of these runs: refuse their operations from now on, then close
-    their sessions.
-
-    The refusal is in place before the first await, so a caller cancelled during
-    delivery still leaves it set, and the sweep delivers what is left.
-    """
+    """Refuse these runs' operations from now on, then close their sessions. The
+    refusal is set before the first await, so it survives a cancelled caller."""
 
     with _LOCK:
         for owner_process_id in owner_process_ids:
@@ -257,7 +260,20 @@ async def sweep_browser_sessions(*, db_path: Path, busy_timeout_ms: int) -> None
                 del _OWNERS[owner_process_id]
 
 
-def _current_session(*, owner_process_id: str, user_id: str) -> _Session | None:
+def _current_session(
+    db_path: Path, busy_timeout_ms: int, *, owner_process_id: str, user_id: str
+) -> _Session | None:
+    with _LOCK:
+        owner = _OWNERS.get(owner_process_id)
+        if owner is not None and owner.ending:
+            return None
+        if owner is not None and owner.current is not None:
+            return owner.current
+    # The sweep forgets ended owners: past that, the run's status is the fence.
+    if owner_process_id not in _live_owner_ids(
+        db_path, busy_timeout_ms, (owner_process_id,)
+    ):
+        return None
     with _LOCK:
         owner = _OWNERS.setdefault(owner_process_id, _Owner())
         if owner.ending:
@@ -265,13 +281,6 @@ def _current_session(*, owner_process_id: str, user_id: str) -> _Session | None:
         if owner.current is None:
             owner.current = _Session(user_id=user_id, session_id=str(uuid.uuid4()))
         return owner.current
-
-
-def _forget_session(*, owner_process_id: str, session: _Session) -> None:
-    with _LOCK:
-        owner = _OWNERS.get(owner_process_id)
-        if owner is not None and owner.current == session:
-            owner.current = None
 
 
 def _retire_current(owner: _Owner) -> None:
@@ -287,10 +296,18 @@ async def _deliver_closes(owner_process_id: str) -> None:
         owner = _OWNERS.get(owner_process_id)
         unclosed = tuple(owner.unclosed) if owner is not None else ()
     for session in unclosed:
-        delivered = await deliver_desktop_request(
-            session.user_id,
-            BrowserSessionCloseRequestedMessage(session_id=session.session_id),
-        )
+        try:
+            delivered = await asyncio.wait_for(
+                deliver_desktop_request(
+                    session.user_id,
+                    BrowserSessionCloseRequestedMessage(session_id=session.session_id),
+                ),
+                timeout=BROWSER_CLOSE_SEND_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            # Left unclosed for the sweep; the next owner's closes still go out.
+            logger.warning("Browser session close not sent in time; will retry")
+            return
         if delivered:
             with _LOCK:
                 owner = _OWNERS.get(owner_process_id)
@@ -311,8 +328,7 @@ def _live_owner_ids(
 
 
 def _artifact_path(operation_request_id: str, kind: Literal["png", "pdf"]) -> str:
-    """Relative to the artifact root; Electron derives the same path from the id."""
-
+    # Relative to the artifact root; Electron derives the same path from the id.
     return f"{BROWSER_TEMP_DIRECTORY}/{operation_request_id}.{kind}"
 
 
@@ -334,7 +350,7 @@ def _verify_artifact(
             network=tuple(answer.network),
         )
 
-    claim: BrowserArtifactClaim | None = answer.artifact
+    claim = answer.artifact
     if (None if claim is None else claim.kind) != expected_kind:
         return integrity_failed("the answer names a different kind of output")
     if claim is None:
@@ -361,6 +377,7 @@ def _verify_artifact(
 
 
 __all__ = [
+    "BROWSER_CLOSE_SEND_TIMEOUT_SECONDS",
     "BROWSER_RELAY_TIMEOUT_SECONDS",
     "BROWSER_TEMP_DIRECTORY",
     "BrowserAnswer",

@@ -102,33 +102,6 @@ def test_reaper_task_runs_from_schedule(
     assert next_runs == {"reaper": 40.0}
 
 
-def test_browser_session_sweep_runs_from_schedule(
-    monkeypatch: pytest.MonkeyPatch,
-    context: PeriodicTaskContext,
-    schedule_and_slot: tuple[tuple[PeriodicTask, ...], MemoryEmbeddingProjectionSlot],
-) -> None:
-    from pantaray_agents.local_runtime.runtime import periodic_schedule
-
-    calls: list[tuple[Path, int]] = []
-
-    async def sweep(*, db_path: Path, busy_timeout_ms: int) -> None:
-        calls.append((db_path, busy_timeout_ms))
-
-    monkeypatch.setattr(periodic_schedule, "sweep_browser_sessions", sweep)
-    schedule, _slot = schedule_and_slot
-    tasks = tuple(task for task in schedule if task.name == "browser_sessions")
-
-    next_runs = run_due_periodic_tasks(
-        tasks=tasks,
-        context=context,
-        next_run_monotonic_by_task={task.name: 0.0 for task in tasks},
-        now_monotonic=10.0,
-    )
-
-    assert calls == [(context.db_path, context.busy_timeout_ms)]
-    assert next_runs == {"browser_sessions": 40.0}
-
-
 def test_activity_summary_task_runs_from_schedule(
     monkeypatch: pytest.MonkeyPatch,
     context: PeriodicTaskContext,

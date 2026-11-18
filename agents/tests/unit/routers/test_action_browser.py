@@ -27,13 +27,7 @@ RESULT = {
     "notes": [],
     "truncated": None,
     "network": [{"host": "localhost", "port": 5173}],
-    "artifact": {
-        "kind": "png",
-        "byte_size": 2048,
-        "sha256": "a" * 64,
-        "width_px": 1280,
-        "height_px": 800,
-    },
+    "artifact": {"kind": "pdf", "byte_size": 2048, "sha256": "a" * 64},
 }
 
 

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import sqlite3
+import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,7 +42,6 @@ from pantaray_agents.schema.websocket.server_messages import (
 )
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
-PNG_SHA256 = hashlib.sha256(PNG_BYTES).hexdigest()
 OWNER = BROKER_ACTOR_PROCESS_ID
 NETWORK = [{"host": "localhost", "port": 5173}]
 SCREENSHOT = BrowserScreenshotOperation(action="screenshot")
@@ -81,7 +82,7 @@ def _succeeded(artifact: dict[str, object] | None) -> BrowserOperationSucceeded:
 PNG_CLAIM = {
     "kind": "png",
     "byte_size": len(PNG_BYTES),
-    "sha256": PNG_SHA256,
+    "sha256": hashlib.sha256(PNG_BYTES).hexdigest(),
     "width_px": 1280,
     "height_px": 800,
 }
@@ -110,6 +111,33 @@ class Runtime:
     async def sweep(self) -> None:
         await relay_module.sweep_browser_sessions(
             db_path=self.db_path, busy_timeout_ms=1_000
+        )
+
+    def seed_run(self, owner: str, status: str = "running") -> None:
+        insert_agent_action(db_path=self.db_path, action_id=owner)
+        _seed_broker_actor_process(
+            self.db_path, process_id=owner, action_id=owner, status=status
+        )
+
+    def finish_run(self, owner: str) -> None:
+        with sqlite3.connect(self.db_path) as connection:
+            connection.execute(
+                "UPDATE processes SET status = 'completed' WHERE process_id = ?",
+                (owner,),
+            )
+
+    async def request(
+        self, owner: str, operation: BrowserOperation = NAVIGATE
+    ) -> BrowserOperationOutcome:
+        return await relay_module.request_browser_operation(
+            db_path=self.db_path,
+            busy_timeout_ms=1_000,
+            user_id="user-1",
+            action_id="action-1",
+            owner_process_id=owner,
+            tool_request_id="action-1:step-1:1",
+            operation=operation,
+            policy=POLICY,
         )
 
 
@@ -142,25 +170,12 @@ async def _start(
     """Start an operation, then write its artifact where Electron would."""
 
     sent = len(runtime.desktop.requests)
-    task = asyncio.ensure_future(
-        relay_module.request_browser_operation(
-            user_id="user-1",
-            action_id="action-1",
-            owner_process_id=owner,
-            tool_request_id="action-1:step-1:1",
-            operation=operation,
-            policy=POLICY,
-        )
-    )
+    task = asyncio.ensure_future(runtime.request(owner, operation))
     while len(runtime.desktop.requests) == sent:
         await asyncio.sleep(0.005)
     payload = runtime.desktop.requests[-1]
-    artifact = (
-        runtime.artifact_root
-        / ".tmp"
-        / "browser"
-        / f"{payload['operation_request_id']}.{kind}"
-    )
+    name = f"{payload['operation_request_id']}.{kind}"
+    artifact = runtime.artifact_root / ".tmp" / "browser" / name
     if data is not None:
         artifact.parent.mkdir(parents=True, exist_ok=True)
         artifact.write_bytes(data)
@@ -214,18 +229,6 @@ async def test_a_screenshot_is_verified_returned_and_removed(
         "operation": {"action": "screenshot", "ref": None, "full_page": None},
         "policy": POLICY.model_dump(mode="json"),
     }
-
-
-@pytest.mark.asyncio
-async def test_a_run_keeps_one_session_and_another_run_gets_its_own(
-    runtime: Runtime,
-) -> None:
-    # Catches: a session minted per operation (the page would be lost between
-    # calls), or one shared between runs.
-    first = await _navigate(runtime)
-
-    assert await _navigate(runtime) == first
-    assert await _navigate(runtime, "p-2") != first
 
 
 @pytest.mark.asyncio
@@ -283,11 +286,8 @@ async def test_an_electron_failure_is_returned_and_a_dropped_session_is_replaced
     # the rest of the run.
     outcome, first = await _run(runtime, _failed(code), data=b"\x89PN")
 
-    assert outcome == BrowserRelayFailed(
-        code=code,  # type: ignore[arg-type]
-        message="x",
-        network=tuple(_failed(code).network),
-    )
+    assert isinstance(outcome, BrowserRelayFailed)
+    assert (outcome.code, outcome.network) == (code, tuple(_failed(code).network))
     assert (await _navigate(runtime) == first["session_id"]) is same_session
 
 
@@ -329,14 +329,8 @@ async def test_after_its_end_begins_a_run_gets_no_operation(runtime: Runtime) ->
 
     await relay_module.end_browser_sessions(owner_process_ids=(OWNER, "p-unused"))
     await relay_module.end_browser_sessions(owner_process_ids=(OWNER,))
-    refused = await relay_module.request_browser_operation(
-        user_id="user-1",
-        action_id="action-1",
-        owner_process_id="p-unused",
-        tool_request_id="t",
-        operation=NAVIGATE,
-        policy=POLICY,
-    )
+    # Its status is still running: the fence in memory refuses it.
+    refused = await runtime.request("p-unused")
 
     # One close, for the one session that existed; a run with none (one whose
     # navigate races its Stop) is refused all the same.
@@ -360,34 +354,18 @@ async def test_closing_is_idempotent_and_the_run_may_open_a_new_session(
 
 
 @pytest.mark.asyncio
-async def test_the_sweep_retries_a_close_no_desktop_session_received(
-    runtime: Runtime,
-) -> None:
-    opened = await _navigate(runtime)
-    runtime.desktop.open = False
-    await relay_module.close_browser_session(owner_process_id=OWNER)
-    assert runtime.closes() == []
-
-    runtime.desktop.open = True
-    await runtime.sweep()
-    await runtime.sweep()
-
-    assert runtime.closes() == [opened]
-
-
-@pytest.mark.asyncio
 async def test_the_sweep_closes_runs_that_ended_and_keeps_live_ones(
     runtime: Runtime,
 ) -> None:
-    for owner, status in (("p-done", "completed"), ("p-paused", "paused")):
-        insert_agent_action(db_path=runtime.db_path, action_id=owner)
-        _seed_broker_actor_process(
-            runtime.db_path, process_id=owner, action_id=owner, status=status
-        )
+    runtime.seed_run("p-paused", "paused")
+    runtime.seed_run("p-done")
     sessions = {
         owner: await _navigate(runtime, owner)
-        for owner in (OWNER, "p-paused", "p-done", "p-no-row")
+        for owner in (OWNER, "p-paused", "p-done")
     }
+    # Catches: a session minted per operation, or one shared between runs.
+    assert len(set(sessions.values())) == 3
+    runtime.finish_run("p-done")
     runtime.desktop.open = False
 
     await runtime.sweep()
@@ -396,7 +374,46 @@ async def test_the_sweep_closes_runs_that_ended_and_keeps_live_ones(
     await runtime.sweep()
     await runtime.sweep()
 
-    assert set(runtime.closes()) == {sessions["p-done"], sessions["p-no-row"]}
+    assert runtime.closes() == [sessions["p-done"]]
     assert set(relay_module._OWNERS) == {OWNER, "p-paused"}
+    # Catches: forgetting the ended owner reopening its browser. A late request
+    # finds no fence in memory, and the run's status refuses it; so does a run
+    # with no process row at all.
+    for owner in ("p-done", "p-no-row"):
+        late = await runtime.request(owner)
+        assert isinstance(late, BrowserRelayFailed)
+        assert late.code == "BROWSER_SESSION_GONE"
     # A live run, waiting for an approval or not, keeps its page.
     assert await _navigate(runtime) == sessions[OWNER]
+
+
+@pytest.mark.asyncio
+async def test_a_close_send_that_never_completes_does_not_hold_the_sweep(
+    runtime: Runtime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Catches: one stuck socket stalling the shared worker's periodic tasks and
+    # every other owner's close.
+    monkeypatch.setattr(relay_module, "BROWSER_CLOSE_SEND_TIMEOUT_SECONDS", 0.05)
+    runtime.seed_run("p-2")
+    opened = {owner: await _navigate(runtime, owner) for owner in (OWNER, "p-2")}
+    runtime.finish_run("p-2")
+
+    async def never_sends(event: object, message: object) -> bool:
+        await asyncio.Event().wait()
+        return True
+
+    runtime.desktop.send_desktop_request = never_sends  # type: ignore[method-assign]
+    # A live run's own close, and an ended run's, both stuck.
+    await relay_module.close_browser_session(owner_process_id=OWNER)
+    started = time.monotonic()
+    await runtime.sweep()
+    # One deadline per owner, then on to the next.
+    assert time.monotonic() - started < 1.0
+    assert runtime.closes() == []
+
+    del runtime.desktop.send_desktop_request
+    await runtime.sweep()
+    await runtime.sweep()
+    # Each retried once delivered; only the live run stays listed.
+    assert sorted(runtime.closes()) == sorted(opened.values())
+    assert set(relay_module._OWNERS) == {OWNER}

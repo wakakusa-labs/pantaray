@@ -76,7 +76,7 @@ async def _save_offer(
             todo=SuggestionTodo(
                 text="Draft the deck",
                 outcome=outcome,
-                note=None if outcome == "done" else "Charts are left",
+                note=None if outcome == "open" else "Charts are left",
             ),
             interaction_contract="action_offer",
         ),
@@ -89,7 +89,7 @@ async def _save_offer(
 
 @pytest.mark.parametrize(
     ("outcome", "state"),
-    [("done", "done"), ("partial", "partial"), ("continue", "waiting")],
+    [("open", "handed_over"), ("partial", "partial"), ("continue", "waiting")],
 )
 async def test_the_popup_names_the_todo_as_the_list_does(
     tmp_path: Path,

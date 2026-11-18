@@ -85,7 +85,7 @@ async def _save_action_offer(db_path: Path) -> None:
             suggestion_summary="summary",
             status=StatusType.SUCCESS,
             has_suggestion=True,
-            todo=SuggestionTodo(text="Reply", outcome="done", note=None),
+            todo=SuggestionTodo(text="Reply", outcome="open", note=None),
             interaction_contract="action_offer",
         ),
         prompt_name="suggestion",

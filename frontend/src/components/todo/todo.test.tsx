@@ -88,6 +88,20 @@ it('says where the TODO stands in a word, Pantaray’s deletion request first', 
   expect(screen.queryByRole('button', { name: /^開始日/ })).toBeNull();
 });
 
+it('shows a TODO handed over to the user with no state word, like an ordinary one', () => {
+  renderRow({
+    author: 'ai',
+    origin: 'suggestion',
+    state: { kind: 'handed_over' },
+    conversation: { kind: 'suggestion', suggestion_id: 'sug-1' },
+  });
+  expect(screen.getByRole('checkbox', { name: '完了: 見積書を送る' })).not.toBeChecked();
+  expect(stateWord()).toHaveTextContent(/^$/);
+  expect(stateWord()).toHaveClass('todo-row__state', { exact: true });
+  // Nothing will start it, so it has no start date to change.
+  expect(screen.queryByRole('button', { name: /^開始日/ })).toBeNull();
+});
+
 it('draws a due day gone by in the late tone, never a done one, and marks a weekly one', () => {
   renderRow({ due: { date: '2026-11-08', repeat: 'weekly' } });
   expect(screen.getByRole('button', { name: '期限 日 11/8: 見積書を送る' })).not.toHaveClass(

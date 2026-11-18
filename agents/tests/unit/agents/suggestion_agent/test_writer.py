@@ -161,8 +161,8 @@ async def test_off_the_writer_writes_the_message_alone_and_no_todo(
 @pytest.mark.parametrize(
     ("state", "note", "expected"),
     [
-        # A finished TODO shows no note, so a note the model added is dropped.
-        ("done", "送りました", SuggestionTodo(text="t", outcome="done", note=None)),
+        # An open TODO carries no report, so a note the model added is dropped.
+        ("open", "送りました", SuggestionTodo(text="t", outcome="open", note=None)),
         (
             "partial",
             " 下書きまで ",
@@ -172,7 +172,7 @@ async def test_off_the_writer_writes_the_message_alone_and_no_todo(
         ("continue", "  ", ValueError),
     ],
 )
-def test_an_offers_todo_state_needs_a_note_unless_done(
+def test_an_offers_todo_state_needs_a_note_unless_open(
     state: str, note: str | None, expected: object
 ) -> None:
     arguments = {"message": "m", "todo": "t", "todo_state": state, "todo_note": note}
@@ -193,6 +193,9 @@ def test_an_offers_todo_state_needs_a_note_unless_done(
         ("message_only", "continue"),
         ("message_only", "partial"),
         ("message_only", None),
+        # A Suggestion's TODO never starts checked: the user checks it off.
+        ("action_offer", "done"),
+        ("message_only", "done"),
     ],
 )
 def test_a_todo_state_outside_the_contracts_choices_is_refused(

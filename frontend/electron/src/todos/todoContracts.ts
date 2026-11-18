@@ -190,6 +190,8 @@ const TodoStateSchema = z.discriminatedUnion('kind', [
     .strict(),
   z.object({ kind: z.literal('partial'), note: z.string().nullable() }).strict(),
   z.object({ kind: z.literal('stopped'), outcome: z.enum(['failed', 'canceled']) }).strict(),
+  // A Suggestion's TODO Pantaray has nothing left on: the user's from here.
+  z.object({ kind: z.literal('handed_over') }).strict(),
   z
     // `scheduled`: its `starts_on` has not come yet. `unscheduled`: it has no `starts_on`.
     .object({

@@ -31,6 +31,7 @@ _TODO_STATE_TEXT: Final[Mapping[SuggestionTodoState, str]] = {
     "waiting": "waiting for the user",
     "partial": "partly done",
     "stopped": "stopped",
+    "handed_over": "handed to the user",
     "not_started": "not started",
 }
 RECENT_SUGGESTION_REPLY_MAX_CHARS = 2_000

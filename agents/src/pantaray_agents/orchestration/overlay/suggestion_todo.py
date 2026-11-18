@@ -5,6 +5,7 @@ from __future__ import annotations
 from pantaray_agents.local_runtime.todos.clock import read_todo_clock
 from pantaray_agents.local_runtime.todos.display import (
     Done,
+    HandedOver,
     Partial,
     Waiting,
     display_state,
@@ -29,7 +30,8 @@ def read_suggestion_todo(
     if entry.conversation.kind == "action":
         return SuggestionTodoView(text=entry.todo.text, state=None)
     state = display_state(entry.todo, entry.conversation, read_todo_clock().today)
-    # Without an Action a Suggestion's TODO is only ever done, partial or waiting.
-    if not isinstance(state, Done | Partial | Waiting):
+    # Without an Action a Suggestion's TODO is only ever done, partial, waiting
+    # or handed over.
+    if not isinstance(state, Done | Partial | Waiting | HandedOver):
         raise ValueError(f"A Suggestion's TODO without an Action is {state.kind}")
     return SuggestionTodoView(text=entry.todo.text, state=state.kind)

@@ -45,7 +45,7 @@ def _response(artifacts: list[str]) -> SuggestionAgentResponse:
         answer="The draft is ready.",
         status=StatusType.SUCCESS,
         has_suggestion=True,
-        todo=SuggestionTodo(text="Reply", outcome="done", note=None),
+        todo=SuggestionTodo(text="Reply", outcome="open", note=None),
         interaction_contract="message_only",
         artifacts=artifacts,
     )

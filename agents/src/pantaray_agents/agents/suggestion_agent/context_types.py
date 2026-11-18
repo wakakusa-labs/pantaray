@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 # The open TODO's display state; a checked TODO is not open.
 type SuggestionTodoState = Literal[
-    "working", "waiting", "partial", "stopped", "not_started"
+    "working", "waiting", "partial", "stopped", "handed_over", "not_started"
 ]
 
 

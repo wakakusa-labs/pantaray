@@ -18,9 +18,10 @@ type StateTone = 'turn' | 'ask' | 'working' | 'quiet' | 'done';
 
 /**
  * Where the TODO stands, in a word; the conversation beside the list tells the rest. `startsOn`
- * names the day a TODO scheduled for later starts.
+ * names the day a TODO scheduled for later starts. Null: there is nothing to say, as for a TODO
+ * handed over to the user.
  */
-function stateWord(todo: TodoView): { key: MessageKey; tone: StateTone; startsOn?: string } {
+function stateWord(todo: TodoView): { key: MessageKey; tone: StateTone; startsOn?: string } | null {
   // Pantaray's request to delete waits for the user, whatever the work's own state.
   if (todo.deletion_request) return { key: 'todo.state.deletionRequested', tone: 'ask' };
   const { state } = todo;
@@ -33,6 +34,8 @@ function stateWord(todo: TodoView): { key: MessageKey; tone: StateTone; startsOn
       return { key: 'todo.state.working', tone: 'working' };
     case 'partial':
       return { key: 'todo.state.partial', tone: 'quiet' };
+    case 'handed_over':
+      return null;
     case 'stopped':
       return {
         key: state.outcome === 'failed' ? 'todo.state.failed' : 'todo.state.canceled',
@@ -77,11 +80,15 @@ export function TodoRow({
   const done = todo.state.kind === 'done';
   const state = stateWord(todo);
   const stateText =
-    state.startsOn === undefined
-      ? t(state.key)
-      : t(state.key, { date: dueDay(language, state.startsOn) });
+    state === null
+      ? ''
+      : state.startsOn === undefined
+        ? t(state.key)
+        : t(state.key, { date: dueDay(language, state.startsOn) });
   const notStarted = todo.deletion_request === null && todo.state.kind === 'not_started';
-  const stateClass = `todo-row__state todo-row__state--${state.tone}`;
+  // Without a word the cell stays, empty, so the due days line up.
+  const stateClass =
+    state === null ? 'todo-row__state' : `todo-row__state todo-row__state--${state.tone}`;
   const late = !done && todo.due !== null && todo.due.date < today;
   const dueText = todo.due ? dueDay(language, todo.due.date) : t('todo.add.noDue');
   const dates = { start: todo.starts_on, due: todo.due?.date ?? null };

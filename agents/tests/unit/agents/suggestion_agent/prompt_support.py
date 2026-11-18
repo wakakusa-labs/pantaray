@@ -60,13 +60,13 @@ SELECT_FIRST = {
 def writer_call(
     message: str, contract: str = "action_offer", **todo: object
 ) -> dict[str, object]:
-    """The writer's tool call; an offer's TODO continues and a notice's is done,
+    """The writer's tool call; an offer's TODO continues and a notice's is open,
     unless `todo` says otherwise."""
 
     state = (
         {"todo_state": "continue", "todo_note": "Waiting for approval."}
         if contract == "action_offer"
-        else {"todo_state": "done", "todo_note": None}
+        else {"todo_state": "open", "todo_note": None}
     )
     return {
         "tool_id": "write_suggestion",

@@ -40,10 +40,13 @@ export type ActionErrorStage =
 
 export type ProcessKind = 'suggestion' | 'action';
 export type SuggestionInteractionContract = 'action_offer' | 'message_only';
-/** A shown Suggestion's TODO; `state`, the list's label, is null once an Action carries it. */
+/**
+ * A shown Suggestion's TODO; `state`, the list's label, is null once an Action carries it.
+ * `handed_over`: Pantaray has nothing left on it, so it shows no label.
+ */
 export type SuggestionTodoView = {
   text: string;
-  state: 'waiting' | 'partial' | 'done' | null;
+  state: 'waiting' | 'partial' | 'done' | 'handed_over' | null;
 };
 export type ActionTerminalStatus = 'success' | 'error' | 'canceled' | 'timeout';
 export type ActionDisplayStatus = 'idle' | 'processing' | ActionTerminalStatus;

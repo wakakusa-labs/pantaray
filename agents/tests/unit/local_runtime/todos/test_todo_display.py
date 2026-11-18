@@ -8,6 +8,7 @@ import pytest
 from pantaray_agents.local_runtime.todos.display import (
     ContinueAiTodo,
     Done,
+    HandedOver,
     NotStarted,
     Partial,
     StartWritten,
@@ -86,8 +87,10 @@ def _reported(kind: ReportKind, run_id: str | None = "run-2") -> Todo:
         ),
         # Dismissed, nothing continues it: it stays where the Suggestion left it.
         (_reported("continue", None), DISMISSED, Partial("continue note")),
-        # A done Suggestion TODO the user unchecked.
-        (SUGGESTED_TODO, SUGGESTION, Waiting("reply", None)),
+        # Nothing left for Pantaray and nothing asked: the user's TODO, not a
+        # wait on their reply, answered or not.
+        (SUGGESTED_TODO, SUGGESTION, HandedOver()),
+        (SUGGESTED_TODO, DISMISSED, HandedOver()),
         (make_todo(starts_on=TOMORROW), NONE, NotStarted("scheduled")),
         (make_todo(starts_on=TODAY), NONE, NotStarted("starting")),
         (make_todo(starts_on=None), NONE, NotStarted("unscheduled")),

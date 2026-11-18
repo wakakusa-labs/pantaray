@@ -1341,6 +1341,22 @@ describe('AgentOverlay broader E2E', () => {
     expect(screen.queryByText('Your reply')).toBeNull();
   });
 
+  it('names a TODO handed over to the user with no state word', async () => {
+    render(
+      <UiLanguageProvider initialLanguage="en">
+        <AgentOverlay />
+      </UiLanguageProvider>
+    );
+    const advice = createCommentOnlySnapshot();
+    Object.assign(advice.snapshot, {
+      suggestionId: 'sug-advice',
+      todo: { text: 'Cancel the design tool plan', state: 'handed_over' },
+    });
+    await act(async () => snapshotListener?.(advice));
+    const heading = screen.getByRole('heading', { level: 1, name: 'Cancel the design tool plan' });
+    expect(heading.parentElement).toHaveTextContent(/^Cancel the design tool plan$/);
+  });
+
   it('stays open when the suggestion it shows is dismissed in the main window', async () => {
     render(
       <UiLanguageProvider initialLanguage="en">

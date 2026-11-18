@@ -19,12 +19,15 @@ LiveResumeKind = Literal["none", "suggestion", "action"]
 
 
 class SuggestionTodoView(BaseModel):
-    """A shown Suggestion's TODO; ``state`` is null once an Action carries it."""
+    """A shown Suggestion's TODO; ``state`` is null once an Action carries it.
+
+    ``handed_over`` is a TODO Pantaray has nothing left on, shown with no state.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     text: str
-    state: Literal["waiting", "partial", "done"] | None
+    state: Literal["waiting", "partial", "done", "handed_over"] | None
 
 
 class OverlaySnapshotModel(BaseModel):

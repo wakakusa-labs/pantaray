@@ -141,7 +141,7 @@ type PageSession = BrowserPage & {
   blocked: BlockedRequest[];
   /** Attaching CDP and pinning the viewport, before the first operation. */
   ready: Promise<void>;
-  queue: Promise<unknown>;
+  queue: Promise<void>;
   /** Why the session ended; set once. */
   end: BrowserOperationError | null;
   /** Rejects with `end` when the session ends, so an operation in flight stops waiting. */
@@ -150,6 +150,9 @@ type PageSession = BrowserPage & {
 };
 
 type LoggerLike = { error?: (name: string, payload?: unknown) => void };
+
+/** What a session needs of a request: the runtime's, or the task preview's own print. */
+export type SessionRequest = Pick<BrowserOperationRequest, 'session_id' | 'operation' | 'policy'>;
 
 const sessionGone = () =>
   new BrowserOperationError('BROWSER_SESSION_GONE', 'This browser session was closed.');
@@ -264,6 +267,15 @@ function errorName(error: unknown): string {
   return error instanceof Error ? error.name : typeof error;
 }
 
+// Outside guardSession, whose closures share one scope with `page`: the session keeps these
+// after the page closes.
+const refusePermission = () => false;
+const refusePermissionRequest = (
+  _contents: unknown,
+  _permission: unknown,
+  callback: (granted: boolean) => void
+) => callback(false);
+
 function guardSession(page: PageSession): void {
   const { ses, contents } = page;
   ses.protocol.handle('file', async (request) => {
@@ -303,9 +315,9 @@ function guardSession(page: PageSession): void {
     const decision = decide(url, 'GET');
     if (decision.allowed && decision.reached !== null) reach(page, decision.reached);
   });
-  ses.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
-  ses.setPermissionCheckHandler(() => false);
-  ses.setDevicePermissionHandler(() => false);
+  ses.setPermissionRequestHandler(refusePermissionRequest);
+  ses.setPermissionCheckHandler(refusePermission);
+  ses.setDevicePermissionHandler(refusePermission);
   ses.on('will-download', (event) => {
     event.preventDefault();
     page.notes.add('download_refused');
@@ -366,6 +378,9 @@ export function createBrowserSessions(params: {
     page.ses.protocol.unhandle('file');
     page.ses.webRequest.onBeforeRequest(null);
     page.ses.webRequest.onHeadersReceived(null);
+    // The session outlives the page, so nothing it keeps may reach the page.
+    page.ses.removeAllListeners('preconnect');
+    page.ses.removeAllListeners('will-download');
     // Electron cannot destroy a session; its memory goes with its storage.
     Promise.all([page.ses.clearStorageData(), page.ses.clearCache()]).catch((error: unknown) =>
       params.logger?.error?.('BROWSER_SESSION_CLEAR_ERR', { error: errorName(error) })
@@ -435,7 +450,7 @@ export function createBrowserSessions(params: {
 
   async function execute<T>(
     page: PageSession,
-    request: BrowserOperationRequest,
+    request: SessionRequest,
     budgetMs: number,
     work: (page: BrowserPage) => Promise<T>
   ): Promise<OperationSettled<T>> {
@@ -511,7 +526,7 @@ export function createBrowserSessions(params: {
      * the first `navigate` naming a new id opens the session.
      */
     run<T>(
-      request: BrowserOperationRequest,
+      request: SessionRequest,
       budgetMs: number,
       work: (page: BrowserPage) => Promise<T>
     ): Promise<OperationSettled<T>> {
@@ -535,7 +550,11 @@ export function createBrowserSessions(params: {
       }
       const opened = page;
       const settled = opened.queue.then(() => execute(opened, request, budgetMs, work));
-      opened.queue = settled.catch(() => undefined);
+      // Waits for the turn only; holding the result would keep it as long as the session.
+      opened.queue = settled.then(
+        () => undefined,
+        () => undefined
+      );
       return settled;
     },
     /** Idempotent; an id closed before its first operation arrives is refused too. */

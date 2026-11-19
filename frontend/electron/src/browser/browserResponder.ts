@@ -49,7 +49,7 @@ const ERR_ABORTED = -3;
 
 type LoggerLike = { error?: (name: string, payload?: unknown) => void };
 
-async function navigate(
+export async function navigate(
   contents: WebContents,
   target: Extract<BrowserOperation, { action: 'navigate' }>['target']
 ): Promise<void> {

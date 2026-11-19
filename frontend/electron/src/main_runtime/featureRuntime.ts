@@ -18,7 +18,6 @@ import type { LocalOwner } from '../auth/localRuntimeState';
 import type { createSupabaseWiring } from '../auth/supabaseWiring';
 import { saveUserState } from '../auth/userState';
 import { createScreenCaptureResponder } from '../capture/screenCaptureRuntime';
-import { createHtmlRenderResponder } from '../render/htmlRender';
 import { createBrowserResponder } from '../browser/browserResponder';
 import { createBrowserSessions } from '../browser/browserSession';
 import { clearBrowserArtifacts } from '../browser/capture';
@@ -180,7 +179,6 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
       }
     },
   });
-  const htmlPreviewPdfs = createHtmlPreviewPdfs({ userDataDir: app.getPath('userData') });
   const resolveOverlayBootstrap = async (suggestionId: string) => {
     const normalizedSuggestionId = String(suggestionId || '').trim();
     return normalizedSuggestionId ? overlayBootstrapFetch(normalizedSuggestionId) : null;
@@ -199,6 +197,10 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
       return Number(new URL(backendUrl).port);
     },
     logger: params.logger,
+  });
+  const htmlPreviewPdfs = createHtmlPreviewPdfs({
+    userDataDir: app.getPath('userData'),
+    sessions: browserSessions,
   });
   const orchestration = createOrchestrationManager({
     getRuntimeBackendUrl: params.desktopRuntime.getBackendUrl,
@@ -219,12 +221,6 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
       localArtifactRoot: params.localArtifactRoot,
       postAnswer: (body) =>
         requestJson({ method: 'POST', path: '/local/action-screen-capture', body }),
-      logger: params.logger,
-    }),
-    respondToHtmlRender: createHtmlRenderResponder({
-      localArtifactRoot: params.localArtifactRoot,
-      postAnswer: (body) =>
-        requestJson({ method: 'POST', path: '/local/action-html-render', body }),
       logger: params.logger,
     }),
     respondToBrowserOperation: createBrowserResponder({

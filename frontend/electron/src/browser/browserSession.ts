@@ -141,7 +141,7 @@ type PageSession = BrowserPage & {
   blocked: BlockedRequest[];
   /** Attaching CDP and pinning the viewport, before the first operation. */
   ready: Promise<void>;
-  queue: Promise<unknown>;
+  queue: Promise<void>;
   /** Why the session ended; set once. */
   end: BrowserOperationError | null;
   /** Rejects with `end` when the session ends, so an operation in flight stops waiting. */
@@ -369,6 +369,9 @@ export function createBrowserSessions(params: {
     page.ses.protocol.unhandle('file');
     page.ses.webRequest.onBeforeRequest(null);
     page.ses.webRequest.onHeadersReceived(null);
+    // The session outlives the page, so nothing it keeps may reach the page.
+    page.ses.removeAllListeners('preconnect');
+    page.ses.removeAllListeners('will-download');
     // Electron cannot destroy a session; its memory goes with its storage.
     Promise.all([page.ses.clearStorageData(), page.ses.clearCache()]).catch((error: unknown) =>
       params.logger?.error?.('BROWSER_SESSION_CLEAR_ERR', { error: errorName(error) })
@@ -538,7 +541,11 @@ export function createBrowserSessions(params: {
       }
       const opened = page;
       const settled = opened.queue.then(() => execute(opened, request, budgetMs, work));
-      opened.queue = settled.catch(() => undefined);
+      // Waits for the turn only; holding the result would keep it as long as the session.
+      opened.queue = settled.then(
+        () => undefined,
+        () => undefined
+      );
       return settled;
     },
     /** Idempotent; an id closed before its first operation arrives is refused too. */

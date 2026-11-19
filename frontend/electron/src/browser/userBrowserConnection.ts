@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import type { UserBrowserId } from './browserContract';
-import { BrowserOperationError } from './browserSession';
+import { BrowserOperationError, type BrowserFailureCode } from './browserSession';
 import type { CdpSession } from './cdpSession';
 import { KNOWN_BROWSERS, type KnownBrowser } from './knownBrowsers';
 
@@ -91,9 +91,10 @@ const BLOCKED_ERRNO = new Set(['EPERM', 'EACCES']);
 
 /**
  * What a tab sends: the page code's commands (snapshot, interactions, capture) and the tab's
- * guards. Chromium routes `Target` commands by the target they name whatever the session, so
- * none but `setAutoAttach` is here, nor anything that reaches the whole browser profile
- * (`Browser`, `Storage`, cookies, downloads). Add a method only when a tab needs it.
+ * guards. Chromium routes `Target` commands by the target they name whatever the session, and
+ * auto-attach would reach the profile's service and shared workers, so no `Target` method is
+ * here, nor anything that reaches the whole browser profile (`Browser`, `Storage`, cookies,
+ * downloads). Add a method only when a tab needs it.
  */
 const TAB_COMMANDS = new Set([
   'Accessibility.getFullAXTree',
@@ -132,31 +133,42 @@ const TAB_COMMANDS = new Set([
   'Runtime.evaluate',
   'Runtime.releaseObjectGroup',
   'Runtime.runIfWaitingForDebugger',
-  'Target.setAutoAttach',
 ]);
 
-const refusal = (browser: KnownBrowser) => ({
-  notRunning: () =>
-    new BrowserOperationError('BROWSER_USER_NOT_RUNNING', `${browser.name} is not running.`),
-  debuggingOff: () =>
-    new BrowserOperationError(
+/**
+ * The children a tab's sessions attach: its frames and dedicated workers, each paused until the
+ * caller has guarded it. A service or shared worker serves the whole profile's tabs of its
+ * origin, so it is never attached; the first matching entry decides.
+ */
+const CHILD_TYPES = new Set(['iframe', 'worker']);
+/** Hidden: never in the tab strip, and gone with the connection. */
+const NEW_TAB = { url: 'about:blank', hidden: true, background: true };
+const AUTO_ATTACH = {
+  autoAttach: true,
+  waitForDebuggerOnStart: true,
+  flatten: true,
+  filter: [{ type: 'iframe' }, { type: 'worker' }, { exclude: true }],
+};
+
+const refusal = (browser: KnownBrowser) => {
+  const { name } = browser;
+  const as = (code: BrowserFailureCode, message: string) => () =>
+    new BrowserOperationError(code, message);
+  return {
+    notRunning: as('BROWSER_USER_NOT_RUNNING', `${name} is not running.`),
+    debuggingOff: as(
       'BROWSER_USER_DEBUGGING_OFF',
-      `${browser.name} does not allow remote debugging; turn it on at ${browser.inspectUrl}.`
+      `${name} does not allow remote debugging; turn it on at ${browser.inspectUrl}.`
     ),
-  fileBlocked: () =>
-    new BrowserOperationError(
+    fileBlocked: as(
       'BROWSER_USER_FILE_BLOCKED',
-      `macOS did not let Pantaray read ${browser.name}'s files; allow it in System Settings › ` +
+      `macOS did not let Pantaray read ${name}'s files; allow it in System Settings › ` +
         'Privacy & Security › Files & Folders.'
     ),
-  denied: () =>
-    new BrowserOperationError(
-      'BROWSER_USER_DENIED',
-      `The user did not allow Pantaray to use ${browser.name}.`
-    ),
-  unavailable: () =>
-    new BrowserOperationError('BROWSER_USER_UNAVAILABLE', `${browser.name} could not be used.`),
-});
+    denied: as('BROWSER_USER_DENIED', `The user did not allow Pantaray to use ${name}.`),
+    unavailable: as('BROWSER_USER_UNAVAILABLE', `${name} could not be used.`),
+  };
+};
 type Refusal = ReturnType<typeof refusal>;
 
 const errnoOf = (error: unknown): unknown => (error as NodeJS.ErrnoException).code;
@@ -269,7 +281,7 @@ type CdpMessage = {
   method?: string;
   params?: {
     sessionId?: string;
-    targetInfo?: { targetId?: string; openerId?: string; url?: string };
+    targetInfo?: { targetId?: string; openerId?: string; url?: string; type?: string };
   };
   sessionId?: string;
 };
@@ -309,10 +321,19 @@ function browserOver(socket: WebSocketClient): UserBrowserConnection {
   function onTabEvent(tab: Tab, message: CdpMessage & { method: string; sessionId: string }) {
     const child = message.params?.sessionId;
     if (child !== undefined && message.method === 'Target.attachedToTarget') {
+      if (!CHILD_TYPES.has(message.params?.targetInfo?.type ?? '')) {
+        // Detaching also lets it run on; it never reaches the caller.
+        send('Target.detachFromTarget', { sessionId: child }, message.sessionId).catch(
+          () => undefined
+        );
+        return;
+      }
       tab.children.add(child);
       bySession.set(child, tab);
+      // Sent before the caller can resume it; if refused, nothing attaches under it.
+      send('Target.setAutoAttach', AUTO_ATTACH, child).catch(() => undefined);
     } else if (child !== undefined && message.method === 'Target.detachedFromTarget') {
-      tab.children.delete(child);
+      if (!tab.children.delete(child)) return;
       bySession.delete(child);
     }
     const from = message.sessionId === tab.sessionId ? undefined : message.sessionId;
@@ -365,17 +386,14 @@ function browserOver(socket: WebSocketClient): UserBrowserConnection {
   async function openTab(onPopup: (url: string) => void): Promise<UserBrowserTab> {
     // Reports every target; only popups of the tabs are acted on, and the rest dropped above.
     await send('Target.setDiscoverTargets', { discover: true });
-    const { targetId } = (await send('Target.createTarget', {
-      url: 'about:blank',
-      hidden: true,
-      background: true,
-    })) as { targetId: string };
+    const { targetId } = (await send('Target.createTarget', NEW_TAB)) as { targetId: string };
     const { sessionId } = (await send('Target.attachToTarget', { targetId, flatten: true })) as {
       sessionId: string;
     };
     const tab: Tab = { targetId, sessionId, children: new Set(), listeners: [], onPopup };
     bySession.set(sessionId, tab);
     byTarget.set(targetId, tab);
+    await send('Target.setAutoAttach', AUTO_ATTACH, sessionId);
     const cdp: CdpSession = {
       async sendCommand(method, params = {}, child) {
         if (!TAB_COMMANDS.has(method)) {

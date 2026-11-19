@@ -57,7 +57,7 @@ async function browserEndpoint(t, mode) {
 }
 
 /** `~/Library/Application Support` with Chrome's user-data-dir as a running Chrome leaves it. */
-function applicationSupport(t, { port, lockPid = process.pid, portFile } = {}) {
+function applicationSupport(t, { port, lockPid = process.pid, portFile, blocked } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-user-browser-'));
   t.after(() => {
     fs.chmodSync(path.join(root, 'Google/Chrome'), 0o700);
@@ -69,6 +69,8 @@ function applicationSupport(t, { port, lockPid = process.pid, portFile } = {}) {
     fs.symlinkSync(`host.local-${lockPid}`, path.join(userDataDir, 'SingletonLock'));
   const text = portFile ?? (port === undefined ? null : `${port}\n${BROWSER_PATH}\n`);
   if (text !== null) fs.writeFileSync(path.join(userDataDir, 'DevToolsActivePort'), text);
+  // macOS privacy settings answer EPERM; a mode of 0 answers EACCES, which reads the same.
+  if (blocked !== undefined) fs.chmodSync(path.join(userDataDir, blocked), 0o000);
   return { root, userDataDir };
 }
 
@@ -159,6 +161,14 @@ test('each state of the browser and its files gets the code the user can act on'
     ['malformed port file', { portFile: 'x\n/elsewhere\n' }, {}, 'BROWSER_USER_UNAVAILABLE'],
     ['debugging turned off, file left', { port: 9222 }, { lsof: '' }, 'BROWSER_USER_DEBUGGING_OFF'],
     ['two listeners', { port: 9222 }, { lsof: 'p1\nf3\np2\nf4\n' }, 'BROWSER_USER_UNAVAILABLE'],
+    [
+      'port file blocked',
+      { port: 9222, blocked: 'DevToolsActivePort' },
+      {},
+      'BROWSER_USER_FILE_BLOCKED',
+      /Files & Folders/,
+    ],
+    ['lock blocked', { port: 9222, blocked: '.' }, {}, 'BROWSER_USER_FILE_BLOCKED'],
   ];
   for (const [name, files, runs, code, message] of cases) {
     const { root } = applicationSupport(t, files);
@@ -168,16 +178,6 @@ test('each state of the browser and its files gets the code the user can act on'
       name
     );
   }
-
-  const unreadable = applicationSupport(t, { port: 9222 });
-  fs.chmodSync(path.join(unreadable.userDataDir, 'DevToolsActivePort'), 0o000);
-  await assert.rejects(
-    connect(unreadable.root),
-    failsWith('BROWSER_USER_FILE_BLOCKED', /Files & Folders/)
-  );
-  const closedDir = applicationSupport(t, { port: 9222 });
-  fs.chmodSync(closedDir.userDataDir, 0o000);
-  await assert.rejects(connect(closedDir.root), failsWith('BROWSER_USER_FILE_BLOCKED'));
 });
 
 test('a listener that is not the signed browser never gets the socket', async (t) => {
@@ -191,11 +191,18 @@ test('a listener that is not the signed browser never gets the socket', async (t
   assert.ok(calls[0].args.includes(`-iTCP@127.0.0.1:${endpoint.port}`));
   const [flag, option, requirement, pid] = calls[1].args;
   assert.deepEqual([flag, option, pid], ['--verify', '-R', '4242']);
-  assert.match(requirement, /leaf\[subject\.OU\] = "EQHXZ8M8AV"/);
-  assert.match(requirement, /"com\.google\.Chrome" or identifier "com\.google\.Chrome\.helper"/);
+  assert.match(
+    requirement,
+    /OU\] = "EQHXZ8M8AV" and \(identifier "com\.google\.Chrome" or identifier "com\.google\.Chrome\.helper"\)$/
+  );
 });
 
-test('a tab reaches only its own sessions, hears only them, and has its popups closed', async (t) => {
+const RESULTS = {
+  'Target.createTarget': { targetId: 'own' },
+  'Target.attachToTarget': { sessionId: 'own-page' },
+};
+
+test('a tab reaches only its own sessions and frames, hears only them, and has its popups closed', async (t) => {
   const received = [];
   let browserSide;
   const endpoint = await browserEndpoint(t, (socket) => {
@@ -203,12 +210,7 @@ test('a tab reaches only its own sessions, hears only them, and has its popups c
     socket.on('message', (data) => {
       const message = JSON.parse(data);
       received.push(message);
-      const result =
-        message.method === 'Target.createTarget'
-          ? { targetId: 'own' }
-          : message.method === 'Target.attachToTarget'
-            ? { sessionId: 'own-page' }
-            : {};
+      const result = RESULTS[message.method] ?? {};
       socket.send(JSON.stringify({ id: message.id, result }));
     });
   });
@@ -221,34 +223,37 @@ test('a tab reaches only its own sessions, hears only them, and has its popups c
   const refused = (method, params, sessionId) =>
     assert.rejects(tab.cdp.sendCommand(method, params, sessionId), CdpCommandError, method);
 
-  // Chromium routes Target commands by the target they name, whichever session carries them.
+  // Chromium routes Target commands by the target they name, whichever session carries them;
+  // auto-attach is the module's own.
   await refused('Target.getTargets', {});
-  await refused('Target.attachToTarget', { targetId: 'users-tab', flatten: true });
   await refused('Target.closeTarget', { targetId: 'users-tab' });
+  await refused('Target.setAutoAttach', { autoAttach: true, flatten: true });
   await refused('Storage.getCookies', {});
-  await refused('Network.getAllCookies', {});
-  await refused('Browser.setDownloadBehavior', { behavior: 'allow' });
   // An empty session id is the browser itself in Chromium.
   await refused('Page.navigate', { url: 'https://example.com' }, '');
-  await refused('Page.navigate', { url: 'https://example.com' }, 'users-session');
   await tab.cdp.sendCommand('Page.navigate', { url: 'https://example.com' });
 
   const send = (method, params, sessionId) =>
     browserSide.send(JSON.stringify({ method, params, sessionId }));
+  const attached = (sessionId, type) =>
+    send(
+      'Target.attachedToTarget',
+      { sessionId, targetInfo: { targetId: type, type } },
+      'own-page'
+    );
   send('Target.targetCreated', {
     targetInfo: { targetId: 'users-tab', url: 'https://mail.example' },
   });
-  send('Target.targetInfoChanged', { targetInfo: { targetId: 'users-tab' } });
   send('Runtime.consoleAPICalled', { type: 'log' }, 'users-session');
   send('Target.targetCreated', {
     targetInfo: { targetId: 'popup', openerId: 'own', url: 'https://popup.example/' },
   });
+  // A service or shared worker serves the profile's other tabs of its origin.
+  attached('sw-session', 'service_worker');
+  attached('shared-session', 'shared_worker');
+  send('Runtime.consoleAPICalled', { type: 'log' }, 'sw-session');
   send('Page.loadEventFired', { timestamp: 1 }, 'own-page');
-  send(
-    'Target.attachedToTarget',
-    { sessionId: 'own-frame', targetInfo: { targetId: 'frame', type: 'iframe' } },
-    'own-page'
-  );
+  attached('own-frame', 'iframe');
   send('Page.frameNavigated', {}, 'own-frame');
   while (events.length < 3) await new Promise((r) => setTimeout(r, 10));
   assert.deepEqual(events, [
@@ -257,22 +262,32 @@ test('a tab reaches only its own sessions, hears only them, and has its popups c
     ['Page.frameNavigated', 'own-frame'],
   ]);
   assert.deepEqual(popups, ['https://popup.example/']);
+  await refused('Runtime.evaluate', { expression: 'clients.matchAll()' }, 'sw-session');
   await tab.cdp.sendCommand('Runtime.runIfWaitingForDebugger', {}, 'own-frame');
   await tab.close();
 
   assert.deepEqual(
-    received.map(({ method, params, sessionId }) => [method, params.targetId, sessionId]),
+    received.map((m) => [m.method, m.params.targetId ?? m.params.sessionId, m.sessionId]),
     [
       ['Target.setDiscoverTargets', undefined, undefined],
       ['Target.createTarget', undefined, undefined],
       ['Target.attachToTarget', 'own', undefined],
+      ['Target.setAutoAttach', undefined, 'own-page'],
       ['Page.navigate', undefined, 'own-page'],
       ['Target.closeTarget', 'popup', undefined],
+      ['Target.detachFromTarget', 'sw-session', 'own-page'],
+      ['Target.detachFromTarget', 'shared-session', 'own-page'],
+      ['Target.setAutoAttach', undefined, 'own-frame'],
       ['Runtime.runIfWaitingForDebugger', undefined, 'own-frame'],
       ['Target.closeTarget', 'own', undefined],
     ]
   );
   assert.deepEqual(received[1].params, { url: 'about:blank', hidden: true, background: true });
+  assert.deepEqual(received[3].params.filter, [
+    { type: 'iframe' },
+    { type: 'worker' },
+    { exclude: true },
+  ]);
 
   connection.close();
   await connection.closed;

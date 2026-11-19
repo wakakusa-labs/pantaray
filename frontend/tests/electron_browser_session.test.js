@@ -373,8 +373,16 @@ test('every frame target is guarded before it runs', async () => {
   const script = cdp.commands.find(
     ({ method }) => method === 'Page.addScriptToEvaluateOnNewDocument'
   ).params.source;
-  assert.match(script, /RTCPeerConnection/);
-  assert.match(script, /showOpenFilePicker/);
+  for (const removed of [
+    'globalThis.RTCPeerConnection',
+    'globalThis.WebTransport',
+    'globalThis.showOpenFilePicker',
+    'globalThis.EyeDropper',
+    'HTMLVideoElement.prototype.requestPictureInPicture',
+    'Navigator.prototype.bluetooth',
+  ]) {
+    assert.ok(script.includes(`delete ${removed};`), removed);
+  }
   cdp.emit('message', {}, 'Target.attachedToTarget', {
     sessionId: 'frame-1',
     targetInfo: { type: 'iframe' },

@@ -12,9 +12,9 @@
  *   ignores `print()`, `execCommand('print')` and the dialogs, and it may start no worker: a
  *   shared or service worker's WebSocket has no frame, and Electron passes only a frame's
  *   WebSocket through `webRequest` (`ElectronBrowserClient::WillInterceptWebSocket`).
- * - Every frame, an out-of-process one included, loses WebRTC and the file pickers before its
- *   first script (`PAGE_GUARD_SCRIPT`), and its file chooser is intercepted. WebRTC over TCP
- *   would bypass `webRequest` under any IP handling policy, and Blink has no switch for it.
+ * - Every frame, an out-of-process one included, loses before its first script
+ *   (`PAGE_GUARD_SCRIPT`) the APIs that connect past `webRequest` or open OS UI the sandbox and
+ *   the permission handlers leave open, and its file chooser is intercepted.
  * Permissions, downloads and new windows are refused. Each refusal is reported with the next
  * answer, as is every host the page reached, once.
  *
@@ -73,14 +73,28 @@ const MAX_POPUPS_REPORTED = 10;
  */
 const DOCUMENT_POLICY =
   "sandbox allow-scripts allow-same-origin allow-forms allow-popups allow-downloads; worker-src 'none'";
+/**
+ * What `PAGE_GUARD_SCRIPT` removes, by owner. Blink has no switch for any of them.
+ * - Connections Electron never passes through `webRequest`: WebRTC (over TCP under any IP
+ *   handling policy) and WebTransport (Electron does not intercept it).
+ * - OS UI a click's user activation opens from the hidden window: the File System Access pickers
+ *   (a same-origin sandbox allows them), the screen color sampler (`OpenEyeDropper`), the
+ *   picture-in-picture window (`EnterPictureInPicture`), and Web Bluetooth, whose chooser picks
+ *   the first device when nothing listens for `select-bluetooth-device`.
+ */
+const GUARDED_APIS: readonly (readonly [owner: string, name: string])[] = [
+  ['globalThis', 'RTCPeerConnection'],
+  ['globalThis', 'webkitRTCPeerConnection'],
+  ['globalThis', 'WebTransport'],
+  ['globalThis', 'showOpenFilePicker'],
+  ['globalThis', 'showSaveFilePicker'],
+  ['globalThis', 'showDirectoryPicker'],
+  ['globalThis', 'EyeDropper'],
+  ['HTMLVideoElement.prototype', 'requestPictureInPicture'],
+  ['Navigator.prototype', 'bluetooth'],
+];
 /** Run in every new document of every frame before its own scripts. */
-const PAGE_GUARD_SCRIPT = `for (const name of ${JSON.stringify([
-  'RTCPeerConnection',
-  'webkitRTCPeerConnection',
-  'showOpenFilePicker',
-  'showSaveFilePicker',
-  'showDirectoryPicker',
-])}) delete globalThis[name];`;
+const PAGE_GUARD_SCRIPT = GUARDED_APIS.map(([owner, name]) => `delete ${owner}.${name};`).join('');
 /** Blink's console message for a dialog or print a sandboxed document asked for. */
 const IGNORED_MODAL = /^Ignored call to '/;
 /** Every connection Chromium makes outside `webRequest` (preconnects) goes nowhere, loopback included. */

@@ -8,6 +8,25 @@ const SESSION_MODULE = path.join(__dirname, '../../electron/dist/browser/browser
 // A worker that ran would open this; the host is never approved for writes.
 const WORKER_SOCKET = "new WebSocket('wss://example.com/')";
 
+/** What a frame still has of each API the guard removes; every entry must be `undefined`. */
+const PROBE = `(w) => [
+  typeof w.RTCPeerConnection, typeof w.webkitRTCPeerConnection, typeof w.WebTransport,
+  typeof w.EyeDropper, typeof w.showOpenFilePicker, typeof w.showSaveFilePicker,
+  typeof w.showDirectoryPicker, typeof w.HTMLVideoElement.prototype.requestPictureInPicture,
+  typeof w.navigator.bluetooth,
+].join()`;
+const NOTHING_LEFT = Array(9).fill('undefined').join();
+
+/** A frame that reports its probe on load and whenever its parent asks. */
+function childScript(from: string): string {
+  return `<!doctype html><script>
+const probe = ${PROBE};
+const report = () => parent.postMessage({ from: '${from}', probe: probe(window) }, '*');
+addEventListener('message', report);
+report();
+</script>`;
+}
+
 function pages(crossSiteOrigin: string): Record<string, string> {
   return {
     '/workers.html': `<!doctype html><body><script>
@@ -28,28 +47,38 @@ window.done = (async () => {
   };
 })();
 </script></body>`,
-    '/rtc.html': `<!doctype html><body><script>
-const result = { main: typeof RTCPeerConnection, webkit: typeof webkitRTCPeerConnection };
+    '/guarded.html': `<!doctype html><body><script>
+const probe = ${PROBE};
 const blank = document.createElement('iframe');
 document.body.appendChild(blank);
-result.blank = typeof blank.contentWindow.RTCPeerConnection;
-window.done = new Promise((resolve) => {
-  addEventListener('message', (event) => {
-    result[event.data.from] = event.data.rtc;
-    if ('sandboxed' in result && 'crossSite' in result) resolve(result);
-  });
+const initial = { main: probe(window), blank: probe(blank.contentWindow) };
+const children = {};
+const replies = new Map();
+addEventListener('message', (event) => {
+  replies.set(event.data.from, event.data.probe);
+  children[event.data.from] = event.source;
 });
+const both = () => new Promise((resolve) => {
+  const check = () => (replies.size === 2 ? resolve(Object.fromEntries(replies)) : setTimeout(check, 50));
+  check();
+});
+window.done = both().then((frames) => ({ ...initial, ...frames }));
+// Asks every frame again, after the click that gave the page user activation.
+window.again = () => {
+  replies.clear();
+  for (const child of Object.values(children)) child.postMessage('probe', '*');
+  return both().then((frames) => ({ main: probe(window), blank: probe(blank.contentWindow), ...frames }));
+};
 const sandboxed = document.createElement('iframe');
 sandboxed.sandbox = 'allow-scripts';
-sandboxed.srcdoc = "<script>parent.postMessage({ from: 'sandboxed', rtc: typeof RTCPeerConnection }, '*')<\\/script>";
+// Escaped so the srcdoc's closing tag does not end this script.
+sandboxed.srcdoc = ${JSON.stringify(childScript('sandboxed')).replace(/</g, '\\u003c')};
 document.body.appendChild(sandboxed);
 const crossSite = document.createElement('iframe');
-crossSite.src = '${crossSiteOrigin}/rtc-child.html';
+crossSite.src = '${crossSiteOrigin}/guarded-child.html';
 document.body.appendChild(crossSite);
 </script></body>`,
-    '/rtc-child.html': `<!doctype html><script>
-parent.postMessage({ from: 'crossSite', rtc: typeof RTCPeerConnection + '/' + typeof webkitRTCPeerConnection }, '*');
-</script>`,
+    '/guarded-child.html': childScript('crossSite'),
     '/ui.html': `<!doctype html><body><input type="file" id="file"><p>printable</p></body>`,
     '/w.js': WORKER_SOCKET,
     '/shared.js': WORKER_SOCKET,
@@ -67,7 +96,13 @@ type Settled = {
 /** Runs one operation in the app's main process through the session module under test. */
 function run(
   app: ElectronApplication,
-  call: { session: string; url: string | null; expression: string | null; print?: boolean }
+  call: {
+    session: string;
+    url: string | null;
+    expression: string | null;
+    print?: boolean;
+    click?: boolean;
+  }
 ): Promise<Settled> {
   return app.evaluate(
     async (_electron, args) => {
@@ -104,6 +139,17 @@ function run(
       return sessions.run(request, 20_000, async (page: Page) => {
         if (args.url) await page.contents.loadURL(args.url);
         if (args.print) return (await page.contents.printToPDF({})).subarray(0, 5).toString();
+        if (args.click) {
+          for (const type of ['mousePressed', 'mouseReleased']) {
+            await page.cdp.sendCommand('Input.dispatchMouseEvent', {
+              type,
+              x: 5,
+              y: 5,
+              button: 'left',
+              clickCount: 1,
+            });
+          }
+        }
         if (!args.expression) return null;
         const { result } = await page.cdp.sendCommand('Runtime.evaluate', {
           expression: args.expression,
@@ -114,12 +160,12 @@ function run(
         return result.value;
       });
     },
-    { ...call, print: call.print ?? false, modulePath: SESSION_MODULE }
+    { ...call, print: call.print ?? false, click: call.click ?? false, modulePath: SESSION_MODULE }
   ) as Promise<Settled>;
 }
 
 // eslint-disable-next-line no-empty-pattern
-test('a browser session page opens no worker, WebRTC, print or file dialog', async ({}, testInfo) => {
+test('a browser session page opens no worker, WebRTC, WebTransport or OS dialog', async ({}, testInfo) => {
   const hits: string[] = [];
   const server: Server = createServer((request, response) => {
     hits.push(request.url ?? '');
@@ -160,19 +206,26 @@ test('a browser session page opens no worker, WebRTC, print or file dialog', asy
       expect(settled.report?.blocked.map((blocked) => blocked.url)).toContain(`${origin}/w.js`);
     });
 
-    await test.step('WebRTC is gone in every frame, out-of-process ones included', async () => {
-      const settled = await run(app, {
-        session: 'rtc',
-        url: `${origin}/rtc.html`,
+    await test.step('WebRTC, WebTransport and the OS pickers are gone in every frame', async () => {
+      const everyFrame = {
+        main: NOTHING_LEFT,
+        blank: NOTHING_LEFT,
+        sandboxed: NOTHING_LEFT,
+        crossSite: NOTHING_LEFT,
+      };
+      const loaded = await run(app, {
+        session: 'guarded',
+        url: `${origin}/guarded.html`,
         expression: 'window.done',
       });
-      expect(settled.value).toEqual({
-        main: 'undefined',
-        webkit: 'undefined',
-        blank: 'undefined',
-        sandboxed: 'undefined',
-        crossSite: 'undefined/undefined',
+      expect(loaded.value).toEqual(everyFrame);
+      const clicked = await run(app, {
+        session: 'guarded',
+        url: null,
+        click: true,
+        expression: 'window.again()',
       });
+      expect(clicked.value).toEqual(everyFrame);
     });
 
     await test.step('a page print is ignored and reported; the tool still prints', async () => {

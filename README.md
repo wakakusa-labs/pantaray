@@ -10,13 +10,13 @@
   </p>
 </div>
 
-Pantaray is an intelligence that thinks and acts for you. It understands your work, brings
-perspectives and ideas worth your time, and suggests the work that matters. Approve a suggestion and
-Pantaray takes it on and sees it through. You can also ask it for anything, any time.
+Pantaray is an intelligence that thinks and acts for you. It understands your work and shares a TODO
+list with you.
 
-- **It thinks ahead.** From what you are working on, it suggests the work that matters before you ask.
-- **It finishes the job.** Approve a suggestion, or ask for something yourself, and Pantaray carries it
+- **It works through your list.** Add a TODO and Pantaray starts on it on its start date, carrying it
   through to the result.
+- **It moves first.** From what you are working on, it finds the work that matters, takes it as far as
+  it can, and reports back. Reply to carry it on.
 - **You choose the AI.** Your own OpenAI, Anthropic, or Fireworks AI key, or your ChatGPT account.
 
 ## Install
@@ -30,8 +30,7 @@ drag Pantaray into your Applications folder. Builds are signed and notarized, an
 1. Open **Settings → AI connection** and choose how to connect: your own API key or your ChatGPT
    account.
 2. Press **Start recording** and allow the macOS permissions Pantaray asks for.
-3. Suggestions arrive as you work. To ask for something yourself, press the **New task**
-   shortcut from any app.
+3. Pantaray reports in your TODO list as you work. To add a TODO from any app, press **Option+Space**.
 
 ## Privacy
 

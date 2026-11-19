@@ -71,6 +71,12 @@ _TABLE: tuple[tuple[str, SecretTier | None], ...] = (
     (".config/gh/hosts.yml", None),
     ("/p/deck.key", None),
     ("/p/cert.pem", None),
+    ("Library/Application Support/Google/Chrome/DevToolsActivePort", "app_secret"),
+    (
+        "Library/Application Support/BraveSoftware/Brave-Browser/Local State",
+        "app_secret",
+    ),
+    ("Library/Application Support/Google/Chrome/Default/Preferences", None),
 )
 
 

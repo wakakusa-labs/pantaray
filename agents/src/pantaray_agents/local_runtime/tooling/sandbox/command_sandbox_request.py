@@ -15,6 +15,7 @@ from ...runtime.runtime_env import (
 )
 from ..brokering.broker_protocol import ValidatedCommandRequest
 from ..models import BrokerNetworkPolicy
+from .browser_debugging_ports import protected_browser_ports
 from .command_sandbox_protocol import (
     ActionSandboxStorage,
     BrokerToSandboxCommandRequest,
@@ -142,6 +143,7 @@ def compose_sandbox_request(
         use_login_environment=use_login_environment,
         run_outside_sandbox=run_outside_sandbox,
         protected_backend_address=f"{address}:{port}",
+        protected_browser_ports=protected_browser_ports(),
     )
 
 

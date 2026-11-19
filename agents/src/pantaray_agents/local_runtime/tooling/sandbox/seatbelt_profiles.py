@@ -295,11 +295,17 @@ def _render_network_clause(request: SandboxCommandSpec) -> str:
     # (system-network) is left out; resolving needs none of it. "localhost"
     # matches 127.0.0.1 and ::1 but not ::ffff:127.0.0.1, so a dual-stack IPv6
     # socket cannot reach loopback.
-    return (
-        "(deny network*)\n"
-        '(allow network-outbound (literal "/private/var/run/mDNSResponder"))\n'
-        '(allow network-outbound (remote ip "localhost:*"))\n'
-        '(allow network-bind (local ip "localhost:*"))\n'
-        '(allow network-inbound (local tcp "localhost:*") (local udp "localhost:*"))\n'
-        f'(deny network-outbound (remote tcp "{protected}"))'
+    return "\n".join(
+        (
+            "(deny network*)",
+            '(allow network-outbound (literal "/private/var/run/mDNSResponder"))',
+            '(allow network-outbound (remote ip "localhost:*"))',
+            '(allow network-bind (local ip "localhost:*"))',
+            '(allow network-inbound (local tcp "localhost:*") (local udp "localhost:*"))',
+            f'(deny network-outbound (remote tcp "{protected}"))',
+            *(
+                f'(deny network-outbound (remote tcp "localhost:{port}"))'
+                for port in request.protected_browser_ports
+            ),
+        )
     )

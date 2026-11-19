@@ -1,4 +1,5 @@
-"""The ``browser`` tool definition: the run's hidden page in the app's browser."""
+"""The ``browser`` tool definition: the run's hidden page in the app's browser,
+and its tab in the user's own browser."""
 
 from __future__ import annotations
 
@@ -27,8 +28,8 @@ from .broker_tool_input_schema import (
     broker_tool_input_spec_from_model,
 )
 
-# The broker parses the call with the BrowserToolArgs union, which owns each
-# action's fields and rules.
+# The broker parses the call with BrowserToolCall, whose BrowserToolArgs union
+# owns each action's fields and rules.
 BrowserOfferedAction = Literal[
     "navigate",
     "back",
@@ -54,6 +55,7 @@ class _BrowserToolInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     action: BrowserOfferedAction
+    browser: Literal["pantaray", "user"] | None = None
     url: str | None = None
     ref: str | None = None
     text: str | None = None
@@ -76,6 +78,17 @@ def _fields(*, images: bool) -> tuple[BrokerToolFieldPresentation, ...]:
     # Every field is presented; without images, _browser_tool drops the image ones.
     return (
         *_FIELDS_BEFORE_REF,
+        BrokerToolFieldPresentation(
+            name="browser",
+            description=(
+                '"pantaray" (the default): this run\'s hidden page in the app. '
+                "\"user\": one tab of this run's own in the user's browser, signed "
+                "in to the user's real accounts. Not for local files, localhost or "
+                + ("print, nor screenshot printed_pages. " if images else "print. ")
+                + "Each site there needs approval once per run: give justification "
+                "with navigate."
+            ),
+        ),
         BrokerToolFieldPresentation(
             name="ref",
             description=(
@@ -159,7 +172,9 @@ _FIELDS_AFTER_REF = (
         description=(
             "allow_writes: shown to the user, as written, as the approval "
             "question: one short sentence in the language of the user's request "
-            "saying what the page will send there and why."
+            "saying what the page will send there and why. navigate with browser "
+            '"user": the same for a site not yet approved, saying what you will '
+            "read there and why."
         ),
     ),
 )
@@ -190,15 +205,19 @@ def _browser_spec(*, images: bool) -> ToolSpec:
         # The name the conversation shows (toolDisplayName.ts).
         name="Browser",
         description=(
-            "Open a web page or local HTML in the app's built-in browser, read it, "
+            "Open a web page or local HTML in the app's built-in browser, or a site "
+            "in the user's own browser, read it, "
             + ("act on it, look at it, " if images else "act on it, ")
             + "and print it to PDF."
         ),
         guide=ToolGuideSpec(
             what=(
-                "One hidden page for this run, apart from the user's browser and "
-                "logins. snapshot gives the page as text with element refs; click, "
-                "hover, type, select, press, scroll and wait act on it; "
+                "Two pages for this run, kept apart: by default a hidden page in the "
+                'app, with none of the user\'s logins; with browser "user", a tab of '
+                "this run's own in the user's browser, signed in as them (their "
+                "other tabs are never touched). snapshot gives the page as text "
+                "with element refs; click, hover, type, select, press, scroll and "
+                "wait act on it; "
                 + (
                     "screenshot attaches an image, and with printed_pages the pages "
                     "as they look printed or as a PDF; "
@@ -212,7 +231,8 @@ def _browser_spec(*, images: bool) -> ToolSpec:
             when=(
                 "Check a web page or a local web app (start its dev server with "
                 "bash run_in_background), or read a page that needs scripts. "
-                "Snapshot first, then act by ref. "
+                "Use the user's browser only for a site that needs their own "
+                "account, or when they ask for it. Snapshot first, then act by ref. "
                 + (
                     "Check an HTML deck, quote or report you wrote with screenshot "
                     "printed_pages, and export it to PDF with print."
@@ -227,14 +247,20 @@ def _browser_spec(*, images: bool) -> ToolSpec:
                 "them (form posts, PUT, PATCH, DELETE, WebSockets) are refused and "
                 "listed in data.blocked as write_not_approved. Only when the user "
                 "asked for that write, call allow_writes with the host, which "
-                "needs approval once per host and then lets this run's pages write "
+                "needs approval once per host and then lets that page write "
                 "there until the work ends; then repeat the action. A GET can "
                 "still carry data in its URL, such as a query or an image address, "
                 "so never type secrets into a page. With the network on, localhost "
                 "takes every request; with the command network setting off, every "
                 "URL is refused, localhost included: opening one closes the page, "
-                "and any other call cuts it off the network. Each snapshot replaces "
-                "the refs, a new page drops them, and only main-frame elements get "
+                "and any other call cuts it off the network; the user's browser "
+                'is not used at all. With browser "user": the first call waits '
+                "until the user allows it in their browser; the tab opens only "
+                "sites approved for this run, and others are listed in "
+                "data.blocked as read_not_approved: navigate there to ask; "
+                'writes there need allow_writes with browser "user", approved '
+                "apart from the app's page; WebSockets are refused. Each snapshot "
+                "replaces the refs, a new page drops them, and only main-frame elements get "
                 "refs. type replaces the field's text. After a click, data.url may "
                 "still be the old page: wait or snapshot before acting on it. "
                 "print writes pdf_path under apply_patch's rules: a path outside "

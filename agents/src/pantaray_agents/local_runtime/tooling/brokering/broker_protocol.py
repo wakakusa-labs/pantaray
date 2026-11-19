@@ -22,7 +22,7 @@ from pantaray_agents.tools.files.render_pages import RenderPdfPageToolArgs
 
 from ..models import ApprovalSource, BrokerNetworkPolicy
 from ..sandbox.egress_proxy import NetworkDestination
-from .browser_protocol import BrowserToolArgs
+from .browser_protocol import BrowserToolCall
 from .process_protocol import ReadProcessOutputToolArgs, StopProcessToolArgs
 
 BrokerExecutionPath = Literal[
@@ -352,7 +352,7 @@ type BrokerToolArgs = (
     | RunPythonToolArgs
     | ReadProcessOutputToolArgs
     | StopProcessToolArgs
-    | BrowserToolArgs
+    | BrowserToolCall
 )
 
 

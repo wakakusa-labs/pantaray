@@ -43,13 +43,14 @@ from pantaray_agents.local_runtime.tooling.brokering.broker import (
     BrokerApprovalRequiredError,
     execute_broker_tool,
 )
-from pantaray_agents.local_runtime.tooling.brokering.broker_browser import FIX_HINTS
 from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
     FinalizedBrokerPolicyError,
 )
 from pantaray_agents.local_runtime.tooling.brokering.browser_protocol import (
+    FIX_HINTS,
     BrowserFailureCode,
     BrowserToolArgs,
+    BrowserToolCall,
     BrowserToolOutput,
 )
 from pantaray_agents.local_runtime.tooling.repository.command_network_settings import (
@@ -589,4 +590,5 @@ def test_browser_is_offered_to_the_action_with_the_brokered_actions() -> None:
     }
     assert offered == parsed
     fields = {name for variant in variants for name in variant.model_fields}
+    fields |= set(BrowserToolCall.model_fields) - {"call"}
     assert set(schema["properties"]) == fields  # type: ignore[call-overload]

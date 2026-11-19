@@ -49,10 +49,17 @@ from .broker_registry import (
     BROKER_TOOL_REGISTRY,
     validate_broker_registry,
 )
+from .broker_user_browser import (
+    build_validated_user_browser_read_request,
+    refuse_printing,
+    user_browser_for_run,
+)
 from .browser_protocol import (
     BrowserAllowWritesArgs,
+    BrowserCloseArgs,
+    BrowserNavigateArgs,
     BrowserPrintArgs,
-    BrowserToolArgs,
+    BrowserToolCall,
     ValidatedBrowserRequest,
 )
 from .direct_execution_start import ValidatedBrokerRequest
@@ -75,8 +82,7 @@ _ARGS_REQUESTS: dict[
     | type[ValidatedGlobRequest]
     | type[ValidatedGrepRequest]
     | type[ValidatedReadProcessOutputRequest]
-    | type[ValidatedStopProcessRequest]
-    | type[ValidatedBrowserRequest],
+    | type[ValidatedStopProcessRequest],
 ] = {
     "broker_direct_read": ValidatedReadRequest,
     "broker_direct_list": ValidatedListRequest,
@@ -84,7 +90,6 @@ _ARGS_REQUESTS: dict[
     "broker_direct_grep": ValidatedGrepRequest,
     "broker_process_read": ValidatedReadProcessOutputRequest,
     "broker_process_stop": ValidatedStopProcessRequest,
-    "broker_browser": ValidatedBrowserRequest,
 }
 
 
@@ -171,23 +176,10 @@ def validate_broker_request(
         preflight_only=preflight_only,
     )
     effective_requested_at = request.requested_at or "unknown"
-    browser_args = None
-    if isinstance(request.args, BrowserToolArgs):
-        refuse_browser_network_use(context=context, call=request.args)
-        browser_args = request.args.root
-    if isinstance(browser_args, BrowserPrintArgs):
-        return context, build_validated_browser_print_request(
+    if isinstance(request.args, BrowserToolCall):
+        return context, _validated_browser_request(
             context=context,
-            args=browser_args,
-            tool_invocation_id=effective_invocation_id,
-            tool_request_id=effective_tool_request_id,
-            requested_at=effective_requested_at,
-            preflight_only=preflight_only,
-        )
-    if isinstance(browser_args, BrowserAllowWritesArgs):
-        return context, build_validated_browser_write_request(
-            context=context,
-            args=browser_args,
+            call=request.args,
             tool_invocation_id=effective_invocation_id,
             tool_request_id=effective_tool_request_id,
             requested_at=effective_requested_at,
@@ -251,6 +243,62 @@ def validate_broker_request(
         )
     raise BrokerPolicyError(
         f"unsupported broker execution path: {definition.execution_path}"
+    )
+
+
+def _validated_browser_request(
+    *,
+    context: BrokerContext,
+    call: BrowserToolCall,
+    tool_invocation_id: str | None,
+    tool_request_id: str,
+    requested_at: str,
+    preflight_only: bool,
+) -> ValidatedBrokerRequest:
+    refuse_browser_network_use(context=context, call=call)
+    args = call.call.root
+    user_browser = None
+    if call.browser == "user" and not isinstance(args, BrowserCloseArgs):
+        refuse_printing(call.call)
+        if isinstance(args, BrowserNavigateArgs):
+            return build_validated_user_browser_read_request(
+                context=context,
+                args=args,
+                tool_invocation_id=tool_invocation_id,
+                tool_request_id=tool_request_id,
+                requested_at=requested_at,
+                preflight_only=preflight_only,
+            )
+        user_browser = user_browser_for_run(context.actor_process_id)
+    if isinstance(args, BrowserPrintArgs):
+        return build_validated_browser_print_request(
+            context=context,
+            args=args,
+            tool_invocation_id=tool_invocation_id,
+            tool_request_id=tool_request_id,
+            requested_at=requested_at,
+            preflight_only=preflight_only,
+        )
+    if isinstance(args, BrowserAllowWritesArgs):
+        return build_validated_browser_write_request(
+            context=context,
+            args=args,
+            user_browser=user_browser,
+            tool_invocation_id=tool_invocation_id,
+            tool_request_id=tool_request_id,
+            requested_at=requested_at,
+            preflight_only=preflight_only,
+        )
+    return ValidatedBrowserRequest(
+        tool_invocation_id=tool_invocation_id,
+        manifest_id=context.manifest_id,
+        execution_session_id=context.execution_session.execution_session_id,
+        action_id=context.execution_session.action_id or "unknown",
+        tool_request_id=tool_request_id,
+        requested_at=requested_at,
+        browser=call.browser,
+        user_browser=user_browser,
+        args=call.call,
     )
 
 

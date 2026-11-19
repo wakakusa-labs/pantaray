@@ -21,7 +21,7 @@ function harness() {
     loaderId: 'doc-1',
     nodes: [],
     gone: new Set(),
-    native: new Set(),
+    native: new Map(),
     covered: new Set(),
     focused: 1,
     described: new Map(),
@@ -48,7 +48,9 @@ function harness() {
         const node = Number(params.objectId);
         const fn = params.functionDeclaration;
         if (fn.includes('isConnected')) return { result: { value: true } };
-        if (fn.includes("'datalist'")) return { result: { value: page.native.has(node) } };
+        if (fn.includes("'datetime-local'")) {
+          return { result: { value: page.native.get(node) ?? null } };
+        }
         if (fn.includes('ShadowRoot')) return { result: { value: !page.covered.has(node) } };
         if (fn.includes('activeElement; }')) {
           const inner = page.shadowFocus.get(node);
@@ -207,7 +209,7 @@ test('no click reaches a list box or picker; select sets options without the mou
   const h = await opened();
   h.page.nodes = [root('s', 'b'), ax('s', 'combobox', 'Color', 3), ax('b', 'button', 'Go', 4)];
   await h.run({ action: 'snapshot', ref: null });
-  h.page.native.add(3);
+  h.page.native.set(3, 'list box');
   const refused = await h.run({ action: 'click', ref: 'e1' });
   assert.equal(refused.code, 'BROWSER_ACTION_FAILED');
   assert.equal((await h.run({ action: 'select', ref: 'e1', values: ['Blue'] })).status, 'ok');
@@ -274,9 +276,9 @@ test('no click or hover reaches an element that covers the ref', async () => {
   assert.deepEqual(h.mouse(), []);
 });
 
-// Catches: a key that opens a focused list box or picker (Space, Enter, the arrows), one hidden
-// in a closed shadow root, and typing into a field with a suggestion list; Tab still leaves.
-test('keys reach a focused list or picker only to leave it, and typing there is refused', async () => {
+// Catches: a key that opens a focused list box (Space, Enter, the arrows), one hidden in a
+// closed shadow root, and typing into a picker field; Tab still leaves.
+test('keys reach a focused list box only to leave it, and typing in a picker is refused', async () => {
   const h = await opened();
   h.page.nodes = [root('f'), ax('f', 'combobox', 'Search', 4)];
   await h.run({ action: 'snapshot', ref: null });
@@ -287,7 +289,7 @@ test('keys reach a focused list or picker only to leave it, and typing there is 
     shadowRoots: [{ backendNodeId: 6, shadowRootType: 'closed' }],
   });
   h.page.shadowFocus.set(6, 7);
-  h.page.native.add(7);
+  h.page.native.set(7, 'list box');
   for (const key of [' ', 'Enter', 'ArrowDown', 'Alt+ArrowDown', 'a']) {
     assert.equal((await h.run({ action: 'press', key })).code, 'BROWSER_ACTION_FAILED', key);
   }
@@ -297,8 +299,22 @@ test('keys reach a focused list or picker only to leave it, and typing there is 
   assert.equal(h.keys().length, 6);
 
   h.page.focused = 4;
-  h.page.native.add(4);
+  h.page.native.set(4, 'picker');
   const typed = await h.run({ action: 'type', ref: 'e1', text: 'Ada' });
   assert.equal(typed.code, 'BROWSER_ACTION_FAILED');
   assert.ok(!h.commands().some(({ method }) => method === 'Input.insertText'));
+});
+
+// Catches: a key that opens a focused picker field's picker (Space, Enter, F4, Alt with an
+// arrow), and a refusal of the digits, arrows and deletes that edit a date or time field.
+test('a focused picker field takes every key but those that open its picker', async () => {
+  const h = await opened();
+  h.page.native.set(1, 'picker');
+  for (const key of [' ', 'Space', 'Enter', 'F4', 'Alt+ArrowDown', 'Alt+ArrowUp']) {
+    assert.equal((await h.run({ action: 'press', key })).code, 'BROWSER_ACTION_FAILED', key);
+  }
+  assert.deepEqual(h.keys(), []);
+  for (const key of ['1', 'ArrowUp', 'ArrowDown', 'ArrowRight', 'Backspace', 'Tab']) {
+    assert.equal((await h.run({ action: 'press', key })).status, 'ok', key);
+  }
 });

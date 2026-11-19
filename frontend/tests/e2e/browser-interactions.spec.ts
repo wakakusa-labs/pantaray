@@ -188,22 +188,29 @@ test('the browser acts on a real page through snapshot refs', async ({}, testInf
       expect(await snapshot()).toContain('Nothing yet');
     });
 
-    await test.step('no click, typing or key reaches a list or picker field', async () => {
+    await test.step('no click, typing or opening key reaches a list or picker field', async () => {
       await act({ action: 'navigate', target: { kind: 'web', url: `${origin}/pickers.html` } });
       const fields = await snapshot();
-      for (const field of ['combobox "Size"', 'combobox "Fruit"']) {
-        const ref = refOf(fields, field);
-        expect((await act({ action: 'click', ref })).code, field).toBe('BROWSER_ACTION_FAILED');
-      }
+      expect((await act({ action: 'click', ref: refOf(fields, 'combobox "Size"') })).code).toBe(
+        'BROWSER_ACTION_FAILED'
+      );
       for (const label of ['Shade', 'Visit']) {
         const ref = new RegExp(`"${label}" \\[ref=(e\\d+)\\]`).exec(fields)?.[1];
         expect(ref, `${label} in\n${fields}`).toBeTruthy();
         expect((await act({ action: 'click', ref })).code, label).toBe('BROWSER_ACTION_FAILED');
       }
+      // A suggestion list opens nothing for a hidden window, so its field takes input.
       const fruit = refOf(fields, 'combobox "Fruit"');
-      expect((await act({ action: 'type', ref: fruit, text: 'Ap' })).code).toBe(
-        'BROWSER_ACTION_FAILED'
-      );
+      expect((await act({ action: 'click', ref: fruit })).status).toBe('ok');
+      expect((await act({ action: 'type', ref: fruit, text: 'Ap' })).status).toBe('ok');
+      // Shift+Tab lands on the date field, where only the keys that open its picker are refused.
+      expect((await act({ action: 'press', key: 'Shift+Tab' })).status).toBe('ok');
+      for (const key of [' ', 'Enter', 'F4', 'Alt+ArrowDown']) {
+        expect((await act({ action: 'press', key })).code, key).toBe('BROWSER_ACTION_FAILED');
+      }
+      for (const key of ['1', 'ArrowUp', 'Backspace']) {
+        expect((await act({ action: 'press', key })).status, key).toBe('ok');
+      }
       // Tab from the name field lands on the list box; only Tab and Escape reach it there.
       expect(
         (await act({ action: 'type', ref: refOf(fields, 'textbox "Name"'), text: 'Ada' })).status

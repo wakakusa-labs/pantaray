@@ -334,7 +334,7 @@ async def execute_tool_call(
         completed_at=completed_at,
         result_line=build_outcome_line(
             tool_def.tool_id,
-            formal_result.output.output,
+            formal_result.output,
             status=(
                 "awaiting_approval"
                 if approval_required

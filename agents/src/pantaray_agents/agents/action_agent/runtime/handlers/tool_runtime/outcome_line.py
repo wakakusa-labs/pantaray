@@ -15,6 +15,9 @@ from typing import Literal, cast
 from pantaray_agents.local_runtime.tooling.brokering.broker_structured_patch import (
     count_patch_diff_lines,
 )
+from pantaray_agents.local_runtime.tooling.tool_result_finalization import (
+    FinalizedToolOutput,
+)
 from pantaray_agents.local_runtime.tooling.tool_result_spill import (
     is_spilled_text,
     spilled_texts,
@@ -39,13 +42,14 @@ _UNKNOWN_FAILURE_CODE = "UNKNOWN"
 
 def build_outcome_line(
     tool_id: str,
-    output: JSONValue,
+    finalized: FinalizedToolOutput,
     *,
     status: OutcomeStatus,
     error_code: str | None = None,
 ) -> str:
     """Render one locale-free ASCII line describing how a tool call ended."""
 
+    output = finalized.output
     match status:
         case "awaiting_approval":
             return f"{tool_id}: awaiting approval"
@@ -64,7 +68,7 @@ def build_outcome_line(
             code = _failure_code(output) or error_code or _UNKNOWN_FAILURE_CODE
             return f"{tool_id}: failed {code}"
         case "ok":
-            return f"{tool_id}: ok{_success_detail(tool_id, output)}"
+            return f"{tool_id}: ok{_success_detail(tool_id, finalized)}"
 
 
 def _captured_detail(output: JSONValue) -> str:
@@ -76,17 +80,27 @@ def _captured_detail(output: JSONValue) -> str:
     return f", {_chars(captured)} captured" if captured else ""
 
 
-def _success_detail(tool_id: str, output: JSONValue) -> str:
+def _success_detail(tool_id: str, finalized: FinalizedToolOutput) -> str:
     """Return the ``, ...`` tail of a successful outcome line, or nothing."""
 
-    if not isinstance(output, dict):
+    body = finalized.output
+    if not isinstance(body, dict):
         return ""
-    whole = whole_result_reference(output)
-    # A result stored whole at the top keeps none of the tool's own fields.
-    details = [] if whole is output else _tool_detail(tool_id, output)
-    moved = [whole] if whole is not None else spilled_texts(output)
-    if moved:
-        details.append(_spill_detail(moved))
+    # An inline result is what the tool returned, and what a tool took from
+    # outside may hold objects shaped like storage's references. A stored one
+    # holds storage's alone: storage refuses to move texts out of a result that
+    # already holds such an object, and stores it whole instead.
+    if finalized.storage_kind == "inline_json":
+        return _joined(_tool_detail(tool_id, body))
+    whole = whole_result_reference(body)
+    if whole is body:
+        # Stored whole at the top: none of the tool's own fields are left.
+        return _joined([_spill_detail([whole])])
+    moved = [whole] if whole is not None else spilled_texts(body)
+    return _joined([*_tool_detail(tool_id, body), _spill_detail(moved)])
+
+
+def _joined(details: Sequence[str]) -> str:
     return "".join(f", {part}" for part in details)
 
 

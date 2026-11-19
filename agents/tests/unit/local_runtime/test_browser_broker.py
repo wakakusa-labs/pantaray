@@ -21,12 +21,14 @@ from pantaray_agents.local_runtime.runtime import browser_relay as relay_module
 from pantaray_agents.local_runtime.runtime.action_approval_review import (
     pending_operation,
 )
+from pantaray_agents.local_runtime.runtime.browser_artifact import (
+    BROWSER_TEMP_DIRECTORY,
+)
 from pantaray_agents.local_runtime.runtime.browser_contract import (
     BrowserOperationFailed,
     BrowserOperationSucceeded,
 )
 from pantaray_agents.local_runtime.runtime.browser_relay import (
-    BROWSER_TEMP_DIRECTORY,
     BrowserAnswer,
 )
 from pantaray_agents.local_runtime.runtime.one_shot_requests import OneShotRequests

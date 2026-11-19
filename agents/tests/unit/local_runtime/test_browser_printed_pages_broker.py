@@ -15,11 +15,11 @@ from pathlib import Path
 
 import pytest
 
+from pantaray_agents.local_runtime.runtime.browser_artifact import (
+    BROWSER_TEMP_DIRECTORY,
+)
 from pantaray_agents.local_runtime.runtime.browser_contract import (
     BrowserOperationFailed,
-)
-from pantaray_agents.local_runtime.runtime.browser_relay import (
-    BROWSER_TEMP_DIRECTORY,
 )
 from pantaray_agents.local_runtime.runtime.runtime_env import (
     read_local_runtime_artifact_root,

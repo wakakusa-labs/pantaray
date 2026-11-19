@@ -29,6 +29,9 @@ from pantaray_agents.local_runtime.runtime.browser_relay import (
     BrowserOperationOutcome,
     BrowserRelayFailed,
 )
+from pantaray_agents.local_runtime.runtime.deliverable_sessions import (
+    DesktopRequestMessage,
+)
 from pantaray_agents.local_runtime.runtime.one_shot_requests import OneShotRequests
 from pantaray_agents.local_runtime.storage.migrations import load_default_migrations
 from pantaray_agents.schema.events import OutboundEvent
@@ -568,6 +571,55 @@ async def test_another_user_browser_retires_the_session_and_its_hosts(
     assert _hosts(edge) == ([], {"browser": "edge", "read_hosts": []})
     # The app's page is not the user's browser, and keeps its session.
     assert await _navigate(runtime) == app["session_id"]
+
+
+@pytest.mark.asyncio
+async def test_an_operation_whose_page_switched_back_while_closing_is_not_sent(
+    runtime: Runtime,
+) -> None:
+    # Catches: an operation for one browser sent with hosts another browser's
+    # page was approved for while the first waited for its old tab's close.
+    await _run(runtime, NAVIGATE_ANSWER, operation=NAVIGATE, user_browser="chrome")
+    send = runtime.desktop.send_desktop_request
+    release, both_closing = asyncio.Event(), asyncio.Event()
+    closing = 0
+
+    async def held_closes(event: str, message: DesktopRequestMessage) -> bool:
+        nonlocal closing
+        if event == OutboundEvent.BROWSER_SESSION_CLOSE_REQUESTED:
+            closing += 1
+            if closing == 2:
+                both_closing.set()
+            await release.wait()
+        return await send(event, message)
+
+    runtime.desktop.send_desktop_request = held_closes  # type: ignore[method-assign]
+    to_edge = asyncio.ensure_future(runtime.request(OWNER, NAVIGATE, "edge"))
+    back = asyncio.ensure_future(runtime.request(OWNER, NAVIGATE, "chrome"))
+    await both_closing.wait()
+    relay_module.allow_browser_writes(
+        owner_process_id=OWNER, browser="user", host="mail.example"
+    )
+    release.set()
+
+    # Bounded only so that sending it fails the test instead of hanging it.
+    refused = await asyncio.wait_for(to_edge, 5)
+    while (
+        not runtime.desktop.requests or "operation" not in runtime.desktop.requests[-1]
+    ):
+        await asyncio.sleep(0.005)
+    runtime.answer(runtime.desktop.requests[-1], NAVIGATE_ANSWER)
+    await back
+
+    assert isinstance(refused, BrowserRelayFailed)
+    assert refused.code == "BROWSER_SESSION_GONE"
+    # Only the page's current browser is driven; the edge operation never went.
+    sent = [
+        request["user_browser"]["browser"]  # type: ignore[index]
+        for request in runtime.desktop.requests[1:]
+        if "operation" in request
+    ]
+    assert sent == ["chrome"]
 
 
 @pytest.mark.asyncio

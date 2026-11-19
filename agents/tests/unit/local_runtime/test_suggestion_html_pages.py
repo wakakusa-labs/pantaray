@@ -13,12 +13,14 @@ from pathlib import Path
 import pytest
 
 from pantaray_agents.local_runtime.runtime import browser_relay as relay_module
+from pantaray_agents.local_runtime.runtime.browser_artifact import (
+    BROWSER_TEMP_DIRECTORY,
+)
 from pantaray_agents.local_runtime.runtime.browser_contract import (
     BrowserOperationFailed,
     BrowserOperationSucceeded,
 )
 from pantaray_agents.local_runtime.runtime.browser_relay import (
-    BROWSER_TEMP_DIRECTORY,
     BrowserAnswer,
     browser_operation_broker,
 )

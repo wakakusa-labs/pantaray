@@ -31,9 +31,7 @@ budgets bound each operation as on the app's page.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
-import os
 import sqlite3
 import threading
 import uuid
@@ -41,10 +39,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, overload
 
-from pantaray_agents.local_runtime.descriptor_access import (
-    DescriptorPathError,
-    open_regular_file_descriptor,
-)
 from pantaray_agents.schema.user_browser import BrowserChoice, UserBrowserId
 from pantaray_agents.schema.websocket.server_messages import (
     BrowserNavigateOperation,
@@ -56,6 +50,12 @@ from pantaray_agents.schema.websocket.server_messages import (
 )
 
 from ..storage.migrations.connection import configure_connection
+from .browser_artifact import (
+    BrowserArtifactKind,
+    BrowserArtifactMismatchError,
+    browser_artifact_path,
+    read_claimed_artifact,
+)
 from .browser_contract import (
     BrowserContactedHost,
     BrowserEngineFailureCode,
@@ -69,7 +69,6 @@ from .runtime_env import read_local_runtime_artifact_root
 
 logger = logging.getLogger(__name__)
 
-BROWSER_TEMP_DIRECTORY = ".tmp/browser"
 # Coupled to Electron's per-operation budgets (frontend/electron/src/browser): the
 # longest is navigate's 20 s, and a ``wait`` stays under it because its bound is
 # BROWSER_MAX_WAIT_SECONDS. The rest covers dispatch and the answer's round trip.
@@ -96,7 +95,7 @@ _SESSION_ENDING_CODES: frozenset[BrowserEngineFailureCode] = frozenset(
         "BROWSER_USER_UNAVAILABLE",
     }
 )
-_ARTIFACT_KIND_BY_ACTION: dict[str, Literal["png", "pdf"]] = {
+_ARTIFACT_KIND_BY_ACTION: dict[str, BrowserArtifactKind] = {
     "screenshot": "png",
     "print": "pdf",
 }
@@ -147,6 +146,18 @@ class _Page:
     connected: bool = False
     # The user's page only: the browser its session and hosts belong to.
     user_browser: UserBrowserId | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _Opened:
+    """A page's session, with what the page held when it was picked."""
+
+    session: _Session
+    connected: bool
+    # Another browser's session was retired for this one and awaits its close.
+    retired: bool
+    write_hosts: tuple[str, ...]
+    read_hosts: tuple[str, ...]
 
 
 def _pages() -> dict[BrowserChoice, _Page]:
@@ -234,14 +245,31 @@ async def request_browser_operation(
             message="This run is ending, so its browser is closed.",
             network=(),
         )
-    session, connected, retired = opened
-    if retired:
+    session = opened.session
+    if opened.retired:
         # Before the operation, so the old browser's tab closes first.
         await _deliver_closes(owner_process_id)
+        with _LOCK:
+            owner = _OWNERS.get(owner_process_id)
+            page = None if owner is None or owner.ending else owner.pages[browser]
+            kept = (
+                page is not None
+                and page.current == session
+                and page.user_browser == user_browser
+            )
+        if not kept:
+            # Switched or closed meanwhile: the hosts taken may be another's.
+            return BrowserRelayFailed(
+                code="BROWSER_SESSION_GONE",
+                message="This browser was switched or closed, so nothing was sent.",
+                network=(),
+            )
     # Until the user's browser answers once, the user is being asked to allow
     # the connection, which takes as long as they take; stopping the run ends it.
     timeout_seconds = (
-        None if browser == "user" and not connected else BROWSER_RELAY_TIMEOUT_SECONDS
+        None
+        if browser == "user" and not opened.connected
+        else BROWSER_RELAY_TIMEOUT_SECONDS
     )
     artifact_root = read_local_runtime_artifact_root()
     broker = browser_operation_broker()
@@ -254,18 +282,13 @@ async def request_browser_operation(
                 session_id=session.session_id,
                 operation=operation,
                 policy=policy.model_copy(
-                    update={
-                        "write_hosts": list(
-                            browser_write_hosts(owner_process_id, browser)
-                        )
-                    }
+                    update={"write_hosts": list(opened.write_hosts)}
                 ),
                 user_browser=(
                     None
                     if user_browser is None
                     else BrowserUserTarget(
-                        browser=user_browser,
-                        read_hosts=list(user_browser_read_hosts(owner_process_id)),
+                        browser=user_browser, read_hosts=list(opened.read_hosts)
                     )
                 ),
             ),
@@ -310,20 +333,32 @@ async def request_browser_operation(
             return BrowserRelayFailed(
                 code=answer.code, message=answer.message, network=tuple(answer.network)
             )
-        # Off the event loop: a PDF may be large, and this loop may also serve the
-        # local HTTP API and the WebSocket.
-        return await asyncio.to_thread(
-            _verify_artifact,
-            artifact_root=artifact_root,
-            operation_request_id=operation_request_id,
-            expected_kind=_ARTIFACT_KIND_BY_ACTION.get(operation.action),
-            answer=answer,
-        )
+        try:
+            # Off the event loop: a PDF may be large, and this loop may also serve
+            # the local HTTP API and the WebSocket.
+            artifact = await asyncio.to_thread(
+                read_claimed_artifact,
+                artifact_root=artifact_root,
+                operation_request_id=operation_request_id,
+                expected_kind=_ARTIFACT_KIND_BY_ACTION.get(operation.action),
+                claim=answer.artifact,
+            )
+        except BrowserArtifactMismatchError as mismatch:
+            return BrowserRelayFailed(
+                code="BROWSER_INTEGRITY_FAILED",
+                message=(
+                    "The browser's output does not match the desktop app's answer: "
+                    f"{mismatch}."
+                ),
+                # The page reached these hosts whether or not its output holds up.
+                network=tuple(answer.network),
+            )
+        return BrowserOperationDone(result=answer, artifact=artifact)
     finally:
         # Closing is idempotent; it matters when the delivery itself failed.
         broker.close(request_id=operation_request_id)
         for kind in ("png", "pdf"):
-            (artifact_root / _artifact_path(operation_request_id, kind)).unlink(
+            (artifact_root / browser_artifact_path(operation_request_id, kind)).unlink(
                 missing_ok=True
             )
 
@@ -441,9 +476,9 @@ def _current_session(
     user_id: str,
     browser: BrowserChoice,
     user_browser: UserBrowserId | None,
-) -> tuple[_Session, bool, bool] | None:
-    """The ``browser`` page's session, whether it is connected, and whether
-    another browser's session was retired for it; None once the run is ending."""
+) -> _Opened | None:
+    """The ``browser`` page's session and the hosts it carries, taken together;
+    None once the run is ending."""
 
     with _LOCK:
         owner = _OWNERS.get(owner_process_id)
@@ -455,7 +490,7 @@ def _current_session(
             and page.current is not None
             and page.user_browser == user_browser
         ):
-            return page.current, page.connected, False
+            return _opened(page, page.current, retired=False)
     # The sweep forgets ended owners: past that, the run's status is the fence.
     if owner_process_id not in _live_owner_ids(
         db_path, busy_timeout_ms, (owner_process_id,)
@@ -476,7 +511,19 @@ def _current_session(
         page.user_browser = user_browser
         if page.current is None:
             page.current = _Session(user_id=user_id, session_id=str(uuid.uuid4()))
-        return page.current, page.connected, retired
+        return _opened(page, page.current, retired=retired)
+
+
+def _opened(page: _Page, session: _Session, *, retired: bool) -> _Opened:
+    """Under the lock."""
+
+    return _Opened(
+        session=session,
+        connected=page.connected,
+        retired=retired,
+        write_hosts=tuple(sorted(page.write_hosts)),
+        read_hosts=tuple(sorted(page.read_hosts)),
+    )
 
 
 def _retire_current(owner: _Owner, page: _Page) -> None:
@@ -525,59 +572,9 @@ def _live_owner_ids(
     return frozenset(str(row[0]) for row in rows)
 
 
-def _artifact_path(operation_request_id: str, kind: Literal["png", "pdf"]) -> str:
-    # Relative to the artifact root; Electron derives the same path from the id.
-    return f"{BROWSER_TEMP_DIRECTORY}/{operation_request_id}.{kind}"
-
-
-def _verify_artifact(
-    *,
-    artifact_root: Path,
-    operation_request_id: str,
-    expected_kind: Literal["png", "pdf"] | None,
-    answer: BrowserOperationSucceeded,
-) -> BrowserOperationOutcome:
-    def integrity_failed(reason: str) -> BrowserRelayFailed:
-        return BrowserRelayFailed(
-            code="BROWSER_INTEGRITY_FAILED",
-            message=(
-                "The browser's output does not match the desktop app's answer: "
-                f"{reason}."
-            ),
-            # The page reached these hosts whether or not its output holds up.
-            network=tuple(answer.network),
-        )
-
-    claim = answer.artifact
-    if (None if claim is None else claim.kind) != expected_kind:
-        return integrity_failed("the answer names a different kind of output")
-    if claim is None:
-        return BrowserOperationDone(result=answer, artifact=None)
-    try:
-        descriptor = open_regular_file_descriptor(
-            root_path=artifact_root,
-            relative_path=_artifact_path(operation_request_id, claim.kind),
-        )
-    except DescriptorPathError:
-        return integrity_failed("no regular file was written")
-    try:
-        # Checked before reading, so a wrong claim never pulls an unbounded file
-        # into memory.
-        if os.fstat(descriptor).st_size != claim.byte_size:
-            return integrity_failed("byte size differs")
-        with open(descriptor, "rb", closefd=False) as handle:
-            data = handle.read()
-    finally:
-        os.close(descriptor)
-    if hashlib.sha256(data).hexdigest() != claim.sha256:
-        return integrity_failed("sha256 differs")
-    return BrowserOperationDone(result=answer, artifact=data)
-
-
 __all__ = [
     "BROWSER_CLOSE_SEND_TIMEOUT_SECONDS",
     "BROWSER_RELAY_TIMEOUT_SECONDS",
-    "BROWSER_TEMP_DIRECTORY",
     "BrowserAnswer",
     "BrowserOperationDone",
     "BrowserOperationOutcome",

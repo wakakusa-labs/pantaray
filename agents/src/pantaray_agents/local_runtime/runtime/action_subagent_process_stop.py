@@ -1,11 +1,12 @@
-"""Stop a subagent's long-running processes before a transaction settles it.
+"""End a subagent's run (its browser session and long-running processes)
+before a transaction settles it.
 
 The cancel core settles a queued or approval-paused child, and releases its
-claims, inside its caller's write transaction, where no stop can run: a stop is
+claims, inside its caller's write transaction, where no end can run: an end is
 asynchronous and waits out the stop grace while the write lock would be held.
-So each owner of such a transaction stops the children it may settle first and
+So each owner of such a transaction ends the children it may settle first and
 waits for it: the parent's ``cancel_subagent``, the parent's terminal, and the
-user's Stop. A running child is only asked to stop there and stops its own at
+user's Stop. A running child is only asked to stop there and ends its own at
 its end; startup recovery settles children before any process can exist.
 """
 
@@ -15,7 +16,7 @@ import sqlite3
 from pathlib import Path
 
 from ..storage.migrations.connection import configure_connection
-from ..tooling.brokering.broker_process import stop_run_processes
+from ..tooling.resources.run_end import end_run_resources
 from .action_subagent_cancel import ActionSubagentCancelRequest
 from .job_types import ACTION_SUBAGENT_PROCESS_KIND
 
@@ -59,7 +60,7 @@ async def stop_action_subagent_processes(
         "",
         (user_id, action_id, ACTION_SUBAGENT_PROCESS_KIND, parent_process_id),
     )
-    await stop_run_processes(
+    await end_run_resources(
         db_path=db_path,
         busy_timeout_ms=busy_timeout_ms,
         owner_process_ids=child_process_ids,
@@ -84,7 +85,7 @@ async def stop_action_subagent_child_processes(
             request.child_process_id,
         ),
     )
-    await stop_run_processes(
+    await end_run_resources(
         db_path=db_path,
         busy_timeout_ms=busy_timeout_ms,
         owner_process_ids=child_process_ids,

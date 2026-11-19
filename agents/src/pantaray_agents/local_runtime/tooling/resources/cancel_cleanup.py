@@ -6,7 +6,6 @@ from pathlib import Path
 
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 
-from ..brokering.broker_process import stop_run_processes
 from .cancel_cleanup_persistence import (
     CleanupPersistenceError,
     persist_action_cleanup_failure,
@@ -17,6 +16,7 @@ from .resource_repository import (
     list_recoverable_tool_runtime_resources_for_action,
     list_run_owner_process_ids_for_action_session,
 )
+from .run_end import end_run_resources
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,25 +66,30 @@ async def cancel_action_runtime_resources(
     busy_timeout_ms: int,
     action_id: str,
     execution_session_id: str,
+    run_process_id: str | None,
 ) -> ActionCleanupPassResult:
     """The cleanup at the end of an Action's run, by its own worker or a Stop.
 
-    The run's long-running processes, and its subagents', are stopped first
-    through the supervisor, which audits how they ended and releases what they
-    held; the pass after it reaps whatever is still registered.
+    The run ends first, with every run that started a process in the session
+    (its subagents'): their browser sessions close and their long-running
+    processes stop, the supervisor auditing how each ended and releasing what it
+    held. The run itself is named because it may have used the browser without
+    starting a process; a replayed Stop names none, since its first call ended
+    it. The pass after that reaps whatever is still registered.
     """
 
-    owner_process_ids = await asyncio.to_thread(
+    resource_owner_ids = await asyncio.to_thread(
         list_run_owner_process_ids_for_action_session,
         db_path=db_path,
         busy_timeout_ms=busy_timeout_ms,
         action_id=action_id,
         execution_session_id=execution_session_id,
     )
-    await stop_run_processes(
+    run_ids = () if run_process_id is None else (run_process_id,)
+    await end_run_resources(
         db_path=db_path,
         busy_timeout_ms=busy_timeout_ms,
-        owner_process_ids=owner_process_ids,
+        owner_process_ids=tuple(sorted({*resource_owner_ids, *run_ids})),
     )
     return await asyncio.to_thread(
         cleanup_action_runtime_resources,

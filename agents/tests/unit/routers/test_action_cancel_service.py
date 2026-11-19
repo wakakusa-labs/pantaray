@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException
+from tests.unit.local_runtime.run_end_probe import install_run_end_probe
 
 from pantaray_agents.local_runtime.runtime.action_approval import (
     ActionApprovalDecisionCommand,
@@ -417,6 +418,39 @@ async def test_standalone_action_cancel_uses_action_owned_runtime_state(
     assert event_data["command_id"] == "message-1"
     assert event_data["action_id"] == turn.action_id
     assert "suggestion_id" not in event_data
+
+
+# Catches: a Stop of an Action run that used the browser but started no
+# command leaving its page open, since only runs that own a resource were ended.
+@pytest.mark.asyncio
+async def test_a_stop_closes_the_browser_of_a_run_that_started_no_command(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pantaray_agents.routers import action_cancel_service as cancel_service
+
+    db_path = _bootstrap_runtime(tmp_path, monkeypatch)
+    bootstrap_local_tooling_catalog(db_path=db_path, busy_timeout_ms=BUSY_TIMEOUT_MS)
+    turn = _submit_and_start_turn(
+        db_path=db_path, message_id="message-1", content="Look at the page"
+    )
+    ensure_action_scratch_execution_context(
+        db_path=db_path,
+        busy_timeout_ms=BUSY_TIMEOUT_MS,
+        user_id="user-1",
+        action_id=turn.action_id,
+        started_at="2026-08-16T00:00:02Z",
+        allowed_tool_ids=("read",),
+    )
+    probe = install_run_end_probe(monkeypatch)
+    await probe.open_browser(db_path, turn.process_id)
+
+    assert await cancel_service.execute_action_cancel(
+        user_id="user-1", action_id=turn.action_id, reason="user_stop"
+    )
+
+    assert probe.closed == [turn.process_id]
+    assert probe.stopped == [((turn.process_id,), True)]
 
 
 @pytest.mark.asyncio
@@ -885,6 +919,7 @@ async def test_cancel_cleanup_stays_on_committed_session_when_next_session_start
         action_id: str,
         execution_session_id: str,
         suggestion_id: str | None,
+        process_id: str | None,
     ) -> ActionCleanupPassResult:
         nonlocal new_context
         if new_context is None:
@@ -921,6 +956,7 @@ async def test_cancel_cleanup_stays_on_committed_session_when_next_session_start
             action_id=action_id,
             execution_session_id=execution_session_id,
             suggestion_id=suggestion_id,
+            process_id=process_id,
         )
 
     monkeypatch.setattr(

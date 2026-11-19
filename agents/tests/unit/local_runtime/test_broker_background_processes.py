@@ -264,6 +264,7 @@ async def test_a_stop_ends_a_waiting_read_and_the_run_end_stops_the_processes(
             busy_timeout_ms=1_000,
             action_id="action-1",
             execution_session_id=action.execution_session_id,
+            run_process_id=BROKER_ACTOR_PROCESS_ID,
         ),
         WAIT_TIMEOUT_S,
     )

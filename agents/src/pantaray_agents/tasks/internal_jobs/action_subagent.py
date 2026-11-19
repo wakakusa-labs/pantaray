@@ -81,8 +81,8 @@ from pantaray_agents.local_runtime.runtime.db_execution_context import (
 from pantaray_agents.local_runtime.runtime.job_executor import (
     persist_local_job_transition_with_retry,
 )
-from pantaray_agents.local_runtime.tooling.brokering.broker_process import (
-    stop_run_processes,
+from pantaray_agents.local_runtime.tooling.resources.run_end import (
+    end_run_resources,
 )
 from pantaray_agents.tasks.types import ActionSubagentJobPayload
 from pantaray_agents.tools.contract import (
@@ -352,9 +352,10 @@ def run_action_subagent_job(payload: ActionSubagentJobPayload) -> None:
             )
         )
     except ActionSubagentApprovalPause as pause:
-        # The child's processes keep running while it waits for the decision.
-        # A cancel requested first makes the pause the terminal that releases
-        # the claims, so they stop before it; a later cancel stops them itself.
+        # The child's processes and browser page keep running while it waits
+        # for the decision. A cancel requested first makes the pause the
+        # terminal that releases the claims, so they end before it; a later
+        # cancel ends them itself.
         db_path, busy_timeout_ms = db_context.db_path, db_context.busy_timeout_ms
         if not _persist_pause_until_success(
             functools.partial(
@@ -365,9 +366,7 @@ def run_action_subagent_job(payload: ActionSubagentJobPayload) -> None:
                 pause=pause,
             )
         ):
-            _stop_processes(
-                db_path=db_path, busy_timeout_ms=busy_timeout_ms, payload=payload
-            )
+            _end_run(db_path=db_path, busy_timeout_ms=busy_timeout_ms, payload=payload)
             _persist_pause_until_success(
                 functools.partial(
                     pause_action_subagent_for_approval,
@@ -443,7 +442,7 @@ def _persist_terminal_until_success(
 ) -> ActionSubagentTerminalResult:
     # The terminal releases the child's claims; nothing it started may still
     # write there once they are released.
-    _stop_processes(db_path=db_path, busy_timeout_ms=busy_timeout_ms, payload=payload)
+    _end_run(db_path=db_path, busy_timeout_ms=busy_timeout_ms, payload=payload)
     return persist_local_job_transition_with_retry(
         operation=lambda: finalize_action_subagent_terminal(
             db_path=db_path,
@@ -455,11 +454,11 @@ def _persist_terminal_until_success(
     )
 
 
-def _stop_processes(
+def _end_run(
     *, db_path: Path, busy_timeout_ms: int, payload: ActionSubagentJobPayload
 ) -> None:
     asyncio.run(
-        stop_run_processes(
+        end_run_resources(
             db_path=db_path,
             busy_timeout_ms=busy_timeout_ms,
             owner_process_ids=(payload["process_id"],),

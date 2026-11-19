@@ -120,7 +120,7 @@ function tabContext(fields = {}) {
 async function opened(options) {
   const browser = fakeUserBrowser(options);
   const context = tabContext();
-  const tab = await openGuardedTab(context, browser.connection, null);
+  const tab = await openGuardedTab(context, browser.connection, new AbortController().signal, null);
   return { ...browser, context, tab };
 }
 
@@ -275,7 +275,9 @@ test('a tab that cannot be guarded is closed and never handed out', SETTLES, asy
       return undefined;
     },
   });
-  await assert.rejects(openGuardedTab(tabContext(), browser.connection, null));
+  await assert.rejects(
+    openGuardedTab(tabContext(), browser.connection, new AbortController().signal, null)
+  );
   assert.equal(browser.state.tabsClosed, 1);
   assert.equal(browser.sent('Page.navigate').length, 0);
 });

@@ -10,6 +10,9 @@
  * - JavaScript dialogs are dismissed and file choosers refused.
  * A frame or worker whose guard failed stays paused and never runs. Each refusal and every host
  * the tab reached goes to the session's `TabContext`, which reports it with the next answer.
+ *
+ * The tab lives under one signal (`UserBrowserConnection.openTab`): once it aborts, nothing more
+ * is sent for the tab, guards and operations alike, and none of its events arrive.
  */
 
 import { BROWSER_MAX_BLOCKED_REQUESTS, type BrowserPageData } from './browserContract';
@@ -164,12 +167,13 @@ async function guardWorker(cdp: CdpSession, sessionId: string): Promise<void> {
 }
 
 /**
- * Opens and guards a tab and watches what it does. Any failure closes the tab and rejects: an
- * unguarded tab is never used.
+ * Opens and guards a tab and watches what it does, under `signal`. Any failure closes the tab
+ * and rejects: an unguarded tab is never used.
  */
 export async function openGuardedTab(
   context: TabContext,
   connection: UserBrowserConnection,
+  signal: AbortSignal,
   logger: LoggerLike | null | undefined
 ): Promise<GuardedTab> {
   let handle: UserBrowserTab | undefined;
@@ -177,12 +181,12 @@ export async function openGuardedTab(
     handle = await connection.openTab((url) => {
       context.notes.add('popup_refused');
       if (context.popups.length < MAX_POPUPS_REPORTED) context.popups.push(url);
-    });
+    }, signal);
     const tab = watchTab(context, handle, logger);
     await tab.ready;
     return tab;
   } catch (error) {
-    logger?.error?.('USER_BROWSER_TAB_GUARD_ERR', { error: errorName(error) });
+    if (!signal.aborted) logger?.error?.('USER_BROWSER_TAB_GUARD_ERR', { error: errorName(error) });
     // The tab goes with the connection if it cannot be closed now.
     handle?.close().catch(() => undefined);
     throw error;

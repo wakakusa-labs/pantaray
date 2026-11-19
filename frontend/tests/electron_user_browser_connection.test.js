@@ -217,7 +217,7 @@ test('a tab reaches only its own sessions and frames, hears only them, and has i
   const { root } = applicationSupport(t, { port: endpoint.port });
   const connection = await connect(root);
   const popups = [];
-  const tab = await connection.openTab((url) => popups.push(url));
+  const tab = await connection.openTab((url) => popups.push(url), new AbortController().signal);
   const events = [];
   tab.cdp.on('message', (_event, method, _params, sessionId) => events.push([method, sessionId]));
   const refused = (method, params, sessionId) =>
@@ -294,6 +294,70 @@ test('a tab reaches only its own sessions and frames, hears only them, and has i
   connection.close();
   await connection.closed;
   await assert.rejects(tab.cdp.sendCommand('Page.enable', {}), /closed/);
+});
+
+// Catches: a tab whose operation already timed out still being opened or driven in the user's
+// browser: a late reply leading on to createTarget, attach or auto-attach, a created target left
+// open, or a child of the dead tab auto-attached and heard.
+test("once a tab's signal aborts, nothing more is sent for it but closing it", async (t) => {
+  const received = [];
+  const held = new Map();
+  let browserSide;
+  const endpoint = await browserEndpoint(t, (socket) => {
+    browserSide = socket;
+    socket.on('message', (data) => {
+      const message = JSON.parse(data);
+      received.push([message.method, message.sessionId]);
+      const reply = () =>
+        socket.send(JSON.stringify({ id: message.id, result: RESULTS[message.method] ?? {} }));
+      if (held.has(message.method)) held.set(message.method, reply);
+      else reply();
+    });
+  });
+  const { root } = applicationSupport(t, { port: endpoint.port });
+  const connection = await connect(root);
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+  const timedOut = new Error('timed out');
+  /** Opens a tab whose `method` reply is held until its signal aborted. */
+  async function abortedWhile(method) {
+    received.length = 0;
+    held.set(method, null);
+    const controller = new AbortController();
+    const opening = connection.openTab(() => undefined, controller.signal);
+    while (held.get(method) === null) await settle();
+    controller.abort(timedOut);
+    held.get(method)();
+    held.delete(method);
+    await assert.rejects(opening, (error) => error === timedOut);
+    await settle();
+    return received.map(([name]) => name);
+  }
+  assert.deepEqual(await abortedWhile('Target.setDiscoverTargets'), ['Target.setDiscoverTargets']);
+  assert.deepEqual(await abortedWhile('Target.createTarget'), [
+    'Target.setDiscoverTargets',
+    'Target.createTarget',
+    'Target.closeTarget',
+  ]);
+
+  const controller = new AbortController();
+  const tab = await connection.openTab(() => undefined, controller.signal);
+  const events = [];
+  tab.cdp.on('message', (_event, method) => events.push(method));
+  controller.abort(timedOut);
+  received.length = 0;
+  browserSide.send(
+    JSON.stringify({
+      method: 'Target.attachedToTarget',
+      params: { sessionId: 'late-frame', targetInfo: { targetId: 'f', type: 'iframe' } },
+      sessionId: 'own-page',
+    })
+  );
+  await settle();
+  await assert.rejects(tab.cdp.sendCommand('Page.navigate', { url: 'https://a.example/' }));
+  assert.deepEqual([received, events], [[], []]);
+  await tab.close();
+  assert.deepEqual(received, [['Target.closeTarget', undefined]]);
+  connection.close();
 });
 
 test('stopping the run ends a check that never answers', async (t) => {

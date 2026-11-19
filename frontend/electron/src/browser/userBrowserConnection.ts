@@ -71,8 +71,12 @@ export const runCommand: CommandRunner = (file, args, signal) =>
 export type UserBrowserTab = { cdp: CdpSession; close(): Promise<void> };
 
 export type UserBrowserConnection = {
-  /** `onPopup` hears the URL of each popup the tab opened, which is closed at once. */
-  openTab(onPopup: (url: string) => void): Promise<UserBrowserTab>;
+  /**
+   * `onPopup` hears the URL of each popup the tab opened, which is closed at once. The tab lives
+   * under `signal`: once it aborts, opening stops (closing a target already created), nothing more
+   * is sent for the tab but its close, and none of its events are heard.
+   */
+  openTab(onPopup: (url: string) => void, signal: AbortSignal): Promise<UserBrowserTab>;
   /** Settles once the socket has closed, whichever side closed it. */
   closed: Promise<void>;
   close(): void;
@@ -389,19 +393,46 @@ function browserOver(socket: WebSocketClient): UserBrowserConnection {
   // Every error closes the socket, which the listener above handles.
   socket.on('error', () => undefined);
 
-  async function openTab(onPopup: (url: string) => void): Promise<UserBrowserTab> {
-    // Reports every target; only popups of the tabs are acted on, and the rest dropped above.
-    await send('Target.setDiscoverTargets', { discover: true });
-    const { targetId } = (await send('Target.createTarget', NEW_TAB)) as { targetId: string };
-    const { sessionId } = (await send('Target.attachToTarget', { targetId, flatten: true })) as {
-      sessionId: string;
+  async function openTab(
+    onPopup: (url: string) => void,
+    signal: AbortSignal
+  ): Promise<UserBrowserTab> {
+    /** Sends one step of opening the tab, none once the tab's signal aborted. */
+    const step = async (method: string, params: object, sessionId?: string) => {
+      signal.throwIfAborted();
+      const result = await send(method, params, sessionId);
+      signal.throwIfAborted();
+      return result;
     };
-    const tab: Tab = { targetId, sessionId, children: new Set(), listeners: [], onPopup };
-    bySession.set(sessionId, tab);
+    // Reports every target; only popups of the tabs are acted on, and the rest dropped above.
+    await step('Target.setDiscoverTargets', { discover: true });
+    const { targetId } = (await send('Target.createTarget', NEW_TAB)) as { targetId: string };
+    const tab: Tab = { targetId, sessionId: '', children: new Set(), listeners: [], onPopup };
+    /** Hears nothing more of the tab: its own and its children's events stop here. */
+    const silence = () => {
+      for (const id of [tab.sessionId, ...tab.children]) bySession.delete(id);
+    };
+    // Its popups are still closed until the tab itself is.
     byTarget.set(targetId, tab);
-    await send('Target.setAutoAttach', AUTO_ATTACH, sessionId);
+    try {
+      ({ sessionId: tab.sessionId } = (await step('Target.attachToTarget', {
+        targetId,
+        flatten: true,
+      })) as { sessionId: string });
+      bySession.set(tab.sessionId, tab);
+      await step('Target.setAutoAttach', AUTO_ATTACH, tab.sessionId);
+    } catch (error) {
+      silence();
+      byTarget.delete(targetId);
+      // Not awaited: a target the browser does not close goes with the connection.
+      send('Target.closeTarget', { targetId }).catch(() => undefined);
+      throw error;
+    }
+    signal.addEventListener('abort', silence, { once: true });
+    const { sessionId } = tab;
     const cdp: CdpSession = {
       async sendCommand(method, params = {}, child) {
+        signal.throwIfAborted();
         const url = (params as { url?: unknown }).url;
         if (!TAB_COMMANDS.has(method) || (method === 'Page.navigate' && !opensWebOrBlank(url))) {
           throw new CdpCommandError(`${method} is not sent to the user's browser.`);
@@ -419,7 +450,7 @@ function browserOver(socket: WebSocketClient): UserBrowserConnection {
     return {
       cdp,
       async close() {
-        for (const id of [sessionId, ...tab.children]) bySession.delete(id);
+        silence();
         byTarget.delete(targetId);
         await send('Target.closeTarget', { targetId });
       },

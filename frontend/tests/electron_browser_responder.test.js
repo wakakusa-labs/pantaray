@@ -74,6 +74,7 @@ function operation(op, { session = 'session-1', policy = {} } = {}) {
       write_hosts: [],
       ...policy,
     },
+    user_browser: null,
   };
 }
 const navigate = (url, options) =>

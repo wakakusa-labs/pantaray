@@ -93,10 +93,18 @@ test('the browser acts on a real page through snapshot refs', async ({}, testInf
             const load = process.getBuiltinModule('node:module').createRequire(args.dist);
             const { createBrowserSessions } = load(`${args.dist}/browser/browserSession.js`);
             const { createBrowserResponder } = load(`${args.dist}/browser/browserResponder.js`);
+            const { createUserBrowserSessions } = load(
+              `${args.dist}/browser/userBrowserSession.js`
+            );
             const answers: unknown[] = [];
             const respond = createBrowserResponder({
               // No page here reaches this port.
               sessions: createBrowserSessions({ getBackendPort: () => 9 }),
+              // Every request here is for the app's page; none connects to a browser.
+              userSessions: createUserBrowserSessions({
+                connect: () => Promise.reject(new Error('not used')),
+                getBackendPort: () => 9,
+              }),
               localArtifactRoot: args.artifactRoot,
               postAnswer: async (body: unknown) => answers.push(body),
             });
@@ -115,6 +123,7 @@ test('the browser acts on a real page through snapshot refs', async ({}, testInf
               secret_paths: [],
               write_hosts: [],
             },
+            user_browser: null,
           });
           const { result } = g.e2eInteractions.answers.at(-1) as { result: Result };
           if (result.status !== 'ok' || result.artifact == null) return { result, corner: null };

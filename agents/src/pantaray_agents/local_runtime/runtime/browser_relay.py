@@ -1,8 +1,10 @@
-"""Run browser operations in Electron main, in the one session each run owns.
+"""Run browser operations in Electron main, in the sessions each run owns.
 
-A run (its ``actor_process_id``) owns at most one session, whose id the runtime
-mints; Electron refuses every operation naming an id it was told to close. The
-registry is in memory under a lock, since callers run on several threads.
+A run (its ``actor_process_id``) has two pages, kept apart: the app's hidden page
+(``"pantaray"``) and one tab of its own in the user's browser (``"user"``). Each
+page has at most one session, whose id the runtime mints; Electron refuses every
+operation naming an id it was told to close. The registry is in memory under a
+lock, since callers run on several threads.
 
 Each operation is one request and one answer (``OneShotRequests``), which
 Electron posts to ``POST /local/action-browser``. A PNG or PDF at
@@ -14,9 +16,16 @@ in-memory fence until its status is written, the status after. Closes are
 idempotent and unanswered; the sweep retries undelivered ones and drops an owner
 once its run is over and its closes were delivered.
 
-The registry also keeps the hosts an approved ``allow_writes`` let the run's
-pages write to: every operation's policy carries them, they outlast a close,
-and the run's end drops them.
+The registry also keeps, per page, the hosts an approved ``allow_writes`` let it
+write to and, for the user's page, the hosts the user approved it to open: every
+operation on that page carries them, a host approved on one page never reaches
+the other, they outlast a close, and the run's end drops them. The user's page
+is bound to one user browser: an operation naming another retires its session
+and drops its hosts, since they were approved for the first.
+
+The user's page waits for its first answer without a deadline, since the user
+must allow the connection in their browser; once one answer came, Electron's
+budgets bound each operation as on the app's page.
 """
 
 from __future__ import annotations
@@ -30,18 +39,20 @@ import threading
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Literal, overload
 
 from pantaray_agents.local_runtime.descriptor_access import (
     DescriptorPathError,
     open_regular_file_descriptor,
 )
+from pantaray_agents.schema.user_browser import BrowserChoice, UserBrowserId
 from pantaray_agents.schema.websocket.server_messages import (
     BrowserNavigateOperation,
     BrowserOperation,
     BrowserOperationRequestedMessage,
     BrowserPagePolicy,
     BrowserSessionCloseRequestedMessage,
+    BrowserUserTarget,
 )
 
 from ..storage.migrations.connection import configure_connection
@@ -72,8 +83,18 @@ BROWSER_CLOSE_SEND_TIMEOUT_SECONDS = 5.0
 type BrowserAnswer = BrowserOperationSucceeded | BrowserOperationFailed
 
 # Electron has dropped the session, so the run's next operation needs a new id.
+# A user's browser that could not be connected to leaves no session either, and
+# the next try connects, and asks the user, again.
 _SESSION_ENDING_CODES: frozenset[BrowserEngineFailureCode] = frozenset(
-    {"BROWSER_RENDERER_CRASHED", "BROWSER_SESSION_GONE"}
+    {
+        "BROWSER_RENDERER_CRASHED",
+        "BROWSER_SESSION_GONE",
+        "BROWSER_USER_NOT_RUNNING",
+        "BROWSER_USER_DEBUGGING_OFF",
+        "BROWSER_USER_FILE_BLOCKED",
+        "BROWSER_USER_DENIED",
+        "BROWSER_USER_UNAVAILABLE",
+    }
 )
 _ARTIFACT_KIND_BY_ACTION: dict[str, Literal["png", "pdf"]] = {
     "screenshot": "png",
@@ -112,16 +133,32 @@ class _Session:
 
 
 @dataclass(slots=True)
-class _Owner:
-    ending: bool = False
+class _Page:
     current: _Session | None = None
-    # Sessions whose close no desktop session has received yet.
-    unclosed: set[_Session] = field(default_factory=set)
-    # Hosts the run's pages may write to; it only grows until the run ends.
+    # Hosts the page may write to; it only grows until the run ends, or until
+    # the user's page is bound to another browser.
     write_hosts: set[str] = field(default_factory=set)
+    # The user's page only: hosts it may open, kept like ``write_hosts``.
+    read_hosts: set[str] = field(default_factory=set)
     # The host the current session's last navigate opened, as Electron parsed
     # the requested URL; never read from the page. None for a file.
     page_host: str | None = None
+    # Whether the current session has answered once, so its connection is up.
+    connected: bool = False
+    # The user's page only: the browser its session and hosts belong to.
+    user_browser: UserBrowserId | None = None
+
+
+def _pages() -> dict[BrowserChoice, _Page]:
+    return {"pantaray": _Page(), "user": _Page()}
+
+
+@dataclass(slots=True)
+class _Owner:
+    ending: bool = False
+    # Sessions whose close no desktop session has received yet.
+    unclosed: set[_Session] = field(default_factory=set)
+    pages: dict[BrowserChoice, _Page] = field(default_factory=_pages)
 
 
 _BROKER = OneShotRequests[BrowserAnswer]()
@@ -135,50 +172,113 @@ def browser_operation_broker() -> OneShotRequests[BrowserAnswer]:
     return _BROKER
 
 
+@overload
 async def request_browser_operation(
     *,
     db_path: Path,
     busy_timeout_ms: int,
     user_id: str,
     owner_process_id: str,
+    browser: Literal["pantaray"],
+    user_browser: None,
+    operation: BrowserOperation,
+    policy: BrowserPagePolicy,
+) -> BrowserOperationOutcome: ...
+
+
+@overload
+async def request_browser_operation(
+    *,
+    db_path: Path,
+    busy_timeout_ms: int,
+    user_id: str,
+    owner_process_id: str,
+    browser: Literal["user"],
+    user_browser: UserBrowserId,
+    operation: BrowserOperation,
+    policy: BrowserPagePolicy,
+) -> BrowserOperationOutcome: ...
+
+
+async def request_browser_operation(
+    *,
+    db_path: Path,
+    busy_timeout_ms: int,
+    user_id: str,
+    owner_process_id: str,
+    browser: BrowserChoice,
+    user_browser: UserBrowserId | None,
     operation: BrowserOperation,
     policy: BrowserPagePolicy,
 ) -> BrowserOperationOutcome:
-    """Run ``operation`` in the owner's session, opening one if it has none.
+    """Run ``operation`` in the session of the owner's ``browser`` page, opening
+    one if it has none.
 
     The caller has validated the operation and resolved its local paths, and
     ``policy`` is what the page may load from now on; the page may write to the
-    run's approved hosts, whatever ``policy`` names.
+    hosts approved for it, whatever ``policy`` names. ``user_browser`` is the
+    user's browser the ``"user"`` page runs in.
     """
 
-    session = _current_session(
-        db_path, busy_timeout_ms, owner_process_id=owner_process_id, user_id=user_id
+    opened = _current_session(
+        db_path,
+        busy_timeout_ms,
+        owner_process_id=owner_process_id,
+        user_id=user_id,
+        browser=browser,
+        user_browser=user_browser,
     )
-    if session is None:
+    if opened is None:
         return BrowserRelayFailed(
             code="BROWSER_SESSION_GONE",
             message="This run is ending, so its browser is closed.",
             network=(),
         )
+    session, connected, retired = opened
+    if retired:
+        # Before the operation, so the old browser's tab closes first.
+        await _deliver_closes(owner_process_id)
+    # Until the user's browser answers once, the user is being asked to allow
+    # the connection, which takes as long as they take; stopping the run ends it.
+    timeout_seconds = (
+        None if browser == "user" and not connected else BROWSER_RELAY_TIMEOUT_SECONDS
+    )
     artifact_root = read_local_runtime_artifact_root()
     broker = browser_operation_broker()
     operation_request_id = broker.open(user_id=user_id)
     try:
-        await deliver_desktop_request(
+        delivered = await deliver_desktop_request(
             user_id,
             BrowserOperationRequestedMessage(
                 operation_request_id=operation_request_id,
                 session_id=session.session_id,
                 operation=operation,
                 policy=policy.model_copy(
-                    update={"write_hosts": list(browser_write_hosts(owner_process_id))}
+                    update={
+                        "write_hosts": list(
+                            browser_write_hosts(owner_process_id, browser)
+                        )
+                    }
                 ),
-                user_browser=None,
+                user_browser=(
+                    None
+                    if user_browser is None
+                    else BrowserUserTarget(
+                        browser=user_browser,
+                        read_hosts=list(user_browser_read_hosts(owner_process_id)),
+                    )
+                ),
             ),
         )
+        if not delivered and timeout_seconds is None:
+            # No answer can come, and nothing would end the wait.
+            return BrowserRelayFailed(
+                code="BROWSER_RELAY_TIMED_OUT",
+                message="The desktop app did not receive the browser operation.",
+                network=(),
+            )
         answer = await broker.wait(
-            request_id=operation_request_id,
-            timeout_seconds=BROWSER_RELAY_TIMEOUT_SECONDS,
+            request_id=operation_request_id, timeout_seconds=timeout_seconds
         )
         if answer is None:
             return BrowserRelayFailed(
@@ -189,21 +289,27 @@ async def request_browser_operation(
                 ),
                 network=(),
             )
+        with _LOCK:
+            owner = _OWNERS.get(owner_process_id)
+            page = None if owner is None else owner.pages[browser]
+            if page is not None and page.current == session:
+                if (
+                    isinstance(answer, BrowserOperationFailed)
+                    and answer.code in _SESSION_ENDING_CODES
+                ):
+                    page.current = None
+                    page.page_host = None
+                    page.connected = False
+                else:
+                    page.connected = True
+                    if isinstance(answer, BrowserOperationSucceeded) and isinstance(
+                        operation, BrowserNavigateOperation
+                    ):
+                        page.page_host = answer.opened_host
         if isinstance(answer, BrowserOperationFailed):
-            if answer.code in _SESSION_ENDING_CODES:
-                with _LOCK:
-                    owner = _OWNERS.get(owner_process_id)
-                    if owner is not None and owner.current == session:
-                        owner.current = None
-                        owner.page_host = None
             return BrowserRelayFailed(
                 code=answer.code, message=answer.message, network=tuple(answer.network)
             )
-        if isinstance(operation, BrowserNavigateOperation):
-            with _LOCK:
-                owner = _OWNERS.get(owner_process_id)
-                if owner is not None and owner.current == session:
-                    owner.page_host = answer.opened_host
         # Off the event loop: a PDF may be large, and this loop may also serve the
         # local HTTP API and the WebSocket.
         return await asyncio.to_thread(
@@ -222,52 +328,81 @@ async def request_browser_operation(
             )
 
 
-def allow_browser_writes(*, owner_process_id: str, host: str) -> None:
-    """Let the owner's pages write to ``host`` from its next operation on."""
+def allow_browser_writes(
+    *, owner_process_id: str, browser: BrowserChoice, host: str
+) -> None:
+    """Let the owner's ``browser`` page write to ``host`` from its next operation
+    on."""
 
     with _LOCK:
         owner = _OWNERS.setdefault(owner_process_id, _Owner())
         if not owner.ending:
-            owner.write_hosts.add(host)
+            owner.pages[browser].write_hosts.add(host)
 
 
-def browser_write_hosts(owner_process_id: str) -> tuple[str, ...]:
-    """The hosts the owner's pages may write to, sorted."""
+def allow_user_browser_reads(*, owner_process_id: str, host: str) -> None:
+    """Let the owner's page in the user's browser open ``host`` from its next
+    operation on."""
+
+    with _LOCK:
+        owner = _OWNERS.setdefault(owner_process_id, _Owner())
+        if not owner.ending:
+            owner.pages["user"].read_hosts.add(host)
+
+
+def browser_write_hosts(
+    owner_process_id: str, browser: BrowserChoice
+) -> tuple[str, ...]:
+    """The hosts the owner's ``browser`` page may write to, sorted."""
 
     with _LOCK:
         owner = _OWNERS.get(owner_process_id)
-        return () if owner is None else tuple(sorted(owner.write_hosts))
+        return () if owner is None else tuple(sorted(owner.pages[browser].write_hosts))
 
 
-def browser_page_host(owner_process_id: str) -> str | None:
-    """The host the owner's open page was navigated to; None for a local file or
-    no page. The page may have followed links since."""
+def user_browser_read_hosts(owner_process_id: str) -> tuple[str, ...]:
+    """The hosts the owner's page in the user's browser may open, sorted."""
 
     with _LOCK:
         owner = _OWNERS.get(owner_process_id)
-        return None if owner is None else owner.page_host
+        return () if owner is None else tuple(sorted(owner.pages["user"].read_hosts))
 
 
-async def close_browser_session(*, owner_process_id: str) -> None:
-    """Close the owner's session, if it has one. The run may open a new one."""
+def browser_page_host(owner_process_id: str, browser: BrowserChoice) -> str | None:
+    """The host the owner's open ``browser`` page was navigated to; None for a
+    local file or no page. The page may have followed links since."""
+
+    with _LOCK:
+        owner = _OWNERS.get(owner_process_id)
+        return None if owner is None else owner.pages[browser].page_host
+
+
+async def close_browser_session(
+    *, owner_process_id: str, browser: BrowserChoice
+) -> None:
+    """Close the session of the owner's ``browser`` page, if it has one. The run
+    may open a new one."""
 
     with _LOCK:
         owner = _OWNERS.get(owner_process_id)
         if owner is not None:
-            _retire_current(owner)
+            _retire_current(owner, owner.pages[browser])
     await _deliver_closes(owner_process_id)
 
 
 async def end_browser_sessions(*, owner_process_ids: tuple[str, ...]) -> None:
-    """Refuse these runs' operations from now on, then close their sessions. The
-    refusal is set before the first await, so it survives a cancelled caller."""
+    """Refuse these runs' operations from now on, then close both pages'
+    sessions. The refusal is set before the first await, so it survives a
+    cancelled caller."""
 
     with _LOCK:
         for owner_process_id in owner_process_ids:
             owner = _OWNERS.setdefault(owner_process_id, _Owner())
             owner.ending = True
-            owner.write_hosts.clear()
-            _retire_current(owner)
+            for page in owner.pages.values():
+                page.write_hosts.clear()
+                page.read_hosts.clear()
+                _retire_current(owner, page)
     for owner_process_id in owner_process_ids:
         await _deliver_closes(owner_process_id)
 
@@ -299,14 +434,28 @@ async def sweep_browser_sessions(*, db_path: Path, busy_timeout_ms: int) -> None
 
 
 def _current_session(
-    db_path: Path, busy_timeout_ms: int, *, owner_process_id: str, user_id: str
-) -> _Session | None:
+    db_path: Path,
+    busy_timeout_ms: int,
+    *,
+    owner_process_id: str,
+    user_id: str,
+    browser: BrowserChoice,
+    user_browser: UserBrowserId | None,
+) -> tuple[_Session, bool, bool] | None:
+    """The ``browser`` page's session, whether it is connected, and whether
+    another browser's session was retired for it; None once the run is ending."""
+
     with _LOCK:
         owner = _OWNERS.get(owner_process_id)
         if owner is not None and owner.ending:
             return None
-        if owner is not None and owner.current is not None:
-            return owner.current
+        page = None if owner is None else owner.pages[browser]
+        if (
+            page is not None
+            and page.current is not None
+            and page.user_browser == user_browser
+        ):
+            return page.current, page.connected, False
     # The sweep forgets ended owners: past that, the run's status is the fence.
     if owner_process_id not in _live_owner_ids(
         db_path, busy_timeout_ms, (owner_process_id,)
@@ -316,18 +465,28 @@ def _current_session(
         owner = _OWNERS.setdefault(owner_process_id, _Owner())
         if owner.ending:
             return None
-        if owner.current is None:
-            owner.current = _Session(user_id=user_id, session_id=str(uuid.uuid4()))
-        return owner.current
+        page = owner.pages[browser]
+        retired = False
+        if page.user_browser is not None and page.user_browser != user_browser:
+            # The hosts were approved for the other browser.
+            retired = page.current is not None
+            _retire_current(owner, page)
+            page.write_hosts.clear()
+            page.read_hosts.clear()
+        page.user_browser = user_browser
+        if page.current is None:
+            page.current = _Session(user_id=user_id, session_id=str(uuid.uuid4()))
+        return page.current, page.connected, retired
 
 
-def _retire_current(owner: _Owner) -> None:
-    """Under the lock: the current session now only waits for its close."""
+def _retire_current(owner: _Owner, page: _Page) -> None:
+    """Under the lock: the page's session now only waits for its close."""
 
-    if owner.current is not None:
-        owner.unclosed.add(owner.current)
-        owner.current = None
-    owner.page_host = None
+    if page.current is not None:
+        owner.unclosed.add(page.current)
+        page.current = None
+    page.page_host = None
+    page.connected = False
 
 
 async def _deliver_closes(owner_process_id: str) -> None:
@@ -424,6 +583,7 @@ __all__ = [
     "BrowserOperationOutcome",
     "BrowserRelayFailed",
     "allow_browser_writes",
+    "allow_user_browser_reads",
     "browser_operation_broker",
     "browser_page_host",
     "browser_write_hosts",
@@ -431,4 +591,5 @@ __all__ = [
     "end_browser_sessions",
     "request_browser_operation",
     "sweep_browser_sessions",
+    "user_browser_read_hosts",
 ]

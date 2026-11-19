@@ -558,7 +558,9 @@ async def test_network_off_refuses_allow_writes_and_closes_the_page(
         _electron(runtime, _succeeded()),
     )
     relay_module.allow_browser_writes(
-        owner_process_id=BROKER_ACTOR_PROCESS_ID, host="api.example.com"
+        owner_process_id=BROKER_ACTOR_PROCESS_ID,
+        browser="pantaray",
+        host="api.example.com",
     )
     _network_off(runtime)
 

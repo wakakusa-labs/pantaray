@@ -96,6 +96,8 @@ class RunEndProbe:
             busy_timeout_ms=1_000,
             user_id="user-1",
             owner_process_id=owner,
+            browser="pantaray",
+            user_browser=None,
             operation=_NAVIGATE,
             policy=_POLICY,
         )

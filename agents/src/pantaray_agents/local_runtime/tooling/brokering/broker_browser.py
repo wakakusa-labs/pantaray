@@ -193,12 +193,12 @@ def build_validated_browser_write_request(
     command_summary: dict[str, JSONValue] = {
         "summary_kind": "browser_write",
         "host": args.host,
-        "page_host": browser_page_host(owner_process_id),
+        "page_host": browser_page_host(owner_process_id, "pantaray"),
         # The model's user-facing reason, shown as the approval question.
         "reason": args.justification,
     }
     approval_session_id, approval_source = None, None
-    if args.host not in browser_write_hosts(owner_process_id):
+    if args.host not in browser_write_hosts(owner_process_id, "pantaray"):
         if not preflight_only and not tool_invocation_id:
             raise BrokerPolicyError(
                 "tool_invocation_id is required for browser allow_writes"
@@ -240,10 +240,16 @@ async def run_browser_executor(
         else request.args
     )
     if isinstance(args, BrowserCloseArgs):
-        await close_browser_session(owner_process_id=context.actor_process_id)
+        await close_browser_session(
+            owner_process_id=context.actor_process_id, browser="pantaray"
+        )
     elif isinstance(args, BrowserAllowWritesArgs):
         # Only an approved call, or one for a host already allowed, gets here.
-        allow_browser_writes(owner_process_id=context.actor_process_id, host=args.host)
+        allow_browser_writes(
+            owner_process_id=context.actor_process_id,
+            browser="pantaray",
+            host=args.host,
+        )
     if isinstance(args, (BrowserCloseArgs, BrowserAllowWritesArgs)):
         return UnprojectedBrokerToolOutcome(
             status="success",
@@ -273,6 +279,8 @@ async def run_browser_executor(
         busy_timeout_ms=context.busy_timeout_ms,
         user_id=user_id,
         owner_process_id=context.actor_process_id,
+        browser="pantaray",
+        user_browser=None,
         operation=operation,
         policy=browser_page_policy(scope, allow_network=allow_network),
     )

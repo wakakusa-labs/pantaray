@@ -5,8 +5,9 @@
  *   handling policy) and WebTransport (Electron does not intercept it);
  * - OS UI a click's user activation opens from the hidden window: the File System Access
  *   pickers (a same-origin sandbox allows them), the screen color sampler (`OpenEyeDropper`),
- *   the picture-in-picture window (`EnterPictureInPicture`), and Web Bluetooth, whose chooser
- *   picks the first device when nothing listens for `select-bluetooth-device`.
+ *   and Web Bluetooth, whose chooser picks the first device when nothing listens for
+ *   `select-bluetooth-device`. Picture-in-picture is refused by the documents' permissions
+ *   policy instead, which the video controls' own button honours.
  *
  * As a preload it runs in Electron's isolated world while the page's own world is being set up,
  * before any page script, in every committed document of every frame, out-of-process frames
@@ -26,7 +27,6 @@ export const GUARDED_APIS: readonly (readonly [owner: string, name: string])[] =
   ['globalThis', 'showSaveFilePicker'],
   ['globalThis', 'showDirectoryPicker'],
   ['globalThis', 'EyeDropper'],
-  ['HTMLVideoElement.prototype', 'requestPictureInPicture'],
   ['Navigator.prototype', 'bluetooth'],
 ];
 

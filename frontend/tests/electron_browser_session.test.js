@@ -341,9 +341,10 @@ test('refused dialogs, prints, choosers, workers, popups and downloads are repor
   assert.equal(h.ses().devicePermission(), false);
 });
 
-// Catches: a document that may print, open dialogs or start a worker (whose sockets bypass
-// webRequest), whether it came over the network or from a file, or a page CSP dropped.
-test('every document is sandboxed without modals and may start no worker', async () => {
+// Catches: a document that may print, open dialogs, start a worker (whose sockets bypass
+// webRequest) or enter picture-in-picture, whether it came over the network or from a file, a
+// page's own policy dropped, or a page policy placed after ours where it would loosen it.
+test('every document is sandboxed and refused workers and picture-in-picture', async () => {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-browser-')));
   fs.writeFileSync(path.join(root, 'deck.html'), '<p>deck</p>');
   let file = null;
@@ -356,14 +357,25 @@ test('every document is sandboxed without modals and may start no worker', async
   const policies = file.headers.get('Content-Security-Policy');
   assert.match(policies, /^sandbox allow-scripts allow-same-origin, sandbox .*worker-src 'none'$/);
   assert.doesNotMatch(policies, /allow-modals/);
+  assert.equal(file.headers.get('Permissions-Policy'), 'picture-in-picture=()');
   let headers = null;
   h.ses().headersReceived(
-    { responseHeaders: { 'content-security-policy': ["default-src 'self'"] } },
+    {
+      responseHeaders: {
+        'content-security-policy': ["default-src 'self'"],
+        'permissions-policy': ['picture-in-picture=*'],
+      },
+    },
     (response) => (headers = response.responseHeaders)
   );
-  assert.deepEqual(Object.keys(headers), ['content-security-policy']);
+  assert.deepEqual(Object.keys(headers), ['content-security-policy', 'permissions-policy']);
   assert.equal(headers['content-security-policy'][0], "default-src 'self'");
   assert.match(headers['content-security-policy'][1], /^sandbox .*worker-src 'none'$/);
+  // A repeated key in the policy dictionary takes its last value.
+  assert.deepEqual(headers['permissions-policy'], [
+    'picture-in-picture=*',
+    'picture-in-picture=()',
+  ]);
 });
 
 // Catches: a guarded API left in an about:blank document (which gets no preload), an API the
@@ -395,12 +407,10 @@ test('every frame target is guarded before it runs', async () => {
     showSaveFilePicker: 1,
     showDirectoryPicker: 1,
     EyeDropper: 1,
-    HTMLVideoElement: { prototype: { requestPictureInPicture: 1, play: 1 } },
     Navigator: { prototype: { bluetooth: 1, userAgent: 1 } },
   });
   vm.runInContext(script, world);
-  assert.deepEqual(Object.keys(world).sort(), ['HTMLVideoElement', 'Navigator']);
-  assert.deepEqual(Object.keys(world.HTMLVideoElement.prototype), ['play']);
+  assert.deepEqual(Object.keys(world), ['Navigator']);
   assert.deepEqual(Object.keys(world.Navigator.prototype), ['userAgent']);
   cdp.emit('message', {}, 'Target.attachedToTarget', {
     sessionId: 'frame-1',

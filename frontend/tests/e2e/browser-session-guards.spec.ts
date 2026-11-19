@@ -12,12 +12,12 @@ const WORKER_SOCKET = "new WebSocket('wss://example.com/')";
 const PROBE = `(w) => [
   typeof w.RTCPeerConnection, typeof w.webkitRTCPeerConnection, typeof w.WebTransport,
   typeof w.EyeDropper, typeof w.showOpenFilePicker, typeof w.showSaveFilePicker,
-  typeof w.showDirectoryPicker, typeof w.HTMLVideoElement.prototype.requestPictureInPicture,
+  typeof w.showDirectoryPicker,
   typeof w.navigator.bluetooth,
   // The guard preload exposes nothing to the page.
   typeof w.require, typeof w.process, typeof w.electron,
 ].join()`;
-const NOTHING_LEFT = Array(12).fill('undefined').join();
+const NOTHING_LEFT = Array(11).fill('undefined').join();
 
 /** A frame that reports its probe on load and whenever its parent asks. */
 function childScript(from: string): string {
@@ -81,6 +81,19 @@ crossSite.src = '${crossSiteOrigin}/guarded-child.html';
 document.body.appendChild(crossSite);
 </script></body>`,
     '/guarded-child.html': childScript('crossSite'),
+    // A playing video with native controls, drawn from a canvas so no media is fetched.
+    '/pip.html': `<!doctype html><body style="margin:0">
+<video id="video" controls muted width="640" height="360"></video>
+<script>
+const canvas = Object.assign(document.createElement('canvas'), { width: 64, height: 36 });
+const paint = canvas.getContext('2d');
+setInterval(() => { paint.fillStyle = 'hsl(' + (Date.now() % 360) + ', 80%, 50%)'; paint.fillRect(0, 0, 64, 36); }, 50);
+const video = document.getElementById('video');
+video.srcObject = canvas.captureStream(10);
+window.entered = false;
+video.addEventListener('enterpictureinpicture', () => (window.entered = true));
+window.ready = video.play().then(() => new Promise((resolve) => setTimeout(resolve, 500)));
+</script></body>`,
     '/ui.html': `<!doctype html><body><input type="file" id="file"><p>printable</p></body>`,
     '/w.js': WORKER_SOCKET,
     '/shared.js': WORKER_SOCKET,
@@ -103,7 +116,7 @@ function run(
     url: string | null;
     expression: string | null;
     print?: boolean;
-    click?: boolean;
+    clicks?: { x: number; y: number }[];
   }
 ): Promise<Settled> {
   return app.evaluate(
@@ -141,12 +154,11 @@ function run(
       return sessions.run(request, 20_000, async (page: Page) => {
         if (args.url) await page.contents.loadURL(args.url);
         if (args.print) return (await page.contents.printToPDF({})).subarray(0, 5).toString();
-        if (args.click) {
+        for (const point of args.clicks) {
           for (const type of ['mousePressed', 'mouseReleased']) {
             await page.cdp.sendCommand('Input.dispatchMouseEvent', {
               type,
-              x: 5,
-              y: 5,
+              ...point,
               button: 'left',
               clickCount: 1,
             });
@@ -162,12 +174,12 @@ function run(
         return result.value;
       });
     },
-    { ...call, print: call.print ?? false, click: call.click ?? false, modulePath: SESSION_MODULE }
+    { ...call, print: call.print ?? false, clicks: call.clicks ?? [], modulePath: SESSION_MODULE }
   ) as Promise<Settled>;
 }
 
 // eslint-disable-next-line no-empty-pattern
-test('a browser session page opens no worker, WebRTC, WebTransport or OS dialog', async ({}, testInfo) => {
+test('a browser session page opens no worker, WebRTC, WebTransport, picture-in-picture or OS dialog', async ({}, testInfo) => {
   const hits: string[] = [];
   const server: Server = createServer((request, response) => {
     hits.push(request.url ?? '');
@@ -224,10 +236,35 @@ test('a browser session page opens no worker, WebRTC, WebTransport or OS dialog'
       const clicked = await run(app, {
         session: 'guarded',
         url: null,
-        click: true,
+        clicks: [{ x: 5, y: 5 }],
         expression: 'window.again()',
       });
       expect(clicked.value).toEqual(everyFrame);
+    });
+
+    await test.step('no click on the video controls enters picture-in-picture', async () => {
+      const ready = await run(app, {
+        session: 'pip',
+        url: `${origin}/pip.html`,
+        expression:
+          'window.ready.then(() => ({ playing: !video.paused, enabled: document.pictureInPictureEnabled }))',
+      });
+      // A playing video in a document whose policy refuses picture-in-picture; the controls'
+      // button shows only when the policy allows it (HTMLVideoElement::SupportsPictureInPicture).
+      expect(ready.value).toEqual({ playing: true, enabled: false });
+      // Every control along the bar, the picture-in-picture button's place included.
+      const clicks = [24, 80, 160, 320, 480, 540, 570, 590, 610, 625].map((x) => ({ x, y: 340 }));
+      const clicked = await run(app, {
+        session: 'pip',
+        url: null,
+        clicks,
+        expression: `new Promise((resolve) => setTimeout(resolve, 500)).then(async () => ({
+          element: document.pictureInPictureElement,
+          entered: window.entered,
+          requested: await video.requestPictureInPicture().then(() => 'entered', (error) => error.name),
+        }))`,
+      });
+      expect(clicked.value).toEqual({ element: null, entered: false, requested: 'SecurityError' });
     });
 
     await test.step('a page print is ignored and reported; the tool still prints', async () => {
@@ -262,7 +299,7 @@ test('a browser session page opens no worker, WebRTC, WebTransport or OS dialog'
         visible: BrowserWindow.getAllWindows().filter((win) => win.isVisible()).length,
       }));
       // One hidden page window per session opened above.
-      expect(state).toEqual({ count: windowsBefore + 3, visible: 0 });
+      expect(state).toEqual({ count: windowsBefore + 4, visible: 0 });
     });
   } finally {
     server.close();

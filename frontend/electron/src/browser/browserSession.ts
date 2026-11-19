@@ -12,6 +12,8 @@
  *   ignores `print()`, `execCommand('print')` and the dialogs, and it may start no worker: a
  *   shared or service worker's WebSocket has no frame, and Electron passes only a frame's
  *   WebSocket through `webRequest` (`ElectronBrowserClient::WillInterceptWebSocket`).
+ * - Every document disallows picture-in-picture (`DOCUMENT_PERMISSIONS`), which hides the video
+ *   controls' button: it enters picture-in-picture without the check the page's API makes.
  * - Every document of every frame, an out-of-process one included, loses before its first
  *   script the APIs that connect past `webRequest` or open OS UI the sandbox and the permission
  *   handlers leave open (`pageGuardPreload`), and every frame's file chooser is intercepted.
@@ -75,6 +77,8 @@ const MAX_POPUPS_REPORTED = 10;
  */
 const DOCUMENT_POLICY =
   "sandbox allow-scripts allow-same-origin allow-forms allow-popups allow-downloads; worker-src 'none'";
+/** Added after every document's own `Permissions-Policy`, so a page cannot loosen it. */
+const DOCUMENT_PERMISSIONS = 'picture-in-picture=()';
 /** `removeGuardedApis` for the `about:blank` documents the preload never reaches. */
 const PAGE_GUARD_SCRIPT = `(${removeGuardedApis.toString()})(${JSON.stringify(GUARDED_APIS)});`;
 const PAGE_GUARD_PRELOAD = path.join(__dirname, 'pageGuardPreload.js');
@@ -242,15 +246,20 @@ function guardSession(page: PageSession): void {
     const response = await serveFile(request.url, fileScope(page.policy), (reason, url) =>
       block(page, reason, url)
     );
-    if (response.ok) response.headers.append('Content-Security-Policy', DOCUMENT_POLICY);
+    if (response.ok) {
+      response.headers.append('Content-Security-Policy', DOCUMENT_POLICY);
+      response.headers.append('Permissions-Policy', DOCUMENT_PERMISSIONS);
+    }
     return response;
   });
   ses.webRequest.onHeadersReceived((details, callback) => {
     const headers = { ...details.responseHeaders };
-    const key =
-      Object.keys(headers).find((name) => name.toLowerCase() === 'content-security-policy') ??
-      'Content-Security-Policy';
-    headers[key] = [...(headers[key] ?? []), DOCUMENT_POLICY];
+    const append = (name: string, value: string) => {
+      const key = Object.keys(headers).find((known) => known.toLowerCase() === name.toLowerCase());
+      headers[key ?? name] = [...(key === undefined ? [] : headers[key]), value];
+    };
+    append('Content-Security-Policy', DOCUMENT_POLICY);
+    append('Permissions-Policy', DOCUMENT_PERMISSIONS);
     callback({ responseHeaders: headers });
   });
   const decide = (url: string, method: string) =>

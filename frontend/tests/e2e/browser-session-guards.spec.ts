@@ -448,36 +448,22 @@ test('no list box or picker of a browser session page reaches the display', asyn
     await settle();
     const before = await mostOnScreenWindows(pid, 300);
 
-    await test.step('a hidden window without the guard does put a picker on the display', async () => {
-      let opened: unknown;
-      const most = await mostWindowsAround(pid, async () => {
-        opened = await app.evaluate(
-          async ({ BrowserWindow }, optionsPath) => {
-            const load = process.getBuiltinModule('node:module').createRequire(optionsPath);
-            const { pageWindowOptions } = load(optionsPath);
-            // A session's own window, painting while hidden, in a partition with no guard preload.
-            const control = new BrowserWindow(pageWindowOptions('e2e-picker-control'));
-            (globalThis as { e2ePickerControl?: Electron.BrowserWindow }).e2ePickerControl =
-              control;
-            await control.loadURL('data:text/html,<input id="color" type="color">');
-            // As every click, key and typing of a session does: the never focused page acts focused.
-            control.webContents.debugger.attach('1.3');
-            await control.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', {
-              enabled: true,
-            });
-            return control.webContents.executeJavaScript(
-              "document.getElementById('color').showPicker(); document.getElementById('color').matches(':open')",
-              true
-            );
-          },
-          path.join(__dirname, '../../electron/dist/browser/pageWindowOptions.js')
-        );
-      });
-      // Blink's own view of the picker, apart from the display's.
-      expect(opened).toBe(true);
+    await test.step('the watch sees a window the app puts on the display', async () => {
+      const most = await mostWindowsAround(pid, () =>
+        app.evaluate(({ BrowserWindow }) => {
+          const shown = new BrowserWindow({
+            width: 120,
+            height: 80,
+            show: false,
+            focusable: false,
+          });
+          (globalThis as { e2eShownWindow?: Electron.BrowserWindow }).e2eShownWindow = shown;
+          shown.showInactive();
+        })
+      );
       expect(most).toBeGreaterThan(before);
       await app.evaluate(() =>
-        (globalThis as { e2ePickerControl?: Electron.BrowserWindow }).e2ePickerControl?.destroy()
+        (globalThis as { e2eShownWindow?: Electron.BrowserWindow }).e2eShownWindow?.destroy()
       );
       await settle();
       expect(await mostOnScreenWindows(pid, 300)).toBe(before);

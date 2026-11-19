@@ -9,24 +9,51 @@ const { fakeBrowserElectron } = require('./helpers/browser_electron_fakes');
 const DIST = path.join(__dirname, '../electron/dist/browser');
 const { MAX_SNAPSHOT_CHARS } = require(`${DIST}/snapshot.js`);
 
-/** A page whose accessibility tree, document and nodes the test sets; CDP answers from it. */
+const ENGINE_WORLD = 77;
+
+/**
+ * A page whose accessibility tree, document and nodes the test sets; CDP answers from it. Every
+ * node is in the main frame, covered by nothing unless in `covered`, and `focused` names the
+ * document's active element, whose description `described` may give shadow roots.
+ */
 function harness() {
-  const page = { loaderId: 'doc-1', nodes: [], gone: new Set(), native: new Set(), refusal: null };
+  const page = {
+    loaderId: 'doc-1',
+    nodes: [],
+    gone: new Set(),
+    native: new Set(),
+    covered: new Set(),
+    focused: 1,
+    described: new Map(),
+    shadowFocus: new Map(),
+    refusal: null,
+  };
   let boxed = null;
   const fake = fakeBrowserElectron({
     cdp: async (method, params) => {
       if (method === 'Page.getFrameTree')
-        return { frameTree: { frame: { loaderId: page.loaderId } } };
+        return { frameTree: { frame: { id: 'main', loaderId: page.loaderId } } };
+      if (method === 'Page.createIsolatedWorld') return { executionContextId: ENGINE_WORLD };
       if (method === 'Accessibility.getFullAXTree') return { nodes: page.nodes };
       if (method === 'DOM.resolveNode') {
         if (page.gone.has(params.backendNodeId)) throw new Error('No node with given id found');
         return { object: { objectId: String(params.backendNodeId) } };
       }
+      if (method === 'Runtime.evaluate') return { result: { objectId: String(page.focused) } };
+      if (method === 'DOM.describeNode') {
+        const id = params.objectId === undefined ? params.backendNodeId : Number(params.objectId);
+        return { node: page.described.get(id) ?? { backendNodeId: id } };
+      }
       if (method === 'Runtime.callFunctionOn') {
         const node = Number(params.objectId);
         const fn = params.functionDeclaration;
         if (fn.includes('isConnected')) return { result: { value: true } };
-        if (fn.includes("closest('label')")) return { result: { value: page.native.has(node) } };
+        if (fn.includes("'datalist'")) return { result: { value: page.native.has(node) } };
+        if (fn.includes('ShadowRoot')) return { result: { value: !page.covered.has(node) } };
+        if (fn.includes('activeElement; }')) {
+          const inner = page.shadowFocus.get(node);
+          return { result: inner === undefined ? { value: null } : { objectId: String(inner) } };
+        }
         if (fn.includes('this.options')) return { result: { value: page.refusal } };
         return { result: { value: true } };
       }
@@ -34,7 +61,7 @@ function harness() {
         boxed = params.backendNodeId;
         return { quads: [[10, 20, 110, 20, 110, 60, 10, 60]] };
       }
-      if (method === 'DOM.getNodeForLocation') return { backendNodeId: boxed };
+      if (method === 'DOM.getNodeForLocation') return { backendNodeId: boxed, frameId: 'main' };
       return {};
     },
   });
@@ -83,7 +110,8 @@ function harness() {
   };
   const commands = () => fake.windows[0].webContents.debugger.commands;
   const mouse = () => commands().filter((command) => command.method === 'Input.dispatchMouseEvent');
-  return { page, run, fake, commands, mouse };
+  const keys = () => commands().filter((command) => command.method === 'Input.dispatchKeyEvent');
+  return { page, run, fake, commands, mouse, keys };
 }
 
 const ax = (nodeId, role, name, backendDOMNodeId, extra = {}) => ({
@@ -212,4 +240,65 @@ test('press sends a chord with its modifiers and text only without a shortcut mo
     ['keyUp', shift, null],
   ]);
   assert.equal((await h.run({ action: 'press', key: 'Hyper+x' })).code, 'BROWSER_ACTION_FAILED');
+});
+
+// Catches: a page function run in the page's own world, where page script can replace what it
+// calls (`closest`, `localName`) and so hide a list box or a picker from the check.
+test('every page function runs in the engine world', async () => {
+  const h = await opened();
+  h.page.nodes = [root('b', 'f'), ax('b', 'button', 'Go', 3), ax('f', 'textbox', 'Name', 4)];
+  await h.run({ action: 'snapshot', ref: null });
+  await h.run({ action: 'click', ref: 'e1' });
+  await h.run({ action: 'type', ref: 'e2', text: 'Ada' });
+  await h.run({ action: 'press', key: 'Enter' });
+  const resolved = h.commands().filter(({ method }) => method === 'DOM.resolveNode');
+  assert.ok(resolved.length > 0);
+  for (const { params } of resolved) assert.equal(params.executionContextId, ENGINE_WORLD);
+  const focus = h.commands().filter(({ method }) => method === 'Runtime.evaluate');
+  assert.ok(focus.length > 0);
+  for (const { params } of focus) assert.equal(params.contextId, ENGINE_WORLD);
+});
+
+// Catches: a click or hover that lands on whatever covers the ref's element, such as an overlay
+// that turns a click on Cancel into one on Confirm.
+test('no click or hover reaches an element that covers the ref', async () => {
+  const h = await opened();
+  h.page.nodes = [root('b'), ax('b', 'button', 'Cancel', 3)];
+  await h.run({ action: 'snapshot', ref: null });
+  h.page.covered.add(3);
+  for (const action of ['click', 'hover']) {
+    const refused = await h.run({ action, ref: 'e1' });
+    assert.equal(refused.code, 'BROWSER_ACTION_FAILED');
+    assert.match(refused.message, /Another element covers this one/);
+  }
+  assert.deepEqual(h.mouse(), []);
+});
+
+// Catches: a key that opens a focused list box or picker (Space, Enter, the arrows), one hidden
+// in a closed shadow root, and typing into a field with a suggestion list; Tab still leaves.
+test('keys reach a focused list or picker only to leave it, and typing there is refused', async () => {
+  const h = await opened();
+  h.page.nodes = [root('f'), ax('f', 'combobox', 'Search', 4)];
+  await h.run({ action: 'snapshot', ref: null });
+  // The document's focus is on a host whose closed shadow root holds the focused list box.
+  h.page.focused = 5;
+  h.page.described.set(5, {
+    backendNodeId: 5,
+    shadowRoots: [{ backendNodeId: 6, shadowRootType: 'closed' }],
+  });
+  h.page.shadowFocus.set(6, 7);
+  h.page.native.add(7);
+  for (const key of [' ', 'Enter', 'ArrowDown', 'Alt+ArrowDown', 'a']) {
+    assert.equal((await h.run({ action: 'press', key })).code, 'BROWSER_ACTION_FAILED', key);
+  }
+  assert.deepEqual(h.keys(), []);
+  assert.equal((await h.run({ action: 'press', key: 'Shift+Tab' })).status, 'ok');
+  assert.equal((await h.run({ action: 'press', key: 'Escape' })).status, 'ok');
+  assert.equal(h.keys().length, 6);
+
+  h.page.focused = 4;
+  h.page.native.add(4);
+  const typed = await h.run({ action: 'type', ref: 'e1', text: 'Ada' });
+  assert.equal(typed.code, 'BROWSER_ACTION_FAILED');
+  assert.ok(!h.commands().some(({ method }) => method === 'Input.insertText'));
 });

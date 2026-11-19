@@ -6,7 +6,9 @@ const path = require('node:path');
 const Module = require('node:module');
 const { pathToFileURL } = require('node:url');
 const { mock, test } = require('node:test');
+const v8 = require('node:v8');
 const vm = require('node:vm');
+const { JSDOM } = require('jsdom');
 
 const SESSION_MODULE = require.resolve('../electron/dist/browser/browserSession.js');
 
@@ -161,6 +163,39 @@ function gate() {
 }
 
 const turn = () => new Promise((resolve) => setImmediate(resolve));
+
+const GLOBAL_APIS = [
+  'RTCPeerConnection',
+  'webkitRTCPeerConnection',
+  'WebTransport',
+  'showOpenFilePicker',
+  'showSaveFilePicker',
+  'showDirectoryPicker',
+  'EyeDropper',
+];
+
+/** A page world (jsdom) holding every guarded API, after `script` ran in it before any page script. */
+function guardedWorld(script, body = '') {
+  const { window } = new JSDOM(`<!doctype html><body>${body}</body>`, {
+    runScripts: 'outside-only',
+  });
+  for (const name of GLOBAL_APIS) window[name] = 1;
+  window.Navigator.prototype.bluetooth = 1;
+  window.HTMLInputElement.prototype.showPicker = () => undefined;
+  window.HTMLSelectElement.prototype.showPicker = () => undefined;
+  window.eval(script);
+  return window;
+}
+
+function guardScript() {
+  const h = harness();
+  return navigate(h, 'https://a.example/').then(
+    () =>
+      h.windows[0].webContents.debugger.commands.find(
+        ({ method }) => method === 'Page.addScriptToEvaluateOnNewDocument'
+      ).params.source
+  );
+}
 
 // Catches: sessions sharing cookies or storage, a partition persisted to disk, a page window
 // shown or focused on the user's screen, captures at the display's device scale, and a frame
@@ -399,25 +434,129 @@ test('every frame target is guarded before it runs', async () => {
     ({ method }) => method === 'Page.addScriptToEvaluateOnNewDocument'
   ).params.source;
   // The script the preload also runs, on a page world holding every guarded API.
-  const world = vm.createContext({
-    RTCPeerConnection: 1,
-    webkitRTCPeerConnection: 1,
-    WebTransport: 1,
-    showOpenFilePicker: 1,
-    showSaveFilePicker: 1,
-    showDirectoryPicker: 1,
-    EyeDropper: 1,
-    Navigator: { prototype: { bluetooth: 1, userAgent: 1 } },
-  });
-  vm.runInContext(script, world);
-  assert.deepEqual(Object.keys(world), ['Navigator']);
-  assert.deepEqual(Object.keys(world.Navigator.prototype), ['userAgent']);
+  const world = guardedWorld(script);
+  for (const name of GLOBAL_APIS) assert.equal(name in world, false, name);
+  assert.equal('bluetooth' in world.Navigator.prototype, false);
+  assert.equal('userAgent' in world.Navigator.prototype, true);
+  assert.equal('showPicker' in world.HTMLInputElement.prototype, false);
+  assert.equal('showPicker' in world.HTMLSelectElement.prototype, false);
   cdp.emit('message', {}, 'Target.attachedToTarget', {
     sessionId: 'frame-1',
     targetInfo: { type: 'iframe' },
   });
   await turn();
   assert.deepEqual(guard('frame-1'), [...guarded, 'Runtime.runIfWaitingForDebugger']);
+});
+
+const PICKERS = `
+  <select id="list"><optgroup><option id="option">a</option></optgroup></select>
+  <input id="color" type="color"><label id="label" for="color">Color</label>
+  <input id="date" type="date"><input id="text">`;
+
+const key = (window, target, type, init) =>
+  target.dispatchEvent(
+    new window.KeyboardEvent(type, { bubbles: true, cancelable: true, ...init })
+  );
+
+// Catches: a key or mouse press whose default action opens a list box's NSMenu or a picker's
+// popup window on the user's display, and a guard that also blocks Tab out of the field or
+// other fields' keys.
+test('the guard cancels the defaults that open a native list or picker', async () => {
+  const window = guardedWorld(await guardScript(), PICKERS);
+  const { document } = window;
+  const [list, option, date, text] = ['list', 'option', 'date', 'text'].map((id) =>
+    document.getElementById(id)
+  );
+  const press = (target) =>
+    target.dispatchEvent(new window.MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+  assert.equal(press(list), false);
+  assert.equal(press(option), false);
+  assert.equal(press(date), true);
+  for (const target of [list, date]) {
+    for (const [type, init] of [
+      ['keydown', { key: ' ' }],
+      ['keypress', { key: 'Enter' }],
+      ['keydown', { key: 'ArrowDown', altKey: true }],
+      ['keydown', { key: 'F4' }],
+    ]) {
+      assert.equal(key(window, target, type, init), false, `${target.id} ${type} ${init.key}`);
+    }
+    assert.equal(key(window, target, 'keydown', { key: 'Tab' }), true);
+    assert.equal(key(window, target, 'keydown', { key: 'Escape' }), true);
+  }
+  assert.equal(key(window, text, 'keydown', { key: ' ' }), true);
+  assert.equal(press(text), true);
+});
+
+// Catches: a page script that opens a picker with `click()` or a click event, directly, through
+// its label, or inside a closed shadow root the window's listeners cannot see into.
+test('a page script cannot click a picker field, even in a closed shadow root', async () => {
+  const window = guardedWorld(await guardScript(), `${PICKERS}<div id="host"></div>`);
+  const { document } = window;
+  const [color, label, text] = ['color', 'label', 'text'].map((id) => document.getElementById(id));
+  const shadow = document.getElementById('host').attachShadow({ mode: 'closed' });
+  shadow.innerHTML = '<label>Hidden <input type="time"></label><span id="inner">x</span>';
+  const hidden = shadow.querySelector('input');
+  const clicks = [];
+  for (const target of [color, text, hidden]) {
+    target.addEventListener('click', () => clicks.push(target.type));
+  }
+  const clickEvent = () => new window.MouseEvent('click', { bubbles: true, cancelable: true });
+  color.click();
+  label.click();
+  hidden.click();
+  shadow.querySelector('label').click();
+  assert.equal(color.dispatchEvent(clickEvent()), false);
+  assert.equal(hidden.dispatchEvent(clickEvent()), false);
+  shadow.getElementById('inner').click();
+  text.click();
+  assert.equal(text.dispatchEvent(clickEvent()), true);
+  assert.deepEqual(clicks, ['text', 'text']);
+});
+
+// Catches: a guard that calls what the page can replace after it ran (`composedPath`,
+// `preventDefault`, a getter, `instanceof`), so a page script switches it off.
+test('page script cannot switch the guard off by replacing what it calls', async () => {
+  const window = guardedWorld(await guardScript(), PICKERS);
+  window.eval(`
+    Event.prototype.composedPath = () => [];
+    Event.prototype.preventDefault = () => undefined;
+    Object.defineProperty(Element.prototype, 'localName', { get: () => 'div' });
+    Object.defineProperty(HTMLInputElement.prototype, 'type', { get: () => 'text' });
+    Object.defineProperty(Node.prototype, 'nodeType', { get: () => 8 });
+    Object.defineProperty(TypeError, Symbol.hasInstance, { value: () => false });
+    Array.prototype[Symbol.iterator] = function* () {};
+  `);
+  const { document } = window;
+  assert.equal(key(window, document.getElementById('list'), 'keydown', { key: ' ' }), false);
+  const color = document.getElementById('color');
+  let clicked = false;
+  color.addEventListener('click', () => (clicked = true));
+  color.click();
+  window.EventTarget.prototype.dispatchEvent.call(window, new window.Event('click'));
+  assert.equal(clicked, false);
+});
+
+// Catches: a kept console line that is a view on the page's whole message, so the 100 lines of
+// 500 characters would keep every long message alive.
+test('the console keeps the cut text of a long line, not the whole line', async () => {
+  const h = harness();
+  await navigate(h, 'https://a.example/');
+  v8.setFlagsFromString('--expose-gc');
+  const gc = vm.runInNewContext('gc');
+  gc();
+  const before = process.memoryUsage().heapUsed;
+  for (let line = 0; line < 100; line += 1) {
+    const message = String(line).padEnd(1_000_000, 'x');
+    h.windows[0].webContents.emit('console-message', { level: 'info', message });
+  }
+  gc();
+  // 100 MB when each line keeps its message.
+  assert.ok(process.memoryUsage().heapUsed - before < 20_000_000);
+  const read = await h.sessions.run(request('back'), 1_000, async (page) => page.console);
+  assert.equal(read.value.lines.length, 100);
+  assert.equal(read.value.lines[99].text, '99'.padEnd(500, 'x'));
+  assert.equal(read.value.cut, true);
 });
 
 // Catches: two operations of one session interleaving on its page, and one session's slow

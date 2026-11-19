@@ -48,11 +48,32 @@ const refMaps = new WeakMap<WebContents, RefMap>();
 /** The next ref number per session; refs keep counting across documents. */
 const nextRef = new WeakMap<WebContents, number>();
 
-export async function mainDocumentId(cdp: Debugger): Promise<string> {
+/**
+ * The world this engine's page functions run in, one per frame and document. The page's own
+ * world could replace what they call (`Element.prototype.closest`, a getter), so none runs there.
+ */
+const ENGINE_WORLD = 'pantaray-browser';
+/** The objects one page call resolves; it releases them as it ends. */
+const CALL_GROUP = 'pantaray-browser-call';
+
+async function mainFrame(cdp: Debugger): Promise<{ id: string; loaderId: string }> {
   const { frameTree } = (await cdp.sendCommand('Page.getFrameTree')) as {
-    frameTree: { frame: { loaderId: string } };
+    frameTree: { frame: { id: string; loaderId: string } };
   };
-  return frameTree.frame.loaderId;
+  return frameTree.frame;
+}
+
+export async function mainDocumentId(cdp: Debugger): Promise<string> {
+  return (await mainFrame(cdp)).loaderId;
+}
+
+/** The engine's world in a frame's current document; the main frame's when `frameId` is absent. */
+export async function engineWorld(cdp: Debugger, frameId?: string): Promise<number> {
+  const { executionContextId } = (await cdp.sendCommand('Page.createIsolatedWorld', {
+    frameId: frameId ?? (await mainFrame(cdp)).id,
+    worldName: ENGINE_WORLD,
+  })) as { executionContextId: number };
+  return executionContextId;
 }
 
 const oneLine = (text: unknown): string =>
@@ -156,21 +177,39 @@ export async function resolveRef(page: BrowserPage, ref: string): Promise<number
   );
 }
 
-/** Runs a fixed function of this engine on a node; `this` is the node. */
+/** An argument of a page function: a JSON value, or a node of the same frame. */
+export type PageArgument = { value: unknown } | { node: number };
+
+/**
+ * Runs a fixed function of this engine on a node, in the engine's world of the node's frame (the
+ * main frame by default); `this` is the node.
+ */
 export async function callOn(
   cdp: Debugger,
   backendNodeId: number,
   functionDeclaration: string,
-  args: unknown[] = []
+  args: PageArgument[] = [],
+  frameId?: string
 ): Promise<unknown> {
-  const { object } = (await cdp.sendCommand('DOM.resolveNode', { backendNodeId })) as {
-    object: { objectId: string };
+  const executionContextId = await engineWorld(cdp, frameId);
+  const resolve = async (node: number) => {
+    const { object } = (await cdp.sendCommand('DOM.resolveNode', {
+      backendNodeId: node,
+      executionContextId,
+      objectGroup: CALL_GROUP,
+    })) as { object: { objectId: string } };
+    return object.objectId;
   };
   try {
+    const objectId = await resolve(backendNodeId);
+    const callArguments = [];
+    for (const arg of args) {
+      callArguments.push('node' in arg ? { objectId: await resolve(arg.node) } : arg);
+    }
     const { result, exceptionDetails } = (await cdp.sendCommand('Runtime.callFunctionOn', {
-      objectId: object.objectId,
+      objectId,
       functionDeclaration,
-      arguments: args.map((value) => ({ value })),
+      arguments: callArguments,
       returnByValue: true,
     })) as { result: { value?: unknown }; exceptionDetails?: unknown };
     if (exceptionDetails !== undefined) {
@@ -178,7 +217,7 @@ export async function callOn(
     }
     return result.value;
   } finally {
-    await cdp.sendCommand('Runtime.releaseObject', { objectId: object.objectId });
+    await cdp.sendCommand('Runtime.releaseObjectGroup', { objectGroup: CALL_GROUP });
   }
 }
 

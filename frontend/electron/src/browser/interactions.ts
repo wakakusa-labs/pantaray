@@ -1,7 +1,14 @@
 /**
  * The operations that act on a session's page by ref, as CDP input at the element's box or one
- * of the fixed page functions below, never page or model text. A click that would open a list or
- * picker the OS draws is refused; `select` sets the options without opening the list.
+ * of the fixed page functions below, never page or model text. The functions run in the engine's
+ * own world (`callOn`), so page script cannot change what they find.
+ *
+ * Input that would open a list or picker the OS draws is refused: a click or typing on one, or a
+ * key other than Tab or Escape while one has focus, wherever it sits (in a shadow root, closed
+ * ones included, or a frame of the page's process). `pageGuardPreload` cancels what opens them in
+ * every frame as well; this check also sees into closed shadow roots and names the refusal.
+ * `select` sets the options without opening the list. A click or hover is refused, too, when
+ * another element covers the ref's element at the point the input would reach.
  */
 
 import type { Debugger } from 'electron';
@@ -9,21 +16,39 @@ import type { Debugger } from 'electron';
 import { BROWSER_MAX_WAIT_SECONDS, type BrowserOperation } from './browserContract';
 import { BrowserOperationError, type BrowserPage } from './browserSession';
 import { decodePng, MAX_FULL_PAGE_HEIGHT_PX, type CapturedArtifact } from './capture';
-import { callOn, resolveRef } from './snapshot';
+import { callOn, engineWorld, resolveRef } from './snapshot';
 
 const WAIT_POLL_MS = 100;
 const SCROLL_DIRECTION = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] } as const;
 
-/** True when a click on this node would open a list or picker the OS draws. */
+/**
+ * True when input to this node would open a list or picker the OS draws: it is, or is inside, a
+ * list box, a picker field, a field with a suggestion list or the label of one of them.
+ */
 const OPENS_NATIVE_UI = `function () {
-  const element = this.nodeType === 1 ? this : this.parentElement;
-  if (element === null) return false;
-  const label = element.closest('label');
-  const control = label !== null && label.control !== null ? label.control : element;
-  if (control.closest('select, datalist') !== null) return true;
-  return control.localName === 'input'
-    && ['color', 'date', 'datetime-local', 'month', 'week', 'time'].includes(control.type);
+  const opens = (element) => element.localName === 'select' || element.localName === 'datalist'
+    || (element.localName === 'input' && (element.hasAttribute('list')
+      || ['color', 'date', 'datetime-local', 'month', 'week', 'time'].includes(element.type)));
+  for (let at = this; at !== null; at = at.parentNode ?? (at instanceof ShadowRoot ? at.host : null)) {
+    if (at.nodeType !== Node.ELEMENT_NODE) continue;
+    if (opens(at) || (at.localName === 'label' && at.control !== null && opens(at.control))) {
+      return true;
+    }
+  }
+  return false;
 }`;
+/** True when `node` is this element or inside it, across shadow roots. */
+const HOLDS = `function (node) {
+  for (let at = node; at !== null; at = at.parentNode ?? (at instanceof ShadowRoot ? at.host : null)) {
+    if (at === this) return true;
+  }
+  return false;
+}`;
+const ACTIVE_ELEMENT = 'function () { return this.activeElement; }';
+/** The objects a focus lookup resolves; it releases them as it ends. */
+const FOCUS_GROUP = 'pantaray-browser-focus';
+/** The keys that reach a focused list or picker: they leave it or dismiss, and open nothing. */
+const KEYS_PAST_NATIVE_UI = new Set(['Tab', 'Escape']);
 /** Selects the focused field's text, so typing replaces it; false when it takes no text. */
 const SELECT_FIELD_TEXT = `function () {
   const active = document.activeElement;
@@ -71,6 +96,8 @@ const PAGE_HAS_TEXT = `function (text) {
 }`;
 
 const failed = (message: string) => new BrowserOperationError('BROWSER_ACTION_FAILED', message);
+const opensNativeUi = (where: string) =>
+  failed(`${where} would open a list or picker outside the page; use select for a list box.`);
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Evaluates an expression built only from this module's fixed functions and JSON values. */
@@ -107,29 +134,160 @@ async function emulateFocus(cdp: Debugger): Promise<void> {
   await cdp.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true });
 }
 
+type Point = { x: number; y: number };
+
+/** The node that holds a frame's document in the main frame, for each frame the page's process draws. */
+async function inMainFrame(cdp: Debugger, node: number, frameId: string): Promise<number> {
+  type FrameTree = { frame: { id: string }; childFrames?: FrameTree[] };
+  const { frameTree } = (await cdp.sendCommand('Page.getFrameTree')) as { frameTree: FrameTree };
+  const parents = new Map<string, string>();
+  const visit = (tree: FrameTree) =>
+    tree.childFrames?.forEach((child) => {
+      parents.set(child.frame.id, tree.frame.id);
+      visit(child);
+    });
+  visit(frameTree);
+  let [holder, frame] = [node, frameId];
+  while (frame !== frameTree.frame.id) {
+    ({ backendNodeId: holder } = (await cdp.sendCommand('DOM.getFrameOwner', {
+      frameId: frame,
+    })) as { backendNodeId: number });
+    frame = parents.get(frame) as string;
+  }
+  return holder;
+}
+
+/**
+ * Refuses unless input at the point reaches the node or something inside it, and with
+ * `refuseNativeUi`, also when it would open a list or picker there.
+ */
+async function checkPoint(
+  cdp: Debugger,
+  node: number,
+  point: Point,
+  refuseNativeUi: boolean
+): Promise<void> {
+  // A field's own parts, such as a date field's picker button, are in its user-agent shadow root.
+  const hit = (await cdp.sendCommand('DOM.getNodeForLocation', {
+    x: Math.round(point.x),
+    y: Math.round(point.y),
+    includeUserAgentShadowDOM: true,
+  })) as { backendNodeId: number; frameId: string };
+  const holder = await inMainFrame(cdp, hit.backendNodeId, hit.frameId);
+  if ((await callOn(cdp, node, HOLDS, [{ node: holder }])) !== true) {
+    throw failed(
+      'Another element covers this one where the input would land; scroll, close what covers it, or take a snapshot.'
+    );
+  }
+  if (
+    refuseNativeUi &&
+    (await callOn(cdp, hit.backendNodeId, OPENS_NATIVE_UI, [], hit.frameId)) === true
+  ) {
+    throw opensNativeUi('Clicking here');
+  }
+}
+
 async function click(page: BrowserPage, ref: string, hoverOnly: boolean): Promise<void> {
   const { cdp } = page;
-  const box = await boxOf(cdp, await resolveRef(page, ref));
+  const node = await resolveRef(page, ref);
+  const box = await boxOf(cdp, node);
   const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  await checkPoint(cdp, node, point, !hoverOnly);
   const move = { type: 'mouseMoved', ...point };
   if (hoverOnly) {
     await cdp.sendCommand('Input.dispatchMouseEvent', move);
     return;
   }
-  const { backendNodeId: hit } = (await cdp.sendCommand('DOM.getNodeForLocation', {
-    x: Math.round(point.x),
-    y: Math.round(point.y),
-  })) as { backendNodeId: number };
-  if ((await callOn(cdp, hit, OPENS_NATIVE_UI)) === true) {
-    throw failed(
-      'Clicking here would open a list or picker outside the page; use select for a list box.'
-    );
-  }
   await emulateFocus(cdp);
   await cdp.sendCommand('Input.dispatchMouseEvent', move);
+  // The hover may have shown something over the element.
+  await checkPoint(cdp, node, point, true);
   const button = { ...point, button: 'left', clickCount: 1 };
   await cdp.sendCommand('Input.dispatchMouseEvent', { ...button, type: 'mousePressed' });
   await cdp.sendCommand('Input.dispatchMouseEvent', { ...button, type: 'mouseReleased' });
+}
+
+/** The focused element of a document or shadow root, or of the frame's document when null. */
+async function activeElementOf(
+  cdp: Debugger,
+  frameId: string | undefined,
+  container: number | null
+): Promise<number | null> {
+  const executionContextId = await engineWorld(cdp, frameId);
+  let result: { objectId?: string };
+  if (container === null) {
+    ({ result } = (await cdp.sendCommand('Runtime.evaluate', {
+      expression: 'document.activeElement',
+      contextId: executionContextId,
+      objectGroup: FOCUS_GROUP,
+    })) as { result: { objectId?: string } });
+  } else {
+    const { object } = (await cdp.sendCommand('DOM.resolveNode', {
+      backendNodeId: container,
+      executionContextId,
+      objectGroup: FOCUS_GROUP,
+    })) as { object: { objectId: string } };
+    ({ result } = (await cdp.sendCommand('Runtime.callFunctionOn', {
+      objectId: object.objectId,
+      functionDeclaration: ACTIVE_ELEMENT,
+      objectGroup: FOCUS_GROUP,
+    })) as { result: { objectId?: string } });
+  }
+  // A null element comes back as a value, without an object.
+  if (result.objectId === undefined) return null;
+  const { node } = (await cdp.sendCommand('DOM.describeNode', { objectId: result.objectId })) as {
+    node: { backendNodeId: number };
+  };
+  return node.backendNodeId;
+}
+
+type DescribedNode = {
+  backendNodeId: number;
+  frameId?: string;
+  shadowRoots?: { backendNodeId: number; shadowRootType: string }[];
+  contentDocument?: { backendNodeId: number };
+};
+
+/**
+ * The element that has focus, through shadow roots (CDP shows closed ones too) and the frames
+ * the page's process draws; in an out-of-process frame, that frame's element in the page. Null
+ * when the document has no element at all.
+ */
+async function focusedElement(cdp: Debugger): Promise<{ node: number; frameId?: string } | null> {
+  let frameId: string | undefined;
+  try {
+    let focused = await activeElementOf(cdp, frameId, null);
+    while (focused !== null) {
+      const { node } = (await cdp.sendCommand('DOM.describeNode', {
+        backendNodeId: focused,
+        depth: 1,
+        pierce: true,
+      })) as { node: DescribedNode };
+      const root = node.shadowRoots?.find((shadow) => shadow.shadowRootType !== 'user-agent');
+      let inner: number | null = null;
+      if (root !== undefined) {
+        inner = await activeElementOf(cdp, frameId, root.backendNodeId);
+      } else if (node.contentDocument !== undefined) {
+        frameId = node.frameId;
+        inner = await activeElementOf(cdp, frameId, node.contentDocument.backendNodeId);
+      }
+      if (inner === null) return { node: focused, frameId };
+      focused = inner;
+    }
+    return null;
+  } finally {
+    await cdp.sendCommand('Runtime.releaseObjectGroup', { objectGroup: FOCUS_GROUP });
+  }
+}
+
+async function refuseIfFocusOpensNativeUi(cdp: Debugger, where: string): Promise<void> {
+  const focused = await focusedElement(cdp);
+  if (
+    focused !== null &&
+    (await callOn(cdp, focused.node, OPENS_NATIVE_UI, [], focused.frameId)) === true
+  ) {
+    throw opensNativeUi(where);
+  }
 }
 
 type KeyDefinition = { key: string; code: string; keyCode: number; text?: string };
@@ -167,11 +325,17 @@ function keyDefinition(name: string): KeyDefinition {
   return { key: name, code, keyCode: code === '' ? 0 : upper.charCodeAt(0), text: name };
 }
 
-/** Presses one key or a chord such as `Shift+Tab`: modifiers, then the key, which is last. */
-async function press(cdp: Debugger, chord: string): Promise<void> {
+/** A chord such as `Shift+Tab`: its modifiers, then its key, which is last. */
+function chordParts(chord: string): { modifiers: string[]; key: string } {
   const parts = chord.length === 1 ? [chord] : chord.split('+');
-  const key = keyDefinition(parts.pop() as string);
-  const held = parts.map((part) => {
+  return { key: parts.pop() as string, modifiers: parts };
+}
+
+/** Presses one key or a chord: modifiers, then the key. */
+async function press(cdp: Debugger, chord: string): Promise<void> {
+  const parts = chordParts(chord);
+  const key = keyDefinition(parts.key);
+  const held = parts.modifiers.map((part) => {
     if (MODIFIERS[part] === undefined) throw failed(`${part} is not a modifier key.`);
     return MODIFIERS[part];
   });
@@ -209,6 +373,7 @@ async function typeText(
   const node = await resolveRef(page, operation.ref);
   await emulateFocus(cdp);
   await cdp.sendCommand('DOM.focus', { backendNodeId: node });
+  await refuseIfFocusOpensNativeUi(cdp, 'Typing in this field');
   if ((await callOn(cdp, node, SELECT_FIELD_TEXT)) !== true) {
     throw failed('This element does not take text.');
   }
@@ -222,7 +387,7 @@ async function selectOptions(
   operation: Extract<BrowserOperation, { action: 'select' }>
 ): Promise<void> {
   const node = await resolveRef(page, operation.ref);
-  const refusal = await callOn(page.cdp, node, SELECT_OPTIONS, [operation.values]);
+  const refusal = await callOn(page.cdp, node, SELECT_OPTIONS, [{ value: operation.values }]);
   if (refusal !== null) throw failed(String(refusal));
 }
 
@@ -235,7 +400,10 @@ async function scroll(
   const moved =
     operation.ref == null
       ? await evaluate(page.cdp, `(${SCROLL_BY}).call(null, ${dx}, ${dy})`)
-      : await callOn(page.cdp, await resolveRef(page, operation.ref), SCROLL_BY, [dx, dy]);
+      : await callOn(page.cdp, await resolveRef(page, operation.ref), SCROLL_BY, [
+          { value: dx },
+          { value: dy },
+        ]);
   if (moved !== true) throw failed('Nothing scrolled: it is at its end, or it does not scroll.');
 }
 
@@ -298,6 +466,9 @@ export async function interact(page: BrowserPage, operation: Interaction): Promi
     case 'type':
       return typeText(page, operation);
     case 'press':
+      if (!KEYS_PAST_NATIVE_UI.has(chordParts(operation.key).key)) {
+        await refuseIfFocusOpensNativeUi(page.cdp, 'This key in the focused field');
+      }
       return press(page.cdp, operation.key);
     case 'select':
       return selectOptions(page, operation);

@@ -1,4 +1,5 @@
 import { test, expect, type ElectronApplication } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import path from 'node:path';
@@ -14,10 +15,11 @@ const PROBE = `(w) => [
   typeof w.EyeDropper, typeof w.showOpenFilePicker, typeof w.showSaveFilePicker,
   typeof w.showDirectoryPicker,
   typeof w.navigator.bluetooth,
+  typeof w.HTMLInputElement.prototype.showPicker, typeof w.HTMLSelectElement.prototype.showPicker,
   // The guard preload exposes nothing to the page.
   typeof w.require, typeof w.process, typeof w.electron,
 ].join()`;
-const NOTHING_LEFT = Array(11).fill('undefined').join();
+const NOTHING_LEFT = Array(13).fill('undefined').join();
 
 /** A frame that reports its probe on load and whenever its parent asks. */
 function childScript(from: string): string {
@@ -95,11 +97,83 @@ video.addEventListener('enterpictureinpicture', () => (window.entered = true));
 window.ready = video.play().then(() => new Promise((resolve) => setTimeout(resolve, 500)));
 </script></body>`,
     '/ui.html': `<!doctype html><body><input type="file" id="file"><p>printable</p></body>`,
+    // Every kind of field whose list or picker the OS draws, at fixed places (`PICKER_POINTS`).
+    '/pickers.html': `<!doctype html><body style="margin:0">
+<select id="list" style="${at(0, 0, 160, 30)}"><option>a</option><option>b</option></select>
+<input id="color" type="color" style="${at(200, 0, 60, 30)}">
+<input id="date" type="date" style="${at(300, 0, 200, 30)}">
+<input id="suggest" list="words" style="${at(540, 0, 200, 30)}">
+<datalist id="words"><option value="alpha"><option value="alps"></datalist>
+<button id="open" style="${at(0, 100, 200, 50)}">open</button>
+<div id="host"></div>
+<iframe src="${crossSiteOrigin}/pickers-child.html" style="${at(300, 100, 300, 150)};border:0"></iframe>
+<script>
+const shadow = host.attachShadow({ mode: 'closed' });
+shadow.innerHTML = '<input type="color">';
+window.tried = [];
+open.onclick = () => {
+  for (const field of [list, color, date, suggest]) {
+    try { field.showPicker(); tried.push('opened'); } catch (error) { tried.push(error.name); }
+  }
+  color.click();
+  shadow.querySelector('input').click();
+  color.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+};
+</script></body>`,
+    // A cross-site frame: a picker field under the click, and a script that clicks another.
+    '/pickers-child.html': `<!doctype html><body style="margin:0">
+<input id="color" type="color" style="${at(0, 0, 300, 150)}"><input id="time" type="time">
+<script>addEventListener('click', () => document.getElementById('time').click());</script>
+</body>`,
     '/w.js': WORKER_SOCKET,
     '/shared.js': WORKER_SOCKET,
     '/sw.js': WORKER_SOCKET,
   };
 }
+
+/** An absolutely placed box, in CSS pixels. */
+function at(left: number, top: number, width: number, height: number): string {
+  return `position:absolute;left:${left}px;top:${top}px;width:${width}px;height:${height}px`;
+}
+
+/** Where each field of /pickers.html takes a click, in viewport CSS pixels. */
+const PICKER_POINTS = {
+  list: { x: 80, y: 15 },
+  color: { x: 230, y: 15 },
+  dateField: { x: 330, y: 15 },
+  dateIndicator: { x: 488, y: 15 },
+  suggest: { x: 640, y: 15 },
+  open: { x: 100, y: 125 },
+  frameColor: { x: 450, y: 175 },
+};
+
+/** A key and its CDP modifier bits (Alt 1, Shift 8). */
+type Key = { key: string; code: string; vk: number; text?: string; modifiers?: number };
+const KEYS: Record<string, Key> = {
+  shiftTab: { key: 'Tab', code: 'Tab', vk: 9, modifiers: 8 },
+  space: { key: ' ', code: 'Space', vk: 32, text: ' ' },
+  enter: { key: 'Enter', code: 'Enter', vk: 13, text: '\r' },
+  down: { key: 'ArrowDown', code: 'ArrowDown', vk: 40 },
+  altDown: { key: 'ArrowDown', code: 'ArrowDown', vk: 40, modifiers: 1 },
+  f4: { key: 'F4', code: 'F4', vk: 115 },
+  a: { key: 'a', code: 'KeyA', vk: 65, text: 'a' },
+};
+
+/**
+ * The windows the app's main process has on the display, as the window server lists them. A list
+ * box's NSMenu and a picker's popup window are among them; a hidden window is not.
+ */
+function onScreenWindows(pid: number): number {
+  const script = `ObjC.import('CoreGraphics');
+const all = ObjC.deepUnwrap(ObjC.castRefToObject(
+  $.CGWindowListCopyWindowInfo($.kCGWindowListOptionOnScreenOnly, $.kCGNullWindowID)));
+all.filter((window) => window.kCGWindowOwnerPID === ${pid}).length`;
+  return Number(
+    execFileSync('osascript', ['-l', 'JavaScript', '-e', script], { encoding: 'utf8' })
+  );
+}
+
+const settle = () => new Promise((resolve) => setTimeout(resolve, 700));
 
 type Settled = {
   status: 'ok' | 'failed';
@@ -117,6 +191,7 @@ function run(
     expression: string | null;
     print?: boolean;
     clicks?: { x: number; y: number }[];
+    keys?: Key[];
   }
 ): Promise<Settled> {
   return app.evaluate(
@@ -154,6 +229,25 @@ function run(
       return sessions.run(request, 20_000, async (page: Page) => {
         if (args.url) await page.contents.loadURL(args.url);
         if (args.print) return (await page.contents.printToPDF({})).subarray(0, 5).toString();
+        if (args.keys.length > 0) {
+          // The hidden window has no focus of its own; keys reach the focused element with this.
+          await page.cdp.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true });
+        }
+        for (const key of args.keys) {
+          const event = {
+            key: key.key,
+            code: key.code,
+            windowsVirtualKeyCode: key.vk,
+            modifiers: key.modifiers ?? 0,
+          };
+          await page.cdp.sendCommand('Input.dispatchKeyEvent', {
+            ...event,
+            ...(key.text === undefined
+              ? { type: 'rawKeyDown' }
+              : { type: 'keyDown', text: key.text, unmodifiedText: key.text }),
+          });
+          await page.cdp.sendCommand('Input.dispatchKeyEvent', { ...event, type: 'keyUp' });
+        }
         for (const point of args.clicks) {
           for (const type of ['mousePressed', 'mouseReleased']) {
             await page.cdp.sendCommand('Input.dispatchMouseEvent', {
@@ -174,7 +268,13 @@ function run(
         return result.value;
       });
     },
-    { ...call, print: call.print ?? false, clicks: call.clicks ?? [], modulePath: SESSION_MODULE }
+    {
+      ...call,
+      print: call.print ?? false,
+      clicks: call.clicks ?? [],
+      keys: call.keys ?? [],
+      modulePath: SESSION_MODULE,
+    }
   ) as Promise<Settled>;
 }
 
@@ -300,6 +400,114 @@ test('a browser session page opens no worker, WebRTC, WebTransport, picture-in-p
       }));
       // One hidden page window per session opened above.
       expect(state).toEqual({ count: windowsBefore + 4, visible: 0 });
+    });
+  } finally {
+    server.close();
+    await stop({ keepArtifacts: testInfo.status !== testInfo.expectedStatus });
+  }
+});
+
+// eslint-disable-next-line no-empty-pattern
+test('no list box or picker of a browser session page reaches the display', async ({}, testInfo) => {
+  const server: Server = createServer((request, response) => {
+    const body = pages(`http://localhost:${(server.address() as AddressInfo).port}`)[
+      request.url ?? ''
+    ];
+    response.writeHead(body === undefined ? 404 : 200, { 'Content-Type': 'text/html' });
+    response.end(body ?? '');
+  });
+  await new Promise<void>((resolve) => server.listen(0, resolve));
+  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const { harness, stop } = await launchElectronE2E();
+  const { app } = harness;
+  try {
+    // The app stays active with its windows hidden, as when the user works in another of its
+    // windows: a picker it opened would be on the display.
+    const pid = await app.evaluate(({ BrowserWindow }) => {
+      for (const win of BrowserWindow.getAllWindows()) win.hide();
+      return process.pid;
+    });
+    await settle();
+    const before = onScreenWindows(pid);
+
+    await test.step('a hidden window without the guard does put a picker on the display', async () => {
+      await app.evaluate(async ({ BrowserWindow }) => {
+        const control = new BrowserWindow({
+          show: false,
+          webPreferences: { partition: 'e2e-picker-control', sandbox: true },
+        });
+        (globalThis as { e2ePickerControl?: Electron.BrowserWindow }).e2ePickerControl = control;
+        await control.loadURL('data:text/html,<input id="color" type="color">');
+        await control.webContents.executeJavaScript(
+          "document.getElementById('color').showPicker()",
+          true
+        );
+      });
+      await settle();
+      expect(onScreenWindows(pid)).toBeGreaterThan(before);
+      await app.evaluate(() =>
+        (globalThis as { e2ePickerControl?: Electron.BrowserWindow }).e2ePickerControl?.destroy()
+      );
+      await settle();
+      expect(onScreenWindows(pid)).toBe(before);
+    });
+
+    const session = 'pickers';
+    const loaded = await run(app, { session, url: `${origin}/pickers.html`, expression: null });
+    expect(loaded.status).toBe('ok');
+    const opensNothing = async (call: { clicks?: { x: number; y: number }[]; keys?: Key[] }) => {
+      const settled = await run(app, { session, url: null, expression: null, ...call });
+      expect(settled.status).toBe('ok');
+      await settle();
+      expect(onScreenWindows(pid)).toBe(before);
+    };
+
+    await test.step('a click on any field opens nothing', async () => {
+      const { list, color, dateField, dateIndicator, suggest } = PICKER_POINTS;
+      for (const point of [list, color, dateField, dateIndicator, suggest]) {
+        await opensNothing({ clicks: [point] });
+      }
+    });
+
+    await test.step('no key on a focused list box, date field or suggestion field opens it', async () => {
+      const { shiftTab, space, enter, down, altDown, f4, a } = KEYS;
+      // Shift+Tab from the color field reaches the list box, the first field.
+      await run(app, {
+        session,
+        url: null,
+        expression: "document.getElementById('color').focus()",
+      });
+      await opensNothing({ keys: [shiftTab] });
+      const onList = await run(app, {
+        session,
+        url: null,
+        expression: 'document.activeElement.id',
+      });
+      expect(onList.value).toBe('list');
+      await opensNothing({ keys: [space, enter, down, altDown, f4] });
+      const focused = await run(app, {
+        session,
+        url: null,
+        expression: "document.getElementById('date').focus(); document.activeElement.id",
+      });
+      expect(focused.value).toBe('date');
+      await opensNothing({ keys: [space, enter, altDown, f4] });
+      await run(app, {
+        session,
+        url: null,
+        expression: "document.getElementById('suggest').focus()",
+      });
+      await opensNothing({ keys: [a, down] });
+    });
+
+    await test.step('a page script given a click opens no picker', async () => {
+      await opensNothing({ clicks: [PICKER_POINTS.open] });
+      const tried = await run(app, { session, url: null, expression: 'window.tried' });
+      expect(tried.value).toEqual(Array(4).fill('TypeError'));
+    });
+
+    await test.step('a click in a cross-site frame opens no picker', async () => {
+      await opensNothing({ clicks: [PICKER_POINTS.frameColor] });
     });
   } finally {
     server.close();

@@ -1,6 +1,8 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const { test } = require('node:test');
 
 const {
@@ -9,6 +11,7 @@ const {
   foldPath,
   isSecretPath,
   isWithinRoot,
+  serveFile,
 } = require('../electron/dist/browser/pagePolicy.js');
 const { BROWSER_MAX_CONTACTED_HOSTS } = require('../electron/dist/browser/browserContract.js');
 
@@ -67,6 +70,88 @@ test("the runtime's secret rules withhold here what its file tools withhold", ()
   for (const [target, withheld] of SECRET_PATHS.cases) {
     assert.equal(isSecretPath([target], SECRET_PATHS.rules), withheld, JSON.stringify(target));
   }
+});
+
+/** Serves each file of `work` in `files` under `scope`: the response types and what was refused. */
+async function serveAll(work, files, scope) {
+  const blocked = [];
+  const served = [];
+  for (const file of files) {
+    const url = pathToFileURL(path.join(work, file)).href;
+    const response = await serveFile(url, scope, (reason, at) => blocked.push({ reason, url: at }));
+    served.push([file, response.type]);
+  }
+  return { served, blocked };
+}
+
+// Catches: a file holding secrets served by its name, by a link that leads to it, or a harmless
+// file refused for a folder name that only looks like one.
+test('a page never loads a file holding secrets, by its name or by where it leads', async () => {
+  const work = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-html-secret-')));
+  fs.writeFileSync(path.join(work, 'deck.html'), '<p>deck</p>');
+  fs.writeFileSync(path.join(work, '.env'), 'API_KEY=secret');
+  fs.writeFileSync(path.join(work, '.env.example'), 'API_KEY=');
+  fs.writeFileSync(path.join(work, 'plain.css'), 'p{}');
+  fs.symlinkSync(path.join(work, '.env'), path.join(work, 'notes.txt'));
+  fs.symlinkSync(path.join(work, 'plain.css'), path.join(work, '.Env.Local'));
+  fs.mkdirSync(path.join(work, 'venv', '.env'), { recursive: true });
+  fs.writeFileSync(path.join(work, 'venv', '.env', 'site.js'), '1');
+  const files = [
+    'deck.html',
+    '.env',
+    '.env.example',
+    'notes.txt',
+    '.Env.Local',
+    'venv/.env/site.js',
+  ];
+  const { served, blocked } = await serveAll(work, files, {
+    fileRoots: [work],
+    privateRoots: [],
+    privateRootExceptions: [],
+    secretPaths: SECRET_PATHS.rules,
+  });
+  assert.deepEqual(served, [
+    ['deck.html', 'default'],
+    ['.env', 'error'],
+    ['.env.example', 'default'],
+    ['notes.txt', 'error'],
+    ['.Env.Local', 'error'],
+    ['venv/.env/site.js', 'default'],
+  ]);
+  assert.deepEqual(
+    blocked,
+    ['.env', 'notes.txt', '.Env.Local'].map((file) => ({
+      reason: 'not_allowed',
+      url: pathToFileURL(path.join(work, file)).href,
+    }))
+  );
+});
+
+// Catches: a link swapped between the open and the check serving the file it first led to.
+test('a file swapped after it was opened is not served', async (t) => {
+  const work = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-html-swap-')));
+  fs.writeFileSync(path.join(work, 'chart.svg'), '<svg/>');
+  const outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-html-out-')));
+  fs.writeFileSync(path.join(outside, 'secret.svg'), 'SECRET');
+  const link = path.join(work, 'link.svg');
+  fs.symlinkSync(path.join(outside, 'secret.svg'), link);
+  // The link points outside when it is opened and back inside when it is checked.
+  const realpath = fs.promises.realpath;
+  t.mock.method(fs.promises, 'realpath', async (target) => {
+    if (target === link) {
+      fs.rmSync(link);
+      fs.symlinkSync(path.join(work, 'chart.svg'), link);
+    }
+    return realpath(target);
+  });
+  const { served, blocked } = await serveAll(work, ['link.svg'], {
+    fileRoots: [work],
+    privateRoots: [],
+    privateRootExceptions: [],
+    secretPaths: [],
+  });
+  assert.deepEqual(served, [['link.svg', 'error']]);
+  assert.deepEqual(blocked, [{ reason: 'outside_read_scope', url: pathToFileURL(link).href }]);
 });
 
 const BACKEND_PORT = 8765;

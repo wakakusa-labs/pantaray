@@ -81,6 +81,7 @@ function fakeBrowserElectron({ load = async () => {}, cdp = async () => ({}) } =
           history.push(url);
         },
         isLoading: () => false,
+        executeJavaScript: async () => undefined,
         printToPDF: async (printOptions) => {
           contents.printOptions = printOptions;
           return PDF;

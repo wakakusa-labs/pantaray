@@ -151,6 +151,9 @@ type PageSession = BrowserPage & {
 
 type LoggerLike = { error?: (name: string, payload?: unknown) => void };
 
+/** What a session needs of a request: the runtime's, or the task preview's own print. */
+export type SessionRequest = Pick<BrowserOperationRequest, 'session_id' | 'operation' | 'policy'>;
+
 const sessionGone = () =>
   new BrowserOperationError('BROWSER_SESSION_GONE', 'This browser session was closed.');
 
@@ -435,7 +438,7 @@ export function createBrowserSessions(params: {
 
   async function execute<T>(
     page: PageSession,
-    request: BrowserOperationRequest,
+    request: SessionRequest,
     budgetMs: number,
     work: (page: BrowserPage) => Promise<T>
   ): Promise<OperationSettled<T>> {
@@ -511,7 +514,7 @@ export function createBrowserSessions(params: {
      * the first `navigate` naming a new id opens the session.
      */
     run<T>(
-      request: BrowserOperationRequest,
+      request: SessionRequest,
       budgetMs: number,
       work: (page: BrowserPage) => Promise<T>
     ): Promise<OperationSettled<T>> {

@@ -1,7 +1,7 @@
 /**
  * What a page in a hidden window may load: local files under the runtime's read rules, and
- * network requests under the command network setting. The HTML print path and the browser
- * sessions share these rules.
+ * network requests under the command network setting. Every browser session, the task preview's
+ * included, follows these rules.
  */
 
 import fs from 'node:fs';

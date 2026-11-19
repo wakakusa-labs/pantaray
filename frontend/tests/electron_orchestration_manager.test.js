@@ -135,7 +135,6 @@ function createManagerHarness(overrides = {}) {
         ? await overrides.readLatestActionConversationPage(actionId)
         : conversationPage(actionId);
     }),
-    respondToHtmlRender: overrides.respondToHtmlRender,
     timers,
   });
 
@@ -1353,50 +1352,6 @@ test('OrchestrationManager: a TODO change reaches only the main window, parsed',
     /TODO change response is invalid/
   );
   assert.equal(harness.mainWindowMessages.length, 1);
-  assert.deepEqual(harness.overlayWindowMessages, []);
-});
-
-test('an HTML render request goes to the desktop renderer only, never to a window', () => {
-  const requests = [];
-  const harness = createManagerHarness({
-    respondToHtmlRender: async (request) => {
-      requests.push(request);
-    },
-  });
-  harness.manager.ensureConnected();
-
-  harness.getWsHooks().forwardEventToRenderers({
-    event: 'html_render_requested',
-    data: {
-      kind: 'action',
-      process_id: 'proc-1',
-      action_id: 'action-1',
-      tool_request_id: 'tool-1',
-      render_request_id: 'render-1',
-      html_path: '/work/deck.html',
-      file_roots: ['/work'],
-      private_roots: ['/work/.pantaray'],
-      private_root_exceptions: ['/work/.pantaray/published'],
-      secret_paths: [{ withheld: '/[.][eE][nN][vV]$', excepted: null }],
-      allow_network: true,
-    },
-  });
-
-  assert.deepEqual(requests, [
-    {
-      renderRequestId: 'render-1',
-      actionId: 'action-1',
-      processId: 'proc-1',
-      toolRequestId: 'tool-1',
-      htmlPath: '/work/deck.html',
-      fileRoots: ['/work'],
-      privateRoots: ['/work/.pantaray'],
-      privateRootExceptions: ['/work/.pantaray/published'],
-      secretPaths: [{ withheld: '/[.][eE][nN][vV]$', excepted: null }],
-      allowNetwork: true,
-    },
-  ]);
-  assert.deepEqual(harness.mainWindowMessages, []);
   assert.deepEqual(harness.overlayWindowMessages, []);
 });
 

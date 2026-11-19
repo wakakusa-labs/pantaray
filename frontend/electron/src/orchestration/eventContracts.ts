@@ -367,27 +367,6 @@ export type ScreenCaptureRequestedEvent = OrchestrationEventEnvelope<
   }
 >;
 
-/**
- * A control message for the desktop client, never forwarded to a renderer: print one
- * HTML file to PDF. The answer goes back over the local backend, like a screen capture.
- */
-export type HtmlRenderRequestedEvent = OrchestrationEventEnvelope<
-  'html_render_requested',
-  {
-    kind: 'action' | 'suggestion';
-    process_id: string;
-    action_id: string;
-    tool_request_id: string;
-    render_request_id: string;
-    html_path: string;
-    file_roots: string[];
-    private_roots: string[];
-    private_root_exceptions: string[];
-    secret_paths: { withheld: string; excepted: string | null }[];
-    allow_network: boolean;
-  }
->;
-
 /** Desktop-only control messages, never forwarded to a renderer; `browser/browserContract.ts`
  * parses the data, and the answer goes back over the local backend. */
 export type BrowserOperationRequestedEvent = OrchestrationEventEnvelope<
@@ -428,7 +407,6 @@ export type OrchestrationServerEvent =
   | CompletionChunkEvent
   | ProcessPausedActionEvent
   | ScreenCaptureRequestedEvent
-  | HtmlRenderRequestedEvent
   | BrowserOperationRequestedEvent
   | BrowserSessionCloseRequestedEvent
   | ChatItemAppendedEvent
@@ -492,12 +470,6 @@ export function isScreenCaptureRequestedEvent(
   event: OrchestrationServerEvent
 ): event is ScreenCaptureRequestedEvent {
   return event.event === 'screen_capture_requested';
-}
-
-export function isHtmlRenderRequestedEvent(
-  event: OrchestrationServerEvent
-): event is HtmlRenderRequestedEvent {
-  return event.event === 'html_render_requested';
 }
 
 export function isBrowserOperationRequestedEvent(

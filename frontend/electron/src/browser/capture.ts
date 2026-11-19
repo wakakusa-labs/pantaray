@@ -64,7 +64,7 @@ export async function captureFullPage(
   return { artifact: decodePng(data), cut: contentHeight > height };
 }
 
-/** Prints as the HTML print path always has: A4 unless the page sets its size, with backgrounds. */
+/** Prints A4 unless the page sets its size, with backgrounds. */
 export async function printPage(contents: WebContents): Promise<CapturedArtifact> {
   const bytes = await contents.printToPDF({
     printBackground: true,

@@ -19,7 +19,6 @@ import {
   BROWSER_NAVIGATION_BUDGET_MS,
   BROWSER_OPERATION_BUDGET_MS,
   BrowserOperationError,
-  type BrowserPage,
   type BrowserSessions,
 } from './browserSession';
 import {
@@ -30,6 +29,7 @@ import {
   writeArtifact,
   type CapturedArtifact,
 } from './capture';
+import type { CdpPage } from './cdpSession';
 import { captureElement, interact } from './interactions';
 import { reachedHost } from './pagePolicy';
 import { takeSnapshot } from './snapshot';
@@ -50,10 +50,18 @@ const ERR_ABORTED = -3;
 
 type LoggerLike = { error?: (name: string, payload?: unknown) => void };
 
-export async function navigate(
-  contents: WebContents,
-  target: Extract<BrowserOperation, { action: 'navigate' }>['target']
-): Promise<void> {
+type NavigateTarget = Extract<BrowserOperation, { action: 'navigate' }>['target'];
+
+/** How an operation moves the page through its history, and prints it where that is offered. */
+type PageNavigation = {
+  navigate(target: NavigateTarget): Promise<void>;
+  back(): Promise<void>;
+  print: (() => Promise<CapturedArtifact>) | null;
+};
+
+type OperablePage = CdpPage & { navigation: PageNavigation };
+
+export async function navigate(contents: WebContents, target: NavigateTarget): Promise<void> {
   const url = target.kind === 'web' ? target.url : pathToFileURL(target.path).href;
   try {
     await contents.loadURL(url);
@@ -117,13 +125,21 @@ export function openedHost(operation: BrowserOperation): string | null {
   return reachedHost(new URL(operation.target.url))?.host ?? null;
 }
 
-async function perform(operation: BrowserOperation, page: BrowserPage): Promise<OperationValue> {
+function appPageNavigation(contents: WebContents): PageNavigation {
+  return {
+    navigate: (target) => navigate(contents, target),
+    back: () => goBack(contents),
+    print: () => printPage(contents),
+  };
+}
+
+async function perform(operation: BrowserOperation, page: OperablePage): Promise<OperationValue> {
   switch (operation.action) {
     case 'navigate':
-      await navigate(page.contents, operation.target);
+      await page.navigation.navigate(operation.target);
       return NOTHING;
     case 'back':
-      await goBack(page.contents);
+      await page.navigation.back();
       return NOTHING;
     case 'screenshot': {
       if (operation.ref == null && operation.full_page !== true) {
@@ -135,8 +151,13 @@ async function perform(operation: BrowserOperation, page: BrowserPage): Promise<
           : await captureElement(page, operation.ref);
       return { ...NOTHING, artifact, truncated: cut ? 'page_too_tall' : null };
     }
-    case 'print':
-      return { ...NOTHING, artifact: await printPage(page.contents) };
+    case 'print': {
+      // The runtime asks only the app's page to print.
+      if (page.navigation.print === null) {
+        throw new BrowserOperationError('BROWSER_ACTION_FAILED', 'This page cannot be printed.');
+      }
+      return { ...NOTHING, artifact: await page.navigation.print() };
+    }
     case 'snapshot': {
       const { text, cut } = await takeSnapshot(page, operation.ref);
       return { ...NOTHING, snapshot: text, truncated: cut ? 'snapshot_too_long' : null };
@@ -175,7 +196,7 @@ export function createBrowserResponder(params: {
     let written: string | null = null;
     try {
       const settled = await params.sessions.run(request, budgetOf(request.operation), (page) =>
-        perform(request.operation, page)
+        perform(request.operation, { ...page, navigation: appPageNavigation(page.contents) })
       );
       let result: BrowserOperationAnswer['result'];
       if (settled.status === 'failed') {

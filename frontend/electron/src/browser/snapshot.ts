@@ -9,9 +9,8 @@
  * session, and every ref is dropped once the main frame holds a new document.
  */
 
-import type { Debugger, WebContents } from 'electron';
-
-import { BrowserOperationError, type BrowserPage } from './browserSession';
+import { BrowserOperationError } from './browserSession';
+import type { CdpPage, CdpSession } from './cdpSession';
 
 /**
  * Design limit: a snapshot is cut at a line boundary past this many characters, reported as
@@ -44,9 +43,9 @@ type RefMap = {
   byNode: Map<number, string>;
 };
 
-const refMaps = new WeakMap<WebContents, RefMap>();
+const refMaps = new WeakMap<CdpSession, RefMap>();
 /** The next ref number per session; refs keep counting across documents. */
-const nextRef = new WeakMap<WebContents, number>();
+const nextRef = new WeakMap<CdpSession, number>();
 
 /**
  * The world this engine's page functions run in, one per frame and document. The page's own
@@ -56,19 +55,19 @@ const ENGINE_WORLD = 'pantaray-browser';
 /** The objects one page call resolves; it releases them as it ends. */
 const CALL_GROUP = 'pantaray-browser-call';
 
-async function mainFrame(cdp: Debugger): Promise<{ id: string; loaderId: string }> {
+async function mainFrame(cdp: CdpSession): Promise<{ id: string; loaderId: string }> {
   const { frameTree } = (await cdp.sendCommand('Page.getFrameTree')) as {
     frameTree: { frame: { id: string; loaderId: string } };
   };
   return frameTree.frame;
 }
 
-export async function mainDocumentId(cdp: Debugger): Promise<string> {
+export async function mainDocumentId(cdp: CdpSession): Promise<string> {
   return (await mainFrame(cdp)).loaderId;
 }
 
 /** The engine's world in a frame's current document; the main frame's when `frameId` is absent. */
-export async function engineWorld(cdp: Debugger, frameId?: string): Promise<number> {
+export async function engineWorld(cdp: CdpSession, frameId?: string): Promise<number> {
   const { executionContextId } = (await cdp.sendCommand('Page.createIsolatedWorld', {
     frameId: frameId ?? (await mainFrame(cdp)).id,
     worldName: ENGINE_WORLD,
@@ -151,11 +150,11 @@ export function renderSnapshot(
 }
 
 /** The node a ref names in the current document, after checking it is still in the page. */
-export async function resolveRef(page: BrowserPage, ref: string): Promise<number> {
-  const refs = refMaps.get(page.contents);
+export async function resolveRef(page: CdpPage, ref: string): Promise<number> {
+  const refs = refMaps.get(page.cdp);
   const node = refs?.byRef.get(ref);
   if (refs !== undefined && refs.loaderId !== (await mainDocumentId(page.cdp))) {
-    refMaps.delete(page.contents);
+    refMaps.delete(page.cdp);
   } else if (node !== undefined) {
     // CDP refuses to resolve a node that no longer exists.
     const connected = await callOn(
@@ -185,7 +184,7 @@ export type PageArgument = { value: unknown } | { node: number };
  * main frame by default); `this` is the node.
  */
 export async function callOn(
-  cdp: Debugger,
+  cdp: CdpSession,
   backendNodeId: number,
   functionDeclaration: string,
   args: PageArgument[] = [],
@@ -223,7 +222,7 @@ export async function callOn(
 
 /** The snapshot of the page, or of the subtree `ref` names. */
 export async function takeSnapshot(
-  page: BrowserPage,
+  page: CdpPage,
   ref: string | null | undefined
 ): Promise<{ text: string; cut: boolean }> {
   const subtreeOf = ref == null ? null : await resolveRef(page, ref);
@@ -239,20 +238,20 @@ export async function takeSnapshot(
       ref == null ? 'The page has no accessibility tree yet.' : `${ref} is not shown in the page.`
     );
   }
-  const previous = refMaps.get(page.contents);
+  const previous = refMaps.get(page.cdp);
   const kept = previous?.loaderId === loaderId ? previous.byNode : new Map<number, string>();
   const refs: RefMap = { loaderId, byRef: new Map(), byNode: new Map() };
   const refOf = (backendNodeId: number) => {
-    const number = nextRef.get(page.contents) ?? 1;
+    const number = nextRef.get(page.cdp) ?? 1;
     const ref = kept.get(backendNodeId) ?? `e${number}`;
     const commit = () => {
-      if (!kept.has(backendNodeId)) nextRef.set(page.contents, number + 1);
+      if (!kept.has(backendNodeId)) nextRef.set(page.cdp, number + 1);
       refs.byRef.set(ref, backendNodeId);
       refs.byNode.set(backendNodeId, ref);
     };
     return { ref, commit };
   };
   const rendered = renderSnapshot(nodes, root.nodeId, refOf);
-  refMaps.set(page.contents, refs);
+  refMaps.set(page.cdp, refs);
   return rendered;
 }

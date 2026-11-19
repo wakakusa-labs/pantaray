@@ -12,10 +12,9 @@
  * the ref's element at the point the input would reach.
  */
 
-import type { Debugger } from 'electron';
-
 import { BROWSER_MAX_WAIT_SECONDS, type BrowserOperation } from './browserContract';
-import { BrowserOperationError, type BrowserPage } from './browserSession';
+import { BrowserOperationError } from './browserSession';
+import type { CdpPage, CdpSession } from './cdpSession';
 import { decodePng, MAX_FULL_PAGE_HEIGHT_PX, type CapturedArtifact } from './capture';
 import { callOn, engineWorld, resolveRef } from './snapshot';
 
@@ -104,7 +103,7 @@ const opensNativeUi = (where: string) =>
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Evaluates an expression built only from this module's fixed functions and JSON values. */
-async function evaluate(cdp: Debugger, expression: string): Promise<unknown> {
+async function evaluate(cdp: CdpSession, expression: string): Promise<unknown> {
   const { result } = (await cdp.sendCommand('Runtime.evaluate', {
     expression,
     returnByValue: true,
@@ -114,7 +113,7 @@ async function evaluate(cdp: Debugger, expression: string): Promise<unknown> {
 
 /** Scrolls the node into view and returns its box in viewport CSS pixels. */
 async function boxOf(
-  cdp: Debugger,
+  cdp: CdpSession,
   backendNodeId: number
 ): Promise<{ x: number; y: number; width: number; height: number }> {
   await cdp.sendCommand('DOM.scrollIntoViewIfNeeded', { backendNodeId });
@@ -133,14 +132,14 @@ async function boxOf(
 }
 
 /** The hidden window is never focused; this lets the page behave as if it were. */
-async function emulateFocus(cdp: Debugger): Promise<void> {
+async function emulateFocus(cdp: CdpSession): Promise<void> {
   await cdp.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true });
 }
 
 type Point = { x: number; y: number };
 
 /** The node that holds a frame's document in the main frame, for each frame the page's process draws. */
-async function inMainFrame(cdp: Debugger, node: number, frameId: string): Promise<number> {
+async function inMainFrame(cdp: CdpSession, node: number, frameId: string): Promise<number> {
   type FrameTree = { frame: { id: string }; childFrames?: FrameTree[] };
   const { frameTree } = (await cdp.sendCommand('Page.getFrameTree')) as { frameTree: FrameTree };
   const parents = new Map<string, string>();
@@ -165,7 +164,7 @@ async function inMainFrame(cdp: Debugger, node: number, frameId: string): Promis
  * `refuseNativeUi`, also when it would open a list or picker there.
  */
 async function checkPoint(
-  cdp: Debugger,
+  cdp: CdpSession,
   node: number,
   point: Point,
   refuseNativeUi: boolean
@@ -190,7 +189,7 @@ async function checkPoint(
   }
 }
 
-async function click(page: BrowserPage, ref: string, hoverOnly: boolean): Promise<void> {
+async function click(page: CdpPage, ref: string, hoverOnly: boolean): Promise<void> {
   const { cdp } = page;
   const node = await resolveRef(page, ref);
   const box = await boxOf(cdp, node);
@@ -212,7 +211,7 @@ async function click(page: BrowserPage, ref: string, hoverOnly: boolean): Promis
 
 /** The focused element of a document or shadow root, or of the frame's document when null. */
 async function activeElementOf(
-  cdp: Debugger,
+  cdp: CdpSession,
   frameId: string | undefined,
   container: number | null
 ): Promise<number | null> {
@@ -256,7 +255,7 @@ type DescribedNode = {
  * the page's process draws; in an out-of-process frame, that frame's element in the page. Null
  * when the document has no element at all.
  */
-async function focusedElement(cdp: Debugger): Promise<{ node: number; frameId?: string } | null> {
+async function focusedElement(cdp: CdpSession): Promise<{ node: number; frameId?: string } | null> {
   let frameId: string | undefined;
   try {
     let focused = await activeElementOf(cdp, frameId, null);
@@ -284,7 +283,7 @@ async function focusedElement(cdp: Debugger): Promise<{ node: number; frameId?: 
 }
 
 /** The kind of list or picker field that has focus, or null when the focus is on none. */
-async function focusedNativeUiField(cdp: Debugger): Promise<NativeUiField | null> {
+async function focusedNativeUiField(cdp: CdpSession): Promise<NativeUiField | null> {
   const focused = await focusedElement(cdp);
   if (focused === null) return null;
   return (await callOn(
@@ -351,7 +350,7 @@ function chordParts(chord: string): { modifiers: string[]; key: string } {
 }
 
 /** Presses one key or a chord: modifiers, then the key. */
-async function press(cdp: Debugger, chord: string): Promise<void> {
+async function press(cdp: CdpSession, chord: string): Promise<void> {
   const parts = chordParts(chord);
   const key = keyDefinition(parts.key);
   const held = parts.modifiers.map((part) => {
@@ -385,7 +384,7 @@ async function press(cdp: Debugger, chord: string): Promise<void> {
 
 /** Replaces the field's text, as a person selecting it and typing would. */
 async function typeText(
-  page: BrowserPage,
+  page: CdpPage,
   operation: Extract<BrowserOperation, { action: 'type' }>
 ): Promise<void> {
   const { cdp } = page;
@@ -402,7 +401,7 @@ async function typeText(
 }
 
 async function selectOptions(
-  page: BrowserPage,
+  page: CdpPage,
   operation: Extract<BrowserOperation, { action: 'select' }>
 ): Promise<void> {
   const node = await resolveRef(page, operation.ref);
@@ -412,7 +411,7 @@ async function selectOptions(
 
 /** Scrolls the page, or the element, by most of its visible size; refused when nothing moved. */
 async function scroll(
-  page: BrowserPage,
+  page: CdpPage,
   operation: Extract<BrowserOperation, { action: 'scroll' }>
 ): Promise<void> {
   const [dx, dy] = SCROLL_DIRECTION[operation.direction];
@@ -428,7 +427,7 @@ async function scroll(
 
 /** Waits the seconds, or until the page shows the text, for at most `BROWSER_MAX_WAIT_SECONDS`. */
 async function wait(
-  cdp: Debugger,
+  cdp: CdpSession,
   operation: Extract<BrowserOperation, { action: 'wait' }>
 ): Promise<void> {
   if (operation.seconds != null) {
@@ -449,7 +448,7 @@ async function wait(
 
 /** The element's box, cut at the full page's height cap. */
 export async function captureElement(
-  page: BrowserPage,
+  page: CdpPage,
   ref: string
 ): Promise<{ artifact: CapturedArtifact; cut: boolean }> {
   const box = await boxOf(page.cdp, await resolveRef(page, ref));
@@ -477,7 +476,7 @@ type Interaction = Extract<
 >;
 
 /** Runs an operation that acts on the page and answers with nothing of its own. */
-export async function interact(page: BrowserPage, operation: Interaction): Promise<void> {
+export async function interact(page: CdpPage, operation: Interaction): Promise<void> {
   switch (operation.action) {
     case 'click':
     case 'hover':

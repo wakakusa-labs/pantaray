@@ -173,6 +173,7 @@ async def request_browser_operation(
                 policy=policy.model_copy(
                     update={"write_hosts": list(browser_write_hosts(owner_process_id))}
                 ),
+                user_browser=None,
             ),
         )
         answer = await broker.wait(

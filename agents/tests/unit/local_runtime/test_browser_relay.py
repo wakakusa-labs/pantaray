@@ -226,6 +226,7 @@ async def test_a_screenshot_is_verified_returned_and_removed(
         "session_id": payload["session_id"],
         "operation": {"action": "screenshot", "ref": None, "full_page": None},
         "policy": {**POLICY.model_dump(mode="json"), "write_hosts": []},
+        "user_browser": None,
     }
 
 

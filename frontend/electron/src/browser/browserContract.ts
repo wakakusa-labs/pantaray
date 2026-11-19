@@ -26,6 +26,16 @@ const HostSchema = z.string().regex(HOST);
 const Sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
 const PositiveIntSchema = z.number().int().positive();
 
+/** The user's browsers, as `schema/user_browser.py` names them. */
+export const UserBrowserIdSchema = z.enum([
+  'chrome',
+  'chrome_beta',
+  'chrome_dev',
+  'chrome_canary',
+  'edge',
+  'brave',
+]);
+
 const NavigateOperationSchema = strict({
   action: z.literal('navigate'),
   target: z.discriminatedUnion('kind', [
@@ -96,7 +106,21 @@ const BrowserOperationRequestSchema = strict({
   session_id: NonBlankSchema,
   operation: BrowserOperationSchema,
   policy: BrowserPagePolicySchema,
-});
+  // A tab of the session's own in the user's browser; null for the app's hidden page.
+  user_browser: strict({
+    browser: UserBrowserIdSchema,
+    // Hosts the user approved this run to open in that tab.
+    read_hosts: z.array(HostSchema),
+  }).nullable(),
+}).refine(
+  // The user's browser opens no local file, prints nothing, and needs the network on.
+  ({ user_browser, operation, policy }) =>
+    user_browser === null ||
+    (policy.allow_network &&
+      operation.action !== 'print' &&
+      !(operation.action === 'navigate' && operation.target.kind === 'file')),
+  { message: "the user's browser takes web pages only, with the network on" }
+);
 
 const BrowserSessionCloseRequestSchema = strict({ session_id: NonBlankSchema });
 
@@ -133,6 +157,7 @@ const BrowserPageDataSchema = strict({
           'write_not_approved',
           'not_allowed',
           'too_many_hosts',
+          'read_not_approved',
         ]),
         url: z.string(),
       })
@@ -178,6 +203,11 @@ export const BrowserOperationAnswerSchema = strict({
         'BROWSER_RENDERER_CRASHED',
         'BROWSER_SESSION_GONE',
         'BROWSER_ACTION_FAILED',
+        'BROWSER_USER_NOT_RUNNING',
+        'BROWSER_USER_DEBUGGING_OFF',
+        'BROWSER_USER_FILE_BLOCKED',
+        'BROWSER_USER_DENIED',
+        'BROWSER_USER_UNAVAILABLE',
       ]),
       message: z.string(),
       network: ContactedHostsSchema,
@@ -185,6 +215,7 @@ export const BrowserOperationAnswerSchema = strict({
   ]),
 });
 
+export type UserBrowserId = z.infer<typeof UserBrowserIdSchema>;
 export type BrowserOperation = z.infer<typeof BrowserOperationSchema>;
 export type BrowserPagePolicy = z.infer<typeof BrowserPagePolicySchema>;
 export type BrowserOperationRequest = z.infer<typeof BrowserOperationRequestSchema>;

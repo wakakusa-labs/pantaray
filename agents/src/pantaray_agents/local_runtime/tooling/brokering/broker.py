@@ -145,7 +145,9 @@ async def execute_broker_tool(
     except BrowserNetworkOffError:
         # A page opened while the network was on keeps it until Electron is
         # sent the setting, which this refusal never does: the page ends.
-        await close_browser_session(owner_process_id=actor_process_id)
+        await close_browser_session(
+            owner_process_id=actor_process_id, browser="pantaray"
+        )
         raise
     if isinstance(validated, ValidatedPatchRequest) and validated.preflight_only:
         return BrokerPreflightOutcome(

@@ -68,8 +68,9 @@ class OneShotRequests[T]:
             self._pending[request_id] = pending
         return request_id
 
-    async def wait(self, *, request_id: str, timeout_seconds: float) -> T | None:
-        """Await the answer, or return None once the deadline passes.
+    async def wait(self, *, request_id: str, timeout_seconds: float | None) -> T | None:
+        """Await the answer, or return None once the deadline passes; with no
+        deadline, until it is answered or the waiter is cancelled.
 
         The request is closed either way: a late answer finds nothing to resolve
         instead of resolving a request nobody is waiting on any more.

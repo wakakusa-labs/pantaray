@@ -80,4 +80,4 @@ def test_a_childs_allow_writes_is_reviewed_then_parks_for_the_user(
         ).fetchone()
     assert session[:2] == ("pending", "Decide whether to send it.")
     assert json.loads(session[2])["summary_kind"] == "browser_write"
-    assert browser_write_hosts(payload["process_id"]) == ()
+    assert browser_write_hosts(payload["process_id"], "pantaray") == ()

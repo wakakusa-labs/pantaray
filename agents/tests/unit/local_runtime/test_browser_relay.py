@@ -32,6 +32,7 @@ from pantaray_agents.local_runtime.runtime.browser_relay import (
 from pantaray_agents.local_runtime.runtime.one_shot_requests import OneShotRequests
 from pantaray_agents.local_runtime.storage.migrations import load_default_migrations
 from pantaray_agents.schema.events import OutboundEvent
+from pantaray_agents.schema.user_browser import UserBrowserId
 from pantaray_agents.schema.websocket.server_messages import (
     BrowserNavigateOperation,
     BrowserOperation,
@@ -131,16 +132,42 @@ class Runtime:
             )
 
     async def request(
-        self, owner: str, operation: BrowserOperation = NAVIGATE
+        self,
+        owner: str,
+        operation: BrowserOperation = NAVIGATE,
+        user_browser: UserBrowserId | None = None,
     ) -> BrowserOperationOutcome:
+        """On the app's page, or with ``user_browser`` on the user's page."""
+
+        if user_browser is None:
+            return await relay_module.request_browser_operation(
+                db_path=self.db_path,
+                busy_timeout_ms=1_000,
+                user_id="user-1",
+                owner_process_id=owner,
+                browser="pantaray",
+                user_browser=None,
+                operation=operation,
+                policy=POLICY,
+            )
         return await relay_module.request_browser_operation(
             db_path=self.db_path,
             busy_timeout_ms=1_000,
             user_id="user-1",
             owner_process_id=owner,
+            browser="user",
+            user_browser=user_browser,
             operation=operation,
             policy=POLICY,
         )
+
+    def answer(self, payload: dict[str, object], answer: BrowserAnswer) -> None:
+        accepted = self.broker.answer(
+            request_id=str(payload["operation_request_id"]),
+            user_id="user-1",
+            outcome=answer,
+        )
+        assert accepted == "accepted"
 
 
 @pytest.fixture
@@ -167,12 +194,15 @@ async def _start(
     owner: str = OWNER,
     data: bytes | None = None,
     kind: str = "png",
+    user_browser: UserBrowserId | None = None,
 ) -> tuple[asyncio.Future[BrowserOperationOutcome], dict[str, object], Path]:
     """Start an operation, then write its artifact where Electron would."""
 
-    sent = len(runtime.desktop.requests)
-    task = asyncio.ensure_future(runtime.request(owner, operation))
-    while len(runtime.desktop.requests) == sent:
+    sent = len(runtime.desktop.events)
+    task = asyncio.ensure_future(runtime.request(owner, operation, user_browser))
+    while (
+        OutboundEvent.BROWSER_OPERATION_REQUESTED not in runtime.desktop.events[sent:]
+    ):
         await asyncio.sleep(0.005)
     payload = runtime.desktop.requests[-1]
     name = f"{payload['operation_request_id']}.{kind}"
@@ -191,16 +221,17 @@ async def _run(
     owner: str = OWNER,
     data: bytes | None = None,
     kind: str = "png",
+    user_browser: UserBrowserId | None = None,
 ) -> tuple[BrowserOperationOutcome, dict[str, object]]:
     task, payload, artifact = await _start(
-        runtime, operation=operation, owner=owner, data=data, kind=kind
+        runtime,
+        operation=operation,
+        owner=owner,
+        data=data,
+        kind=kind,
+        user_browser=user_browser,
     )
-    accepted = runtime.broker.answer(
-        request_id=str(payload["operation_request_id"]),
-        user_id="user-1",
-        outcome=answer,
-    )
-    assert accepted == "accepted"
+    runtime.answer(payload, answer)
     outcome = await task
     assert not artifact.exists()
     return outcome, payload
@@ -345,8 +376,8 @@ async def test_closing_is_idempotent_and_the_run_may_open_a_new_session(
 ) -> None:
     first = await _navigate(runtime)
 
-    await relay_module.close_browser_session(owner_process_id=OWNER)
-    await relay_module.close_browser_session(owner_process_id=OWNER)
+    await relay_module.close_browser_session(owner_process_id=OWNER, browser="pantaray")
+    await relay_module.close_browser_session(owner_process_id=OWNER, browser="pantaray")
 
     assert runtime.closes() == [first]
     assert await _navigate(runtime) != first
@@ -357,20 +388,22 @@ async def test_closing_is_idempotent_and_the_run_may_open_a_new_session(
 @pytest.mark.asyncio
 async def test_write_hosts_belong_to_one_run_until_it_ends(runtime: Runtime) -> None:
     runtime.seed_run("p-other")
-    relay_module.allow_browser_writes(owner_process_id=OWNER, host="api.example.com")
+    relay_module.allow_browser_writes(
+        owner_process_id=OWNER, browser="pantaray", host="api.example.com"
+    )
 
     _, mine = await _run(runtime, NAVIGATE_ANSWER, operation=NAVIGATE)
     _, theirs = await _run(
         runtime, NAVIGATE_ANSWER, operation=NAVIGATE, owner="p-other"
     )
-    await relay_module.close_browser_session(owner_process_id=OWNER)
+    await relay_module.close_browser_session(owner_process_id=OWNER, browser="pantaray")
     _, reopened = await _run(runtime, NAVIGATE_ANSWER, operation=NAVIGATE)
     await relay_module.end_browser_sessions(owner_process_ids=(OWNER,))
 
     assert mine["policy"]["write_hosts"] == ["api.example.com"]  # type: ignore[index]
     assert theirs["policy"]["write_hosts"] == []  # type: ignore[index]
     assert reopened["policy"]["write_hosts"] == ["api.example.com"]  # type: ignore[index]
-    assert relay_module.browser_write_hosts(OWNER) == ()
+    assert relay_module.browser_write_hosts(OWNER, "pantaray") == ()
 
 
 @pytest.mark.asyncio
@@ -424,7 +457,7 @@ async def test_a_close_send_that_never_completes_does_not_hold_the_sweep(
 
     runtime.desktop.send_desktop_request = never_sends  # type: ignore[method-assign]
     # A live run's own close, and an ended run's, both stuck.
-    await relay_module.close_browser_session(owner_process_id=OWNER)
+    await relay_module.close_browser_session(owner_process_id=OWNER, browser="pantaray")
     started = time.monotonic()
     await runtime.sweep()
     # One deadline per owner, then on to the next.
@@ -437,3 +470,139 @@ async def test_a_close_send_that_never_completes_does_not_hold_the_sweep(
     # Each retried once delivered; only the live run stays listed.
     assert sorted(runtime.closes()) == sorted(opened.values())
     assert set(relay_module._OWNERS) == {OWNER}
+
+
+def _hosts(payload: dict[str, object]) -> tuple[object, object]:
+    """The write hosts and the user's browser an operation was sent with."""
+
+    return payload["policy"]["write_hosts"], payload["user_browser"]  # type: ignore[index]
+
+
+@pytest.mark.asyncio
+async def test_the_user_page_waits_for_its_first_answer_without_a_deadline(
+    runtime: Runtime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Catches: the relay timing out while the user is still deciding whether to
+    # allow the connection, or a connected page left without a deadline.
+    monkeypatch.setattr(relay_module, "BROWSER_RELAY_TIMEOUT_SECONDS", 0.05)
+    task, payload, _ = await _start(runtime, operation=NAVIGATE, user_browser="chrome")
+    await asyncio.sleep(0.2)
+    assert not task.done()
+    runtime.answer(payload, NAVIGATE_ANSWER)
+    assert isinstance(await task, BrowserOperationDone)
+
+    unanswered = await asyncio.wait_for(runtime.request(OWNER, NAVIGATE, "chrome"), 1)
+
+    assert isinstance(unanswered, BrowserRelayFailed)
+    assert unanswered.code == "BROWSER_RELAY_TIMED_OUT"
+
+
+@pytest.mark.asyncio
+async def test_an_undelivered_first_user_operation_fails_at_once(
+    runtime: Runtime,
+) -> None:
+    # Catches: waiting forever for an answer no desktop app was asked for.
+    runtime.desktop.open = False
+
+    outcome = await asyncio.wait_for(runtime.request(OWNER, NAVIGATE, "chrome"), 1)
+
+    assert isinstance(outcome, BrowserRelayFailed)
+    assert outcome.code == "BROWSER_RELAY_TIMED_OUT"
+
+
+# Catches: a host approved on one page reaching the other, so an approval on the
+# app's page would let the user's logged-in browser write (or the reverse), and
+# the user's page opening hosts the run was not approved for.
+@pytest.mark.asyncio
+async def test_each_page_has_its_own_session_and_hosts(runtime: Runtime) -> None:
+    relay_module.allow_browser_writes(
+        owner_process_id=OWNER, browser="pantaray", host="app.example"
+    )
+    relay_module.allow_browser_writes(
+        owner_process_id=OWNER, browser="user", host="mail.example"
+    )
+    relay_module.allow_user_browser_reads(owner_process_id=OWNER, host="mail.example")
+
+    _, app = await _run(runtime, NAVIGATE_ANSWER, operation=NAVIGATE)
+    _, user = await _run(
+        runtime, NAVIGATE_ANSWER, operation=NAVIGATE, user_browser="chrome"
+    )
+
+    assert app["session_id"] != user["session_id"]
+    assert _hosts(app) == (["app.example"], None)
+    assert _hosts(user) == (
+        ["mail.example"],
+        {"browser": "chrome", "read_hosts": ["mail.example"]},
+    )
+    await relay_module.close_browser_session(owner_process_id=OWNER, browser="user")
+    assert runtime.closes() == [user["session_id"]]
+    assert relay_module.browser_page_host(OWNER, "pantaray") == "localhost"
+    assert relay_module.browser_page_host(OWNER, "user") is None
+
+
+@pytest.mark.asyncio
+async def test_the_user_page_stays_bound_to_its_first_browser(
+    runtime: Runtime,
+) -> None:
+    # Catches: hosts approved for one browser sent to another one.
+    relay_module.allow_user_browser_reads(owner_process_id=OWNER, host="mail.example")
+    assert relay_module.bound_user_browser(OWNER) is None
+    await _run(runtime, NAVIGATE_ANSWER, operation=NAVIGATE, user_browser="chrome")
+    sent = len(runtime.desktop.requests)
+
+    with pytest.raises(ValueError):
+        await runtime.request(OWNER, NAVIGATE, "edge")
+
+    assert len(runtime.desktop.requests) == sent
+    assert relay_module.bound_user_browser(OWNER) == "chrome"
+
+
+@pytest.mark.asyncio
+async def test_a_lost_connection_asks_again_in_a_new_session(
+    runtime: Runtime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Catches: reusing an id Electron dropped, or putting the deadline on a new
+    # connection the user has to allow again.
+    monkeypatch.setattr(relay_module, "BROWSER_RELAY_TIMEOUT_SECONDS", 0.05)
+    sessions = []
+    for answer in (
+        _failed("BROWSER_USER_DENIED"),
+        NAVIGATE_ANSWER,
+        # The user quit the browser after allowing it.
+        _failed("BROWSER_USER_NOT_RUNNING"),
+    ):
+        _, payload = await _run(
+            runtime, answer, operation=NAVIGATE, user_browser="chrome"
+        )
+        sessions.append(payload["session_id"])
+    # The session ended; the page is still the same browser's.
+    assert relay_module.bound_user_browser(OWNER) == "chrome"
+
+    task, last, _ = await _start(runtime, operation=NAVIGATE, user_browser="chrome")
+    await asyncio.sleep(0.2)
+
+    assert not task.done()
+    assert sessions[0] != sessions[1] == sessions[2] != last["session_id"]
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.asyncio
+async def test_the_run_end_closes_both_pages_and_drops_their_hosts(
+    runtime: Runtime,
+) -> None:
+    relay_module.allow_browser_writes(
+        owner_process_id=OWNER, browser="user", host="mail.example"
+    )
+    relay_module.allow_user_browser_reads(owner_process_id=OWNER, host="mail.example")
+    app = await _navigate(runtime)
+    _, user = await _run(
+        runtime, NAVIGATE_ANSWER, operation=NAVIGATE, user_browser="chrome"
+    )
+
+    await relay_module.end_browser_sessions(owner_process_ids=(OWNER,))
+
+    assert set(runtime.closes()) == {app, user["session_id"]}
+    assert relay_module.browser_write_hosts(OWNER, "user") == ()
+    assert relay_module.user_browser_read_hosts(OWNER) == ()

@@ -228,6 +228,8 @@ class SuggestionHtmlPages:
                 busy_timeout_ms=busy_timeout_ms,
                 user_id=self.user_id,
                 owner_process_id=owner,
+                browser="pantaray",
+                user_browser=None,
                 operation=operation,
                 policy=policy,
             )
@@ -244,7 +246,7 @@ class SuggestionHtmlPages:
             )
             printed = await operate(BrowserPrintOperation(action="print"))
         finally:
-            await close_browser_session(owner_process_id=owner)
+            await close_browser_session(owner_process_id=owner, browser="pantaray")
         # The relay has verified the PDF a print answer claims.
         assert printed.artifact is not None
         return target, _Printed(

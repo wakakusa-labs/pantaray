@@ -1,10 +1,11 @@
 """render_html_page and save_html_as_pdf for a Suggestion's make stage.
 
-The Action's tools, printed and drawn by the same functions through the same
-desktop relay: the page is any HTML file ``read`` may open, and it loads local
-files only where ``read`` may. What differs is what a run with nobody to ask may
-do: the page never reaches the network, as make-stage commands never do, and
-the PDF is written only into the artifact folder, below a descriptor opened
+Each call prints in a browser session of its own, opened on the desktop app's
+browser engine for the Suggestion's run and closed when the call ends, however
+it ends. The page is any HTML file ``read`` may open, and it loads local files
+only where ``read`` may. What a run with nobody to ask may do is narrower than an
+Action's: the page never reaches the network, as make-stage commands never do,
+and the PDF is written only into the artifact folder, below a descriptor opened
 without following a link, while the folder is still the one pinned.
 """
 
@@ -12,9 +13,12 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sqlite3
 import stat
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Final, Literal, cast
 
 from pydantic import BaseModel, ValidationError
 
@@ -25,6 +29,13 @@ from pantaray_agents.local_runtime.descriptor_write import (
 )
 from pantaray_agents.local_runtime.tooling.documents import MAX_RENDERED_PAGES
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.schema.websocket.server_messages import (
+    BrowserFileTarget,
+    BrowserNavigateOperation,
+    BrowserPagePolicy,
+    BrowserPrintOperation,
+    SecretPathRule,
+)
 from pantaray_agents.tools.contract import (
     BrokerPolicyError,
     JsonSchema,
@@ -36,19 +47,39 @@ from pantaray_agents.tools.contract import (
     tool_error_response,
 )
 from pantaray_agents.tools.files.read_only_tools import ReadOnlyFileTools
+from pantaray_agents.tools.files.read_scope import ReadScope
 from pantaray_agents.tools.files.read_target import ReadTarget
 from pantaray_agents.tools.files.render_pages import (
     RenderHtmlPageToolArgs,
     SaveHtmlAsPdfToolArgs,
 )
+from pantaray_agents.tools.files.secret_paths import secret_path_patterns
 
-from ...runtime.html_render_relay import HtmlRendered
+from ...runtime.browser_relay import (
+    BrowserOperationDone,
+    BrowserRelayFailed,
+    BrowserRelayFailureCode,
+    close_browser_session,
+    request_browser_operation,
+)
+from ...runtime.db_execution_context import resolve_local_runtime_db_config
+from ...runtime.html_render_relay import (
+    BlockedRequest,
+    BlockedRequestReason,
+    HtmlRendered,
+    HtmlRenderFailed,
+    HtmlRenderFailureCode,
+)
+from ...runtime.job_types import SUGGESTION_PROCESS_KIND
+from ...runtime.runtime_env import read_local_runtime_db_config
+from ...storage.migrations.connection import configure_connection
 from ..brokering.action_path_policy import WRITE_PATH_DENIED
 from ..brokering.broker_direct_render_html import (
     BLOCKED_REQUESTS_NOTE,
+    _file_roots,
+    _render_failed,
     blocked_requests_output,
     draw_printed_html,
-    print_html_target,
     resolve_html_file,
 )
 from .artifact_patch import (
@@ -70,6 +101,19 @@ _PAGE_RULES = (
     "refused requests are listed in blocked_requests. When the desktop app is "
     "closed nothing answers, and the call fails after about 30 seconds."
 )
+
+# The engine's failures that mean the same as one of the print path's own codes;
+# any other failure is a page that did not load, or did not print.
+_SAME_FAILURE: Final[dict[BrowserRelayFailureCode, HtmlRenderFailureCode]] = {
+    "BROWSER_TIMED_OUT": "HTML_RENDER_TIMED_OUT",
+    "BROWSER_RENDERER_CRASHED": "HTML_RENDERER_CRASHED",
+    "BROWSER_RELAY_TIMED_OUT": "HTML_RENDER_RELAY_TIMED_OUT",
+    "BROWSER_INTEGRITY_FAILED": "HTML_RENDER_INTEGRITY_FAILED",
+}
+_SUGGESTION_PROCESS_SQL = """
+SELECT process_id FROM processes
+WHERE user_id = ? AND kind = ? AND suggestion_id = ?
+"""
 
 type _Run = Callable[[ReactToolCall, BaseModel], Awaitable[ReactToolResult]]
 
@@ -154,17 +198,68 @@ class SuggestionHtmlPages:
     ) -> tuple[ReadTarget, HtmlRendered]:
         scope = self.files.scope
         target = resolve_html_file(scope=scope, raw_path=raw_path)
-        rendered = await print_html_target(
-            target=target,
-            scope=scope,
-            user_id=self.user_id,
-            kind="suggestion",
-            requester_id=self.run_id,
-            process_id=self.run_id,
-            tool_request_id=f"{self.run_id}:{call.call_id}",
-            allow_network=False,
+        db_path, busy_timeout_ms = resolve_local_runtime_db_config(
+            fallback=read_local_runtime_db_config
         )
-        return target, rendered
+        # The run's own process owns the session: it stays live until the job
+        # ends, so the sweep never closes the session while this call prints.
+        owner = _suggestion_process_id(
+            db_path, busy_timeout_ms, user_id=self.user_id, suggestion_id=self.run_id
+        )
+        if owner is None:
+            raise _print_failed(
+                target,
+                "navigate",
+                BrowserRelayFailed(
+                    code="BROWSER_SESSION_GONE",
+                    message="This Suggestion has no run to own a browser.",
+                    network=(),
+                ),
+            )
+        policy = _offline_policy(scope)
+
+        async def operate(
+            operation: BrowserNavigateOperation | BrowserPrintOperation,
+        ) -> BrowserOperationDone:
+            outcome = await request_browser_operation(
+                db_path=db_path,
+                busy_timeout_ms=busy_timeout_ms,
+                user_id=self.user_id,
+                action_id=self.run_id,
+                owner_process_id=owner,
+                tool_request_id=f"{self.run_id}:{call.call_id}",
+                operation=operation,
+                policy=policy,
+            )
+            if isinstance(outcome, BrowserRelayFailed):
+                raise _print_failed(target, operation.action, outcome)
+            return outcome
+
+        try:
+            loaded = await operate(
+                BrowserNavigateOperation(
+                    action="navigate",
+                    target=BrowserFileTarget(kind="file", path=str(target.real_path)),
+                )
+            )
+            printed = await operate(BrowserPrintOperation(action="print"))
+        finally:
+            await close_browser_session(owner_process_id=owner)
+        # The relay has verified the PDF a print answer claims.
+        assert printed.artifact is not None
+        answers = (loaded.result, printed.result)
+        return target, HtmlRendered(
+            pdf=printed.artifact,
+            blocked_requests=tuple(
+                # With the network off nothing is refused as a write, so every
+                # reason is one the print path already reports.
+                BlockedRequest(cast(BlockedRequestReason, blocked.reason), blocked.url)
+                for answer in answers
+                for blocked in answer.page_data.blocked
+            ),
+            # The network is off: the page reaches no host.
+            network=(),
+        )
 
     async def _render(self, call: ReactToolCall, request: BaseModel) -> ReactToolResult:
         assert isinstance(request, RenderHtmlPageToolArgs)
@@ -247,6 +342,60 @@ class SuggestionHtmlPages:
         finally:
             os.close(parent)
         return existing is not None
+
+
+def _suggestion_process_id(
+    db_path: Path, busy_timeout_ms: int, *, user_id: str, suggestion_id: str
+) -> str | None:
+    with sqlite3.connect(db_path) as connection:
+        configure_connection(connection, busy_timeout_ms)
+        row = connection.execute(
+            _SUGGESTION_PROCESS_SQL, (user_id, SUGGESTION_PROCESS_KIND, suggestion_id)
+        ).fetchone()
+    return None if row is None else str(row[0])
+
+
+def _offline_policy(scope: ReadScope) -> BrowserPagePolicy:
+    """What the page may load: local files only where ``read`` may, by both
+    secret tiers as for ``read``, and never the network."""
+
+    return BrowserPagePolicy(
+        allow_network=False,
+        file_roots=[str(root) for root in _file_roots(scope)],
+        private_roots=[str(root) for root in scope.private_storage.storage_roots],
+        private_root_exceptions=[
+            str(root) for root in scope.private_storage.readable_roots
+        ],
+        secret_paths=[
+            SecretPathRule(withheld=rule.withheld, excepted=rule.excepted)
+            for rule in (
+                *secret_path_patterns("app_secret"),
+                *secret_path_patterns("cli_credential"),
+            )
+        ],
+        write_hosts=[],
+    )
+
+
+def _print_failed(
+    target: ReadTarget,
+    step: Literal["navigate", "print"],
+    failure: BrowserRelayFailed,
+) -> BrokerPolicyError:
+    """The engine's failure as the print path's own error output."""
+
+    step_code: HtmlRenderFailureCode = (
+        "HTML_LOAD_FAILED" if step == "navigate" else "HTML_PRINT_FAILED"
+    )
+    return _render_failed(
+        target,
+        HtmlRenderFailed(
+            code=_SAME_FAILURE.get(failure.code, step_code),
+            message=failure.message,
+            blocked_requests=(),
+            network=(),
+        ),
+    )
 
 
 def _error(call: ReactToolCall, code: str, message: str) -> ReactToolResult:

@@ -10,8 +10,7 @@ The page belongs to the calling run (its ``actor_process_id``), which the run's
 end closes.
 
 Everything taken from the page goes in the output's ``data``, marked
-``untrusted``, and nowhere else; the output is cut to fit inline so that storage
-never replaces it with a preview outside ``data``.
+``untrusted``, and nowhere else; storage keeps a large one's preview there too.
 """
 
 from __future__ import annotations
@@ -23,7 +22,6 @@ from pydantic import ValidationError
 from pantaray_agents.local_runtime.runtime.browser_contract import (
     BrowserContactedHost,
     BrowserOperationSucceeded,
-    BrowserTruncation,
 )
 from pantaray_agents.local_runtime.runtime.browser_relay import (
     BrowserRelayFailed,
@@ -37,7 +35,6 @@ from pantaray_agents.local_runtime.runtime.tool_image_attachments import (
     assemble_tool_image,
 )
 from pantaray_agents.schema.agent.base import JSONValue
-from pantaray_agents.schema.tool_result import largest_fitting_size
 from pantaray_agents.schema.websocket.server_messages import (
     BrowserFileTarget,
     BrowserNavigateOperation,
@@ -53,7 +50,6 @@ from pantaray_agents.tools.files.read_target import resolve_read_target
 from pantaray_agents.tools.files.secret_paths import secret_path_patterns
 
 from ..repository.command_network_settings import load_command_network_enabled
-from ..tool_result_storage import ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT
 from .action_path_policy import read_scope
 from .broker_common import BrokerContext, ensure_session_capabilities
 from .broker_direct_render_html import _file_roots
@@ -76,11 +72,6 @@ _RETRY_ONCE: Final = (
     "Try once more; if it fails again, tell the user the browser could not be "
     "used. The desktop app must be open."
 )
-# What a cut reports when Electron reported none: the action's own long text.
-_CUT_TRUNCATION: Final[dict[str, BrowserTruncation]] = {
-    "snapshot": "snapshot_too_long",
-    "console": "console_too_long",
-}
 _NAVIGATE_AGAIN: Final = "The page was discarded. Navigate again to continue."
 FIX_HINTS: Final[dict[BrowserFailureCode, str]] = {
     "BROWSER_NO_PAGE": "Open a page with navigate first.",
@@ -174,7 +165,7 @@ async def run_browser_executor(
         )
     if outcome.artifact is None:
         return UnprojectedBrokerToolOutcome(
-            status="success", output=_fitted_output(args.action, outcome.result)
+            status="success", output=_page_output(args.action, outcome.result)
         )
     # The relay has verified the PNG a screenshot answer claims.
     blob = write_local_image_blob(
@@ -185,7 +176,7 @@ async def run_browser_executor(
     )
     return UnprojectedBrokerToolOutcome(
         status="success",
-        output=_fitted_output(
+        output=_page_output(
             args.action, outcome.result, attachments=[image.output_entry]
         ),
         attachments=(image.attachment,),
@@ -215,63 +206,22 @@ def browser_page_policy(scope: ReadScope, *, allow_network: bool) -> BrowserPage
     )
 
 
-def _fitted_output(
+def _page_output(
     action: str,
     result: BrowserOperationSucceeded,
     *,
     attachments: list[JSONValue] | None = None,
 ) -> dict[str, JSONValue]:
-    """The output, its page text cut to the longest length that fits inline. A
-    larger result would be stored away and shown as a preview outside ``data``,
-    where page text would no longer be marked untrusted."""
-
-    page = result.page_data
-    console = page.console or []
-    texts = [page.url, page.title, page.snapshot or "", *page.popups]
-    texts += [line.text for line in console] + [item.url for item in page.blocked]
-
-    def output(length: int) -> dict[str, JSONValue]:
-        def cut(text: str) -> str:
-            return text if len(text) <= length else f"{text[:length]}…"
-
-        cut_page = page.model_copy(
-            update={
-                "url": cut(page.url),
-                "title": cut(page.title),
-                "snapshot": None if page.snapshot is None else cut(page.snapshot),
-                "console": None
-                if page.console is None
-                else [m.model_copy(update={"text": cut(m.text)}) for m in console],
-                "popups": [cut(url) for url in page.popups],
-                "blocked": [
-                    b.model_copy(update={"url": cut(b.url)}) for b in page.blocked
-                ],
-            }
-        )
-        truncated = result.truncated
-        if truncated is None and any(len(text) > length for text in texts):
-            truncated = _CUT_TRUNCATION.get(action)
-        return {
-            "status": "ok",
-            "action": action,
-            "truncated": truncated,
-            "notes": list(result.notes),
-            "network": _network(result.network),
-            "untrusted": True,
-            "data": cut_page.model_dump(mode="json"),
-            **({} if attachments is None else {"attachments": attachments}),
-        }
-
-    # Design limit: cut to nothing, the output is bounded by how many console
-    # lines, popups and blocked requests Electron reports; it fits while those
-    # stay in the hundreds.
-    return output(
-        largest_fitting_size(
-            output,
-            high=max(len(text) for text in texts),
-            limit=ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT,
-        )
-    )
+    return {
+        "status": "ok",
+        "action": action,
+        "truncated": result.truncated,
+        "notes": list(result.notes),
+        "network": _network(result.network),
+        "untrusted": True,
+        "data": result.page_data.model_dump(mode="json"),
+        **({} if attachments is None else {"attachments": attachments}),
+    }
 
 
 def _navigation_target(

@@ -363,17 +363,13 @@ async def test_page_text_past_the_inline_limit_stays_untrusted_in_data(
 
     outcome, _ = await asyncio.gather(_call(runtime, args), _electron(runtime, answer))
 
-    assert outcome.output_storage_kind == "inline_json"  # type: ignore[attr-defined]
-    parsed = BrowserToolOutput.model_validate(outcome.output).root  # type: ignore[attr-defined]
-    assert parsed.untrusted is True  # type: ignore[union-attr]
-    data = parsed.data  # type: ignore[union-attr]
-    if field == "console":
-        assert parsed.truncated == "console_too_long"  # type: ignore[union-attr]
-        assert data.console is not None and len(data.console) == 100
-        assert data.console[0].text.startswith("line 0 ")
-    else:
-        assert len(data.popups) == 10 and len(data.blocked) == 10
-        assert data.popups[0].endswith("…")
+    assert outcome.output_storage_kind == "action_file"  # type: ignore[attr-defined]
+    output = dict(outcome.output)  # type: ignore[attr-defined]
+    assert output["untrusted"] is True
+    data = output.pop("data")
+    assert data["storage"] == "action_file" and data["preview"]
+    assert "evil.example" not in json.dumps(output)
+    assert "line 0 " not in json.dumps(output)
 
 
 # Catches: an Electron failure that reaches the model without its code, its

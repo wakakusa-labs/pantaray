@@ -31,7 +31,12 @@ from ..repository import (
     CommandInvocationAuditUpsertInput,
     upsert_command_invocation_audit,
 )
-from ..repository.command_invocation_audits import TerminalOutcome
+from ..repository.command_invocation_audits import (
+    BudgetExceededKind,
+    CommandAuditOutcome,
+    SandboxViolationKind,
+    TerminalOutcome,
+)
 from ..resources.cleanup import CleanupFailure, terminate_process_group
 from ..resources.resource_tracking import (
     mark_resource_cleaned_if_tracked,
@@ -131,13 +136,13 @@ def write_command_invocation_audit(
     *,
     context: BrokerContext,
     request: ValidatedCommandRequest,
-    terminal_outcome: str,
+    terminal_outcome: CommandAuditOutcome,
     exit_code: int | None,
     signal_value: int | None,
     stdout_bytes: int,
     stderr_bytes: int,
-    budget_exceeded_kind: str | None,
-    sandbox_violation_kind: str | None,
+    budget_exceeded_kind: BudgetExceededKind | None,
+    sandbox_violation_kind: SandboxViolationKind | None,
     sandbox_violation_summary: str | None,
     updated_at: str,
 ) -> None:
@@ -150,7 +155,7 @@ def write_command_invocation_audit(
             execution_kind=request.execution_kind,
             executable_source_kind=request.executable_source_kind,
             resolved_executable_path=request.resolved_executable_path,
-            terminal_outcome=terminal_outcome,  # type: ignore[arg-type]
+            terminal_outcome=terminal_outcome,
             exit_code=exit_code,
             signal=signal_value,
             stdout_bytes=stdout_bytes,
@@ -160,8 +165,8 @@ def write_command_invocation_audit(
             temp_storage_limit_bytes=request.temp_storage_limit_bytes,
             child_count_limit=request.child_count_limit,
             open_file_lease_limit=request.open_file_lease_limit,
-            budget_exceeded_kind=budget_exceeded_kind,  # type: ignore[arg-type]
-            sandbox_violation_kind=sandbox_violation_kind,  # type: ignore[arg-type]
+            budget_exceeded_kind=budget_exceeded_kind,
+            sandbox_violation_kind=sandbox_violation_kind,
             sandbox_violation_summary=sandbox_violation_summary,
             created_at=request.requested_at,
             updated_at=updated_at,

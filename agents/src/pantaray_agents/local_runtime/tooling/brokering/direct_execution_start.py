@@ -28,7 +28,8 @@ from .process_protocol import (
     ValidatedStopProcessRequest,
 )
 
-type DirectReadOnlyRequest = (
+# Read-only requests, recorded without a command summary.
+DirectReadOnlyRequest = (
     ValidatedReadRequest
     | ValidatedRenderPdfPageRequest
     | ValidatedListRequest
@@ -39,9 +40,12 @@ type DirectReadOnlyRequest = (
     | ValidatedBrowserRequest
 )
 # Approval-gated requests, recorded with the command summary that was approved.
-type GatedRequest = (
+GatedRequest = (
     ValidatedPatchRequest | ValidatedBrowserPrintRequest | ValidatedCommandRequest
 )
+# Every request the broker validates. These are runtime unions, so isinstance
+# checks take them as they are.
+ValidatedBrokerRequest = DirectReadOnlyRequest | GatedRequest
 
 
 def start_direct_execution(
@@ -49,7 +53,7 @@ def start_direct_execution(
     db_path: Path,
     busy_timeout_ms: int,
     context: BrokerContext,
-    validated: DirectReadOnlyRequest | GatedRequest,
+    validated: ValidatedBrokerRequest,
     args: dict[str, JSONValue],
 ) -> str | None:
     tool_invocation_id = validated.tool_invocation_id
@@ -111,24 +115,12 @@ def tool_invocation_exists(
 def build_direct_invocation_start(
     *,
     context: BrokerContext,
-    validated: DirectReadOnlyRequest | GatedRequest,
+    validated: ValidatedBrokerRequest,
     args: dict[str, JSONValue],
 ) -> ToolInvocationStartInput:
     if validated.tool_invocation_id is None:
         raise BrokerPolicyError("direct broker execution requires an invocation id")
-    if isinstance(
-        validated,
-        (
-            ValidatedReadRequest,
-            ValidatedRenderPdfPageRequest,
-            ValidatedListRequest,
-            ValidatedGlobRequest,
-            ValidatedGrepRequest,
-            ValidatedReadProcessOutputRequest,
-            ValidatedStopProcessRequest,
-            ValidatedBrowserRequest,
-        ),
-    ):
+    if isinstance(validated, DirectReadOnlyRequest):
         return _build_read_only_invocation_start(
             context=context,
             validated=validated,
@@ -222,4 +214,9 @@ def _command_request_json_for_audit(
     )
 
 
-__all__ = ["start_direct_execution"]
+__all__ = [
+    "DirectReadOnlyRequest",
+    "GatedRequest",
+    "ValidatedBrokerRequest",
+    "start_direct_execution",
+]

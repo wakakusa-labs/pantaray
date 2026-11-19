@@ -23,14 +23,9 @@ from ..models import ApprovalSource, ToolInvocationStartInput
 from ..repository import claim_approval_execution_start
 from .action_subagent_broker_authority import ACTION_SUBAGENT_WRITE_DENIED
 from .broker_common import BrokerContext
-from .broker_protocol import (
-    ValidatedCommandRequest,
-    ValidatedPatchRequest,
-)
-from .browser_protocol import ValidatedBrowserPrintRequest
 from .direct_execution_start import (
-    DirectReadOnlyRequest,
     GatedRequest,
+    ValidatedBrokerRequest,
     build_direct_invocation_start,
     should_start_direct_invocation,
     start_direct_execution,
@@ -125,18 +120,11 @@ def claim_broker_execution_start(
     db_path: Path,
     busy_timeout_ms: int,
     context: BrokerContext,
-    validated: DirectReadOnlyRequest | GatedRequest,
+    validated: ValidatedBrokerRequest,
     args: dict[str, JSONValue],
 ) -> str | None:
     try:
-        if isinstance(
-            validated,
-            (
-                ValidatedPatchRequest,
-                ValidatedBrowserPrintRequest,
-                ValidatedCommandRequest,
-            ),
-        ):
+        if isinstance(validated, GatedRequest):
             if (
                 validated.approval_session_id is not None
                 and validated.approval_source is not None

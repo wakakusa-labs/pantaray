@@ -141,6 +141,12 @@ const TAB_COMMANDS = new Set([
  * origin, so it is never attached; the first matching entry decides.
  */
 const CHILD_TYPES = new Set(['iframe', 'worker']);
+/** What a tab may open: the web or its blank start page; a browser page reaches other tabs. */
+const opensWebOrBlank = (url: unknown): boolean =>
+  url === 'about:blank' ||
+  (typeof url === 'string' &&
+    URL.canParse(url) &&
+    ['http:', 'https:'].includes(new URL(url).protocol));
 /** Hidden: never in the tab strip, and gone with the connection. */
 const NEW_TAB = { url: 'about:blank', hidden: true, background: true };
 const AUTO_ATTACH = {
@@ -396,7 +402,8 @@ function browserOver(socket: WebSocketClient): UserBrowserConnection {
     await send('Target.setAutoAttach', AUTO_ATTACH, sessionId);
     const cdp: CdpSession = {
       async sendCommand(method, params = {}, child) {
-        if (!TAB_COMMANDS.has(method)) {
+        const url = (params as { url?: unknown }).url;
+        if (!TAB_COMMANDS.has(method) || (method === 'Page.navigate' && !opensWebOrBlank(url))) {
           throw new CdpCommandError(`${method} is not sent to the user's browser.`);
         }
         if (child !== undefined && !tab.children.has(child)) {

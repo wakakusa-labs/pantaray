@@ -231,6 +231,8 @@ test('a tab reaches only its own sessions and frames, hears only them, and has i
   await refused('Storage.getCookies', {});
   // An empty session id is the browser itself in Chromium.
   await refused('Page.navigate', { url: 'https://example.com' }, '');
+  // chrome://inspect lists the browser's other targets and can close them.
+  await refused('Page.navigate', { url: 'chrome://inspect/#pages' });
   await tab.cdp.sendCommand('Page.navigate', { url: 'https://example.com' });
 
   const send = (method, params, sessionId) =>

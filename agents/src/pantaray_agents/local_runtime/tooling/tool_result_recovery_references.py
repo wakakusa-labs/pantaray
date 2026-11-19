@@ -35,6 +35,7 @@ from .tool_result_storage import (
     ACTION_TOOL_RESULTS_DIRNAME,
     TOOL_RESULT_BINARY_MEDIA_TYPE,
     TOOL_RESULT_JSON_MEDIA_TYPE,
+    whole_result_reference,
 )
 
 _FINAL_RESULT_FILE_PATTERN = re.compile(r"^output-[0-9a-f]{32}\.(?:bin|json|txt)$")
@@ -259,10 +260,8 @@ def _step_references_from_json_column(
 def _load_whole_step_output(
     *, action_root: Path, step_id: str, output: JSONValue
 ) -> JSONValue:
-    if not (
-        isinstance(output, dict)
-        and output.get("media_type") == TOOL_RESULT_JSON_MEDIA_TYPE
-    ):
+    whole = whole_result_reference(output)
+    if whole is None or whole.get("media_type") != TOOL_RESULT_JSON_MEDIA_TYPE:
         return None
     try:
         return load_action_file_result(
@@ -350,14 +349,9 @@ def _action_file_references(
     """The files an action-file output references: the one standing in for the whole
     result, or each one a moved text value points to."""
 
-    if (
-        isinstance(value, dict)
-        and value.get("storage") == "action_file"
-        and value.get("media_type") != SPILLED_TEXT_MEDIA_TYPE
-    ):
-        texts: list[dict[str, JSONValue]] = [value]
-    else:
-        texts = spilled_texts(cast(JSONValue, value))
+    output = cast(JSONValue, value)
+    whole = whole_result_reference(output)
+    texts = [whole] if whole is not None else spilled_texts(output)
     if not texts:
         raise ToolResultRecoveryError(
             f"action-file output references no stored file in {column_name}"

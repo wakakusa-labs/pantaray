@@ -31,6 +31,7 @@ from .tool_result_storage import (
     ActionBinaryToolResultMetadata,
     ActionFileToolResultMetadata,
     validate_invocation_id,
+    whole_result_reference,
 )
 
 _JSON_RESULT_FILE_PATTERN = re.compile(r"^output-[0-9a-f]{32}\.json$")
@@ -86,11 +87,11 @@ def load_action_file_result(
     validate_invocation_id(invocation_id)
     if max_bytes <= 0:
         raise ValueError("max_bytes must be a positive integer")
-    if _is_json_metadata(output):
+    if (whole := _json_reference(output)) is not None:
         return _load_json_result(
             action_tool_results_path=action_tool_results_path,
             invocation_id=invocation_id,
-            metadata=output,
+            metadata=whole,
             max_bytes=max_bytes,
         )
     references = [_validate_text_reference(value) for value in spilled_texts(output)]
@@ -247,7 +248,8 @@ def read_tool_result_text_prefix(
         if start_byte:
             raise ToolResultTextOffsetError("cursor is invalid for binary output")
         return ToolResultTextPrefix("", None, binary["byte_size"], "binary")
-    if not _is_json_metadata(output):
+    whole = _json_reference(output)
+    if whole is None:
         if not spilled_texts(output):
             raise ToolResultLoadError("action-file result references no stored file")
         # A text longer than the readable bytes is read only a little past them: the
@@ -266,7 +268,7 @@ def read_tool_result_text_prefix(
             page_bytes=page_bytes,
             max_read_bytes=max_read_bytes,
         )
-    metadata = _validate_json_metadata(output)
+    metadata = _validate_json_metadata(whole)
     total_bytes = metadata["byte_size"]
     readable_bytes = min(total_bytes, max_read_bytes)
     if start_byte >= readable_bytes:
@@ -307,12 +309,13 @@ def _page(
     )
 
 
-def _is_json_metadata(output: JSONValue) -> bool:
-    return (
-        isinstance(output, dict)
-        and output.get("storage") == "action_file"
-        and output.get("media_type") == TOOL_RESULT_JSON_MEDIA_TYPE
-    )
+def _json_reference(output: JSONValue) -> dict[str, JSONValue] | None:
+    """The reference to a result stored whole as JSON, wherever storage put it."""
+
+    reference = whole_result_reference(output)
+    if reference is None or reference.get("media_type") != TOOL_RESULT_JSON_MEDIA_TYPE:
+        return None
+    return reference
 
 
 def _validate_text_reference(value: JSONValue) -> _TextReference:

@@ -31,6 +31,16 @@ def _args(tool_id: str, **args: JSONValue) -> str:
         ),
         pytest.param("grep", _args("grep", pattern="retrieval"), "retrieval"),
         pytest.param(
+            "browser",
+            _args("browser", action="navigate", url="http://localhost:5173/"),
+            "http://localhost:5173/",
+        ),
+        pytest.param(
+            "browser",
+            _args("browser", action="print", pdf_path="out/deck.pdf"),
+            "out/deck.pdf",
+        ),
+        pytest.param(
             "bash",
             _args("bash", command="PYTHONPATH=src python - <<'PY'\nprint(1)\nPY"),
             "PYTHONPATH=src python - <<'PY'…",
@@ -161,6 +171,12 @@ def test_projects_the_one_salient_argument(
             "draft_final_answer",
             _args("draft_final_answer", answer="長い回答"),
             id="the-answer-is-not-a-subject",
+        ),
+        pytest.param(
+            # Every action but navigate and print acts on the page already open.
+            "browser",
+            _args("browser", action="type", ref="e3", text="hello"),
+            id="browser-action-on-the-open-page",
         ),
         pytest.param("read", None, id="row-without-arguments"),
         pytest.param("read", _args("read"), id="missing-named-argument"),

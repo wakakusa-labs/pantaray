@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, cast
 
+from pantaray_agents.agents.action_agent.tools.browser_tool import BROWSER_TOOL
 from pantaray_agents.local_runtime.tooling.brokering.broker_patch_read_gate import (
     build_needs_read_output,
 )
@@ -17,10 +18,10 @@ from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tasks.internal_jobs.action_subagent_broker import (
     build_action_subagent_broker_tools,
 )
-from pantaray_agents.tools.contract import validate_json_value
+from pantaray_agents.tools.contract import ReactToolDefinition, validate_json_value
 
 
-def _response_schema(tmp_path: Path, tool_name: str) -> object:
+def _child_tool(tmp_path: Path, tool_name: str) -> ReactToolDefinition:
     tools = build_action_subagent_broker_tools(
         db_path=tmp_path / "runtime.db",
         busy_timeout_ms=1_000,
@@ -29,7 +30,31 @@ def _response_schema(tmp_path: Path, tool_name: str) -> object:
         agents_md=cast(Any, None),
         reviewer=cast(Any, None),
     )
-    return next(tool for tool in tools if tool.name == tool_name).response_schema
+    return next(tool for tool in tools if tool.name == tool_name)
+
+
+def _response_schema(tmp_path: Path, tool_name: str) -> object:
+    return _child_tool(tmp_path, tool_name).response_schema
+
+
+def test_child_browser_takes_every_action_of_the_action_but_screenshot(
+    tmp_path: Path,
+) -> None:
+    # A child cannot receive images, so screenshot is refused before it runs.
+    request_schema = _child_tool(tmp_path, "browser").request_schema
+    offered = cast(Any, BROWSER_TOOL.build_validation_input_schema()["properties"])[
+        "action"
+    ]["enum"]
+    assert "screenshot" in offered
+
+    refused = [
+        action
+        for action in offered
+        if validate_json_value(schema=request_schema, value={"action": action})
+        is not None
+    ]
+
+    assert refused == ["screenshot"]
 
 
 def _stored(tmp_path: Path, output: JSONValue) -> JSONValue:

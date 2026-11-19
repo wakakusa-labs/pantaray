@@ -9,8 +9,9 @@
  * every host the page reached, once.
  *
  * Operations on one session run one after another, each within its budget. A session ends on
- * close, on a renderer crash, when its window is closed (the app quits), or when the backend
- * generation that opened it ends; an id that ended is refused from then on.
+ * close, on a renderer crash, past an operation's budget, when its window is closed (the app
+ * quits), or when the backend generation that opened it ends. A closed or crashed id is refused
+ * from then on; after a timeout the next `navigate` opens a new session under the same id.
  */
 
 import {
@@ -142,6 +143,11 @@ function drain(page: PageSession): PageReport {
   return report;
 }
 
+/** A log names an error only by its class: its message can carry page text or a private URL. */
+function errorName(error: unknown): string {
+  return error instanceof Error ? error.name : typeof error;
+}
+
 /** Dismisses a page dialog; `disableDialogs` may have closed it already, which is as good. */
 function dismissDialogs(page: PageSession): void {
   page.cdp.on('message', (_event, method) => {
@@ -195,7 +201,9 @@ function guardSession(page: PageSession): void {
   contents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
 }
 
-async function attachDebugger(cdp: Debugger): Promise<void> {
+async function attachDebugger(contents: WebContents, cdp: Debugger): Promise<void> {
+  // A command sent before the first navigation may not settle until one happens.
+  await contents.loadURL('about:blank');
   cdp.attach('1.3');
   await cdp.sendCommand('Page.enable');
   // Device scale 1, so an image has the CSS pixel size on any display.
@@ -224,13 +232,15 @@ export function createBrowserSessions(params: {
   logger?: LoggerLike | null;
 }) {
   const sessions = new Map<string, PageSession>();
-  /** Ids that ended; the runtime mints a new id for the run's next session. */
+  /** Ids closed or crashed; the runtime mints a new id for the run's next session. */
   const ended = new Set<string>();
+  let partitions = 0;
 
-  function discard(page: PageSession, reason: BrowserOperationError): void {
+  /** Ends the session; unless `reopenable`, its id is refused from then on. */
+  function discard(page: PageSession, reason: BrowserOperationError, reopenable = false): void {
     if (page.end !== null) return;
     page.end = reason;
-    ended.add(page.id);
+    if (!reopenable) ended.add(page.id);
     sessions.delete(page.id);
     page.stop(reason);
     if (!page.window.isDestroyed()) page.window.destroy();
@@ -238,13 +248,15 @@ export function createBrowserSessions(params: {
     page.ses.webRequest.onBeforeRequest(null);
     // Electron cannot destroy a session; its memory goes with its storage.
     Promise.all([page.ses.clearStorageData(), page.ses.clearCache()]).catch((error: unknown) =>
-      params.logger?.error?.('BROWSER_SESSION_CLEAR_ERR', { err: error })
+      params.logger?.error?.('BROWSER_SESSION_CLEAR_ERR', { error: errorName(error) })
     );
   }
 
   function open(id: string, policy: BrowserPagePolicy): PageSession {
-    // No `persist:` prefix: the partition lives in memory only, and no other session shares it.
-    const partition = `browser-session-${id}`;
+    // No `persist:` prefix: the partition lives in memory only, and no other session, nor a
+    // later one under the same id, shares it.
+    partitions += 1;
+    const partition = `browser-session-${partitions}`;
     const window = new BrowserWindow(pageWindowOptions(partition));
     const contents = window.webContents;
     let stop: PageSession['stop'] = () => undefined;
@@ -282,7 +294,7 @@ export function createBrowserSessions(params: {
       )
     );
     window.on('closed', () => discard(page, sessionGone()));
-    page.ready = attachDebugger(page.cdp);
+    page.ready = attachDebugger(contents, page.cdp);
     page.ready.catch(() => undefined);
     sessions.set(id, page);
     return page;
@@ -309,7 +321,7 @@ export function createBrowserSessions(params: {
           reject(
             new BrowserOperationError(
               'BROWSER_TIMED_OUT',
-              `The page did not finish within ${budgetMs / 1000} s.`
+              `The page did not finish within ${budgetMs / 1000} s, so its session was closed.`
             )
           ),
         budgetMs
@@ -335,13 +347,13 @@ export function createBrowserSessions(params: {
     } catch (error) {
       if (page.end !== null) return failed(page.end);
       if (error instanceof BrowserOperationError) {
-        // The page keeps what loaded; a load still running would change it under the next call.
-        if (error.code === 'BROWSER_TIMED_OUT') page.contents.stop();
+        // The work past its budget may still act on the page, so no later operation may share it.
+        if (error.code === 'BROWSER_TIMED_OUT') discard(page, error, true);
         return failed(error);
       }
       params.logger?.error?.('BROWSER_OPERATION_ERR', {
         action: request.operation.action,
-        err: error,
+        error: errorName(error),
       });
       return failed(
         new BrowserOperationError(

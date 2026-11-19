@@ -69,14 +69,18 @@ _ELECTRON_BROKER = OneShotRequests[BrowserAnswer]()
 
 @pytest.fixture
 async def runtime(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
 ) -> AsyncIterator[Runtime]:
     monkeypatch.setenv("LOCAL_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
     monkeypatch.setattr(
         relay_module, "browser_operation_broker", lambda: _ELECTRON_BROKER
     )
     monkeypatch.setattr(relay_module, "_OWNERS", {})
-    db_path, context = _bootstrap_runtime_db(tmp_path, allowed_tool_ids=("browser",))
+    db_path, context = _bootstrap_runtime_db(
+        tmp_path,
+        read_access_scope=getattr(request, "param", "workspace"),
+        allowed_tool_ids=("browser",),
+    )
     with desktop_session(_USER_ID) as desktop:
         yield db_path, context, desktop
 
@@ -441,26 +445,21 @@ async def test_close_closes_the_runs_session(runtime: Runtime) -> None:
     assert runtime[2].requests == [{"session_id": payload["session_id"]}]
 
 
-# Catches: an action whose write rules or approval do not exist yet reaching
-# Electron through the broker.
-@pytest.mark.parametrize(
-    "args",
-    [
+# Catches: allow_writes, whose approval does not exist yet, reaching Electron
+# through the broker.
+async def test_allow_writes_is_refused(runtime: Runtime) -> None:
+    error = await _refused(
+        runtime,
         {"action": "allow_writes", "host": "api.example.com", "justification": "x"},
-        {"action": "screenshot", "printed_pages": [1]},
-    ],
-)
-async def test_actions_not_offered_yet_are_refused(
-    runtime: Runtime, args: dict
-) -> None:
-    error = await _refused(runtime, args)
+    )
 
     assert error.code == "BROWSER_ACTION_UNAVAILABLE"
 
 
-# Catches: the model offered an action the broker cannot parse, or one of the
-# actions later releases add, and the tool reaching subagents before their
-# variant exists.
+# Catches: the model offered an action or field the broker cannot parse, or one
+# of the actions later releases add, a field the broker parses missing from what
+# the model is offered, and the tool reaching subagents before their variant
+# exists.
 def test_browser_is_offered_to_the_action_alone_with_the_brokered_actions() -> None:
     assert "browser" in select_supervisor_act_tool_ids(
         integrations=False, todo=False, todo_import=False
@@ -468,8 +467,11 @@ def test_browser_is_offered_to_the_action_alone_with_the_brokered_actions() -> N
     assert "browser" not in {tool.tool_id for tool in _CHILD_BROKER_TOOLS}
     schema = TOOL_REGISTRY["browser"].build_validation_input_schema()
     offered = set(schema["properties"]["action"]["enum"])  # type: ignore[index]
+    variants = typing.get_args(BrowserToolArgs.model_fields["root"].annotation)
     parsed = {
         typing.get_args(variant.model_fields["action"].annotation)[0]
-        for variant in typing.get_args(BrowserToolArgs.model_fields["root"].annotation)
+        for variant in variants
     }
     assert offered == parsed - {"allow_writes"}
+    fields = {name for variant in variants for name in variant.model_fields}
+    assert set(schema["properties"]) == fields - {"host", "justification"}  # type: ignore[call-overload]

@@ -22,11 +22,11 @@ from pantaray_agents.local_runtime.runtime.browser_relay import (
     BrowserAnswer,
     browser_operation_broker,
 )
-from pantaray_agents.local_runtime.tooling.brokering.broker_direct_render_html import (
-    BLOCKED_REQUESTS_NOTE,
-)
 from pantaray_agents.local_runtime.tooling.repository.command_network_settings import (
     update_command_network_enabled,
+)
+from pantaray_agents.local_runtime.tooling.suggestion_research.html_pages import (
+    BLOCKED_REQUESTS_NOTE,
 )
 from pantaray_agents.schema.events import OutboundEvent
 from pantaray_agents.tools.contract import (

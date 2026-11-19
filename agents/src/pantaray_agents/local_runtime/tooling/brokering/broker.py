@@ -52,7 +52,6 @@ from .broker_common import (
 )
 from .broker_direct import build_validated_patch_request, run_apply_patch_executor
 from .broker_direct_read import run_read_executor
-from .broker_direct_render_html import run_render_html_page_executor
 from .broker_direct_render_pdf import run_render_pdf_page_executor
 from .broker_failure_finalization import (
     canceled_broker_tool_outcome,
@@ -80,7 +79,6 @@ from .broker_protocol import (
     ValidatedListRequest,
     ValidatedPatchRequest,
     ValidatedReadRequest,
-    ValidatedRenderHtmlPageRequest,
     ValidatedRenderPdfPageRequest,
 )
 from .broker_registry import (
@@ -118,7 +116,6 @@ _APPROVAL_GATED_TOOL_IDS = frozenset(
 _ARGS_REQUESTS: dict[
     BrokerExecutionPath,
     type[ValidatedReadRequest]
-    | type[ValidatedRenderHtmlPageRequest]
     | type[ValidatedListRequest]
     | type[ValidatedGlobRequest]
     | type[ValidatedGrepRequest]
@@ -127,7 +124,6 @@ _ARGS_REQUESTS: dict[
     | type[ValidatedBrowserRequest],
 ] = {
     "broker_direct_read": ValidatedReadRequest,
-    "broker_direct_render_html": ValidatedRenderHtmlPageRequest,
     "broker_direct_list": ValidatedListRequest,
     "broker_direct_glob": ValidatedGlobRequest,
     "broker_direct_grep": ValidatedGrepRequest,
@@ -189,7 +185,6 @@ def _validate_request(
     BrokerContext,
     ValidatedReadRequest
     | ValidatedRenderPdfPageRequest
-    | ValidatedRenderHtmlPageRequest
     | ValidatedListRequest
     | ValidatedGlobRequest
     | ValidatedGrepRequest
@@ -427,10 +422,6 @@ async def execute_broker_tool(
             outcome = await run_render_pdf_page_executor(
                 context=context,
                 request=validated,
-            )
-        elif isinstance(validated, ValidatedRenderHtmlPageRequest):
-            outcome = await run_render_html_page_executor(
-                context=context, request=validated
             )
         elif isinstance(validated, ValidatedListRequest):
             outcome = read_tool_outcome(

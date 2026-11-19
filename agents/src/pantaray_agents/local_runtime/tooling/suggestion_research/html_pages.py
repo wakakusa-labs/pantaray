@@ -18,7 +18,7 @@ import stat
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, Literal, cast
+from typing import Final, Literal
 
 from pydantic import BaseModel, ValidationError
 
@@ -32,9 +32,7 @@ from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.websocket.server_messages import (
     BrowserFileTarget,
     BrowserNavigateOperation,
-    BrowserPagePolicy,
     BrowserPrintOperation,
-    SecretPathRule,
 )
 from pantaray_agents.tools.contract import (
     BrokerPolicyError,
@@ -47,14 +45,13 @@ from pantaray_agents.tools.contract import (
     tool_error_response,
 )
 from pantaray_agents.tools.files.read_only_tools import ReadOnlyFileTools
-from pantaray_agents.tools.files.read_scope import ReadScope
 from pantaray_agents.tools.files.read_target import ReadTarget
 from pantaray_agents.tools.files.render_pages import (
     RenderHtmlPageToolArgs,
     SaveHtmlAsPdfToolArgs,
 )
-from pantaray_agents.tools.files.secret_paths import secret_path_patterns
 
+from ...runtime.browser_contract import BrowserBlockedRequest
 from ...runtime.browser_relay import (
     BrowserOperationDone,
     BrowserRelayFailed,
@@ -63,25 +60,12 @@ from ...runtime.browser_relay import (
     request_browser_operation,
 )
 from ...runtime.db_execution_context import resolve_local_runtime_db_config
-from ...runtime.html_render_relay import (
-    BlockedRequest,
-    BlockedRequestReason,
-    HtmlRendered,
-    HtmlRenderFailed,
-    HtmlRenderFailureCode,
-)
 from ...runtime.job_types import SUGGESTION_PROCESS_KIND
 from ...runtime.runtime_env import read_local_runtime_db_config
 from ...storage.migrations.connection import configure_connection
 from ..brokering.action_path_policy import WRITE_PATH_DENIED
-from ..brokering.broker_direct_render_html import (
-    BLOCKED_REQUESTS_NOTE,
-    _file_roots,
-    _render_failed,
-    blocked_requests_output,
-    draw_printed_html,
-    resolve_html_file,
-)
+from ..brokering.broker_browser import browser_page_policy
+from ..brokering.printed_pages import draw_printed_pages, resolve_html_file
 from .artifact_patch import (
     PATH_OUTSIDE_FOLDER_ERROR_CODE,
     PathOutsideFolder,
@@ -102,9 +86,40 @@ _PAGE_RULES = (
     "closed nothing answers, and the call fails after about 30 seconds."
 )
 
+BLOCKED_REQUESTS_NOTE: Final = "Some resources were refused; see blocked_requests."
+_PrintFailureCode = Literal[
+    "HTML_LOAD_FAILED",
+    "HTML_RENDER_TIMED_OUT",
+    "HTML_RENDERER_CRASHED",
+    "HTML_PRINT_FAILED",
+    "HTML_RENDER_RELAY_TIMED_OUT",
+    "HTML_RENDER_INTEGRITY_FAILED",
+]
+_RETRY_ONCE_HINT: Final = (
+    "Try once more; if it fails again, tell the user the page could not be checked."
+)
+_FAILURE_HINTS: Final[dict[_PrintFailureCode, str]] = {
+    "HTML_LOAD_FAILED": (
+        "Check that the file is a complete HTML page; blocked requests, if any, "
+        "are listed in the message."
+    ),
+    "HTML_RENDER_TIMED_OUT": (
+        "The page did not finish loading and printing in time. Remove scripts or "
+        "resources that keep it busy, then try again."
+    ),
+    "HTML_RENDERER_CRASHED": (
+        "The page crashed the browser engine. Simplify heavy scripts or very "
+        "large images, then try again."
+    ),
+    "HTML_PRINT_FAILED": (
+        "Check the page's @page and print CSS rules, then try again."
+    ),
+    "HTML_RENDER_RELAY_TIMED_OUT": _RETRY_ONCE_HINT,
+    "HTML_RENDER_INTEGRITY_FAILED": _RETRY_ONCE_HINT,
+}
 # The engine's failures that mean the same as one of the print path's own codes;
 # any other failure is a page that did not load, or did not print.
-_SAME_FAILURE: Final[dict[BrowserRelayFailureCode, HtmlRenderFailureCode]] = {
+_SAME_FAILURE: Final[dict[BrowserRelayFailureCode, _PrintFailureCode]] = {
     "BROWSER_TIMED_OUT": "HTML_RENDER_TIMED_OUT",
     "BROWSER_RENDERER_CRASHED": "HTML_RENDERER_CRASHED",
     "BROWSER_RELAY_TIMED_OUT": "HTML_RENDER_RELAY_TIMED_OUT",
@@ -116,6 +131,12 @@ WHERE user_id = ? AND kind = ? AND suggestion_id = ?
 """
 
 type _Run = Callable[[ReactToolCall, BaseModel], Awaitable[ReactToolResult]]
+
+
+@dataclass(frozen=True, slots=True)
+class _Printed:
+    pdf: bytes
+    blocked: tuple[BrowserBlockedRequest, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,7 +216,7 @@ class SuggestionHtmlPages:
 
     async def _print(
         self, call: ReactToolCall, raw_path: str
-    ) -> tuple[ReadTarget, HtmlRendered]:
+    ) -> tuple[ReadTarget, _Printed]:
         scope = self.files.scope
         target = resolve_html_file(scope=scope, raw_path=raw_path)
         db_path, busy_timeout_ms = resolve_local_runtime_db_config(
@@ -216,7 +237,8 @@ class SuggestionHtmlPages:
                     network=(),
                 ),
             )
-        policy = _offline_policy(scope)
+        # The network is off, as for make-stage commands: the page reaches no host.
+        policy = browser_page_policy(scope, allow_network=False)
 
         async def operate(
             operation: BrowserNavigateOperation | BrowserPrintOperation,
@@ -247,29 +269,25 @@ class SuggestionHtmlPages:
             await close_browser_session(owner_process_id=owner)
         # The relay has verified the PDF a print answer claims.
         assert printed.artifact is not None
-        answers = (loaded.result, printed.result)
-        return target, HtmlRendered(
+        return target, _Printed(
             pdf=printed.artifact,
-            blocked_requests=tuple(
-                # With the network off nothing is refused as a write, so every
-                # reason is one the print path already reports.
-                BlockedRequest(cast(BlockedRequestReason, blocked.reason), blocked.url)
-                for answer in answers
-                for blocked in answer.page_data.blocked
+            blocked=(
+                *loaded.result.page_data.blocked,
+                *printed.result.page_data.blocked,
             ),
-            # The network is off: the page reaches no host.
-            network=(),
         )
 
     async def _render(self, call: ReactToolCall, request: BaseModel) -> ReactToolResult:
         assert isinstance(request, RenderHtmlPageToolArgs)
-        target, rendered = await self._print(call, request.path)
-        drawn, message = await draw_printed_html(
-            target=target,
-            rendered=rendered,
+        target, printed = await self._print(call, request.path)
+        drawn, message = await draw_printed_pages(
+            pdf=printed.pdf,
+            name=target.display_path,
             requested=request.pages,
             converted_dir=self.files.spill_root,
         )
+        if printed.blocked:
+            message = f"{message} {BLOCKED_REQUESTS_NOTE}"
         images = await asyncio.to_thread(self.files.keep_pages, drawn.pages)
         refs = " ".join(
             f"Page {page.number}: {image.ref}"
@@ -282,7 +300,7 @@ class SuggestionHtmlPages:
                 "kind": "html_pages",
                 "path": target.display_path,
                 "page_count": drawn.page_count,
-                "blocked_requests": blocked_requests_output(rendered),
+                "blocked_requests": _blocked_requests_output(printed),
                 "message": f"{message} {refs}".strip(),
             },
             images=images,
@@ -292,12 +310,12 @@ class SuggestionHtmlPages:
         assert isinstance(request, SaveHtmlAsPdfToolArgs)
         # Refused before printing, so a call that cannot be saved never prints.
         relative = folder_relative(self.folder.path, request.pdf_path)
-        target, rendered = await self._print(call, request.path)
-        replaced = await asyncio.to_thread(self._write, relative, rendered.pdf)
+        target, printed = await self._print(call, request.path)
+        replaced = await asyncio.to_thread(self._write, relative, printed.pdf)
         notes = [f"Saved {target.display_path} as {relative}."]
         if replaced:
             notes.append("It replaced the file that was there.")
-        if rendered.blocked_requests:
+        if printed.blocked:
             notes.append(BLOCKED_REQUESTS_NOTE)
         return ReactToolResult(
             tool_name=call.tool_name,
@@ -305,7 +323,7 @@ class SuggestionHtmlPages:
             output={
                 "status": "saved",
                 "pdf_path": relative,
-                "blocked_requests": blocked_requests_output(rendered),
+                "blocked_requests": _blocked_requests_output(printed),
                 "message": " ".join(notes),
             },
         )
@@ -355,26 +373,10 @@ def _suggestion_process_id(
     return None if row is None else str(row[0])
 
 
-def _offline_policy(scope: ReadScope) -> BrowserPagePolicy:
-    """What the page may load: local files only where ``read`` may, by both
-    secret tiers as for ``read``, and never the network."""
-
-    return BrowserPagePolicy(
-        allow_network=False,
-        file_roots=[str(root) for root in _file_roots(scope)],
-        private_roots=[str(root) for root in scope.private_storage.storage_roots],
-        private_root_exceptions=[
-            str(root) for root in scope.private_storage.readable_roots
-        ],
-        secret_paths=[
-            SecretPathRule(withheld=rule.withheld, excepted=rule.excepted)
-            for rule in (
-                *secret_path_patterns("app_secret"),
-                *secret_path_patterns("cli_credential"),
-            )
-        ],
-        write_hosts=[],
-    )
+def _blocked_requests_output(printed: _Printed) -> list[JSONValue]:
+    return [
+        {"reason": blocked.reason, "url": blocked.url} for blocked in printed.blocked
+    ]
 
 
 def _print_failed(
@@ -384,17 +386,13 @@ def _print_failed(
 ) -> BrokerPolicyError:
     """The engine's failure as the print path's own error output."""
 
-    step_code: HtmlRenderFailureCode = (
-        "HTML_LOAD_FAILED" if step == "navigate" else "HTML_PRINT_FAILED"
+    code = _SAME_FAILURE.get(
+        failure.code, "HTML_LOAD_FAILED" if step == "navigate" else "HTML_PRINT_FAILED"
     )
-    return _render_failed(
-        target,
-        HtmlRenderFailed(
-            code=_SAME_FAILURE.get(failure.code, step_code),
-            message=failure.message,
-            blocked_requests=(),
-            network=(),
-        ),
+    return BrokerPolicyError(
+        f"Could not print {target.display_path}: {failure.message}",
+        code=code,
+        fix_hint=_FAILURE_HINTS[code],
     )
 
 
@@ -431,6 +429,7 @@ def _definition(
 
 
 __all__ = [
+    "BLOCKED_REQUESTS_NOTE",
     "RENDER_HTML_PAGE_TOOL_ID",
     "SAVE_HTML_AS_PDF_TOOL_ID",
     "SuggestionHtmlPages",

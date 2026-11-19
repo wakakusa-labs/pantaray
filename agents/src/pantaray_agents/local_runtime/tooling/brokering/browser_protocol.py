@@ -159,7 +159,18 @@ class BrowserPageOutput(_BrowserPageOutput):
 
 class BrowserScreenshotOutput(_BrowserPageOutput):
     action: Literal["screenshot"]
-    attachments: list[BrowserImageAttachment] = Field(min_length=1)
+    attachments: list[BrowserImageAttachment]
+    # Printed pages only: the page count of the print layout, and what was
+    # drawn with each image's ref.
+    page_count: int | None = None
+    message: str | None = None
+
+    @model_validator(mode="after")
+    def _has_images(self) -> Self:
+        # Printed pages draw none when every page asked for is past the end.
+        if not self.attachments and self.page_count is None:
+            raise ValueError("a screenshot attaches at least one image")
+        return self
 
 
 class BrowserPrintOutput(_BrowserPageOutput):

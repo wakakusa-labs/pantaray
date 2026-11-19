@@ -86,6 +86,10 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.approvalRequired.operation.applyPatch': 'Modify files.',
     'overlay.approvalRequired.operation.captureScreen': 'Capture a window.',
     'overlay.approvalRequired.operation.browserWrite': 'Send data from the browser.',
+    'overlay.approvalRequired.operation.userBrowserRead':
+      'Open a site in your {browser}, signed in as you.',
+    'overlay.approvalRequired.operation.userBrowserWrite':
+      'Send data from your {browser}, signed in as you.',
     'overlay.approvalRequired.operation.generic': 'Run this operation.',
     'overlay.approvalRequired.operation.integration': 'Write to {service} ({account}).',
     'overlay.approvalRequired.integration.tool': 'Action',
@@ -97,6 +101,8 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.approvalRequired.app': 'App',
     'overlay.approvalRequired.sendsTo': 'Sends to',
     'overlay.approvalRequired.openPage': 'Open page',
+    'overlay.approvalRequired.site': 'Site',
+    'overlay.approvalRequired.why': 'Why',
     'overlay.approvalRequired.pythonCode': 'Python code',
     'overlay.approvalRequired.pythonCodeDescription':
       'Generated Python code will run in the workspace.',
@@ -217,6 +223,10 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.approvalRequired.operation.applyPatch': 'ファイルを変更します。',
     'overlay.approvalRequired.operation.captureScreen': 'ウィンドウを撮影します。',
     'overlay.approvalRequired.operation.browserWrite': 'ブラウザからデータを送ります。',
+    'overlay.approvalRequired.operation.userBrowserRead':
+      'あなたの{browser}でサイトを開きます。ログインしているアカウントのまま、ページの中身を読みます。',
+    'overlay.approvalRequired.operation.userBrowserWrite':
+      'あなたの{browser}からデータを送ります。ログインしているアカウントで、あなたとして送ります。',
     'overlay.approvalRequired.operation.generic': 'この操作を実行します。',
     'overlay.approvalRequired.operation.integration': '{service}（{account}）で書き込みます。',
     'overlay.approvalRequired.integration.tool': '操作',
@@ -226,6 +236,8 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.approvalRequired.app': 'アプリ',
     'overlay.approvalRequired.sendsTo': '送り先',
     'overlay.approvalRequired.openPage': '開いているページ',
+    'overlay.approvalRequired.site': 'サイト',
+    'overlay.approvalRequired.why': '理由',
     'overlay.approvalRequired.pythonCode': 'Pythonコード',
     'overlay.approvalRequired.pythonCodeDescription':
       '生成されたPythonコードをワークスペース内で実行します。',

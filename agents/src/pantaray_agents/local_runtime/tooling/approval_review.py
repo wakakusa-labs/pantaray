@@ -100,9 +100,30 @@ class PendingBrowserWrite:
     # no page.
     page_host: str | None
     justification: str
+    # The display name of the user's own browser the run's tab is in; None for
+    # the app's own page.
+    users_browser: str | None
 
 
-type PendingOperation = PendingCommand | PendingIntegrationWrite | PendingBrowserWrite
+@dataclass(frozen=True, slots=True)
+class PendingUserBrowserRead:
+    """Opening a host in the run's tab of the user's own, signed-in browser.
+
+    Like a browser write, it holds no page text.
+    """
+
+    # The browser's display name.
+    browser: str
+    host: str
+    justification: str
+
+
+type PendingOperation = (
+    PendingCommand
+    | PendingIntegrationWrite
+    | PendingBrowserWrite
+    | PendingUserBrowserRead
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,9 +220,23 @@ def _render_operation(operation: PendingOperation) -> dict[str, JSONValue]:
             }
         case PendingBrowserWrite():
             return {
-                "requires": ["browser_write"],
+                **(
+                    {"requires": ["browser_write"]}
+                    if operation.users_browser is None
+                    else {
+                        "requires": ["users_browser_write"],
+                        "browser": operation.users_browser,
+                    }
+                ),
                 "host": operation.host,
                 "page_host": operation.page_host,
+                "justification": operation.justification,
+            }
+        case PendingUserBrowserRead():
+            return {
+                "requires": ["users_browser_read"],
+                "browser": operation.browser,
+                "host": operation.host,
                 "justification": operation.justification,
             }
 
@@ -278,6 +313,7 @@ __all__ = [
     "PendingCommand",
     "PendingIntegrationWrite",
     "PendingOperation",
+    "PendingUserBrowserRead",
     "RequestTextNotByUser",
     "UserMessage",
     "build_approval_review_payload",

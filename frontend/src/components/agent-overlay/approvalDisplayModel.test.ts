@@ -76,6 +76,48 @@ describe('buildApprovalDisplay', () => {
     ).toEqual([]);
   });
 
+  // Catches: the user's browser approved under the model's reason alone, so the user
+  // never reads that the site is opened or written to signed in as them.
+  it("leads a user's-browser approval with Pantaray's line naming the browser", () => {
+    const read = buildApprovalDisplay(
+      blocker('browser', 'read_only', {
+        summary_kind: 'user_browser_read',
+        browser: 'Google Chrome',
+        host: 'mail.example.com',
+        reason: 'Read the invoice email you mentioned.',
+      }),
+      t
+    );
+    expect(read.operationKey).toBe('overlay.approvalRequired.operation.userBrowserRead');
+    expect(read.operationVars).toEqual({ browser: 'Google Chrome' });
+    expect(read.reason).toBeNull();
+    expect(read.primaryLabelKey).toBe('overlay.approvalRequired.site');
+    expect(read.primaryValue).toBe('mail.example.com');
+    expect(read.details).toEqual([
+      { labelKey: 'overlay.approvalRequired.why', value: 'Read the invoice email you mentioned.' },
+    ]);
+
+    const write = buildApprovalDisplay(
+      blocker('browser', 'read_only', {
+        summary_kind: 'browser_write',
+        browser: 'Google Chrome',
+        host: 'api.example.com',
+        page_host: 'shop.example.com',
+        reason: 'Place the order you asked for.',
+      }),
+      t
+    );
+    expect(write.operationKey).toBe('overlay.approvalRequired.operation.userBrowserWrite');
+    expect(write.operationVars).toEqual({ browser: 'Google Chrome' });
+    expect(write.reason).toBeNull();
+    expect(write.primaryLabelKey).toBe('overlay.approvalRequired.sendsTo');
+    expect(write.primaryValue).toBe('api.example.com');
+    expect(write.details).toEqual([
+      { labelKey: 'overlay.approvalRequired.openPage', value: 'shop.example.com' },
+      { labelKey: 'overlay.approvalRequired.why', value: 'Place the order you asked for.' },
+    ]);
+  });
+
   // A command that runs with the user's sign-ins must say so before it is approved.
   it('says when a command uses the login environment', () => {
     const summary = { summary_kind: 'bash', command: 'gh auth status', cwd: '/repo' };

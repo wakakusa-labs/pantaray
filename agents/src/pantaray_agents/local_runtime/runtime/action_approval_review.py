@@ -31,6 +31,7 @@ from pantaray_agents.local_runtime.tooling.approval_review import (
     PendingCommand,
     PendingIntegrationWrite,
     PendingOperation,
+    PendingUserBrowserRead,
     RequestTextNotByUser,
     UserMessage,
     review_approval,
@@ -60,6 +61,7 @@ if TYPE_CHECKING:
 _COMMAND_SUMMARY_KINDS = frozenset({"bash", "run_python", "apply_patch"})
 _INTEGRATION_SUMMARY_KIND = "integration_tool"
 _BROWSER_WRITE_SUMMARY_KIND = "browser_write"
+_USER_BROWSER_READ_SUMMARY_KIND = "user_browser_read"
 
 # The rows an Action's request is told in: its USER rows, and the assistant
 # message a Suggestion reply or an AI-written TODO opens it with.
@@ -247,9 +249,18 @@ def pending_operation(
         )
     if kind == _BROWSER_WRITE_SUMMARY_KIND:
         page_host = summary["page_host"]
+        # Only a write from the user's own browser names it.
+        users_browser = summary.get("browser")
         return PendingBrowserWrite(
             host=str(summary["host"]),
             page_host=None if page_host is None else str(page_host),
+            justification=str(summary["reason"]),
+            users_browser=None if users_browser is None else str(users_browser),
+        )
+    if kind == _USER_BROWSER_READ_SUMMARY_KIND:
+        return PendingUserBrowserRead(
+            browser=str(summary["browser"]),
+            host=str(summary["host"]),
             justification=str(summary["reason"]),
         )
     if kind not in _COMMAND_SUMMARY_KINDS:

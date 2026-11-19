@@ -12,6 +12,11 @@ end closes.
 ``screenshot {printed_pages}`` prints the page as ``print`` does and attaches
 the pages drawn, as ``render_pdf_page`` draws a PDF.
 
+External hosts get reads only until ``allow_writes`` names one: the approval
+review, or the user, decides from the user's words, the host, the host the run
+opened and the model's reason, never from page text. Once approved, the run's
+pages may write to that host until the run ends, with no new approval.
+
 Everything taken from the page goes in the output's ``data``, marked
 ``untrusted``, and nowhere else; storage keeps a large one's preview there too.
 """
@@ -33,6 +38,9 @@ from pantaray_agents.local_runtime.runtime.browser_contract import (
 from pantaray_agents.local_runtime.runtime.browser_relay import (
     BrowserOperationDone,
     BrowserRelayFailed,
+    allow_browser_writes,
+    browser_page_host,
+    browser_write_hosts,
     close_browser_session,
     request_browser_operation,
 )
@@ -67,7 +75,11 @@ from pantaray_agents.tools.files.secret_paths import secret_path_patterns
 from ..repository.command_network_settings import load_command_network_enabled
 from .action_path_policy import read_scope
 from .broker_browser_print import save_printed_pdf
-from .broker_common import BrokerContext, ensure_session_capabilities
+from .broker_common import (
+    BrokerContext,
+    ensure_session_capabilities,
+    ensure_tool_authorization,
+)
 from .broker_direct_render_pdf import rendered_documents_dir
 from .broker_failure_finalization import NetworkReachedPolicyError
 from .broker_outcome import UnprojectedBrokerToolOutcome
@@ -85,10 +97,10 @@ from .browser_protocol import (
     BrowserScreenshotOutput,
     ValidatedBrowserPrintRequest,
     ValidatedBrowserRequest,
+    ValidatedBrowserWriteRequest,
 )
 from .printed_pages import draw_printed_pages
 
-BROWSER_ACTION_UNAVAILABLE: Final = "BROWSER_ACTION_UNAVAILABLE"
 _WEB_SCHEMES: Final = ("http://", "https://")
 _SNAPSHOT_AGAIN: Final = "Take a new snapshot and use a ref from it."
 _RETRY_ONCE: Final = (
@@ -122,36 +134,89 @@ FIX_HINTS: Final[dict[BrowserFailureCode, str]] = {
 }
 
 
+def build_validated_browser_write_request(
+    *,
+    context: BrokerContext,
+    args: BrowserAllowWritesArgs,
+    tool_invocation_id: str | None,
+    tool_request_id: str,
+    requested_at: str,
+    preflight_only: bool,
+) -> ValidatedBrowserWriteRequest:
+    """Accept ``allow_writes``: with its approval, unless the run may already
+    write to the host. Refused with the network off, before anyone is asked."""
+
+    if not _network_enabled(context):
+        raise BrokerPolicyError(
+            f"Writes to {args.host} were not allowed: the command network setting "
+            "is off",
+            code="BROWSER_NETWORK_OFF",
+            fix_hint=FIX_HINTS["BROWSER_NETWORK_OFF"],
+        )
+    owner_process_id = context.actor_process_id
+    # Names no page text: the host the runtime opened, not what the page says.
+    command_summary: dict[str, JSONValue] = {
+        "summary_kind": "browser_write",
+        "host": args.host,
+        "page_host": browser_page_host(owner_process_id),
+        # The model's user-facing reason, shown as the approval question.
+        "reason": args.justification,
+    }
+    approval_session_id, approval_source = None, None
+    if args.host not in browser_write_hosts(owner_process_id):
+        if not preflight_only and not tool_invocation_id:
+            raise BrokerPolicyError(
+                "tool_invocation_id is required for browser allow_writes"
+            )
+        approval_session_id, approval_source = ensure_tool_authorization(
+            context=context,
+            tool_invocation_id=tool_invocation_id,
+            tool_request_id=tool_request_id,
+            command_summary=command_summary,
+            requested_at=requested_at,
+            require_user_prompt=True,
+        )
+    return ValidatedBrowserWriteRequest(
+        tool_invocation_id=tool_invocation_id or "",
+        manifest_id=context.manifest_id,
+        execution_session_id=context.execution_session.execution_session_id,
+        action_id=context.execution_session.action_id or "unknown",
+        approval_session_id=approval_session_id,
+        approval_source=approval_source,
+        args=args,
+        command_summary_json=command_summary,
+        tool_request_id=tool_request_id,
+        requested_at=requested_at,
+        preflight_only=preflight_only,
+    )
+
+
 async def run_browser_executor(
     *,
     context: BrokerContext,
-    request: ValidatedBrowserRequest | ValidatedBrowserPrintRequest,
+    request: ValidatedBrowserRequest
+    | ValidatedBrowserPrintRequest
+    | ValidatedBrowserWriteRequest,
 ) -> UnprojectedBrokerToolOutcome:
     ensure_session_capabilities(context=context)
     args = (
-        request.args
-        if isinstance(request, ValidatedBrowserPrintRequest)
-        else request.args.root
+        request.args.root
+        if isinstance(request, ValidatedBrowserRequest)
+        else request.args
     )
     if isinstance(args, BrowserCloseArgs):
         await close_browser_session(owner_process_id=context.actor_process_id)
+    elif isinstance(args, BrowserAllowWritesArgs):
+        # Only an approved call, or one for a host already allowed, gets here.
+        allow_browser_writes(owner_process_id=context.actor_process_id, host=args.host)
+    if isinstance(args, (BrowserCloseArgs, BrowserAllowWritesArgs)):
         return UnprojectedBrokerToolOutcome(
             status="success",
-            output=_dump(BrowserControlOutput(status="ok", action="close")),
-        )
-    # Parsed by the contract's full union; it comes with a later release.
-    if isinstance(args, BrowserAllowWritesArgs):
-        raise BrokerPolicyError(
-            f"browser {args.action} is not available",
-            code=BROWSER_ACTION_UNAVAILABLE,
+            output=_dump(BrowserControlOutput(status="ok", action=args.action)),
         )
     scope = read_scope(context)
     user_id = context.execution_session.user_id
-    allow_network = load_command_network_enabled(
-        db_path=context.db_path,
-        busy_timeout_ms=context.busy_timeout_ms,
-        user_id=user_id,
-    )
+    allow_network = _network_enabled(context)
     operation: BrowserOperation
     if isinstance(args, BrowserNavigateArgs):
         if args.url.strip().startswith(_WEB_SCHEMES) and not allow_network:
@@ -328,6 +393,14 @@ def _store_image(
     )
 
 
+def _network_enabled(context: BrokerContext) -> bool:
+    return load_command_network_enabled(
+        db_path=context.db_path,
+        busy_timeout_ms=context.busy_timeout_ms,
+        user_id=context.execution_session.user_id,
+    )
+
+
 def browser_page_policy(scope: ReadScope, *, allow_network: bool) -> BrowserPagePolicy:
     """What the page may load: local files only where ``read`` may, by both
     secret tiers as for ``read``, and the network by the user's setting."""
@@ -346,7 +419,7 @@ def browser_page_policy(scope: ReadScope, *, allow_network: bool) -> BrowserPage
                 *secret_path_patterns("cli_credential"),
             )
         ],
-        # Writes to external hosts need an approval no release asks for yet.
+        # The relay sends the hosts the run's approved allow_writes named.
         write_hosts=[],
     )
 
@@ -421,8 +494,8 @@ def _navigation_target(
 
 
 __all__ = [
-    "BROWSER_ACTION_UNAVAILABLE",
     "FIX_HINTS",
     "browser_page_policy",
+    "build_validated_browser_write_request",
     "run_browser_executor",
 ]

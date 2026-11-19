@@ -55,7 +55,8 @@ POLICY = BrowserPagePolicy(
     private_roots=["/app-data"],
     private_root_exceptions=[],
     secret_paths=[],
-    write_hosts=["api.example.com"],
+    # The relay sends the run's approved hosts instead.
+    write_hosts=["caller.example"],
 )
 
 
@@ -221,7 +222,7 @@ async def test_a_screenshot_is_verified_returned_and_removed(
         "operation_request_id": payload["operation_request_id"],
         "session_id": payload["session_id"],
         "operation": {"action": "screenshot", "ref": None, "full_page": None},
-        "policy": POLICY.model_dump(mode="json"),
+        "policy": {**POLICY.model_dump(mode="json"), "write_hosts": []},
     }
 
 
@@ -345,6 +346,27 @@ async def test_closing_is_idempotent_and_the_run_may_open_a_new_session(
 
     assert runtime.closes() == [first]
     assert await _navigate(runtime) != first
+
+
+# Catches: one run's approved write host reaching another run's page, a host
+# lost when the run closes its page, and the hosts outliving the run's end.
+@pytest.mark.asyncio
+async def test_write_hosts_belong_to_one_run_until_it_ends(runtime: Runtime) -> None:
+    runtime.seed_run("p-other")
+    relay_module.allow_browser_writes(owner_process_id=OWNER, host="api.example.com")
+
+    _, mine = await _run(runtime, NAVIGATE_ANSWER, operation=NAVIGATE)
+    _, theirs = await _run(
+        runtime, NAVIGATE_ANSWER, operation=NAVIGATE, owner="p-other"
+    )
+    await relay_module.close_browser_session(owner_process_id=OWNER)
+    _, reopened = await _run(runtime, NAVIGATE_ANSWER, operation=NAVIGATE)
+    await relay_module.end_browser_sessions(owner_process_ids=(OWNER,))
+
+    assert mine["policy"]["write_hosts"] == ["api.example.com"]  # type: ignore[index]
+    assert theirs["policy"]["write_hosts"] == []  # type: ignore[index]
+    assert reopened["policy"]["write_hosts"] == ["api.example.com"]  # type: ignore[index]
+    assert relay_module.browser_write_hosts(OWNER) == ()
 
 
 @pytest.mark.asyncio

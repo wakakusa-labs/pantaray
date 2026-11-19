@@ -60,7 +60,11 @@ from .broker_protocol import (
     ValidatedRenderPdfPageRequest,
 )
 from .broker_request_validation import validate_broker_request
-from .browser_protocol import ValidatedBrowserPrintRequest, ValidatedBrowserRequest
+from .browser_protocol import (
+    ValidatedBrowserPrintRequest,
+    ValidatedBrowserRequest,
+    ValidatedBrowserWriteRequest,
+)
 from .execution_start import claim_broker_execution_start
 from .process_protocol import (
     ValidatedReadProcessOutputRequest,
@@ -77,6 +81,12 @@ class BrokerCompletionPersistenceError(RuntimeError):
 
 
 logger = logging.getLogger(__name__)
+
+_BROWSER_REQUESTS = (
+    ValidatedBrowserRequest,
+    ValidatedBrowserPrintRequest,
+    ValidatedBrowserWriteRequest,
+)
 
 
 def _superseded_by_cancel(
@@ -138,9 +148,7 @@ async def execute_broker_tool(
                 "applied_paths": list(validated.patch_paths),
             },
         )
-    if preflight_only and isinstance(
-        validated, (ValidatedBrowserRequest, ValidatedBrowserPrintRequest)
-    ):
+    if preflight_only and isinstance(validated, _BROWSER_REQUESTS):
         return BrokerPreflightOutcome(status="success", output={"status": "success"})
     if isinstance(validated, ValidatedCommandRequest) and validated.preflight_only:
         return BrokerPreflightOutcome(
@@ -213,9 +221,7 @@ async def execute_broker_tool(
             validated, (ValidatedReadProcessOutputRequest, ValidatedStopProcessRequest)
         ):
             outcome = await run_process_control(context=context, request=validated)
-        elif isinstance(
-            validated, (ValidatedBrowserRequest, ValidatedBrowserPrintRequest)
-        ):
+        elif isinstance(validated, _BROWSER_REQUESTS):
             outcome = await run_browser_executor(context=context, request=validated)
         else:
             verify_outside_workspace_folders_unchanged(

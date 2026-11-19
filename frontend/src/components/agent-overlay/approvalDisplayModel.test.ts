@@ -44,6 +44,38 @@ describe('buildApprovalDisplay', () => {
     ).toBe('overlay.approvalRequired.unavailable');
   });
 
+  // A browser write that falls through to the generic line shows raw summary keys and
+  // hides where the data goes and which page sends it.
+  it('names where a browser write sends data, the page it comes from and the reason', () => {
+    const display = buildApprovalDisplay(
+      blocker('browser', 'read_only', {
+        summary_kind: 'browser_write',
+        host: 'api.example.com',
+        page_host: 'localhost',
+        reason: 'Send the signup form you asked me to test.',
+      }),
+      t
+    );
+    expect(display.operationKey).toBe('overlay.approvalRequired.operation.browserWrite');
+    expect(display.reason).toBe('Send the signup form you asked me to test.');
+    expect(display.primaryLabelKey).toBe('overlay.approvalRequired.sendsTo');
+    expect(display.primaryValue).toBe('api.example.com');
+    expect(display.details).toEqual([
+      { labelKey: 'overlay.approvalRequired.openPage', value: 'localhost' },
+    ]);
+    expect(
+      buildApprovalDisplay(
+        blocker('browser', 'read_only', {
+          summary_kind: 'browser_write',
+          host: 'api.example.com',
+          page_host: null,
+          reason: 'x',
+        }),
+        t
+      ).details
+    ).toEqual([]);
+  });
+
   // A command that runs with the user's sign-ins must say so before it is approved.
   it('says when a command uses the login environment', () => {
     const summary = { summary_kind: 'bash', command: 'gh auth status', cwd: '/repo' };

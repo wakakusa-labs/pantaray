@@ -13,6 +13,10 @@ No session is opened and no operation sent for a run whose end has begun: an
 in-memory fence until its status is written, the status after. Closes are
 idempotent and unanswered; the sweep retries undelivered ones and drops an owner
 once its run is over and its closes were delivered.
+
+The registry also keeps the hosts an approved ``allow_writes`` let the run's
+pages write to: every operation's policy carries them, they outlast a close,
+and the run's end drops them.
 """
 
 from __future__ import annotations
@@ -27,16 +31,19 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pantaray_agents.local_runtime.descriptor_access import (
     DescriptorPathError,
     open_regular_file_descriptor,
 )
 from pantaray_agents.schema.websocket.server_messages import (
+    BrowserNavigateOperation,
     BrowserOperation,
     BrowserOperationRequestedMessage,
     BrowserPagePolicy,
     BrowserSessionCloseRequestedMessage,
+    BrowserWebTarget,
 )
 
 from ..storage.migrations.connection import configure_connection
@@ -112,6 +119,11 @@ class _Owner:
     current: _Session | None = None
     # Sessions whose close no desktop session has received yet.
     unclosed: set[_Session] = field(default_factory=set)
+    # Hosts the run's pages may write to; it only grows until the run ends.
+    write_hosts: set[str] = field(default_factory=set)
+    # The host of the URL the runtime last navigated the current session to:
+    # the runtime's own record, never read from the page. None for a file.
+    page_host: str | None = None
 
 
 _BROKER = OneShotRequests[BrowserAnswer]()
@@ -137,7 +149,8 @@ async def request_browser_operation(
     """Run ``operation`` in the owner's session, opening one if it has none.
 
     The caller has validated the operation and resolved its local paths, and
-    ``policy`` is what the page may load and write to from now on.
+    ``policy`` is what the page may load from now on; the page may write to the
+    run's approved hosts, whatever ``policy`` names.
     """
 
     session = _current_session(
@@ -159,7 +172,9 @@ async def request_browser_operation(
                 operation_request_id=operation_request_id,
                 session_id=session.session_id,
                 operation=operation,
-                policy=policy,
+                policy=policy.model_copy(
+                    update={"write_hosts": list(browser_write_hosts(owner_process_id))}
+                ),
             ),
         )
         answer = await broker.wait(
@@ -181,9 +196,20 @@ async def request_browser_operation(
                     owner = _OWNERS.get(owner_process_id)
                     if owner is not None and owner.current == session:
                         owner.current = None
+                        owner.page_host = None
             return BrowserRelayFailed(
                 code=answer.code, message=answer.message, network=tuple(answer.network)
             )
+        if isinstance(operation, BrowserNavigateOperation):
+            with _LOCK:
+                owner = _OWNERS.get(owner_process_id)
+                target = operation.target
+                if owner is not None and owner.current == session:
+                    owner.page_host = (
+                        urlsplit(target.url).hostname
+                        if isinstance(target, BrowserWebTarget)
+                        else None
+                    )
         # Off the event loop: a PDF may be large, and this loop may also serve the
         # local HTTP API and the WebSocket.
         return await asyncio.to_thread(
@@ -200,6 +226,32 @@ async def request_browser_operation(
             (artifact_root / _artifact_path(operation_request_id, kind)).unlink(
                 missing_ok=True
             )
+
+
+def allow_browser_writes(*, owner_process_id: str, host: str) -> None:
+    """Let the owner's pages write to ``host`` from its next operation on."""
+
+    with _LOCK:
+        owner = _OWNERS.setdefault(owner_process_id, _Owner())
+        if not owner.ending:
+            owner.write_hosts.add(host)
+
+
+def browser_write_hosts(owner_process_id: str) -> tuple[str, ...]:
+    """The hosts the owner's pages may write to, sorted."""
+
+    with _LOCK:
+        owner = _OWNERS.get(owner_process_id)
+        return () if owner is None else tuple(sorted(owner.write_hosts))
+
+
+def browser_page_host(owner_process_id: str) -> str | None:
+    """The host the owner's open page was navigated to; None for a local file or
+    no page. The page may have followed links since."""
+
+    with _LOCK:
+        owner = _OWNERS.get(owner_process_id)
+        return None if owner is None else owner.page_host
 
 
 async def close_browser_session(*, owner_process_id: str) -> None:
@@ -220,6 +272,7 @@ async def end_browser_sessions(*, owner_process_ids: tuple[str, ...]) -> None:
         for owner_process_id in owner_process_ids:
             owner = _OWNERS.setdefault(owner_process_id, _Owner())
             owner.ending = True
+            owner.write_hosts.clear()
             _retire_current(owner)
     for owner_process_id in owner_process_ids:
         await _deliver_closes(owner_process_id)
@@ -280,6 +333,7 @@ def _retire_current(owner: _Owner) -> None:
     if owner.current is not None:
         owner.unclosed.add(owner.current)
         owner.current = None
+    owner.page_host = None
 
 
 async def _deliver_closes(owner_process_id: str) -> None:
@@ -375,7 +429,10 @@ __all__ = [
     "BrowserOperationDone",
     "BrowserOperationOutcome",
     "BrowserRelayFailed",
+    "allow_browser_writes",
     "browser_operation_broker",
+    "browser_page_host",
+    "browser_write_hosts",
     "close_browser_session",
     "end_browser_sessions",
     "request_browser_operation",

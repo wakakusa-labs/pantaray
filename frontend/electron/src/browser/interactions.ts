@@ -3,12 +3,13 @@
  * of the fixed page functions below, never page or model text. The functions run in the engine's
  * own world (`callOn`), so page script cannot change what they find.
  *
- * Input that would open a list or picker the OS draws is refused: a click or typing on one, or a
- * key other than Tab or Escape while one has focus, wherever it sits (in a shadow root, closed
- * ones included, or a frame of the page's process). `pageGuardPreload` cancels what opens them in
- * every frame as well; this check also sees into closed shadow roots and names the refusal.
- * `select` sets the options without opening the list. A click or hover is refused, too, when
- * another element covers the ref's element at the point the input would reach.
+ * Input that would open a list or picker the OS draws is refused: a click or typing on one, a key
+ * other than Tab or Escape while a list box has focus, or a key that opens a picker field's picker
+ * while one has focus (`keyReaches`), wherever it sits (in a shadow root, closed ones included, or
+ * a frame of the page's process). `pageGuardPreload` cancels what opens them in every frame as
+ * well; this check also sees into closed shadow roots and names the refusal. `select` sets the
+ * options without opening the list. A click or hover is refused, too, when another element covers
+ * the ref's element at the point the input would reach.
  */
 
 import type { Debugger } from 'electron';
@@ -21,21 +22,25 @@ import { callOn, engineWorld, resolveRef } from './snapshot';
 const WAIT_POLL_MS = 100;
 const SCROLL_DIRECTION = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] } as const;
 
+/** A field whose list or picker the OS draws. */
+type NativeUiField = 'list box' | 'picker';
 /**
- * True when input to this node would open a list or picker the OS draws: it is, or is inside, a
- * list box, a picker field, a field with a suggestion list or the label of one of them.
+ * The kind of field whose list or picker input to this node would open: the node is, or is inside,
+ * a list box or a picker field, or the label of one; null for any other node. A datalist's
+ * suggestions are not among them: Electron shows none for a hidden window
+ * (`AutofillPopupView::Show`).
  */
-const OPENS_NATIVE_UI = `function () {
-  const opens = (element) => element.localName === 'select' || element.localName === 'datalist'
-    || (element.localName === 'input' && (element.hasAttribute('list')
-      || ['color', 'date', 'datetime-local', 'month', 'week', 'time'].includes(element.type)));
+const NATIVE_UI_FIELD = `function () {
+  const kind = (element) => element.localName === 'select' ? 'list box'
+    : element.localName === 'input'
+      && ['color', 'date', 'datetime-local', 'month', 'week', 'time'].includes(element.type)
+      ? 'picker' : null;
   for (let at = this; at !== null; at = at.parentNode ?? (at instanceof ShadowRoot ? at.host : null)) {
     if (at.nodeType !== Node.ELEMENT_NODE) continue;
-    if (opens(at) || (at.localName === 'label' && at.control !== null && opens(at.control))) {
-      return true;
-    }
+    const field = kind(at) ?? (at.localName === 'label' && at.control !== null ? kind(at.control) : null);
+    if (field !== null) return field;
   }
-  return false;
+  return null;
 }`;
 /** True when `node` is this element or inside it, across shadow roots. */
 const HOLDS = `function (node) {
@@ -47,8 +52,6 @@ const HOLDS = `function (node) {
 const ACTIVE_ELEMENT = 'function () { return this.activeElement; }';
 /** The objects a focus lookup resolves; it releases them as it ends. */
 const FOCUS_GROUP = 'pantaray-browser-focus';
-/** The keys that reach a focused list or picker: they leave it or dismiss, and open nothing. */
-const KEYS_PAST_NATIVE_UI = new Set(['Tab', 'Escape']);
 /** Selects the focused field's text, so typing replaces it; false when it takes no text. */
 const SELECT_FIELD_TEXT = `function () {
   const active = document.activeElement;
@@ -181,7 +184,7 @@ async function checkPoint(
   }
   if (
     refuseNativeUi &&
-    (await callOn(cdp, hit.backendNodeId, OPENS_NATIVE_UI, [], hit.frameId)) === true
+    (await callOn(cdp, hit.backendNodeId, NATIVE_UI_FIELD, [], hit.frameId)) !== null
   ) {
     throw opensNativeUi('Clicking here');
   }
@@ -280,14 +283,30 @@ async function focusedElement(cdp: Debugger): Promise<{ node: number; frameId?: 
   }
 }
 
-async function refuseIfFocusOpensNativeUi(cdp: Debugger, where: string): Promise<void> {
+/** The kind of list or picker field that has focus, or null when the focus is on none. */
+async function focusedNativeUiField(cdp: Debugger): Promise<NativeUiField | null> {
   const focused = await focusedElement(cdp);
-  if (
-    focused !== null &&
-    (await callOn(cdp, focused.node, OPENS_NATIVE_UI, [], focused.frameId)) === true
-  ) {
-    throw opensNativeUi(where);
-  }
+  if (focused === null) return null;
+  return (await callOn(
+    cdp,
+    focused.node,
+    NATIVE_UI_FIELD,
+    [],
+    focused.frameId
+  )) as NativeUiField | null;
+}
+
+/**
+ * Whether a key may reach a focused field of this kind. A list box takes only Tab and Escape: on
+ * macOS its arrows, Space and Enter open the list. A picker field takes all but the keys that
+ * open its picker (`MultipleFieldsTemporalInputTypeView::HandleKeydownEvent`: Space, F4,
+ * Alt+ArrowDown; a color field's Space and Enter click it), so digits and arrows edit it.
+ */
+function keyReaches(field: NativeUiField, chord: string): boolean {
+  const { modifiers, key } = chordParts(chord);
+  if (field === 'list box') return key === 'Tab' || key === 'Escape';
+  const arrow = key === 'ArrowDown' || key === 'ArrowUp';
+  return !(['Space', ' ', 'Enter', 'F4'].includes(key) || (arrow && modifiers.includes('Alt')));
 }
 
 type KeyDefinition = { key: string; code: string; keyCode: number; text?: string };
@@ -373,7 +392,7 @@ async function typeText(
   const node = await resolveRef(page, operation.ref);
   await emulateFocus(cdp);
   await cdp.sendCommand('DOM.focus', { backendNodeId: node });
-  await refuseIfFocusOpensNativeUi(cdp, 'Typing in this field');
+  if ((await focusedNativeUiField(cdp)) !== null) throw opensNativeUi('Typing in this field');
   if ((await callOn(cdp, node, SELECT_FIELD_TEXT)) !== true) {
     throw failed('This element does not take text.');
   }
@@ -465,11 +484,13 @@ export async function interact(page: BrowserPage, operation: Interaction): Promi
       return click(page, operation.ref, operation.action === 'hover');
     case 'type':
       return typeText(page, operation);
-    case 'press':
-      if (!KEYS_PAST_NATIVE_UI.has(chordParts(operation.key).key)) {
-        await refuseIfFocusOpensNativeUi(page.cdp, 'This key in the focused field');
+    case 'press': {
+      const field = await focusedNativeUiField(page.cdp);
+      if (field !== null && !keyReaches(field, operation.key)) {
+        throw opensNativeUi('This key in the focused field');
       }
       return press(page.cdp, operation.key);
+    }
     case 'select':
       return selectOptions(page, operation);
     case 'scroll':

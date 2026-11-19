@@ -91,6 +91,14 @@ const IGNORED_MODAL = /^Ignored call to '/;
 /** Every connection Chromium makes outside `webRequest` (preconnects) goes nowhere, loopback included. */
 const DEAD_PROXY = { proxyRules: 'http://127.0.0.1:9', proxyBypassRules: '<-loopback>' };
 
+/** Every browser session's partition; app-wide handlers leave their pages alone. */
+const pagePartitions = new WeakSet<Session>();
+
+/** True for the page of a browser session, which must never get the app's own UI. */
+export function isBrowserSessionPage(contents: WebContents): boolean {
+  return pagePartitions.has(contents.session);
+}
+
 /** A failure the answer reports by its code. */
 export class BrowserOperationError extends Error {
   constructor(
@@ -370,6 +378,7 @@ export function createBrowserSessions(params: {
     partitions += 1;
     const partition = `browser-session-${partitions}`;
     const ses = electronSessions.fromPartition(partition);
+    pagePartitions.add(ses);
     ses.registerPreloadScript({ type: 'frame', filePath: PAGE_GUARD_PRELOAD });
     const window = new BrowserWindow(pageWindowOptions(partition));
     const contents = window.webContents;

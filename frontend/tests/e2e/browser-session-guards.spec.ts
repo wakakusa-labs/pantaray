@@ -158,6 +158,7 @@ const KEYS: Record<string, Key> = {
   altDown: { key: 'ArrowDown', code: 'ArrowDown', vk: 40, modifiers: 1 },
   f4: { key: 'F4', code: 'F4', vk: 115 },
   a: { key: 'a', code: 'KeyA', vk: 65, text: 'a' },
+  one: { key: '1', code: 'Digit1', vk: 49, text: '1' },
 };
 
 /**
@@ -490,7 +491,7 @@ test('no list box or picker of a browser session page reaches the display', asyn
     });
 
     await test.step('no key on a focused list box, date field or suggestion field opens it', async () => {
-      const { shiftTab, space, enter, down, altDown, f4, a } = KEYS;
+      const { shiftTab, space, enter, down, altDown, f4, a, one } = KEYS;
       const evaluate = (expression: string) => run(app, { session, url: null, expression });
       // Shift+Tab from the color field reaches the list box, the first field.
       await evaluate("document.getElementById('color').focus()");
@@ -499,7 +500,8 @@ test('no list box or picker of a browser session page reaches the display', asyn
       await opensNothing({ keys: [space, enter, down, altDown, f4] });
       await evaluate("document.getElementById('date').focus()");
       expect((await evaluate('document.activeElement.id')).value).toBe('date');
-      await opensNothing({ keys: [space, enter, altDown, f4] });
+      // The keys that open its picker are cancelled; the digits and arrows that edit it pass.
+      await opensNothing({ keys: [space, enter, altDown, f4, one, down] });
       await evaluate("document.getElementById('suggest').focus()");
       await opensNothing({ keys: [a, down] });
     });

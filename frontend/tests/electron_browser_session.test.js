@@ -70,6 +70,7 @@ function fakeElectron({ load = async () => {} } = {}) {
           if (next !== 'about:blank') await load(next, { ses, contents });
           url = next;
         },
+        session: ses,
         setWindowOpenHandler: (handler) => (contents.openHandler = handler),
         setWebRTCIPHandlingPolicy: (policy) => (contents.webRtcPolicy = policy),
       });
@@ -114,7 +115,7 @@ function loadOnElectron(electron) {
 
 function harness(scripts = {}) {
   const fake = fakeElectron(scripts);
-  const { createBrowserSessions } = loadOnElectron(fake.electron);
+  const { createBrowserSessions, isBrowserSessionPage } = loadOnElectron(fake.electron);
   const logged = [];
   const sessions = createBrowserSessions({
     getBackendPort: () => BACKEND_PORT,
@@ -122,7 +123,7 @@ function harness(scripts = {}) {
   });
   const ses = (index = 0) =>
     fake.partitions.get(fake.windows[index].options.webPreferences.partition);
-  return { ...fake, sessions, logged, ses };
+  return { ...fake, sessions, logged, ses, isBrowserSessionPage };
 }
 
 function request(action, { session = 'session-1', policy = {} } = {}) {
@@ -459,8 +460,8 @@ const key = (window, target, type, init) =>
   );
 
 // Catches: a key or mouse press whose default action opens a list box's NSMenu or a picker's
-// popup window on the user's display, and a guard that also blocks Tab out of the field or
-// other fields' keys.
+// popup window on the user's display, and a guard that also blocks Tab out of the field, the
+// keys that edit a date field, or other fields' keys.
 test('the guard cancels the defaults that open a native list or picker', async () => {
   const window = guardedWorld(await guardScript(), PICKERS);
   const { document } = window;
@@ -472,17 +473,24 @@ test('the guard cancels the defaults that open a native list or picker', async (
   assert.equal(press(list), false);
   assert.equal(press(option), false);
   assert.equal(press(date), true);
+  const opening = [
+    ['keydown', { key: ' ' }],
+    ['keypress', { key: 'Enter' }],
+    ['keydown', { key: 'ArrowDown', altKey: true }],
+    ['keydown', { key: 'ArrowUp', altKey: true }],
+    ['keydown', { key: 'F4' }],
+  ];
   for (const target of [list, date]) {
-    for (const [type, init] of [
-      ['keydown', { key: ' ' }],
-      ['keypress', { key: 'Enter' }],
-      ['keydown', { key: 'ArrowDown', altKey: true }],
-      ['keydown', { key: 'F4' }],
-    ]) {
+    for (const [type, init] of opening) {
       assert.equal(key(window, target, type, init), false, `${target.id} ${type} ${init.key}`);
     }
     assert.equal(key(window, target, 'keydown', { key: 'Tab' }), true);
     assert.equal(key(window, target, 'keydown', { key: 'Escape' }), true);
+  }
+  // A list box takes no other key; a date field's digits and arrows edit it.
+  for (const name of ['1', 'ArrowDown', 'ArrowUp', 'Backspace']) {
+    assert.equal(key(window, list, 'keydown', { key: name }), false, `list ${name}`);
+    assert.equal(key(window, date, 'keydown', { key: name }), true, `date ${name}`);
   }
   assert.equal(key(window, text, 'keydown', { key: ' ' }), true);
   assert.equal(press(text), true);
@@ -557,6 +565,15 @@ test('the console keeps the cut text of a long line, not the whole line', async 
   assert.equal(read.value.lines.length, 100);
   assert.equal(read.value.lines[99].text, '99'.padEnd(500, 'x'));
   assert.equal(read.value.cut, true);
+});
+
+// Catches: the app's own native UI (its edit menu) attached to a browser session's page, or a
+// window of the app taken for one.
+test("a browser session page is told apart from the app's own pages", async () => {
+  const h = harness();
+  await navigate(h, 'https://a.example/');
+  assert.equal(h.isBrowserSessionPage(h.windows[0].webContents), true);
+  assert.equal(h.isBrowserSessionPage({ session: new EventEmitter() }), false);
 });
 
 // Catches: two operations of one session interleaving on its page, and one session's slow

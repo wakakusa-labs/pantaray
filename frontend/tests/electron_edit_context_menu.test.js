@@ -21,6 +21,7 @@ function rightClick(params, language = 'ja') {
     },
     windowFor: () => window,
     getUiLanguage: () => language,
+    excludes: () => false,
   });
   const calls = [];
   const contents = new EventEmitter();
@@ -67,4 +68,20 @@ test('a text field offers Cut, Copy, Paste and Select All, enabled as the page r
   );
   for (const item of menu) item.click?.();
   assert.deepEqual(calls, ['cut', 'copy', 'paste', 'selectAll']);
+});
+
+// Catches: the app's native menu attached to a browser session's page, whose hidden window must
+// open nothing on the user's display.
+test('a page the caller excludes gets no menu at all', () => {
+  const app = new EventEmitter();
+  const contents = new EventEmitter();
+  showEditContextMenus({
+    app,
+    menu: { buildFromTemplate: () => assert.fail('no menu is built') },
+    windowFor: () => null,
+    getUiLanguage: () => 'en',
+    excludes: (candidate) => candidate === contents,
+  });
+  app.emit('web-contents-created', {}, contents);
+  assert.equal(contents.listenerCount('context-menu'), 0);
 });

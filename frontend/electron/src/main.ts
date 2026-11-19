@@ -35,6 +35,7 @@ import { createTrayController } from './main_runtime/trayController';
 import { installDesktopApplicationLifecycle } from './main_runtime/applicationLifecycle';
 import { openNewWindowsInDefaultBrowser } from './security/windowOpenPolicy';
 import { showEditContextMenus } from './ui/editContextMenu';
+import { isBrowserSessionPage } from './browser/browserSession';
 import { startDesktopBackgroundRuntime } from './main_runtime/backgroundStartup';
 import { createDesktopRuntime, loadDevelopmentEnvironment } from './main_runtime/desktopRuntime';
 import { createDesktopFeatureRuntime } from './main_runtime/featureRuntime';
@@ -520,6 +521,7 @@ showEditContextMenus({
   menu: Menu,
   windowFor: (contents) => BrowserWindow.fromWebContents(contents),
   getUiLanguage: () => uiLanguage,
+  excludes: isBrowserSessionPage,
 });
 
 installDesktopApplicationLifecycle({

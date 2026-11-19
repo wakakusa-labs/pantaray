@@ -15,13 +15,15 @@
  * (`PopupMenuHelper`) and the color, date and time pickers are windows at the menu level
  * (`PopupWindowMac`), both on the user's display whatever window the page is in. Past
  * `showPicker`, Blink opens them only as a default action: of a trusted mouse press or key on a
- * list box, a trusted key on a picker field, or a click on a picker field or its label, a page
- * script's `click()` and `dispatchEvent` included (`EventDispatcher` runs no other default for an
- * untrusted event). Listeners on the frame's window, added before the page could add one, cancel
- * those defaults, and `click()` and `dispatchEvent` drop a click aimed at a picker field, so a
- * script cannot reach one in a closed shadow root either. A trusted input into a closed shadow
- * root is out of the listeners' sight; `interactions` checks its target through CDP before it
- * sends it. A datalist's suggestions need nothing: Electron shows none for a hidden window
+ * list box, a trusted key that opens a picker field, or a click on a picker field or its label, a
+ * page script's `click()` and `dispatchEvent` included (`EventDispatcher` runs no other default
+ * for an untrusted event). Listeners on the frame's window, added before the page could add one,
+ * cancel those defaults, and `click()` and `dispatchEvent` drop a click aimed at a picker field,
+ * so a script cannot reach one in a closed shadow root either. A trusted input into a closed
+ * shadow root is out of the listeners' sight; `interactions` checks its target through CDP before
+ * it sends it. Chromium also destroys a picker's popup for a window that is not active
+ * (`BlockSelectPopupUnfocusedWindow`), as a session's never is; the guard does not rely on it. A
+ * datalist's suggestions need nothing: Electron shows none for a hidden window
  * (`AutofillPopupView::Show`).
  *
  * As a preload it runs in Electron's isolated world while the page's own world is being set up,
@@ -90,6 +92,7 @@ export function removeGuardedApis(apis: readonly (readonly [string, string])[]):
   const labelControl = getter('HTMLLabelElement', 'control');
   const eventType = getter('Event', 'type');
   const keyOf = getter('KeyboardEvent', 'key');
+  const altKeyOf = getter('KeyboardEvent', 'altKey');
   const composedPath = prototypeOf('Event').composedPath;
   const preventDefault = prototypeOf('Event').preventDefault;
   const addEventListener = prototypeOf('EventTarget').addEventListener;
@@ -133,7 +136,11 @@ export function removeGuardedApis(apis: readonly (readonly [string, string])[]):
     return element !== null && clickOpensPicker(element);
   };
 
-  /** Cancels a default action that would open a native picker; Tab and Escape still move on. */
+  /**
+   * Cancels a default action that would open a native list or picker: any key but Tab and Escape
+   * on a list box, and on a picker field the keys that open it (Space, Enter, F4, Alt with an
+   * arrow), so others still edit it.
+   */
   const cancelPickerDefault = (event: unknown): void => {
     const type = apply(eventType, event, []);
     const element = elementOf((apply(composedPath, event, []) as unknown[])[0]);
@@ -143,7 +150,14 @@ export function removeGuardedApis(apis: readonly (readonly [string, string])[]):
     else if (type === 'mousedown') opens = inListBox(element);
     else {
       const key = read(keyOf, event);
-      opens = (inListBox(element) || opensPicker(element)) && key !== 'Tab' && key !== 'Escape';
+      const opensField =
+        key === ' ' ||
+        key === 'Enter' ||
+        key === 'F4' ||
+        ((key === 'ArrowDown' || key === 'ArrowUp') && read(altKeyOf, event) === true);
+      opens = inListBox(element)
+        ? key !== 'Tab' && key !== 'Escape'
+        : opensPicker(element) && opensField;
     }
     if (opens) apply(preventDefault, event, []);
   };

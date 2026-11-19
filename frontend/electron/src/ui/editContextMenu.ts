@@ -46,14 +46,19 @@ export function editContextMenuTemplate(
   return editFlags.canCopy ? [copyItem] : [];
 }
 
-/** Electron shows no context menu of its own; every window's pages get this one. */
+/**
+ * Electron shows no context menu of its own; every window's pages get this one, except those
+ * `excludes` names (a browser session's page, whose hidden window must open no native menu).
+ */
 export function showEditContextMenus(params: {
   app: App;
   menu: MenuLike;
   windowFor: (contents: WebContents) => BrowserWindow | null;
   getUiLanguage: () => UiLanguage;
+  excludes: (contents: WebContents) => boolean;
 }): void {
   params.app.on('web-contents-created', (_event, contents) => {
+    if (params.excludes(contents)) return;
     contents.on('context-menu', (_menuEvent, menuParams) => {
       const template = editContextMenuTemplate(menuParams, params.getUiLanguage(), contents);
       if (template.length === 0) return;

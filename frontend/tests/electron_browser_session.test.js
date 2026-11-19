@@ -26,7 +26,10 @@ function fakeElectron({ load = async () => {} } = {}) {
         handle: (_scheme, handler) => (ses.fileHandler = handler),
         unhandle: (scheme) => (ses.unhandled = scheme),
       },
-      webRequest: { onBeforeRequest: (listener) => (ses.beforeRequest = listener) },
+      webRequest: {
+        onBeforeRequest: (listener) => (ses.beforeRequest = listener),
+        onHeadersReceived: (listener) => (ses.headersReceived = listener),
+      },
       setPermissionRequestHandler: (handler) => (ses.permissionRequest = handler),
       setPermissionCheckHandler: (handler) => (ses.permissionCheck = handler),
       setDevicePermissionHandler: (handler) => (ses.devicePermission = handler),
@@ -49,7 +52,8 @@ function fakeElectron({ load = async () => {} } = {}) {
       Object.assign(debuggerApi, {
         commands: [],
         attach: (version) => (debuggerApi.attached = { version, afterUrl: url }),
-        sendCommand: async (method, params) => debuggerApi.commands.push({ method, params }),
+        sendCommand: async (method, params, sessionId) =>
+          debuggerApi.commands.push({ method, params, sessionId }),
       });
       const ses = fromPartition(options.webPreferences.partition);
       let url = '';
@@ -285,23 +289,34 @@ test('local files are served only inside the policy read scope', async () => {
   ]);
 });
 
-// Catches: a dialog left open, a popup opened (or sent to the user's browser), a download
-// saved, or a permission granted, and any of them not reported.
-test('dialogs are dismissed and popups, downloads and permissions refused, with notes', async () => {
+// Catches: a dialog, print, file chooser or worker the page asked for left unreported, a popup
+// opened (or sent to the user's browser), a download saved, or a permission granted.
+test('refused dialogs, prints, choosers, workers, popups and downloads are reported', async () => {
   const h = harness({
     load: async (_url, { ses, contents }) => {
-      contents.debugger.emit('message', {}, 'Page.javascriptDialogOpening', {});
+      const emit = (method, params, sessionId) =>
+        contents.debugger.emit('message', {}, method, params, sessionId);
+      emit('Page.javascriptDialogOpening', {}, 'frame-1');
+      emit('Log.entryAdded', { entry: { source: 'security', text: "Ignored call to 'print()'." } });
+      emit('Page.fileChooserOpened', {});
+      const csp = { violatedDirective: 'worker-src', blockedURL: 'https://a.example/w.js' };
+      emit('Audits.issueAdded', { issue: { details: { contentSecurityPolicyIssueDetails: csp } } });
       contents.openHandler({ url: 'https://ads.example/' });
       ses.emit('will-download', { preventDefault: () => (ses.downloadPrevented = true) });
     },
   });
   const settled = await navigate(h, 'https://a.example/');
-  assert.deepEqual(settled.report.notes, ['dialog_dismissed', 'popup_refused', 'download_refused']);
-  assert.deepEqual(settled.report.popups, ['https://ads.example/']);
+  assert.deepEqual(settled.report, {
+    notes: ['dialog_dismissed', 'popup_refused', 'download_refused'],
+    popups: ['https://ads.example/'],
+    blocked: [{ reason: 'not_allowed', url: 'https://a.example/w.js' }],
+    network: [],
+  });
   const contents = h.windows[0].webContents;
   assert.ok(
     contents.debugger.commands.some(
-      ({ method, params }) => method === 'Page.handleJavaScriptDialog' && params.accept === false
+      ({ method, params, sessionId }) =>
+        method === 'Page.handleJavaScriptDialog' && !params.accept && sessionId === 'frame-1'
     )
   );
   assert.deepEqual(contents.openHandler({ url: 'https://x.example/' }), { action: 'deny' });
@@ -311,6 +326,61 @@ test('dialogs are dismissed and popups, downloads and permissions refused, with 
   assert.equal(granted, false);
   assert.equal(h.ses().permissionCheck(), false);
   assert.equal(h.ses().devicePermission(), false);
+});
+
+// Catches: a document that may print, open dialogs or start a worker (whose sockets bypass
+// webRequest), whether it came over the network or from a file, or a page CSP dropped.
+test('every document is sandboxed without modals and may start no worker', async () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-browser-')));
+  fs.writeFileSync(path.join(root, 'deck.html'), '<p>deck</p>');
+  let file = null;
+  const h = harness({
+    load: async (_url, { ses }) => {
+      file = await ses.fileHandler({ url: pathToFileURL(path.join(root, 'deck.html')).href });
+    },
+  });
+  await navigate(h, 'https://a.example/', { policy: { file_roots: [root] } });
+  const policies = file.headers.get('Content-Security-Policy');
+  assert.match(policies, /^sandbox allow-scripts allow-same-origin, sandbox .*worker-src 'none'$/);
+  assert.doesNotMatch(policies, /allow-modals/);
+  let headers = null;
+  h.ses().headersReceived(
+    { responseHeaders: { 'content-security-policy': ["default-src 'self'"] } },
+    (response) => (headers = response.responseHeaders)
+  );
+  assert.deepEqual(Object.keys(headers), ['content-security-policy']);
+  assert.equal(headers['content-security-policy'][0], "default-src 'self'");
+  assert.match(headers['content-security-policy'][1], /^sandbox .*worker-src 'none'$/);
+});
+
+// Catches: an out-of-process frame running its scripts before it loses WebRTC and the file
+// pickers, or left paused forever.
+test('every frame target is guarded before it runs', async () => {
+  const h = harness();
+  await navigate(h, 'https://a.example/');
+  const cdp = h.windows[0].webContents.debugger;
+  const guard = (sessionId) =>
+    cdp.commands.filter((command) => command.sessionId === sessionId).map(({ method }) => method);
+  const guarded = [
+    'Page.enable',
+    'Log.enable',
+    'Audits.enable',
+    'Page.addScriptToEvaluateOnNewDocument',
+    'Page.setInterceptFileChooserDialog',
+    'Target.setAutoAttach',
+  ];
+  assert.deepEqual(guard(undefined).slice(0, guarded.length), guarded);
+  const script = cdp.commands.find(
+    ({ method }) => method === 'Page.addScriptToEvaluateOnNewDocument'
+  ).params.source;
+  assert.match(script, /RTCPeerConnection/);
+  assert.match(script, /showOpenFilePicker/);
+  cdp.emit('message', {}, 'Target.attachedToTarget', {
+    sessionId: 'frame-1',
+    targetInfo: { type: 'iframe' },
+  });
+  await turn();
+  assert.deepEqual(guard('frame-1'), [...guarded, 'Runtime.runIfWaitingForDebugger']);
 });
 
 // Catches: two operations of one session interleaving on its page, and one session's slow

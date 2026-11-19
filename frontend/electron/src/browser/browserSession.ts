@@ -4,9 +4,19 @@
  * A session is one hidden window (`pageWindowOptions`) in a partition of its own that lives in
  * memory only, driven through `webContents.debugger`. It is never shown or focused. What its page
  * may load is `pagePolicy`'s decision under the latest policy the runtime sent; with the network
- * off, a dead proxy also catches what never passes `webRequest`. Permissions, downloads and new
- * windows are refused, and dialogs are dismissed; each is reported with the next answer, as is
- * every host the page reached, once.
+ * off, a dead proxy also catches what never passes `webRequest`.
+ *
+ * Nothing on the page may open native UI on the user's display or a connection `webRequest`
+ * does not see, in any frame:
+ * - Every document is sandboxed without `allow-modals` (`DOCUMENT_POLICY`), so Blink itself
+ *   ignores `print()`, `execCommand('print')` and the dialogs, and it may start no worker: a
+ *   shared or service worker's WebSocket has no frame, and Electron passes only a frame's
+ *   WebSocket through `webRequest` (`ElectronBrowserClient::WillInterceptWebSocket`).
+ * - Every frame, an out-of-process one included, loses WebRTC and the file pickers before its
+ *   first script (`PAGE_GUARD_SCRIPT`), and its file chooser is intercepted. WebRTC over TCP
+ *   would bypass `webRequest` under any IP handling policy, and Blink has no switch for it.
+ * Permissions, downloads and new windows are refused. Each refusal is reported with the next
+ * answer, as is every host the page reached, once.
  *
  * Operations on one session run one after another, each within its budget. A session ends on
  * close, on a renderer crash, past an operation's budget, when its window is closed (the app
@@ -56,6 +66,23 @@ export const BROWSER_NAVIGATION_BUDGET_MS = 20_000;
 export const BROWSER_OPERATION_BUDGET_MS = 10_000;
 
 const MAX_POPUPS_REPORTED = 10;
+/**
+ * Added to every document's own policy. `allow-same-origin` keeps cookies and storage working;
+ * `allow-popups` and `allow-downloads` let those attempts reach the handlers that refuse and
+ * report them.
+ */
+const DOCUMENT_POLICY =
+  "sandbox allow-scripts allow-same-origin allow-forms allow-popups allow-downloads; worker-src 'none'";
+/** Run in every new document of every frame before its own scripts. */
+const PAGE_GUARD_SCRIPT = `for (const name of ${JSON.stringify([
+  'RTCPeerConnection',
+  'webkitRTCPeerConnection',
+  'showOpenFilePicker',
+  'showSaveFilePicker',
+  'showDirectoryPicker',
+])}) delete globalThis[name];`;
+/** Blink's console message for a dialog or print a sandboxed document asked for. */
+const IGNORED_MODAL = /^Ignored call to '/;
 /** Every connection Chromium makes outside `webRequest` (preconnects) goes nowhere, loopback included. */
 const DEAD_PROXY = { proxyRules: 'http://127.0.0.1:9', proxyBypassRules: '<-loopback>' };
 
@@ -143,30 +170,92 @@ function drain(page: PageSession): PageReport {
   return report;
 }
 
+/** The CDP events that report what the page tried; `sessionId` names the frame target. */
+function watchPage(page: PageSession, logger: LoggerLike | null | undefined): void {
+  page.cdp.on('message', (_event, method, params, sessionId) => {
+    if (method === 'Target.attachedToTarget') {
+      void guardChild(page.cdp, params.sessionId, params.targetInfo.type, logger);
+    } else if (method === 'Page.javascriptDialogOpening') {
+      page.notes.add('dialog_dismissed');
+      // `disableDialogs` may have closed it already, which is as good.
+      void send(page.cdp, 'Page.handleJavaScriptDialog', { accept: false }, sessionId).catch(
+        () => undefined
+      );
+    } else if (method === 'Page.fileChooserOpened') {
+      page.notes.add('dialog_dismissed');
+    } else if (method === 'Log.entryAdded') {
+      const { source, text } = params.entry;
+      if (source === 'security' && IGNORED_MODAL.test(text)) page.notes.add('dialog_dismissed');
+    } else if (method === 'Audits.issueAdded') {
+      const csp = params.issue.details.contentSecurityPolicyIssueDetails;
+      if (csp?.violatedDirective === 'worker-src' && csp.blockedURL !== undefined) {
+        block(page, 'not_allowed', csp.blockedURL);
+      }
+    }
+  });
+}
+
+function send(cdp: Debugger, method: string, params: object, sessionId: string | undefined) {
+  return sessionId === undefined
+    ? cdp.sendCommand(method, params)
+    : cdp.sendCommand(method, params, sessionId);
+}
+
+/** Closes WebRTC, the file pickers and modal reports in one frame target, nested frames included. */
+async function guardTarget(cdp: Debugger, sessionId?: string): Promise<void> {
+  await Promise.all([
+    send(cdp, 'Page.enable', {}, sessionId),
+    send(cdp, 'Log.enable', {}, sessionId),
+    send(cdp, 'Audits.enable', {}, sessionId),
+    send(cdp, 'Page.addScriptToEvaluateOnNewDocument', { source: PAGE_GUARD_SCRIPT }, sessionId),
+    send(cdp, 'Page.setInterceptFileChooserDialog', { enabled: true, cancel: true }, sessionId),
+    // An out-of-process frame waits until it is guarded too.
+    send(
+      cdp,
+      'Target.setAutoAttach',
+      { autoAttach: true, waitForDebuggerOnStart: true, flatten: true },
+      sessionId
+    ),
+  ]);
+}
+
+async function guardChild(
+  cdp: Debugger,
+  sessionId: string,
+  type: string,
+  logger: LoggerLike | null | undefined
+): Promise<void> {
+  try {
+    if (type === 'iframe') await guardTarget(cdp, sessionId);
+  } catch (error) {
+    logger?.error?.('BROWSER_FRAME_GUARD_ERR', { error: errorName(error) });
+  } finally {
+    await send(cdp, 'Runtime.runIfWaitingForDebugger', {}, sessionId).catch(() => undefined);
+  }
+}
+
 /** A log names an error only by its class: its message can carry page text or a private URL. */
 function errorName(error: unknown): string {
   return error instanceof Error ? error.name : typeof error;
 }
 
-/** Dismisses a page dialog; `disableDialogs` may have closed it already, which is as good. */
-function dismissDialogs(page: PageSession): void {
-  page.cdp.on('message', (_event, method) => {
-    if (method !== 'Page.javascriptDialogOpening') return;
-    page.notes.add('dialog_dismissed');
-    page.cdp.sendCommand('Page.handleJavaScriptDialog', { accept: false }).catch(() => undefined);
-  });
-  // Leaving a page that asks to stay ignores its `beforeunload` handler.
-  page.contents.on('will-prevent-unload', (event) => {
-    event.preventDefault();
-    page.notes.add('dialog_dismissed');
-  });
-}
-
 function guardSession(page: PageSession): void {
   const { ses, contents } = page;
-  ses.protocol.handle('file', (request) =>
-    serveFile(request.url, fileScope(page.policy), (reason, url) => block(page, reason, url))
-  );
+  ses.protocol.handle('file', async (request) => {
+    const response = await serveFile(request.url, fileScope(page.policy), (reason, url) =>
+      block(page, reason, url)
+    );
+    if (response.ok) response.headers.append('Content-Security-Policy', DOCUMENT_POLICY);
+    return response;
+  });
+  ses.webRequest.onHeadersReceived((details, callback) => {
+    const headers = { ...details.responseHeaders };
+    const key =
+      Object.keys(headers).find((name) => name.toLowerCase() === 'content-security-policy') ??
+      'Content-Security-Policy';
+    headers[key] = [...(headers[key] ?? []), DOCUMENT_POLICY];
+    callback({ responseHeaders: headers });
+  });
   const decide = (url: string, method: string) =>
     decideBrowserRequest(
       { url, method },
@@ -197,7 +286,7 @@ function guardSession(page: PageSession): void {
     if (page.popups.length < MAX_POPUPS_REPORTED) page.popups.push(url);
     return { action: 'deny' };
   });
-  // No data path may bypass webRequest, whatever the network setting.
+  // Design invariant 5; the guard script removes WebRTC itself.
   contents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
 }
 
@@ -205,7 +294,7 @@ async function attachDebugger(contents: WebContents, cdp: Debugger): Promise<voi
   // A command sent before the first navigation may not settle until one happens.
   await contents.loadURL('about:blank');
   cdp.attach('1.3');
-  await cdp.sendCommand('Page.enable');
+  await guardTarget(cdp);
   // Device scale 1, so an image has the CSS pixel size on any display.
   await cdp.sendCommand('Emulation.setDeviceMetricsOverride', {
     width: PAGE_VIEWPORT.width,
@@ -232,9 +321,9 @@ export function createBrowserSessions(params: {
   logger?: LoggerLike | null;
 }) {
   const sessions = new Map<string, PageSession>();
+  let partitions = 0;
   /** Ids closed or crashed; the runtime mints a new id for the run's next session. */
   const ended = new Set<string>();
-  let partitions = 0;
 
   /** Ends the session; unless `reopenable`, its id is refused from then on. */
   function discard(page: PageSession, reason: BrowserOperationError, reopenable = false): void {
@@ -246,6 +335,7 @@ export function createBrowserSessions(params: {
     if (!page.window.isDestroyed()) page.window.destroy();
     page.ses.protocol.unhandle('file');
     page.ses.webRequest.onBeforeRequest(null);
+    page.ses.webRequest.onHeadersReceived(null);
     // Electron cannot destroy a session; its memory goes with its storage.
     Promise.all([page.ses.clearStorageData(), page.ses.clearCache()]).catch((error: unknown) =>
       params.logger?.error?.('BROWSER_SESSION_CLEAR_ERR', { error: errorName(error) })
@@ -283,7 +373,7 @@ export function createBrowserSessions(params: {
       stop,
     };
     guardSession(page);
-    dismissDialogs(page);
+    watchPage(page, params.logger);
     contents.on('render-process-gone', (_event, details) =>
       discard(
         page,

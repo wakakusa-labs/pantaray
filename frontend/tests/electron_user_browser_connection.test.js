@@ -246,6 +246,13 @@ test('the connection touches only targets and sessions of its own', async (t) =>
   await refused('Runtime.evaluate', { expression: 'document.cookie' }, 'users-session');
   await connection.cdp.sendCommand('Target.attachToTarget', { targetId: 'own', flatten: true });
   await connection.cdp.sendCommand('Page.navigate', { url: 'https://example.com' }, 'own-page');
+  // Chromium routes Target commands by the target they name, whichever session carries them.
+  await refused('Target.getTargets', {}, 'own-page');
+  await refused('Target.attachToTarget', { targetId: 'users-tab', flatten: true }, 'own-page');
+  await refused('Target.closeTarget', { targetId: 'users-tab' }, 'own-page');
+  await refused('Target.setDiscoverTargets', { discover: true }, 'own-page');
+  await refused('Storage.getCookies', {}, 'own-page');
+  await refused('Network.getAllCookies', {}, 'own-page');
 
   const send = (method, params, sessionId) =>
     browserSide.send(JSON.stringify({ method, params, sessionId }));

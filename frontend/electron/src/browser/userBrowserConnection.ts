@@ -6,8 +6,9 @@
  *
  * The connection reaches the whole browser, but carries only what this run's own tabs need: at
  * the browser level it sends the few `Target` commands below, the target-naming ones only for a
- * target it created or one such a target opened; within a session, only to a session it attached
- * to one of those targets or one such a session auto-attached. It passes on no event about any
+ * target it created or one such a target opened; within a session, only the page commands of
+ * `SESSION_COMMANDS` and only to a session it attached to one of those targets or one such a
+ * session auto-attached. It passes on no event about any
  * other target or from any other session, so the user's tabs never reach this process.
  */
 
@@ -97,6 +98,52 @@ const TARGET_NAMING = new Set([
   'Target.attachToTarget',
   'Target.getTargetInfo',
   'Target.closeTarget',
+]);
+/**
+ * Commands sent within a session of this connection's own: what the page code (snapshot,
+ * interactions, capture) and a tab's guards send. Chromium routes `Target` commands by the
+ * target they name whatever the session, so none but `setAutoAttach` is here, nor anything that
+ * reaches the whole browser profile (`Browser`, `Storage`, cookies, downloads). The user tab's
+ * session extends it only with methods that tab itself needs.
+ */
+const SESSION_COMMANDS = new Set([
+  'Accessibility.getFullAXTree',
+  'Audits.enable',
+  'DOM.describeNode',
+  'DOM.focus',
+  'DOM.getContentQuads',
+  'DOM.getFrameOwner',
+  'DOM.getNodeForLocation',
+  'DOM.resolveNode',
+  'DOM.scrollIntoViewIfNeeded',
+  'Emulation.setDeviceMetricsOverride',
+  'Emulation.setFocusEmulationEnabled',
+  'Fetch.continueRequest',
+  'Fetch.enable',
+  'Fetch.failRequest',
+  'Fetch.fulfillRequest',
+  'Input.dispatchKeyEvent',
+  'Input.dispatchMouseEvent',
+  'Input.insertText',
+  'Log.enable',
+  'Network.setBypassServiceWorker',
+  'Page.addScriptToEvaluateOnNewDocument',
+  'Page.captureScreenshot',
+  'Page.createIsolatedWorld',
+  'Page.enable',
+  'Page.getFrameTree',
+  'Page.getLayoutMetrics',
+  'Page.getNavigationHistory',
+  'Page.handleJavaScriptDialog',
+  'Page.navigate',
+  'Page.navigateToHistoryEntry',
+  'Page.setInterceptFileChooserDialog',
+  'Runtime.callFunctionOn',
+  'Runtime.enable',
+  'Runtime.evaluate',
+  'Runtime.releaseObjectGroup',
+  'Runtime.runIfWaitingForDebugger',
+  'Target.setAutoAttach',
 ]);
 
 const refusal = (browser: KnownBrowser) => ({
@@ -271,7 +318,8 @@ function cdpOver(socket: WebSocketClient): UserBrowserConnection {
     let passes: boolean;
     if (message.sessionId !== undefined) {
       passes = ownSessions.has(message.sessionId);
-      // What a session of ours auto-attaches is a frame or worker of our tab.
+      // Within a session of ours only our own `setAutoAttach` attaches, so this is a frame or
+      // worker of our tab.
       if (passes && message.method === 'Target.attachedToTarget' && info?.targetId !== undefined) {
         own.add(info.targetId);
       }
@@ -288,6 +336,15 @@ function cdpOver(socket: WebSocketClient): UserBrowserConnection {
       if (message.method === 'Target.detachedFromTarget') ownSessions.delete(childSession);
     }
     return passes;
+  }
+
+  /** The one rule every command passes before it is sent. */
+  function allowed(method: string, params: object, sessionId: string | undefined): boolean {
+    // An empty session id names the browser itself; like any other unknown id, it is not ours.
+    if (sessionId !== undefined) return ownSessions.has(sessionId) && SESSION_COMMANDS.has(method);
+    const targetId = (params as { targetId?: unknown }).targetId;
+    const ownTarget = typeof targetId === 'string' && own.has(targetId);
+    return BROWSER_COMMANDS.has(method) && (!TARGET_NAMING.has(method) || ownTarget);
   }
 
   socket.on('message', (data) => {
@@ -319,14 +376,9 @@ function cdpOver(socket: WebSocketClient): UserBrowserConnection {
 
   const cdp: CdpSession = {
     async sendCommand(method, params = {}, sessionId) {
-      const targetId = (params as { targetId?: unknown }).targetId;
-      const ownTarget = typeof targetId === 'string' && own.has(targetId);
-      // An empty session id names the browser itself; like any other unknown id, it is not ours.
-      const allowed =
-        sessionId === undefined
-          ? BROWSER_COMMANDS.has(method) && (!TARGET_NAMING.has(method) || ownTarget)
-          : ownSessions.has(sessionId);
-      if (!allowed) throw new CdpCommandError(`${method} is not sent to the user's browser.`);
+      if (!allowed(method, params, sessionId)) {
+        throw new CdpCommandError(`${method} is not sent to the user's browser.`);
+      }
       // `ws` drops what is sent after the close, which would never be answered.
       if (isClosed) throw new CdpCommandError('The connection to the browser closed.');
       nextId += 1;

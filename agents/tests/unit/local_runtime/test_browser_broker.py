@@ -85,7 +85,9 @@ def _workspace(runtime: Runtime) -> Path:
     return Path(runtime[1].workspace_path)  # type: ignore[attr-defined]
 
 
-async def _call(runtime: Runtime, args: dict, *, step: int = 1) -> object:
+async def _call(
+    runtime: Runtime, args: dict, *, step: int = 1, preflight_only: bool = False
+) -> object:
     db_path, context, _ = runtime
     return await execute_broker_tool(
         db_path=db_path,
@@ -97,6 +99,7 @@ async def _call(runtime: Runtime, args: dict, *, step: int = 1) -> object:
         execution_session_id=context.execution_session_id,  # type: ignore[attr-defined]
         tool_request_id=f"action-1:step-{step}:1",
         args=args,
+        preflight_only=preflight_only,
     )
 
 
@@ -117,9 +120,19 @@ def _page_data(marker: str = "page") -> dict[str, object]:
 
 
 def _succeeded(
-    *, png: bytes | None = None, marker: str = "page", page: dict | None = None
+    *,
+    png: bytes | None = None,
+    pdf: bytes | None = None,
+    marker: str = "page",
+    page: dict | None = None,
 ) -> BrowserAnswer:
     artifact = None
+    if pdf is not None:
+        artifact = {
+            "kind": "pdf",
+            "byte_size": len(pdf),
+            "sha256": hashlib.sha256(pdf).hexdigest(),
+        }
     if png is not None:
         artifact = {
             "kind": "png",
@@ -141,7 +154,11 @@ def _succeeded(
 
 
 async def _electron(
-    runtime: Runtime, answer: BrowserAnswer, *, png: bytes | None = None
+    runtime: Runtime,
+    answer: BrowserAnswer,
+    *,
+    png: bytes | None = None,
+    pdf: bytes | None = None,
 ) -> dict[str, object]:
     """Answer the next announced operation as Electron main would."""
 
@@ -150,10 +167,11 @@ async def _electron(
         await asyncio.sleep(0.005)
     payload = desktop.requests.pop(0)
     request_id = str(payload["operation_request_id"])
-    if png is not None:
-        path = read_local_runtime_artifact_root() / BROWSER_TEMP_DIRECTORY
-        path.mkdir(parents=True, exist_ok=True)
-        (path / f"{request_id}.png").write_bytes(png)
+    for kind, artifact in (("png", png), ("pdf", pdf)):
+        if artifact is not None:
+            path = read_local_runtime_artifact_root() / BROWSER_TEMP_DIRECTORY
+            path.mkdir(parents=True, exist_ok=True)
+            (path / f"{request_id}.{kind}").write_bytes(artifact)
     status = _ELECTRON_BROKER.answer(
         request_id=request_id, user_id=_USER_ID, outcome=answer
     )
@@ -428,7 +446,6 @@ async def test_close_closes_the_runs_session(runtime: Runtime) -> None:
 @pytest.mark.parametrize(
     "args",
     [
-        {"action": "print", "pdf_path": "out.pdf"},
         {"action": "allow_writes", "host": "api.example.com", "justification": "x"},
         {"action": "screenshot", "printed_pages": [1]},
     ],
@@ -455,4 +472,4 @@ def test_browser_is_offered_to_the_action_alone_with_the_brokered_actions() -> N
         typing.get_args(variant.model_fields["action"].annotation)[0]
         for variant in typing.get_args(BrowserToolArgs.model_fields["root"].annotation)
     }
-    assert offered == parsed - {"print", "allow_writes"}
+    assert offered == parsed - {"allow_writes"}

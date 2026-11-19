@@ -37,6 +37,12 @@ from pantaray_agents.schema.agent.base import JSONValue
             "apply_patch: ok, 1 file, +2 -1",
         ),
         (
+            "browser",
+            {"action": "print", "pdf_path": "/w/deck.pdf", "replaced": True},
+            "browser: ok, /w/deck.pdf, replaced existing file",
+        ),
+        ("browser", {"action": "snapshot", "data": {}}, "browser: ok"),
+        (
             "web_extract",
             {"results": [{"url": "https://example.test/a", "raw_content": "y" * 2300}]},
             "web_extract: ok, 2,300 chars, https://example.test/a",

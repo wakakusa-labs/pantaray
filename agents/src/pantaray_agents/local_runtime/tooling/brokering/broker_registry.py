@@ -12,7 +12,6 @@ from pantaray_agents.tools.files.read_output import ReadToolOutput
 from pantaray_agents.tools.files.render_pages import (
     RenderHtmlPageToolArgs,
     RenderPdfPageToolArgs,
-    SaveHtmlAsPdfToolArgs,
 )
 
 from .broker_process import ProcessToolOutput
@@ -30,7 +29,6 @@ from .broker_protocol import (
     RenderPdfPageOutput,
     RunPythonToolArgs,
     RunPythonToolOutput,
-    SaveHtmlAsPdfOutput,
     ToolError,
 )
 from .browser_protocol import BrowserToolArgs, BrowserToolOutput
@@ -54,7 +52,6 @@ BROKER_MODEL_REGISTRY = BrokerModelRegistry(
         "GlobToolArgs": GlobToolArgs,
         "GrepToolArgs": GrepToolArgs,
         "ApplyPatchToolArgs": ApplyPatchToolArgs,
-        "SaveHtmlAsPdfToolArgs": SaveHtmlAsPdfToolArgs,
         "BashToolArgs": BashToolArgs,
         "RunPythonToolArgs": RunPythonToolArgs,
         "ReadProcessOutputToolArgs": ReadProcessOutputToolArgs,
@@ -69,7 +66,6 @@ BROKER_MODEL_REGISTRY = BrokerModelRegistry(
         "GlobToolOutput": GlobToolOutput,
         "GrepToolOutput": GrepToolOutput,
         "ApplyPatchToolOutput": ApplyPatchToolOutput,
-        "SaveHtmlAsPdfOutput": SaveHtmlAsPdfOutput,
         "BashToolOutput": BashToolOutput,
         "RunPythonToolOutput": RunPythonToolOutput,
         "ProcessToolOutput": ProcessToolOutput,
@@ -159,18 +155,6 @@ BROKER_TOOL_REGISTRY = BrokerToolRegistry(
             approval_policy="prompt_each_time",
             resource_kinds=["lock"],
         ),
-        # Written under apply_patch's rules, so it is approved like apply_patch.
-        "save_html_as_pdf": BrokerManagedToolDefinition(
-            tool_id="save_html_as_pdf",
-            execution_path="broker_direct_save_pdf",
-            path_access_kind="write",
-            input_model_ref="SaveHtmlAsPdfToolArgs",
-            output_model_ref="SaveHtmlAsPdfOutput",
-            error_model_ref="ToolError",
-            required_capabilities=["scoped_write"],
-            approval_policy="prompt_each_time",
-            resource_kinds=["lock"],
-        ),
         "bash": BrokerManagedToolDefinition(
             tool_id="bash",
             execution_path="broker_sandbox_command",
@@ -217,8 +201,8 @@ BROKER_TOOL_REGISTRY = BrokerToolRegistry(
             approval_policy="none",
             resource_kinds=["none"],
         ),
-        # Local paths it opens are resolved as read resolves them; it writes
-        # nothing, so it is not approved.
+        # Local paths it opens are resolved as read resolves them. print alone
+        # writes, under apply_patch's rules, so only print is approved.
         "browser": BrokerManagedToolDefinition(
             tool_id="browser",
             execution_path="broker_browser",
@@ -227,8 +211,8 @@ BROKER_TOOL_REGISTRY = BrokerToolRegistry(
             output_model_ref="BrowserToolOutput",
             error_model_ref="ToolError",
             required_capabilities=["scoped_read"],
-            approval_policy="none",
-            resource_kinds=["none"],
+            approval_policy="prompt_each_time",
+            resource_kinds=["lock"],
         ),
     }
 )

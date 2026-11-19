@@ -13,10 +13,7 @@ from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import BrokerPolicyError
 from pantaray_agents.tools.files.discovery import run_glob, run_grep, run_list
 from pantaray_agents.tools.files.read_scope import ReadScope
-from pantaray_agents.tools.files.render_pages import (
-    RenderPdfPageToolArgs,
-    SaveHtmlAsPdfToolArgs,
-)
+from pantaray_agents.tools.files.render_pages import RenderPdfPageToolArgs
 
 from ..resources.resource_tracking import (
     register_path_resource,
@@ -32,6 +29,7 @@ from ..tool_result_finalization import (
 from ..tool_result_validation import ToolOutputValidationError
 from .action_path_policy import read_scope
 from .broker_browser import run_browser_executor
+from .broker_browser_print import build_validated_browser_print_request
 from .broker_command_validation import (
     build_validated_command_request,
     build_validated_python_request,
@@ -40,8 +38,8 @@ from .broker_command_validation import (
 from .broker_common import (
     APPLY_PATCH_TOOL_ID,
     BASH_TOOL_ID,
+    BROWSER_TOOL_ID,
     RUN_PYTHON_TOOL_ID,
-    SAVE_HTML_AS_PDF_TOOL_ID,
     ApprovalDecisionError,
     BrokerApprovalDeniedError,
     BrokerApprovalRequiredError,
@@ -56,10 +54,6 @@ from .broker_direct import build_validated_patch_request, run_apply_patch_execut
 from .broker_direct_read import run_read_executor
 from .broker_direct_render_html import run_render_html_page_executor
 from .broker_direct_render_pdf import run_render_pdf_page_executor
-from .broker_direct_save_pdf import (
-    build_validated_save_pdf_request,
-    run_save_html_as_pdf_executor,
-)
 from .broker_failure_finalization import (
     canceled_broker_tool_outcome,
     finalize_broker_invocation_error,
@@ -88,14 +82,18 @@ from .broker_protocol import (
     ValidatedReadRequest,
     ValidatedRenderHtmlPageRequest,
     ValidatedRenderPdfPageRequest,
-    ValidatedSaveHtmlAsPdfRequest,
 )
 from .broker_registry import (
     BROKER_MODEL_REGISTRY,
     BROKER_TOOL_REGISTRY,
     validate_broker_registry,
 )
-from .browser_protocol import ValidatedBrowserRequest
+from .browser_protocol import (
+    BrowserPrintArgs,
+    BrowserToolArgs,
+    ValidatedBrowserPrintRequest,
+    ValidatedBrowserRequest,
+)
 from .execution_start import claim_broker_execution_start
 from .process_protocol import (
     ValidatedReadProcessOutputRequest,
@@ -112,8 +110,9 @@ class BrokerCompletionPersistenceError(RuntimeError):
 
 
 BROKER_TOOL_ARGS_INVALID = "BROKER_TOOL_ARGS_INVALID"
+# browser asks only for print, but every call carries the request id it binds to.
 _APPROVAL_GATED_TOOL_IDS = frozenset(
-    {APPLY_PATCH_TOOL_ID, SAVE_HTML_AS_PDF_TOOL_ID, BASH_TOOL_ID, RUN_PYTHON_TOOL_ID}
+    {APPLY_PATCH_TOOL_ID, BROWSER_TOOL_ID, BASH_TOOL_ID, RUN_PYTHON_TOOL_ID}
 )
 # Read-only requests that carry their parsed arguments as they are.
 _ARGS_REQUESTS: dict[
@@ -198,7 +197,7 @@ def _validate_request(
     | ValidatedStopProcessRequest
     | ValidatedBrowserRequest
     | ValidatedPatchRequest
-    | ValidatedSaveHtmlAsPdfRequest
+    | ValidatedBrowserPrintRequest
     | ValidatedCommandRequest,
 ]:
     validate_broker_registry()
@@ -237,6 +236,17 @@ def _validate_request(
         preflight_only=preflight_only,
     )
     effective_requested_at = request.requested_at or "unknown"
+    if isinstance(request.args, BrowserToolArgs) and isinstance(
+        request.args.root, BrowserPrintArgs
+    ):
+        return context, build_validated_browser_print_request(
+            context=context,
+            args=request.args.root,
+            tool_invocation_id=effective_invocation_id,
+            tool_request_id=effective_tool_request_id,
+            requested_at=effective_requested_at,
+            preflight_only=preflight_only,
+        )
     args_request = _ARGS_REQUESTS.get(definition.execution_path)
     if args_request is not None:
         # The model refuses arguments parsed for another tool.
@@ -266,16 +276,6 @@ def _validate_request(
     if definition.execution_path == "broker_direct_patch":
         assert isinstance(request.args, ApplyPatchToolArgs)
         return context, build_validated_patch_request(
-            context=context,
-            args=request.args,
-            tool_invocation_id=effective_invocation_id,
-            tool_request_id=effective_tool_request_id,
-            requested_at=effective_requested_at,
-            preflight_only=preflight_only,
-        )
-    if definition.execution_path == "broker_direct_save_pdf":
-        assert isinstance(request.args, SaveHtmlAsPdfToolArgs)
-        return context, build_validated_save_pdf_request(
             context=context,
             args=request.args,
             tool_invocation_id=effective_invocation_id,
@@ -381,9 +381,8 @@ async def execute_broker_tool(
                 "applied_paths": list(validated.patch_paths),
             },
         )
-    if (
-        isinstance(validated, ValidatedSaveHtmlAsPdfRequest)
-        and validated.preflight_only
+    if preflight_only and isinstance(
+        validated, (ValidatedBrowserRequest, ValidatedBrowserPrintRequest)
     ):
         return BrokerPreflightOutcome(status="success", output={"status": "success"})
     if isinstance(validated, ValidatedCommandRequest) and validated.preflight_only:
@@ -433,10 +432,6 @@ async def execute_broker_tool(
             outcome = await run_render_html_page_executor(
                 context=context, request=validated
             )
-        elif isinstance(validated, ValidatedSaveHtmlAsPdfRequest):
-            outcome = await run_save_html_as_pdf_executor(
-                context=context, request=validated
-            )
         elif isinstance(validated, ValidatedListRequest):
             outcome = read_tool_outcome(
                 await asyncio.to_thread(
@@ -465,7 +460,9 @@ async def execute_broker_tool(
             validated, (ValidatedReadProcessOutputRequest, ValidatedStopProcessRequest)
         ):
             outcome = await run_process_control(context=context, request=validated)
-        elif isinstance(validated, ValidatedBrowserRequest):
+        elif isinstance(
+            validated, (ValidatedBrowserRequest, ValidatedBrowserPrintRequest)
+        ):
             outcome = await run_browser_executor(context=context, request=validated)
         else:
             verify_outside_workspace_folders_unchanged(

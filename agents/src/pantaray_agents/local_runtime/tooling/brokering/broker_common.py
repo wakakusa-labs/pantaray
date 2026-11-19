@@ -34,7 +34,6 @@ from .broker_protocol import BrokerPathAccessKind
 READ_TOOL_ID = "read"
 RENDER_PDF_PAGE_TOOL_ID = "render_pdf_page"
 RENDER_HTML_PAGE_TOOL_ID = "render_html_page"
-SAVE_HTML_AS_PDF_TOOL_ID = "save_html_as_pdf"
 LIST_TOOL_ID = "list"
 GLOB_TOOL_ID = "glob"
 GREP_TOOL_ID = "grep"
@@ -497,7 +496,6 @@ __all__ = [
     "READ_PROCESS_OUTPUT_TOOL_ID",
     "RUN_PYTHON_TOOL_ID",
     "STOP_PROCESS_TOOL_ID",
-    "SAVE_HTML_AS_PDF_TOOL_ID",
     "apply_approval_decision",
     "create_settings_approval_session",
     "ensure_session_capabilities",

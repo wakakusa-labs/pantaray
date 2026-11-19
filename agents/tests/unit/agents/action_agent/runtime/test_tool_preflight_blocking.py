@@ -23,7 +23,11 @@ from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.shared im
 )
 from pantaray_agents.agents.action_agent.runtime.handlers.tools import run_tool
 from pantaray_agents.agents.action_agent.runtime.state import create_initial_state
-from pantaray_agents.agents.action_agent.tools import BASH_TOOL
+from pantaray_agents.agents.action_agent.tools import (
+    BASH_TOOL,
+    BROWSER_TOOL,
+    ToolDefinition,
+)
 from pantaray_agents.agents.core import CountingSink
 from pantaray_agents.local_runtime.tooling.tool_result_finalization import (
     ActionStepToolResultOwner,
@@ -174,9 +178,21 @@ async def test_run_tool_returns_preflight_error(
     assert result.status == "error"
 
 
+# browser asks only for print, but every call is preflighted like bash so the
+# approval binds to the request id the resumed call reuses.
+@pytest.mark.parametrize(
+    ("tool", "args"),
+    [
+        (BASH_TOOL, {"command": "ls -R .", "cwd": "."}),
+        (BROWSER_TOOL, {"action": "print", "pdf_path": "/outside/deck.pdf"}),
+    ],
+    ids=["bash", "browser-print"],
+)
 @pytest.mark.asyncio
 async def test_run_tool_returns_preflight_approval_request(
     monkeypatch: pytest.MonkeyPatch,
+    tool: ToolDefinition,
+    args: dict[str, object],
 ) -> None:
     async def fake_broker_tool_wrapper(*_args, **_kwargs) -> ToolExecutionPreparation:
         return _preparation(
@@ -203,8 +219,8 @@ async def test_run_tool_returns_preflight_approval_request(
 
     result = await run_tool(
         MagicMock(),
-        BASH_TOOL,
-        args={"command": "ls -R .", "cwd": "."},
+        tool,
+        args=args,
         state=_state(),
         sink=CountingSink(),
         runtime=runtime,

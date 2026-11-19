@@ -22,9 +22,8 @@ from .broker_protocol import (
     ValidatedReadRequest,
     ValidatedRenderHtmlPageRequest,
     ValidatedRenderPdfPageRequest,
-    ValidatedSaveHtmlAsPdfRequest,
 )
-from .browser_protocol import ValidatedBrowserRequest
+from .browser_protocol import ValidatedBrowserPrintRequest, ValidatedBrowserRequest
 from .process_protocol import (
     ValidatedReadProcessOutputRequest,
     ValidatedStopProcessRequest,
@@ -43,7 +42,7 @@ type DirectReadOnlyRequest = (
 )
 # Approval-gated requests, recorded with the command summary that was approved.
 type GatedRequest = (
-    ValidatedPatchRequest | ValidatedSaveHtmlAsPdfRequest | ValidatedCommandRequest
+    ValidatedPatchRequest | ValidatedBrowserPrintRequest | ValidatedCommandRequest
 )
 
 

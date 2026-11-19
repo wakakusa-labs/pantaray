@@ -191,18 +191,6 @@ test('a failed answer is logged without its message', async () => {
   ]);
 });
 
-// Catches: operations N4c owns answered as success, and a ref screenshot with no ref map.
-test('operations this engine does not run yet fail clearly', async () => {
-  const h = harness();
-  await h.respond(navigate('https://a.example/'));
-  const click = operation({ action: 'click', ref: 'e1' });
-  const byRef = screenshot({ ref: 'e1' });
-  await h.respond(click);
-  await h.respond(byRef);
-  assert.equal(h.answerOf(click.operation_request_id).code, 'BROWSER_ACTION_FAILED');
-  assert.equal(h.answerOf(byRef.operation_request_id).code, 'BROWSER_REF_UNKNOWN');
-});
-
 // Catches: sessions outliving the backend generation that opened them, which also happens
 // when the app quits (shutdown stops the helper).
 test('every session closes when a ready backend generation ends', async () => {

@@ -13,6 +13,7 @@ import type {
   BrowserOperation,
   BrowserOperationAnswer,
   BrowserOperationRequest,
+  BrowserPageData,
 } from './browserContract';
 import {
   BROWSER_NAVIGATION_BUDGET_MS,
@@ -29,13 +30,20 @@ import {
   writeArtifact,
   type CapturedArtifact,
 } from './capture';
+import { captureElement, interact } from './interactions';
+import { takeSnapshot } from './snapshot';
 
 type OkResult = Extract<BrowserOperationAnswer['result'], { status: 'ok' }>;
 
 /** What an operation produced beyond the page's url and title. */
-type OperationValue = { artifact: CapturedArtifact | null; truncated: OkResult['truncated'] };
+type OperationValue = {
+  artifact: CapturedArtifact | null;
+  truncated: OkResult['truncated'];
+  snapshot: BrowserPageData['snapshot'];
+  console: BrowserPageData['console'];
+};
 
-const NOTHING: OperationValue = { artifact: null, truncated: null };
+const NOTHING: OperationValue = { artifact: null, truncated: null, snapshot: null, console: null };
 /** Chromium's code for a load that another navigation replaced, which is no failure of the page. */
 const ERR_ABORTED = -3;
 
@@ -107,35 +115,36 @@ async function perform(operation: BrowserOperation, page: BrowserPage): Promise<
       await goBack(page.contents);
       return NOTHING;
     case 'screenshot': {
-      if (operation.ref != null) {
-        throw new BrowserOperationError('BROWSER_REF_UNKNOWN', 'No snapshot has named this ref.');
+      if (operation.ref == null && operation.full_page !== true) {
+        return { ...NOTHING, artifact: await captureViewport(page.cdp) };
       }
-      if (operation.full_page !== true) {
-        return { artifact: await captureViewport(page.cdp), truncated: null };
-      }
-      const { artifact, cut } = await captureFullPage(page.cdp);
-      return { artifact, truncated: cut ? 'page_too_tall' : null };
+      const { artifact, cut } =
+        operation.ref == null
+          ? await captureFullPage(page.cdp)
+          : await captureElement(page, operation.ref);
+      return { ...NOTHING, artifact, truncated: cut ? 'page_too_tall' : null };
     }
     case 'print':
-      return { artifact: await printPage(page.contents), truncated: null };
-    case 'snapshot':
-    case 'click':
-    case 'hover':
-    case 'type':
-    case 'press':
-    case 'select':
-    case 'scroll':
-    case 'wait':
+      return { ...NOTHING, artifact: await printPage(page.contents) };
+    case 'snapshot': {
+      const { text, cut } = await takeSnapshot(page, operation.ref);
+      return { ...NOTHING, snapshot: text, truncated: cut ? 'snapshot_too_long' : null };
+    }
     case 'console':
-      throw new BrowserOperationError(
-        'BROWSER_ACTION_FAILED',
-        `This version of the app cannot ${operation.action} in the browser yet.`
-      );
+      return {
+        ...NOTHING,
+        console: [...page.console.lines],
+        truncated: page.console.cut ? 'console_too_long' : null,
+      };
+    default:
+      await interact(page, operation);
+      return NOTHING;
   }
 }
 
 function budgetOf(operation: BrowserOperation): number {
-  return operation.action === 'navigate' || operation.action === 'back'
+  // A `wait` is bounded by `BROWSER_MAX_WAIT_SECONDS`, well within the navigation budget.
+  return ['navigate', 'back', 'wait'].includes(operation.action)
     ? BROWSER_NAVIGATION_BUDGET_MS
     : BROWSER_OPERATION_BUDGET_MS;
 }
@@ -161,7 +170,7 @@ export function createBrowserResponder(params: {
       if (settled.status === 'failed') {
         result = settled;
       } else {
-        const { artifact, truncated } = settled.value;
+        const { artifact, truncated, snapshot, console: consoleLines } = settled.value;
         let claim: BrowserArtifactClaim | null = null;
         if (artifact !== null) {
           written = browserArtifactPath(params.localArtifactRoot, id, artifact.kind);
@@ -173,8 +182,8 @@ export function createBrowserResponder(params: {
           page_data: {
             url: settled.url,
             title: settled.title,
-            snapshot: null,
-            console: null,
+            snapshot,
+            console: consoleLines,
             popups,
             blocked,
           },

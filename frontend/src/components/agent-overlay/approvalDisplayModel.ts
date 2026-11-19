@@ -188,12 +188,27 @@ function readOutsideWorkspace(summary: Record<string, unknown>): ApprovalOutside
     : null;
 }
 
+// The display name of the user's own browser a browser approval acts in; null for the
+// app's own page and for every other approval.
+function readUsersBrowser(summary: Record<string, unknown>): string | null {
+  const summaryKind = readStringValue(summary, 'summary_kind');
+  return summaryKind === 'user_browser_read' || summaryKind === 'browser_write'
+    ? readStringValue(summary, 'browser')
+    : null;
+}
+
 export function buildApprovalDisplay(
   approvalPanel: ActionApprovalBlocker,
   t: ApprovalDisplayTranslator
 ): ApprovalDisplay {
   const toolDisplay = buildToolApprovalDisplay(approvalPanel, t);
-  const reason = readStringValue(approvalPanel.commandSummary, 'reason');
+  // In the user's own browser the run acts signed in as the user. Pantaray's line
+  // saying so must stay in view, so the model's reason does not replace it and is
+  // shown as a row instead.
+  const reason =
+    readUsersBrowser(approvalPanel.commandSummary) === null
+      ? readStringValue(approvalPanel.commandSummary, 'reason')
+      : null;
   const runsInBackground = approvalPanel.commandSummary.run_in_background === true;
   if (approvalPanel.commandSummary.run_outside_sandbox === true) {
     return {
@@ -341,6 +356,33 @@ function buildToolApprovalDisplay(
         },
       ],
       argumentFields: readIntegrationArguments(summary, t),
+    };
+  }
+
+  const usersBrowser = readUsersBrowser(summary);
+  // A read opens the host in the run's tab of the user's browser; a write lets that
+  // tab send data to the host. Both act as the user from their signed-in accounts.
+  if (usersBrowser !== null) {
+    const isRead = summaryKind === 'user_browser_read';
+    const pageHost = readStringValue(summary, 'page_host');
+    const why = readStringValue(summary, 'reason');
+    return {
+      operationKey: isRead
+        ? 'overlay.approvalRequired.operation.userBrowserRead'
+        : 'overlay.approvalRequired.operation.userBrowserWrite',
+      operationVars: { browser: usersBrowser },
+      usesLoginEnvironment: false,
+      primaryLabelKey: isRead
+        ? 'overlay.approvalRequired.site'
+        : 'overlay.approvalRequired.sendsTo',
+      primaryValue: readStringValue(summary, 'host') ?? t('overlay.approvalRequired.unavailable'),
+      details: [
+        ...(pageHost
+          ? [{ labelKey: 'overlay.approvalRequired.openPage' as MessageKey, value: pageHost }]
+          : []),
+        ...(why ? [{ labelKey: 'overlay.approvalRequired.why' as MessageKey, value: why }] : []),
+      ],
+      argumentFields: [],
     };
   }
 

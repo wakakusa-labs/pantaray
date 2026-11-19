@@ -13,8 +13,10 @@ from pantaray_agents.local_runtime.tooling.approval_review import (
     ApprovalReviewRequest,
     ApprovalReviewVerdict,
     DeclinedOperation,
+    PendingBrowserWrite,
     PendingCommand,
     PendingIntegrationWrite,
+    PendingUserBrowserRead,
     RequestTextNotByUser,
     UserMessage,
     build_approval_review_payload,
@@ -199,3 +201,57 @@ def test_the_review_request_has_no_place_for_tool_output() -> None:
         {"kind": "user_message", "text": "Post the summary to #general"},
         {"kind": "declined_operation", "operation": command["operation"]},
     ]
+
+
+# Catches: a user's-browser approval reviewed as one on the app's own page, which
+# hides that the site sees the user's real accounts, or page text reaching the
+# review through it.
+def test_the_review_knows_an_operation_is_in_the_users_own_browser() -> None:
+    def rendered(operation: PendingBrowserWrite | PendingUserBrowserRead) -> object:
+        request = ApprovalReviewRequest(
+            conversation=(UserMessage("Check my invoice email."),),
+            request_text_not_by_user=None,
+            operation=operation,
+            workspace_folders=(),
+        )
+        return json.loads(build_approval_review_payload(request))["operation"]
+
+    write = PendingBrowserWrite(
+        host="shop.example.com",
+        page_host="shop.example.com",
+        justification="Place the order.",
+        users_browser=None,
+    )
+
+    assert rendered(
+        PendingUserBrowserRead(
+            browser="Google Chrome",
+            host="mail.example.com",
+            justification="Read the invoice email.",
+        )
+    ) == {
+        "requires": ["users_browser_read"],
+        "browser": "Google Chrome",
+        "host": "mail.example.com",
+        "justification": "Read the invoice email.",
+    }
+    assert rendered(write) == {
+        "requires": ["browser_write"],
+        "host": "shop.example.com",
+        "page_host": "shop.example.com",
+        "justification": "Place the order.",
+    }
+    assert rendered(
+        PendingBrowserWrite(
+            host=write.host,
+            page_host=write.page_host,
+            justification=write.justification,
+            users_browser="Google Chrome",
+        )
+    ) == {
+        "requires": ["users_browser_write"],
+        "browser": "Google Chrome",
+        "host": "shop.example.com",
+        "page_host": "shop.example.com",
+        "justification": "Place the order.",
+    }

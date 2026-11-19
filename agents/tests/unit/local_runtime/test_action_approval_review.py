@@ -31,7 +31,9 @@ from pantaray_agents.local_runtime.storage.migrations import load_default_migrat
 from pantaray_agents.local_runtime.tooling.approval_review import (
     ApprovalReviewRequest,
     DeclinedOperation,
+    PendingBrowserWrite,
     PendingCommand,
+    PendingUserBrowserRead,
     RequestTextNotByUser,
     UserMessage,
     build_approval_review_payload,
@@ -314,6 +316,69 @@ def test_what_the_user_declined_in_the_action_reaches_the_review(
     assert [(at, entry.operation.command) for at, entry in declined] == [  # type: ignore[union-attr]
         ("t2", "rm -rf ~/Archive"),
         ("t1", "git push --force"),
+    ]
+
+
+# Catches: a declined user's-browser approval rebuilt from its stored summary as
+# an app-page write (or dropped), so the review allows what the user declined.
+def test_declined_browser_approvals_keep_which_browser_they_were_in(
+    tmp_path: Path,
+) -> None:
+    db_path = _action_db(tmp_path)
+    summaries = (
+        {
+            "summary_kind": "user_browser_read",
+            "browser": "Google Chrome",
+            "host": "mail.example.com",
+            "reason": "Read the invoice email.",
+        },
+        {
+            "summary_kind": "browser_write",
+            "browser": "Google Chrome",
+            "host": "shop.example.com",
+            "page_host": "shop.example.com",
+            "reason": "Place the order.",
+        },
+        {
+            "summary_kind": "browser_write",
+            "host": "api.example.com",
+            "page_host": None,
+            "reason": "Send the test form.",
+        },
+    )
+    with sqlite3.connect(db_path) as connection:
+        for index, summary in enumerate(summaries):
+            connection.execute(
+                "INSERT INTO approval_sessions(approval_session_id, user_id, "
+                "action_id, tool_request_id, tool_id, intent_class, approval_source, "
+                "status, approved_capabilities_json, command_summary_json, "
+                "requested_at, decided_at, created_at) VALUES (?, 'user-1', "
+                "'action-1', ?, 'browser', 'read_only', 'prompt', 'denied', '{}', "
+                "?, 't0', ?, 't0')",
+                (f"s{index}", f"r{index}", json.dumps(summary), f"t{index}"),
+            )
+        declined = declined_operations(
+            connection, user_id="user-1", action_id="action-1"
+        )
+
+    assert [entry.operation for _at, entry in declined] == [
+        PendingBrowserWrite(
+            host="api.example.com",
+            page_host=None,
+            justification="Send the test form.",
+            users_browser=None,
+        ),
+        PendingBrowserWrite(
+            host="shop.example.com",
+            page_host="shop.example.com",
+            justification="Place the order.",
+            users_browser="Google Chrome",
+        ),
+        PendingUserBrowserRead(
+            browser="Google Chrome",
+            host="mail.example.com",
+            justification="Read the invoice email.",
+        ),
     ]
 
 

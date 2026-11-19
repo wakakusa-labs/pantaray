@@ -27,7 +27,14 @@ system_instruction: |
     (changes something in a connected service through the user's account),
     browser_write (lets pages in the assistant's own browser send data to host,
     such as form posts, for the rest of this work; page_host is the site the
-    assistant opened there, null for a local file or no page).
+    assistant opened there, null for a local file or no page),
+    users_browser_read (opens host in a tab of the user's own browser, named in
+    browser, signed in to the user's real accounts; the assistant can read
+    whatever those accounts show on that site for the rest of this work),
+    users_browser_write (lets that tab send data to host as the user, from the
+    user's real signed-in account, for the rest of this work; page_host is as in
+    browser_write; purchases, payments, sent messages, posts and account changes
+    happen as the user and may not be undoable).
     run_in_background true means the command keeps running after it starts,
     until the work ends or it is stopped.
   - workspace_folders: the folders the user registered for this work.

@@ -491,32 +491,16 @@ test('no list box or picker of a browser session page reaches the display', asyn
 
     await test.step('no key on a focused list box, date field or suggestion field opens it', async () => {
       const { shiftTab, space, enter, down, altDown, f4, a } = KEYS;
+      const evaluate = (expression: string) => run(app, { session, url: null, expression });
       // Shift+Tab from the color field reaches the list box, the first field.
-      await run(app, {
-        session,
-        url: null,
-        expression: "document.getElementById('color').focus()",
-      });
+      await evaluate("document.getElementById('color').focus()");
       await opensNothing({ keys: [shiftTab] });
-      const onList = await run(app, {
-        session,
-        url: null,
-        expression: 'document.activeElement.id',
-      });
-      expect(onList.value).toBe('list');
+      expect((await evaluate('document.activeElement.id')).value).toBe('list');
       await opensNothing({ keys: [space, enter, down, altDown, f4] });
-      const focused = await run(app, {
-        session,
-        url: null,
-        expression: "document.getElementById('date').focus(); document.activeElement.id",
-      });
-      expect(focused.value).toBe('date');
+      await evaluate("document.getElementById('date').focus()");
+      expect((await evaluate('document.activeElement.id')).value).toBe('date');
       await opensNothing({ keys: [space, enter, altDown, f4] });
-      await run(app, {
-        session,
-        url: null,
-        expression: "document.getElementById('suggest').focus()",
-      });
+      await evaluate("document.getElementById('suggest').focus()");
       await opensNothing({ keys: [a, down] });
     });
 

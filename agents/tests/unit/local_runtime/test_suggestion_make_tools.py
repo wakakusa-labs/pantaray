@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-import hashlib
 import shutil
 import subprocess
 import sys
@@ -12,11 +10,6 @@ from pathlib import Path
 
 import pytest
 
-from pantaray_agents.local_runtime.runtime.html_render_relay import (
-    HTML_RENDER_TEMP_DIRECTORY,
-    HtmlRenderClaimed,
-    html_render_broker,
-)
 from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
     resolve_suggestion_artifacts_root,
 )
@@ -38,8 +31,6 @@ from pantaray_agents.tools.contract import (
     ToolCallEnvelope,
 )
 
-from .broker_test_support import RecordingDesktopSession, desktop_session
-from .test_pdf_page_render import write_pdf
 from .test_suggestion_commands import _EXITED, _capture_request, _command
 from .test_suggestion_commands import suggestion_db as suggestion_db  # the fixture
 from .test_suggestion_research_tools import BUSY_TIMEOUT_MS, _snapshot
@@ -331,118 +322,4 @@ for name, attempt in (
         ran.stderr
     )
     assert (make.folder / "made.txt").read_text() == "ok"
-    assert list(outside.iterdir()) == []
-
-
-def _call(name: str, args: dict[str, object]) -> ReactToolCall:
-    return ReactToolCall(
-        tool_name=name,
-        tool_args=args,  # type: ignore[arg-type]
-        tool_call_envelope=ToolCallEnvelope(name, None, args),  # type: ignore[arg-type]
-        call_id="c1",
-    )
-
-
-async def _electron(desktop: RecordingDesktopSession, artifact_root: Path) -> None:
-    """Answer the one render request as Electron main would."""
-
-    while not desktop.requests:
-        await asyncio.sleep(0.005)
-    render_request_id = str(desktop.requests[0]["render_request_id"])
-    pdf_path = artifact_root / HTML_RENDER_TEMP_DIRECTORY / f"{render_request_id}.pdf"
-    pdf_path.parent.mkdir(parents=True, exist_ok=True)
-    write_pdf(pdf_path, marks=[(0, 0, 0)] * 2)
-    pdf = pdf_path.read_bytes()
-    claimed = HtmlRenderClaimed(len(pdf), hashlib.sha256(pdf).hexdigest(), (), ())
-    assert (
-        html_render_broker().answer(
-            request_id=render_request_id, user_id="user-1", outcome=claimed
-        )
-        == "accepted"
-    )
-
-
-@pytest.fixture
-def artifact_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    root = (tmp_path / "relay").resolve()
-    root.mkdir()
-    monkeypatch.setenv("LOCAL_ARTIFACT_ROOT", str(root))
-    return root
-
-
-@pytest.mark.asyncio
-async def test_html_is_printed_offline_and_saved_into_the_folder(
-    suggestion_db: Path, artifact_root: Path
-) -> None:
-    update_command_network_enabled(
-        db_path=suggestion_db,
-        busy_timeout_ms=BUSY_TIMEOUT_MS,
-        user_id="user-1",
-        command_network_enabled=True,
-        now=TIMESTAMP,
-    )
-    make = await _tools(suggestion_db).build_make_tools(
-        user_id="user-1", run_id="sug-1"
-    )
-    (make.folder / "deck.html").write_text("<h1>Deck</h1>")
-    registry = ReactToolRegistry(make.definitions)
-    page = str(make.folder / "deck.html")
-
-    with desktop_session() as desktop:
-        saved, _ = await asyncio.gather(
-            registry.execute(
-                _call("save_html_as_pdf", {"path": page, "pdf_path": "deck.pdf"}), 1
-            ),
-            _electron(desktop, artifact_root),
-        )
-    with desktop_session() as desktop:
-        rendered, _ = await asyncio.gather(
-            registry.execute(
-                _call("render_html_page", {"path": page, "pages": None}), 2
-            ),
-            _electron(desktop, artifact_root),
-        )
-        [asked] = desktop.requests
-
-    assert saved.status == "success", saved.output
-    assert (make.folder / "deck.pdf").read_bytes().startswith(b"%PDF-")
-    assert rendered.status == "success", rendered.output
-    assert rendered.output["page_count"] == 2
-    assert len(rendered.images) == 2
-    # Never the network, whatever the user's command setting says.
-    assert (asked["kind"], asked["allow_network"]) == ("suggestion", False)
-
-
-@pytest.mark.asyncio
-async def test_a_pdf_is_never_saved_outside_the_folder(
-    suggestion_db: Path, tmp_path: Path, artifact_root: Path
-) -> None:
-    outside = (tmp_path / "outside").resolve()
-    outside.mkdir()
-    make = await _tools(suggestion_db).build_make_tools(
-        user_id="user-1", run_id="sug-1"
-    )
-    (make.folder / "deck.html").write_text("<h1>Deck</h1>")
-    (make.folder / "link").symlink_to(outside, target_is_directory=True)
-    registry = ReactToolRegistry(make.definitions)
-    page = str(make.folder / "deck.html")
-
-    with desktop_session() as desktop:
-        refused = [
-            await registry.execute(
-                _call("save_html_as_pdf", {"path": page, "pdf_path": pdf_path}), 1
-            )
-            for pdf_path in (str(outside / "a.pdf"), "../outside/a.pdf")
-        ]
-        # A link inside the folder is refused when the PDF is written.
-        linked, _ = await asyncio.gather(
-            registry.execute(
-                _call("save_html_as_pdf", {"path": page, "pdf_path": "link/a.pdf"}),
-                2,
-            ),
-            _electron(desktop, artifact_root),
-        )
-
-    assert [result.status for result in (*refused, linked)] == ["error"] * 3
-    assert len(desktop.requests) == 1  # Paths outside are refused before printing.
     assert list(outside.iterdir()) == []

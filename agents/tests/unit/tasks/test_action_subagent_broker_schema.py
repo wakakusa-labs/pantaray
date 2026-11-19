@@ -10,6 +10,9 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_patch_read_gate impo
 from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
     ApplyPatchUpdateChange,
 )
+from pantaray_agents.local_runtime.tooling.brokering.browser_protocol import (
+    BrowserToolOutput,
+)
 from pantaray_agents.local_runtime.tooling.tool_result_storage import (
     release_stored_tool_result,
     store_tool_result,
@@ -84,6 +87,36 @@ def test_child_tool_accepts_its_result_with_long_texts_moved_out(
     broken = dict(moved)
     broken["stdout"] = {**cast(dict[str, JSONValue], moved["stdout"]), "extra": 1}
     assert validate_json_value(schema=schema, value=broken) is not None
+
+
+def test_child_browser_accepts_a_large_page_stored_whole(tmp_path: Path) -> None:
+    # Many short console lines move no text out, so storage keeps the untrusted
+    # wrapper and puts the reference of the whole result in its data.
+    output = BrowserToolOutput.model_validate(
+        {
+            "status": "ok",
+            "action": "console",
+            "truncated": None,
+            "notes": [],
+            "network": [{"host": "localhost", "port": 5173}],
+            "untrusted": True,
+            "data": {
+                "url": "http://localhost:5173/",
+                "title": "App",
+                "snapshot": None,
+                "console": [{"level": "log", "text": "x" * 400}] * 60,
+                "popups": [],
+                "blocked": [],
+            },
+        }
+    ).model_dump(mode="json")
+    stored = _stored(tmp_path, cast(JSONValue, output))
+    assert isinstance(stored, dict)
+    assert cast(dict[str, JSONValue], stored["data"])["storage"] == "action_file"
+
+    schema = cast(Any, _response_schema(tmp_path, "browser"))
+
+    assert validate_json_value(schema=schema, value=stored) is None
 
 
 def test_child_patch_accepts_target_windows_with_their_text_moved_out(

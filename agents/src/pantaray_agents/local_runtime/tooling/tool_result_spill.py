@@ -390,9 +390,32 @@ SPILLED_TEXT_SCHEMA: dict[str, JSONValue] = {
 }
 
 
+# What storage puts in place of a result stored whole: at the top, or as the
+# ``data`` of a result marked untrusted, whose own fields stay beside it.
+STORED_RESULT_SCHEMA: dict[str, JSONValue] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [*sorted(TOOL_RESULT_JSON_METADATA_KEYS)],
+    "properties": {
+        "storage": {"type": "string", "enum": [ACTION_FILE_STORAGE]},
+        "path": {"type": "string", "minLength": 1},
+        "media_type": {"type": "string", "enum": ["application/json"]},
+        "byte_size": {"type": "integer", "minimum": 0},
+        "character_count": {"type": "integer", "minimum": 0},
+        "line_count": {"type": "integer", "minimum": 1},
+        "preview": {"type": "string"},
+        "retry_hint": {"type": "string"},
+        TOOL_RESULT_STATUS_KEY: {"type": "string"},
+        TOOL_RESULT_NETWORK_KEY: {"type": "array"},
+    },
+}
+
+
 def accepting_spilled_texts(schema: JSONValue) -> JSONValue:
     """``schema`` with each text value also allowed to be a moved-text reference,
-    which storage puts in place of a long text when the result is too large."""
+    which storage puts in place of a long text when the result is too large, and
+    the ``data`` of a result marked untrusted also allowed to be the reference of
+    the whole result stored."""
 
     if not isinstance(schema, dict):
         return schema
@@ -417,4 +440,15 @@ def accepting_spilled_texts(schema: JSONValue) -> JSONValue:
         isinstance(schema_type, list) and "string" in schema_type
     ):
         return {"anyOf": [adjusted, dict(SPILLED_TEXT_SCHEMA)]}
+    properties = adjusted.get("properties")
+    if (
+        isinstance(properties, dict)
+        and isinstance(untrusted := properties.get("untrusted"), dict)
+        and untrusted.get("const") is True
+        and "data" in properties
+    ):
+        stored: dict[str, JSONValue] = {
+            "anyOf": [properties["data"], dict(STORED_RESULT_SCHEMA)]
+        }
+        adjusted["properties"] = {**properties, "data": stored}
     return adjusted

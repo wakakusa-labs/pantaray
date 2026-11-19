@@ -63,6 +63,7 @@ from pantaray_agents.local_runtime.tooling.repository.approval_sessions import (
     load_approval_session_by_request,
 )
 from pantaray_agents.local_runtime.tooling.tool_result_spill import (
+    STORED_RESULT_SCHEMA,
     accepting_spilled_texts,
 )
 from pantaray_agents.local_runtime.tooling.tool_result_storage import (
@@ -119,30 +120,6 @@ APPROVAL_DENIED_MESSAGE = (
     "The requested tool call was denied by the user. "
     "Treat this tool call as skipped and continue."
 )
-_ACTION_FILE_JSON_RESULT_SCHEMA: JsonSchema = {
-    "type": "object",
-    "additionalProperties": False,
-    "required": [
-        "storage",
-        "path",
-        "media_type",
-        "byte_size",
-        "character_count",
-        "line_count",
-    ],
-    "properties": {
-        "storage": {"type": "string", "enum": ["action_file"]},
-        "path": {"type": "string", "minLength": 1},
-        "media_type": {"type": "string", "enum": ["application/json"]},
-        "byte_size": {"type": "integer", "minimum": 0},
-        "character_count": {"type": "integer", "minimum": 0},
-        "line_count": {"type": "integer", "minimum": 1},
-        "preview": {"type": "string"},
-        "retry_hint": {"type": "string"},
-        "status": {"type": "string"},
-        "network": {"type": "array"},
-    },
-}
 _APPROVAL_DENIED_RESULT_SCHEMA: JsonSchema = {
     "type": "object",
     "additionalProperties": False,
@@ -500,7 +477,7 @@ def _child_response_schema(definition: ToolDefinition) -> JsonSchema:
         success_schema={
             "oneOf": [
                 output_schema,
-                dict(_ACTION_FILE_JSON_RESULT_SCHEMA),
+                dict(STORED_RESULT_SCHEMA),
                 dict(_APPROVAL_DENIED_RESULT_SCHEMA),
             ]
         }

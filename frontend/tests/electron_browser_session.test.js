@@ -6,6 +6,7 @@ const path = require('node:path');
 const Module = require('node:module');
 const { pathToFileURL } = require('node:url');
 const { mock, test } = require('node:test');
+const vm = require('node:vm');
 
 const SESSION_MODULE = require.resolve('../electron/dist/browser/browserSession.js');
 
@@ -26,10 +27,15 @@ function fakeElectron({ load = async () => {} } = {}) {
         handle: (_scheme, handler) => (ses.fileHandler = handler),
         unhandle: (scheme) => (ses.unhandled = scheme),
       },
-      webRequest: { onBeforeRequest: (listener) => (ses.beforeRequest = listener) },
+      webRequest: {
+        onBeforeRequest: (listener) => (ses.beforeRequest = listener),
+        onHeadersReceived: (listener) => (ses.headersReceived = listener),
+      },
       setPermissionRequestHandler: (handler) => (ses.permissionRequest = handler),
       setPermissionCheckHandler: (handler) => (ses.permissionCheck = handler),
       setDevicePermissionHandler: (handler) => (ses.devicePermission = handler),
+      preloads: [],
+      registerPreloadScript: (script) => ses.preloads.push(script),
       setProxy: async (config) => ses.proxies.push(config),
       closeAllConnections: async () => (ses.closedConnections += 1),
       clearStorageData: async () => ses.cleared.push('storage'),
@@ -49,7 +55,8 @@ function fakeElectron({ load = async () => {} } = {}) {
       Object.assign(debuggerApi, {
         commands: [],
         attach: (version) => (debuggerApi.attached = { version, afterUrl: url }),
-        sendCommand: async (method, params) => debuggerApi.commands.push({ method, params }),
+        sendCommand: async (method, params, sessionId) =>
+          debuggerApi.commands.push({ method, params, sessionId }),
       });
       const ses = fromPartition(options.webPreferences.partition);
       let url = '';
@@ -156,7 +163,8 @@ function gate() {
 const turn = () => new Promise((resolve) => setImmediate(resolve));
 
 // Catches: sessions sharing cookies or storage, a partition persisted to disk, a page window
-// shown or focused on the user's screen, and captures at the display's device scale.
+// shown or focused on the user's screen, captures at the display's device scale, and a frame
+// without the guard preload or with Node or the preload's world reachable from the page.
 test('each session has its own in-memory partition and a window that is never shown', async () => {
   const h = harness();
   await navigate(h, 'https://a.example/', { session: 'one' });
@@ -169,6 +177,15 @@ test('each session has its own in-memory partition and a window that is never sh
   for (const window of h.windows) {
     assert.equal(window.options.show, false);
     assert.equal(window.options.focusable, false);
+    assert.equal(window.options.webPreferences.sandbox, true);
+    assert.equal(window.options.webPreferences.contextIsolation, true);
+    assert.equal(window.options.webPreferences.nodeIntegration, false);
+    // The guard preload runs in every frame of every document.
+    assert.equal(window.options.webPreferences.nodeIntegrationInSubFrames, true);
+    const ses = h.partitions.get(window.options.webPreferences.partition);
+    assert.equal(ses.preloads.length, 1);
+    assert.equal(ses.preloads[0].type, 'frame');
+    assert.ok(fs.existsSync(ses.preloads[0].filePath), ses.preloads[0].filePath);
     assert.equal(window.shown, false);
     // A command sent before the first navigation may never settle.
     assert.deepEqual(window.webContents.debugger.attached, {
@@ -285,23 +302,34 @@ test('local files are served only inside the policy read scope', async () => {
   ]);
 });
 
-// Catches: a dialog left open, a popup opened (or sent to the user's browser), a download
-// saved, or a permission granted, and any of them not reported.
-test('dialogs are dismissed and popups, downloads and permissions refused, with notes', async () => {
+// Catches: a dialog, print, file chooser or worker the page asked for left unreported, a popup
+// opened (or sent to the user's browser), a download saved, or a permission granted.
+test('refused dialogs, prints, choosers, workers, popups and downloads are reported', async () => {
   const h = harness({
     load: async (_url, { ses, contents }) => {
-      contents.debugger.emit('message', {}, 'Page.javascriptDialogOpening', {});
+      const emit = (method, params, sessionId) =>
+        contents.debugger.emit('message', {}, method, params, sessionId);
+      emit('Page.javascriptDialogOpening', {}, 'frame-1');
+      emit('Log.entryAdded', { entry: { source: 'security', text: "Ignored call to 'print()'." } });
+      emit('Page.fileChooserOpened', {});
+      const csp = { violatedDirective: 'worker-src', blockedURL: 'https://a.example/w.js' };
+      emit('Audits.issueAdded', { issue: { details: { contentSecurityPolicyIssueDetails: csp } } });
       contents.openHandler({ url: 'https://ads.example/' });
       ses.emit('will-download', { preventDefault: () => (ses.downloadPrevented = true) });
     },
   });
   const settled = await navigate(h, 'https://a.example/');
-  assert.deepEqual(settled.report.notes, ['dialog_dismissed', 'popup_refused', 'download_refused']);
-  assert.deepEqual(settled.report.popups, ['https://ads.example/']);
+  assert.deepEqual(settled.report, {
+    notes: ['dialog_dismissed', 'popup_refused', 'download_refused'],
+    popups: ['https://ads.example/'],
+    blocked: [{ reason: 'not_allowed', url: 'https://a.example/w.js' }],
+    network: [],
+  });
   const contents = h.windows[0].webContents;
   assert.ok(
     contents.debugger.commands.some(
-      ({ method, params }) => method === 'Page.handleJavaScriptDialog' && params.accept === false
+      ({ method, params, sessionId }) =>
+        method === 'Page.handleJavaScriptDialog' && !params.accept && sessionId === 'frame-1'
     )
   );
   assert.deepEqual(contents.openHandler({ url: 'https://x.example/' }), { action: 'deny' });
@@ -311,6 +339,85 @@ test('dialogs are dismissed and popups, downloads and permissions refused, with 
   assert.equal(granted, false);
   assert.equal(h.ses().permissionCheck(), false);
   assert.equal(h.ses().devicePermission(), false);
+});
+
+// Catches: a document that may print, open dialogs, start a worker (whose sockets bypass
+// webRequest) or enter picture-in-picture, whether it came over the network or from a file, a
+// page's own policy dropped, or a page policy placed after ours where it would loosen it.
+test('every document is sandboxed and refused workers and picture-in-picture', async () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-browser-')));
+  fs.writeFileSync(path.join(root, 'deck.html'), '<p>deck</p>');
+  let file = null;
+  const h = harness({
+    load: async (_url, { ses }) => {
+      file = await ses.fileHandler({ url: pathToFileURL(path.join(root, 'deck.html')).href });
+    },
+  });
+  await navigate(h, 'https://a.example/', { policy: { file_roots: [root] } });
+  const policies = file.headers.get('Content-Security-Policy');
+  assert.match(policies, /^sandbox allow-scripts allow-same-origin, sandbox .*worker-src 'none'$/);
+  assert.doesNotMatch(policies, /allow-modals/);
+  assert.equal(file.headers.get('Permissions-Policy'), 'picture-in-picture=()');
+  let headers = null;
+  h.ses().headersReceived(
+    {
+      responseHeaders: {
+        'content-security-policy': ["default-src 'self'"],
+        'permissions-policy': ['picture-in-picture=*'],
+      },
+    },
+    (response) => (headers = response.responseHeaders)
+  );
+  assert.deepEqual(Object.keys(headers), ['content-security-policy', 'permissions-policy']);
+  assert.equal(headers['content-security-policy'][0], "default-src 'self'");
+  assert.match(headers['content-security-policy'][1], /^sandbox .*worker-src 'none'$/);
+  // A repeated key in the policy dictionary takes its last value.
+  assert.deepEqual(headers['permissions-policy'], [
+    'picture-in-picture=*',
+    'picture-in-picture=()',
+  ]);
+});
+
+// Catches: a guarded API left in an about:blank document (which gets no preload), an API the
+// removal misses or one it takes too many, and an out-of-process frame left paused forever.
+test('every frame target is guarded before it runs', async () => {
+  const h = harness();
+  await navigate(h, 'https://a.example/');
+  const cdp = h.windows[0].webContents.debugger;
+  const guard = (sessionId) =>
+    cdp.commands.filter((command) => command.sessionId === sessionId).map(({ method }) => method);
+  const guarded = [
+    'Page.enable',
+    'Log.enable',
+    'Audits.enable',
+    'Page.addScriptToEvaluateOnNewDocument',
+    'Page.setInterceptFileChooserDialog',
+    'Target.setAutoAttach',
+  ];
+  assert.deepEqual(guard(undefined).slice(0, guarded.length), guarded);
+  const script = cdp.commands.find(
+    ({ method }) => method === 'Page.addScriptToEvaluateOnNewDocument'
+  ).params.source;
+  // The script the preload also runs, on a page world holding every guarded API.
+  const world = vm.createContext({
+    RTCPeerConnection: 1,
+    webkitRTCPeerConnection: 1,
+    WebTransport: 1,
+    showOpenFilePicker: 1,
+    showSaveFilePicker: 1,
+    showDirectoryPicker: 1,
+    EyeDropper: 1,
+    Navigator: { prototype: { bluetooth: 1, userAgent: 1 } },
+  });
+  vm.runInContext(script, world);
+  assert.deepEqual(Object.keys(world), ['Navigator']);
+  assert.deepEqual(Object.keys(world.Navigator.prototype), ['userAgent']);
+  cdp.emit('message', {}, 'Target.attachedToTarget', {
+    sessionId: 'frame-1',
+    targetInfo: { type: 'iframe' },
+  });
+  await turn();
+  assert.deepEqual(guard('frame-1'), [...guarded, 'Runtime.runIfWaitingForDebugger']);
 });
 
 // Catches: two operations of one session interleaving on its page, and one session's slow

@@ -25,7 +25,8 @@ export function pageWindowOptions(partition: string): BrowserWindowConstructorOp
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
-      nodeIntegrationInSubFrames: false,
+      // Runs the session's frame preload in every frame; Node stays off in the sandbox.
+      nodeIntegrationInSubFrames: true,
       webviewTag: false,
       devTools: false,
       disableDialogs: true,

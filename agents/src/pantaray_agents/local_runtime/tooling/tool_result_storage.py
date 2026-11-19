@@ -7,7 +7,7 @@ import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal, NotRequired, TypedDict, cast
+from typing import Literal, NotRequired, TypedDict, TypeGuard, cast
 from urllib.parse import quote
 
 from pantaray_agents.schema.agent.base import JSONValue
@@ -19,7 +19,12 @@ from pantaray_agents.schema.tool_result import (
 from pantaray_agents.tools.files.text_lines import count_text_lines
 
 from .models import ToolOutputStorageKind
-from .tool_result_spill import outline_previewer, spill_long_texts
+from .tool_result_spill import (
+    ACTION_FILE_STORAGE,
+    SPILLED_TEXT_MEDIA_TYPE,
+    outline_previewer,
+    spill_long_texts,
+)
 
 TOOL_RESULT_JSON_MEDIA_TYPE: Literal["application/json"] = "application/json"
 TOOL_RESULT_BINARY_MEDIA_TYPE: Literal["application/octet-stream"] = (
@@ -138,25 +143,37 @@ def store_tool_result(
         "character_count": len(history_text),
         "line_count": count_text_lines(history_text),
     }
-    # A result's status says how the call ended, not what it returned. Keeping it beside
-    # the reference lets a reader tell, say, a patch that applied nothing from one that
-    # did without opening the file.
-    if isinstance(output, dict) and isinstance(status := output.get("status"), str):
-        reference["status"] = status
-    # Where a call connected is a record, not content: the row names the hosts
-    # of a large result too. Design limit: kept whole, so a command reaching
-    # thousands of hosts overruns the inline limit; cap it if such results occur.
-    if isinstance(output, dict) and isinstance(network := output.get("network"), list):
-        reference["network"] = network
+    if _is_untrusted(output):
+        # What a tool took from outside is all in data, marked untrusted; the
+        # preview shows it, so it goes there too, and the tool's own fields stay
+        # beside data as they were. Design limit: they are kept whole, so they
+        # must stay well under the inline limit, as the tools putting them there
+        # keep them.
+        untrusted = output
+
+        def placed(metadata: ActionFileToolResultMetadata) -> JSONValue:
+            return {**untrusted, "data": cast(dict[str, JSONValue], metadata)}
+
+    else:
+        # A result's status says how the call ended, not what it returned. Keeping it
+        # beside the reference lets a reader tell, say, a patch that applied nothing
+        # from one that did without opening the file.
+        if isinstance(output, dict) and isinstance(status := output.get("status"), str):
+            reference["status"] = status
+        # Where a call connected is a record, not content: the row names the hosts
+        # of a large result too. Design limit: kept whole, so a command reaching
+        # thousands of hosts overruns the inline limit; cap it if such results occur.
+        if isinstance(output, dict) and isinstance(
+            network := output.get("network"), list
+        ):
+            reference["network"] = network
+
+        def placed(metadata: ActionFileToolResultMetadata) -> JSONValue:
+            return cast(dict[str, JSONValue], metadata)
 
     def with_preview(window: int) -> JSONValue:
         preview, retry_hint = previewer(window)
-        metadata: ActionFileToolResultMetadata = {
-            **reference,
-            "preview": preview,
-            "retry_hint": retry_hint,
-        }
-        return cast(dict[str, JSONValue], metadata)
+        return placed({**reference, "preview": preview, "retry_hint": retry_hint})
 
     return _stored_result(
         action_tool_results_path=action_tool_results_path,
@@ -170,6 +187,27 @@ def store_tool_result(
         ),
         payloads=((file_name, payload),),
     )
+
+
+def _is_untrusted(output: JSONValue) -> TypeGuard[dict[str, JSONValue]]:
+    """Whether a result holds what its tool took from outside, which is then all
+    in its ``data``."""
+
+    return isinstance(output, dict) and output.get("untrusted") is True
+
+
+def whole_result_reference(output: JSONValue) -> dict[str, JSONValue] | None:
+    """The reference standing in for a result stored whole, or None for one that
+    was not: the result itself, or the ``data`` of one marked untrusted."""
+
+    holder = output.get("data") if _is_untrusted(output) else output
+    if (
+        isinstance(holder, dict)
+        and holder.get("storage") == ACTION_FILE_STORAGE
+        and holder.get("media_type") != SPILLED_TEXT_MEDIA_TYPE
+    ):
+        return holder
+    return None
 
 
 def store_run_tool_result(*, spill_root: Path, output: JSONValue) -> JSONValue:
@@ -432,4 +470,5 @@ __all__ = [
     "store_run_tool_result",
     "store_tool_result",
     "validate_invocation_id",
+    "whole_result_reference",
 ]

@@ -572,6 +572,58 @@ def test_a_command_result_stored_whole_with_its_network_loads_and_recovers(
     assert result.preserved_file_count == 1
 
 
+# Catches: recovery looking for a whole-result reference only at the top level,
+# so startup stops on an untrusted result whose reference is in its data, or
+# removes that result's file as an orphan.
+def test_an_untrusted_result_stored_whole_is_kept_by_recovery(tmp_path: Path) -> None:
+    db_path = tmp_path / "runtime.db"
+    _create_reference_db(db_path)
+    root = _tool_results_root(db_path)
+    root.mkdir(parents=True)
+    output = {
+        "source": "github",
+        "account": {"account": "acct-1", "label": "Work"},
+        "untrusted": True,
+        "data": [{"title": f"Issue {index}"} for index in range(2_000)],
+    }
+    stored = store_tool_result(
+        action_tool_results_path=root, invocation_id="invocation-1", output=output
+    )
+    release_stored_tool_result(stored)
+    orphan = _write_result(root, owner="invocation-1", file_name=_ORPHAN_FILE_NAME)
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "INSERT INTO tool_invocations VALUES (?, ?, ?, ?)",
+            ("invocation-1", "user-1", "action-1", "step-1"),
+        )
+        connection.execute(
+            "INSERT INTO tool_outputs VALUES (?, ?, ?, 'action_file')",
+            ("output-1", "invocation-1", json.dumps(stored.output_json)),
+        )
+        connection.execute(
+            "INSERT INTO agent_action_steps VALUES (?, ?, ?, ?, NULL)",
+            (
+                "step-1",
+                "user-1",
+                "action-1",
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "status": "success",
+                        "output": stored.output_json,
+                        "output_storage_kind": "action_file",
+                        "output_owner_kind": "tool_invocation",
+                    }
+                ),
+            ),
+        )
+
+    result = reconcile_tool_results_for_startup(db_path=db_path, busy_timeout_ms=1_000)
+
+    assert result.preserved_file_count == 1
+    assert not orphan.exists()
+
+
 def _pending_approval_named_only_inside_json(db_path: Path) -> tuple[Path, Path]:
     """A pending approval kept whole as JSON around a summary stored as files:
     the summary's text file and the approval's JSON file."""

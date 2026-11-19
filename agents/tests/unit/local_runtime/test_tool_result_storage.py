@@ -276,6 +276,90 @@ def test_outline_says_how_many_lines_it_leaves_out(tmp_path: Path) -> None:
     release_stored_tool_result(result)
 
 
+def _issues_from_a_service(count: int) -> dict[str, object]:
+    """An integration result: what the service returned is all in data."""
+    return {
+        "source": "github",
+        "account": {"account": "acct-1", "label": "Work"},
+        "untrusted": True,
+        "data": {
+            "issues": [
+                {"title": f"Issue {index}", "url": f"https://example.com/{index}"}
+                for index in range(count)
+            ]
+        },
+    }
+
+
+# Catches: a result marked untrusted stored whole with its preview of the
+# service's text at the top level, outside data, where the model is not told to
+# treat it as data; and readers not finding the reference once it is in data.
+def test_an_untrusted_result_stored_whole_keeps_its_preview_inside_data(
+    tmp_path: Path,
+) -> None:
+    output = _issues_from_a_service(600)
+    assert len(_display_text(output)) > ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT
+
+    result = store_tool_result(
+        action_tool_results_path=tmp_path, invocation_id="issues", output=output
+    )
+    release_stored_tool_result(result)
+
+    shown = result.output_json
+    assert isinstance(shown, dict)
+    assert {key: value for key, value in shown.items() if key != "data"} == {
+        key: value for key, value in output.items() if key != "data"
+    }
+    reference = shown["data"]
+    assert isinstance(reference, dict)
+    assert reference["media_type"] == "application/json"
+    assert 'title="Issue 0"' in str(reference["preview"])
+    assert len(_display_text(shown)) <= ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT
+    assert (
+        load_action_file_result(
+            action_tool_results_path=tmp_path,
+            invocation_id="issues",
+            output=shown,
+            max_bytes=1_000_000,
+        )
+        == output
+    )
+    page = read_tool_result_text_prefix(
+        action_tool_results_path=tmp_path,
+        output_owner_id="issues",
+        output=shown,
+        storage_kind="action_file",
+        start_byte=0,
+        page_bytes=1_048_576,
+        max_read_bytes=1_048_576,
+    )
+    assert page.content == _display_text(output)
+
+
+# Catches: the untrusted rule reaching a result not marked at its top level,
+# such as an error whose details carry an untrusted detail, which would move its
+# reference away from where every reader of that result looks.
+def test_a_result_not_marked_untrusted_at_its_top_is_stored_whole_as_before(
+    tmp_path: Path,
+) -> None:
+    output = {
+        "status": "error",
+        "details": {"untrusted": True, "text": "detail"},
+        "data": _issues_from_a_service(600)["data"],
+    }
+
+    result = store_tool_result(
+        action_tool_results_path=tmp_path, invocation_id="error", output=output
+    )
+    release_stored_tool_result(result)
+
+    shown = result.output_json
+    assert isinstance(shown, dict)
+    assert shown["storage"] == "action_file"
+    assert shown["status"] == "error"
+    assert "data" not in shown
+
+
 def _page(words: int) -> str:
     return "\n".join(f"line {number}: " + "word " * words for number in range(1, 4_000))
 

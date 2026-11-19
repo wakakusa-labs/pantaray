@@ -34,6 +34,13 @@ BrowserEngineFailureCode = Literal[
     "BROWSER_ACTION_FAILED",
 ]
 
+# What a relayed operation fails with: Electron's codes, or no answer in time, or
+# an answer whose PNG or PDF does not match its claim.
+BrowserRelayFailureCode = (
+    BrowserEngineFailureCode
+    | Literal["BROWSER_RELAY_TIMED_OUT", "BROWSER_INTEGRITY_FAILED"]
+)
+
 BrowserBlockedReason = Literal[
     "outside_read_scope",
     "network_off",

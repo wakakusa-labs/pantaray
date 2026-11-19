@@ -169,7 +169,6 @@ def make_db(
     monkeypatch.setenv("LOCAL_ARTIFACT_ROOT", str(artifact_root))
     monkeypatch.setenv("LOCAL_DB_PATH", str(suggestion_db))
     monkeypatch.setenv("LOCAL_DB_BUSY_TIMEOUT_MS", str(BUSY_TIMEOUT_MS))
-    monkeypatch.setattr(relay_module, "_OWNERS", {})
     with sqlite3.connect(suggestion_db) as connection:
         connection.execute(
             """
@@ -274,10 +273,6 @@ async def test_html_is_printed_offline_in_a_session_of_its_own(make_db: Path) ->
             "action": "navigate",
             "target": {"kind": "file", "path": str(Path(page).resolve())},
         }
-        assert (navigate["process_id"], navigate["tool_request_id"]) == (
-            PROCESS_ID,
-            "sug-1:c1",
-        )
         policy = navigate["policy"]
         assert (policy["allow_network"], policy["write_hosts"]) == (False, [])  # type: ignore[index]
     assert save_sent[0][1]["session_id"] != render_sent[0][1]["session_id"]
@@ -290,35 +285,35 @@ async def test_html_is_printed_offline_in_a_session_of_its_own(make_db: Path) ->
         (
             {"navigate": _failed("BROWSER_NAVIGATION_FAILED")},
             ("navigate",),
-            "HTML_LOAD_FAILED",
+            "BROWSER_NAVIGATION_FAILED",
             True,
         ),
         (
             {"navigate": _failed("BROWSER_TIMED_OUT")},
             ("navigate",),
-            "HTML_RENDER_TIMED_OUT",
+            "BROWSER_TIMED_OUT",
             True,
         ),
         (
             {"print": _failed("BROWSER_ACTION_FAILED")},
             ("navigate", "print"),
-            "HTML_PRINT_FAILED",
+            "BROWSER_ACTION_FAILED",
             True,
         ),
         (
             {"print": _failed("BROWSER_RENDERER_CRASHED")},
             ("navigate", "print"),
-            "HTML_RENDERER_CRASHED",
+            "BROWSER_RENDERER_CRASHED",
             # Electron discarded the crashed session; there is nothing to close.
             False,
         ),
         (
             {"print": _MISMATCH},
             ("navigate", "print"),
-            "HTML_RENDER_INTEGRITY_FAILED",
+            "BROWSER_INTEGRITY_FAILED",
             True,
         ),
-        ({"navigate": None}, ("navigate",), "HTML_RENDER_RELAY_TIMED_OUT", True),
+        ({"navigate": None}, ("navigate",), "BROWSER_RELAY_TIMED_OUT", True),
     ],
 )
 async def test_a_failed_print_keeps_its_error_and_closes_the_session(

@@ -64,9 +64,6 @@ function operation(op, { session = 'session-1', policy = {} } = {}) {
   return {
     operation_request_id: `op-${nextOperation}`,
     session_id: session,
-    action_id: 'action-1',
-    process_id: 'process-1',
-    tool_request_id: 'tool-1',
     operation: op,
     policy: {
       allow_network: true,

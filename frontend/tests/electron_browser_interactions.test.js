@@ -95,9 +95,6 @@ function harness() {
     await respond({
       operation_request_id: `op-${next}`,
       session_id: 'session-1',
-      action_id: 'action-1',
-      process_id: 'process-1',
-      tool_request_id: 'tool-1',
       operation,
       policy: {
         allow_network: true,

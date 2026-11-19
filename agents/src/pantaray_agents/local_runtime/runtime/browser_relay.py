@@ -4,8 +4,8 @@ A run (its ``actor_process_id``) owns at most one session, whose id the runtime
 mints; Electron refuses every operation naming an id it was told to close. The
 registry is in memory under a lock, since callers run on several threads.
 
-An operation is one-shot like an HTML render, answered with
-``POST /local/action-browser``. A PNG or PDF at
+Each operation is one request and one answer (``OneShotRequests``), which
+Electron posts to ``POST /local/action-browser``. A PNG or PDF at
 ``{artifact_root}/.tmp/browser/{operation_request_id}.{png|pdf}`` is checked
 against the claimed size and sha256 and removed on every path.
 
@@ -45,6 +45,7 @@ from .browser_contract import (
     BrowserEngineFailureCode,
     BrowserOperationFailed,
     BrowserOperationSucceeded,
+    BrowserRelayFailureCode,
 )
 from .deliverable_sessions import deliver_desktop_request
 from .one_shot_requests import OneShotRequests
@@ -62,11 +63,6 @@ BROWSER_RELAY_TIMEOUT_SECONDS = _ELECTRON_LONGEST_OPERATION_BUDGET_SECONDS + 10.
 # A close is one small frame: still pending after this, the socket is stuck, and
 # the sweep on the shared worker must not wait on it.
 BROWSER_CLOSE_SEND_TIMEOUT_SECONDS = 5.0
-
-BrowserRelayFailureCode = (
-    BrowserEngineFailureCode
-    | Literal["BROWSER_RELAY_TIMED_OUT", "BROWSER_INTEGRITY_FAILED"]
-)
 
 type BrowserAnswer = BrowserOperationSucceeded | BrowserOperationFailed
 
@@ -134,9 +130,7 @@ async def request_browser_operation(
     db_path: Path,
     busy_timeout_ms: int,
     user_id: str,
-    action_id: str,
     owner_process_id: str,
-    tool_request_id: str,
     operation: BrowserOperation,
     policy: BrowserPagePolicy,
 ) -> BrowserOperationOutcome:
@@ -164,9 +158,6 @@ async def request_browser_operation(
             BrowserOperationRequestedMessage(
                 operation_request_id=operation_request_id,
                 session_id=session.session_id,
-                action_id=action_id,
-                process_id=owner_process_id,
-                tool_request_id=tool_request_id,
                 operation=operation,
                 policy=policy,
             ),
@@ -384,7 +375,6 @@ __all__ = [
     "BrowserOperationDone",
     "BrowserOperationOutcome",
     "BrowserRelayFailed",
-    "BrowserRelayFailureCode",
     "browser_operation_broker",
     "close_browser_session",
     "end_browser_sessions",

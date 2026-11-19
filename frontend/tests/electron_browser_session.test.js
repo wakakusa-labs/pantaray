@@ -130,9 +130,6 @@ function request(action, { session = 'session-1', policy = {} } = {}) {
   return {
     operation_request_id: 'op-1',
     session_id: session,
-    action_id: 'action-1',
-    process_id: 'process-1',
-    tool_request_id: 'tool-1',
     operation:
       action === 'navigate'
         ? { action, target: { kind: 'web', url: 'https://a.example/' } }

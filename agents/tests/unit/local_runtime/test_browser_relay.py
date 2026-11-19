@@ -133,9 +133,7 @@ class Runtime:
             db_path=self.db_path,
             busy_timeout_ms=1_000,
             user_id="user-1",
-            action_id="action-1",
             owner_process_id=owner,
-            tool_request_id="action-1:step-1:1",
             operation=operation,
             policy=POLICY,
         )
@@ -150,7 +148,6 @@ async def runtime(
     monkeypatch.setenv("LOCAL_ARTIFACT_ROOT", str(artifact_root))
     broker = OneShotRequests[BrowserAnswer]()
     monkeypatch.setattr(relay_module, "browser_operation_broker", lambda: broker)
-    monkeypatch.setattr(relay_module, "_OWNERS", {})
     db_path = tmp_path / "runtime.db"
     prepare_test_database(db_path, 1_000, load_default_migrations())
     insert_agent_action(db_path=db_path)
@@ -223,9 +220,6 @@ async def test_a_screenshot_is_verified_returned_and_removed(
     assert payload == {
         "operation_request_id": payload["operation_request_id"],
         "session_id": payload["session_id"],
-        "action_id": "action-1",
-        "process_id": OWNER,
-        "tool_request_id": "action-1:step-1:1",
         "operation": {"action": "screenshot", "ref": None, "full_page": None},
         "policy": POLICY.model_dump(mode="json"),
     }

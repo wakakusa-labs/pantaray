@@ -45,6 +45,9 @@ from pantaray_agents.local_runtime.runtime.process_events import (
     append_local_process_event,
     mark_local_action_job_paused,
 )
+from pantaray_agents.local_runtime.runtime.run_end import (
+    cancel_action_runtime_resources,
+)
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
 from pantaray_agents.local_runtime.tooling.repository.executions import (
@@ -55,9 +58,6 @@ from pantaray_agents.local_runtime.tooling.resources.action_session_temp_authori
 )
 from pantaray_agents.local_runtime.tooling.resources.action_session_temp_cleanup import (
     cleanup_action_session_temp,
-)
-from pantaray_agents.local_runtime.tooling.resources.cancel_cleanup import (
-    cancel_action_runtime_resources,
 )
 from pantaray_agents.orchestration.common.types import JSONValue
 from pantaray_agents.schema.action_conversation import ActionStepEventPayload

@@ -9,8 +9,8 @@ from pantaray_agents.local_runtime.runtime import browser_relay as relay_module
 from pantaray_agents.local_runtime.runtime.deliverable_sessions import (
     DesktopRequestMessage,
 )
+from pantaray_agents.local_runtime.runtime.run_end import end_run_resources
 from pantaray_agents.local_runtime.storage.migrations import load_default_migrations
-from pantaray_agents.local_runtime.tooling.resources.run_end import end_run_resources
 from pantaray_agents.schema.websocket.server_messages import (
     BrowserSessionCloseRequestedMessage,
 )

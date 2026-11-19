@@ -5,6 +5,9 @@ from pathlib import Path
 
 import pytest
 
+from pantaray_agents.local_runtime.runtime.run_end import (
+    cancel_action_runtime_resources,
+)
 from pantaray_agents.local_runtime.storage.migrations import (
     load_default_migrations,
 )
@@ -21,9 +24,6 @@ from pantaray_agents.local_runtime.tooling.models import (
 )
 from pantaray_agents.local_runtime.tooling.repository import (
     record_tool_invocation_start,
-)
-from pantaray_agents.local_runtime.tooling.resources.cancel_cleanup import (
-    cancel_action_runtime_resources,
 )
 from pantaray_agents.local_runtime.tooling.resources.resource_repository import (
     create_tool_runtime_resource,
@@ -384,7 +384,7 @@ async def test_cancel_action_runtime_resources_counts_one_affected_resource_when
         _raise_persistence_failure,
     )
 
-    result = await cancel_cleanup_module.cancel_action_runtime_resources(
+    result = await cancel_action_runtime_resources(
         db_path=db_path,
         busy_timeout_ms=1_000,
         action_id="action-1",
@@ -522,7 +522,7 @@ async def test_cancel_action_runtime_resources_uses_persistence_failure_message_
         _raise_persistence_failure,
     )
 
-    result = await cancel_cleanup_module.cancel_action_runtime_resources(
+    result = await cancel_action_runtime_resources(
         db_path=db_path,
         busy_timeout_ms=1_000,
         action_id="action-1",

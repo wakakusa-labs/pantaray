@@ -20,6 +20,7 @@ from pantaray_agents.conversation import provider_turns
 from pantaray_agents.local_runtime.runtime import (
     action_subagent_process_stop as process_stop,
 )
+from pantaray_agents.local_runtime.runtime import run_end as run_end_module
 from pantaray_agents.local_runtime.runtime.action_subagent_approval import (
     ActionSubagentApprovalDecisionError,
     apply_action_subagent_approval_decision,
@@ -75,7 +76,6 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
 from pantaray_agents.local_runtime.tooling.repository.command_network_settings import (
     update_command_network_enabled,
 )
-from pantaray_agents.local_runtime.tooling.resources import run_end as run_end_module
 from pantaray_agents.local_runtime.tooling.resources.resource_cleanup import (
     process_exists,
 )

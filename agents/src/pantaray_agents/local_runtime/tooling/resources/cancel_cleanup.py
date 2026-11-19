@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -12,11 +11,7 @@ from .cancel_cleanup_persistence import (
     persist_action_cleanup_success,
 )
 from .resource_cleanup import cleanup_runtime_resource
-from .resource_repository import (
-    list_recoverable_tool_runtime_resources_for_action,
-    list_run_owner_process_ids_for_action_session,
-)
-from .run_end import end_run_resources
+from .resource_repository import list_recoverable_tool_runtime_resources_for_action
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,46 +53,6 @@ class ActionCleanupPassResult:
             f"failed to clean up {self.failure_count} post-terminal action resources "
             f"(kinds: {kinds}; {count_summary}{abandoned_suffix})"
         )
-
-
-async def cancel_action_runtime_resources(
-    *,
-    db_path: Path,
-    busy_timeout_ms: int,
-    action_id: str,
-    execution_session_id: str,
-    run_process_id: str | None,
-) -> ActionCleanupPassResult:
-    """The cleanup at the end of an Action's run, by its own worker or a Stop.
-
-    The run ends first, with every run that started a process in the session
-    (its subagents'): their browser sessions close and their long-running
-    processes stop, the supervisor auditing how each ended and releasing what it
-    held. The run itself is named because it may have used the browser without
-    starting a process; a replayed Stop names none, since its first call ended
-    it. The pass after that reaps whatever is still registered.
-    """
-
-    resource_owner_ids = await asyncio.to_thread(
-        list_run_owner_process_ids_for_action_session,
-        db_path=db_path,
-        busy_timeout_ms=busy_timeout_ms,
-        action_id=action_id,
-        execution_session_id=execution_session_id,
-    )
-    run_ids = () if run_process_id is None else (run_process_id,)
-    await end_run_resources(
-        db_path=db_path,
-        busy_timeout_ms=busy_timeout_ms,
-        owner_process_ids=tuple(sorted({*resource_owner_ids, *run_ids})),
-    )
-    return await asyncio.to_thread(
-        cleanup_action_runtime_resources,
-        db_path=db_path,
-        busy_timeout_ms=busy_timeout_ms,
-        action_id=action_id,
-        execution_session_id=execution_session_id,
-    )
 
 
 def cleanup_action_runtime_resources(
@@ -200,6 +155,5 @@ def cleanup_action_runtime_resources(
 
 __all__ = [
     "ActionCleanupPassResult",
-    "cancel_action_runtime_resources",
     "cleanup_action_runtime_resources",
 ]

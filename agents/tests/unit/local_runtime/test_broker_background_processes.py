@@ -14,6 +14,10 @@ from pantaray_agents.agents.action_agent.runtime.stop_watch import (
     ActionStopRequested,
     ActionStopWatch,
 )
+from pantaray_agents.local_runtime.runtime.run_end import (
+    cancel_action_runtime_resources,
+    end_run_resources,
+)
 from pantaray_agents.local_runtime.tooling.brokering.broker import (
     BrokerApprovalRequiredError,
     BrokerToolOutcome,
@@ -21,17 +25,11 @@ from pantaray_agents.local_runtime.tooling.brokering.broker import (
     apply_approval_decision,
     execute_broker_tool,
 )
-from pantaray_agents.local_runtime.tooling.brokering.broker_process import (
-    stop_run_processes,
-)
 from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
     BashToolArgs,
 )
 from pantaray_agents.local_runtime.tooling.repository.command_network_settings import (
     update_command_network_enabled,
-)
-from pantaray_agents.local_runtime.tooling.resources.cancel_cleanup import (
-    cancel_action_runtime_resources,
 )
 from pantaray_agents.local_runtime.tooling.resources.resource_cleanup import (
     process_exists,
@@ -279,8 +277,9 @@ async def test_a_stop_ends_a_waiting_read_and_the_run_end_stops_the_processes(
     assert forgotten.code == "PROCESS_NOT_FOUND"
 
 
-# Catches: a run-end stop whose caller is cancelled (a Stop, a tool timeout)
-# while it waits leaving the audit row running, its end already forgotten.
+# Catches: a run end whose caller is cancelled (a Stop, a tool timeout) while
+# the process stop waits leaving the audit row running, its end already
+# forgotten.
 @needs_seatbelt
 @pytest.mark.asyncio
 async def test_a_cancelled_run_end_stop_still_audits_the_end(action: _Action) -> None:
@@ -297,7 +296,7 @@ async def test_a_cancelled_run_end_stop_still_audits_the_end(action: _Action) ->
     await _until(lambda: pid_file.exists() and bool(pid_file.read_text().strip()))
     # The stop waits out the grace, so the cancel lands while it runs.
     stop = asyncio.ensure_future(
-        stop_run_processes(
+        end_run_resources(
             db_path=action.db_path,
             busy_timeout_ms=1_000,
             owner_process_ids=(BROKER_ACTOR_PROCESS_ID,),

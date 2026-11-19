@@ -9,6 +9,9 @@ from pantaray_agents.local_runtime import (
     list_invocation_recovery_audit_events,
     list_runtime_recovery_audit_events,
 )
+from pantaray_agents.local_runtime.runtime.run_end import (
+    cancel_action_runtime_resources,
+)
 from pantaray_agents.local_runtime.runtime.runtime_lock_repository import (
     create_runtime_lock_resource,
     record_runtime_lock_event,
@@ -19,9 +22,6 @@ from pantaray_agents.local_runtime.tooling.models import (
 )
 from pantaray_agents.local_runtime.tooling.repository.executions import (
     record_tool_invocation_completion,
-)
-from pantaray_agents.local_runtime.tooling.resources.cancel_cleanup import (
-    cancel_action_runtime_resources,
 )
 from pantaray_agents.local_runtime.tooling.resources.resource_recovery import (
     reconcile_tool_runtime_resources_for_periodic_reaper,

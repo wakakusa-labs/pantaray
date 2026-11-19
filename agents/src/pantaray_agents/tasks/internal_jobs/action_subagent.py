@@ -81,9 +81,7 @@ from pantaray_agents.local_runtime.runtime.db_execution_context import (
 from pantaray_agents.local_runtime.runtime.job_executor import (
     persist_local_job_transition_with_retry,
 )
-from pantaray_agents.local_runtime.tooling.resources.run_end import (
-    end_run_resources,
-)
+from pantaray_agents.local_runtime.runtime.run_end import end_run_resources
 from pantaray_agents.tasks.types import ActionSubagentJobPayload
 from pantaray_agents.tools.contract import (
     ReactToolCall,

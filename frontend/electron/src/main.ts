@@ -302,6 +302,8 @@ const localBackendHelperManager = createLocalBackendHelperManager({
     featureRuntime.ensureOrchestrationConnected();
   },
   onUnexpectedExit: () => supabaseWiring.reportRuntimeUnavailable(),
+  // Also on quit: shutdown stops the helper.
+  onGenerationEnded: () => featureRuntime.closeBrowserSessions(),
   logger,
 });
 

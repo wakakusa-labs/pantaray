@@ -49,6 +49,9 @@ class SandboxCommandSpec(BaseModel):
     # other limit (timeout, output caps, temp quota, process group).
     run_outside_sandbox: bool
     protected_backend_address: str
+    # Loopback ports of the user's own browser's debugging; see
+    # ``browser_debugging_ports``.
+    protected_browser_ports: list[int]
 
 
 class BrokerToSandboxCommandRequest(SandboxCommandSpec):

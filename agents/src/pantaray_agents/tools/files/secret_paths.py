@@ -30,6 +30,7 @@ from functools import cache
 from pathlib import Path
 from typing import Literal
 
+from pantaray_agents.schema.user_browser import KNOWN_USER_BROWSERS, UserBrowserId
 from pantaray_agents.tools.contract import BrokerPolicyError
 
 SECRET_PATH_WITHHELD = "SECRET_PATH_WITHHELD"
@@ -67,6 +68,16 @@ def secret_path_patterns(tier: SecretTier) -> tuple[SecretPathPattern, ...]:
     """The rules of one tier, for the current OS account's home folder."""
 
     return tuple(rule for rule in _rules(_home()) if rule.tier == tier)
+
+
+def user_browser_data_dirs() -> dict[UserBrowserId, Path]:
+    """Each known browser's user-data-dir in the OS account's home, in table order."""
+
+    support = _home() / "Library" / "Application Support"
+    return {
+        browser_id: support / browser.user_data_dir
+        for browser_id, browser in KNOWN_USER_BROWSERS.items()
+    }
 
 
 def withheld_reason(path: Path, *, credentials_readable: bool) -> SecretWithheld | None:
@@ -196,6 +207,7 @@ def _rules(home: Path) -> tuple[SecretPathPattern, ...]:
     )
     ssh_key = names(*(ere_literal(f"id_{kind}") for kind in _SSH_KEY_KINDS))
     credential_names = names(*(ere_literal(name) for name in _CREDENTIAL_FILE_NAMES))
+    browser_files = names(*(ere_literal(name) for name in _BROWSER_CONTROL_FILE_NAMES))
     return (
         SecretPathPattern(
             tier="app_secret",
@@ -203,6 +215,25 @@ def _rules(home: Path) -> tuple[SecretPathPattern, ...]:
             excepted=f"/{env_dot}{env_templates}$",
             directories_exempt=True,
             description="its name marks it as an env secrets file",
+        ),
+        # DevToolsActivePort names the port that drives the user's signed-in
+        # browser once they turn remote debugging on; Local State holds that
+        # switch. Withheld even from the login environment: no CLI needs them.
+        # One rule per browser: seatbelt refuses a string over 1,023 bytes.
+        *(
+            SecretPathPattern(
+                tier="app_secret",
+                withheld=(
+                    f"{under(f'Library/Application Support/{browser.user_data_dir}')}"
+                    f"{browser_files}$"
+                ),
+                excepted=None,
+                directories_exempt=False,
+                description=(
+                    f"it lets a program take control of {browser.display_name}"
+                ),
+            )
+            for browser in KNOWN_USER_BROWSERS.values()
         ),
         # `security`, and gh and git through it, read these files themselves.
         SecretPathPattern(
@@ -259,6 +290,7 @@ def _rules(home: Path) -> tuple[SecretPathPattern, ...]:
 _ENV_TEMPLATE_SUFFIXES = ("example", "sample", "template")
 _SSH_KEY_KINDS = ("rsa", "dsa", "ecdsa", "ed25519")
 _CREDENTIAL_FILE_NAMES = (".netrc", ".git-credentials", ".pgpass", ".envrc")
+_BROWSER_CONTROL_FILE_NAMES = ("DevToolsActivePort", "Local State")
 # Literal in a bracket expression in every dialect.
 _BRACKETED = frozenset(".*+?(){}|$")
 # A bracket expression cannot hold these portably, so they are escaped.
@@ -291,6 +323,7 @@ __all__ = [
     "refuse_withheld_paths",
     "secret_path_error",
     "secret_path_patterns",
+    "user_browser_data_dirs",
     "withheld_folder_reason",
     "withheld_reason",
 ]

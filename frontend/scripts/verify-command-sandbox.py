@@ -83,6 +83,7 @@ print('sandbox ok')
         temp_storage_limit_bytes=1_048_576,
         network_policy="allow" if enabled else "deny",
         protected_backend_address=f"*:{protected_port}",
+        protected_browser_ports=[],
         use_login_environment=False,
         run_outside_sandbox=False,
     )

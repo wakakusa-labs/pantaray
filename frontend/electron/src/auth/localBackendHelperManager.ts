@@ -218,6 +218,11 @@ export function createLocalBackendHelperManager(params: {
   onReady?: (ready: { runtimeBackendUrl: string }) => void;
   /** 起動済みの helper が main の意図しない理由で終了した。ローカル実行環境はもう無い。 */
   onUnexpectedExit?: () => void;
+  /**
+   * A helper that became ready exited, whether main stopped it or not: what this process holds
+   * for that backend generation (its browser sessions) has no owner left.
+   */
+  onGenerationEnded?: () => void;
 }): {
   /** 起動済みなら何もしない。戻り値の instance id は helper の世代を表す。 */
   ensureStarted: () => Promise<{ helperInstanceId: string }>;
@@ -325,6 +330,9 @@ export function createLocalBackendHelperManager(params: {
           code,
           signal,
         });
+      }
+      if (readyHandles.has(child)) {
+        params.onGenerationEnded?.();
       }
       if (currentHandle !== child) {
         return;

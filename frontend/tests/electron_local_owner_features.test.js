@@ -10,6 +10,7 @@ const {
   initializeAccountSettingsScope,
 } = require('../electron/dist/settings/scope');
 const { saveUiLanguage } = require('../electron/dist/ui/uiLanguage');
+const { fakeBrowserElectron } = require('./helpers/browser_electron_fakes');
 
 test('desktop features bind guest and expired-account requests, preferences, read state, and sockets to the confirmed owner', async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-owner-features-'));
@@ -29,9 +30,16 @@ test('desktop features bind guest and expired-account requests, preferences, rea
   });
   const windows = new Set();
   let context;
+  // Browser pages that never finish loading, so one is in flight when the owner changes.
+  const browser = fakeBrowserElectron({ load: () => new Promise(() => {}) });
   const fakeElectron = {
     app: { getPath: () => dir, getLocale: () => 'en' },
-    BrowserWindow: { getAllWindows: () => [] },
+    BrowserWindow: class extends browser.electron.BrowserWindow {
+      static getAllWindows() {
+        return [];
+      }
+    },
+    session: browser.electron.session,
     systemPreferences: {
       isTrustedAccessibilityClient: () => false,
       getMediaAccessStatus: () => 'denied',
@@ -63,11 +71,36 @@ test('desktop features bind guest and expired-account requests, preferences, rea
 
   let owner = null;
   let language = 'en';
+  let receiveBrowser = null;
+  const browserOperation = (id) => ({
+    event: 'browser_operation_requested',
+    data: {
+      operation_request_id: id,
+      session_id: 'owner-session',
+      action_id: 'action-1',
+      process_id: 'process-1',
+      tool_request_id: 'tool-1',
+      operation: { action: 'navigate', target: { kind: 'web', url: 'https://a.example/' } },
+      policy: {
+        allow_network: true,
+        file_roots: [],
+        private_roots: [],
+        private_root_exceptions: [],
+        secret_paths: [],
+        write_hosts: [],
+      },
+    },
+  });
   const requests = [];
   const sockets = [];
   let overlayOwnerId;
+  const browserAnswers = [];
   t.mock.method(globalThis, 'fetch', async (url, options) => {
     assert.equal(options.headers.Authorization, 'Bearer local-owner-token');
+    if (new URL(url).pathname === '/local/action-browser') {
+      browserAnswers.push(JSON.parse(options.body).result);
+      return new Response('{}');
+    }
     requests.push(new URL(url).pathname);
     return new Response(JSON.stringify({ command_network_enabled: false }));
   });
@@ -97,10 +130,13 @@ test('desktop features bind guest and expired-account requests, preferences, rea
       clearActionAssociations: () => {},
       setOverlayPlacementGetter: () => {},
     },
-    createOrchestrationWS: () => ({
-      connect: (url, headers) => sockets.push({ url, headers }),
-      disconnect: () => {},
-    }),
+    createOrchestrationWS: (hooks) => {
+      receiveBrowser = hooks.forwardEventToRenderers;
+      return {
+        connect: (url, headers) => sockets.push({ url, headers }),
+        disconnect: () => {},
+      };
+    },
     authCoordinator: { startBrowserLogin: async () => ({ ok: true }) },
     localBackendAuthContextController: {},
     supabaseWiring: {
@@ -188,6 +224,13 @@ test('desktop features bind guest and expired-account requests, preferences, rea
     'completion-guest-id'
   );
   await bind({ id: 'account-a', kind: 'account' });
+  // A browser page still loading, and an artifact the backend has not taken yet.
+  receiveBrowser(browserOperation('op-in-flight'));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(browser.windows.length, 1);
+  const leftover = path.join(dir, '.tmp', 'browser', 'op-earlier.png');
+  fs.mkdirSync(path.dirname(leftover), { recursive: true });
+  fs.writeFileSync(leftover, 'png');
   assert.equal(language, 'ja');
   assert.equal(
     JSON.parse(fs.readFileSync(readState('account-a'), 'utf8')).entries[0].completion_event_id,
@@ -201,6 +244,10 @@ test('desktop features bind guest and expired-account requests, preferences, rea
   owner = null;
   const prepared = feature.prepareOwnerChange();
   assert.equal(windows.size, 0);
+  // No close for the old owner's session will come: it ends with the switch. The backend that
+  // may still read the artifact keeps running, so it stays.
+  assert.equal(browser.windows[0].destroyed, true);
+  assert.ok(fs.existsSync(leftover));
   assert.equal(feature.openNewConversationOverlay(), 'initializing');
   assert.throws(() => mark('account-a'));
   assert.throws(() => context.privacy.getCaptureSettings(), /Local owner is unavailable/);
@@ -209,6 +256,13 @@ test('desktop features bind guest and expired-account requests, preferences, rea
   assert.equal(language, 'ja');
   assert.equal(JSON.parse(fs.readFileSync(uiPath('account-a'), 'utf8')).ui_language, 'ja');
   await bind({ id: 'account-a', kind: 'account' });
+  receiveBrowser(browserOperation('op-after'));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(browserAnswers.at(-1).code, 'BROWSER_SESSION_GONE');
+  assert.equal(browser.windows.length, 1);
+  // The backend generation ends: no runtime can take the artifact any more.
+  feature.closeBrowserSessions();
+  assert.equal(fs.existsSync(leftover), false);
   assert.equal(feature.openNewConversationOverlay(), 'created');
   // The ready broadcast must replay a deferred window even without another
   // renderer focus or recording-start event after a token refresh.

@@ -19,6 +19,9 @@ import type { createSupabaseWiring } from '../auth/supabaseWiring';
 import { saveUserState } from '../auth/userState';
 import { createScreenCaptureResponder } from '../capture/screenCaptureRuntime';
 import { createHtmlRenderResponder } from '../render/htmlRender';
+import { createBrowserResponder } from '../browser/browserResponder';
+import { createBrowserSessions } from '../browser/browserSession';
+import { clearBrowserArtifacts } from '../browser/capture';
 import { createHtmlPreviewPdfs } from '../render/htmlPreview';
 import { createActionFetcher } from '../actions/actionFetch';
 import { createChatFetcher } from '../chat/chatFetch';
@@ -189,6 +192,14 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
       limit: ACTION_CONVERSATION_LATEST_PAGE_LIMIT,
     })
   );
+  const browserSessions = createBrowserSessions({
+    getBackendPort: () => {
+      const backendUrl = params.desktopRuntime.getBackendUrl();
+      if (backendUrl === null) throw new Error('The local backend has no address yet.');
+      return Number(new URL(backendUrl).port);
+    },
+    logger: params.logger,
+  });
   const orchestration = createOrchestrationManager({
     getRuntimeBackendUrl: params.desktopRuntime.getBackendUrl,
     notificationWindow: { ...params.notificationWindow, showNotification },
@@ -216,6 +227,13 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
         requestJson({ method: 'POST', path: '/local/action-html-render', body }),
       logger: params.logger,
     }),
+    respondToBrowserOperation: createBrowserResponder({
+      sessions: browserSessions,
+      localArtifactRoot: params.localArtifactRoot,
+      postAnswer: (body) => requestJson({ method: 'POST', path: '/local/action-browser', body }),
+      logger: params.logger,
+    }),
+    closeBrowserSession: browserSessions.close,
     logger: params.logger,
   });
   const localBackendClient = createLocalBackendClient({
@@ -512,7 +530,15 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
 
   return {
     applyLocalOwner,
+    /** When the backend generation ends: everything the browser holds for it goes. */
+    closeBrowserSessions: () => {
+      browserSessions.closeAll();
+      clearBrowserArtifacts(params.localArtifactRoot);
+    },
     prepareOwnerChange: () => {
+      // The helper keeps running, so no close for the old owner's sessions will arrive. Their
+      // artifacts stay: the same backend may still be reading one.
+      browserSessions.closeAll();
       params.notificationWindow.clearForOwnerChange();
       heldPanels.length = 0;
       conversationOverlay.onOwnerChanged(null);

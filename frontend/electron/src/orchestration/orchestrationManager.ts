@@ -16,6 +16,11 @@ import { parseChatItem, parseChatTurnState, type ChatTurnState } from '../chat/c
 import type { LocalRuntimeState } from '../auth/localRuntimeState';
 import type { ScreenCaptureRequest } from '../capture/screenCapture';
 import type { HtmlRenderRequest } from '../render/htmlRender';
+import {
+  parseBrowserOperationRequest,
+  parseBrowserSessionCloseRequest,
+  type BrowserOperationRequest,
+} from '../browser/browserContract';
 import { parseTodoChanged } from '../todos/todoContracts';
 import type {
   AcceptActionRequest,
@@ -31,6 +36,8 @@ import {
   isChatTurnStateEvent,
   isScreenCaptureRequestedEvent,
   isHtmlRenderRequestedEvent,
+  isBrowserOperationRequestedEvent,
+  isBrowserSessionCloseRequestedEvent,
   isTodoChangedEvent,
 } from './eventContracts';
 import {
@@ -138,6 +145,9 @@ export function createOrchestrationManager(params: {
   respondToScreenCapture?: (request: ScreenCaptureRequest) => Promise<void>;
   /** Prints an HTML file for the Action runtime; absent means no desktop rendering. */
   respondToHtmlRender?: (request: HtmlRenderRequest) => Promise<void>;
+  /** Runs a browser operation for the runtime; absent means no desktop browser. */
+  respondToBrowserOperation?: (request: BrowserOperationRequest) => Promise<void>;
+  closeBrowserSession?: (sessionId: string) => void;
   onStatus?: (payload: OrchestrationStatusPayload) => void;
   logger?: LoggerLike | null;
   timers?: TimerApi;
@@ -402,6 +412,16 @@ export function createOrchestrationManager(params: {
         secretPaths: data.secret_paths,
         allowNetwork: data.allow_network,
       });
+      return;
+    }
+    // Off the wire contract throws to the WS message handler, which logs it; the runtime's
+    // wait then times out.
+    if (isBrowserOperationRequestedEvent(message)) {
+      void params.respondToBrowserOperation?.(parseBrowserOperationRequest(message.data));
+      return;
+    }
+    if (isBrowserSessionCloseRequestedEvent(message)) {
+      params.closeBrowserSession?.(parseBrowserSessionCloseRequest(message.data).session_id);
       return;
     }
     // The chat is the main window's alone. Off the wire contract throws to the WS message

@@ -22,7 +22,6 @@ class OutboundEvent(StrEnum):
     ACTION_STEP = "action_step"
     PROCESS_PAUSED = "process_paused"
     SCREEN_CAPTURE_REQUESTED = "screen_capture_requested"
-    HTML_RENDER_REQUESTED = "html_render_requested"
     BROWSER_OPERATION_REQUESTED = "browser_operation_requested"
     BROWSER_SESSION_CLOSE_REQUESTED = "browser_session_close_requested"
     PROCESS_COMPLETED = "process_completed"

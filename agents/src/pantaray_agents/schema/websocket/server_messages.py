@@ -195,41 +195,6 @@ class SecretPathRule(BaseModel):
     excepted: str | None = Field(description="ERE of the paths it leaves loadable")
 
 
-class HtmlRenderRequestedMessage(BaseModel):
-    """An HTML render tool asks the desktop client to print one page to PDF.
-
-    WebSocket event: "html_render_requested"
-
-    A control message for the desktop client only; it is never forwarded to the
-    renderer. The runtime has already authorized ``html_path`` and decides what
-    the page may load; the desktop client enforces it.
-    """
-
-    kind: Literal["action", "suggestion"] = Field(description="Requester kind")
-    process_id: str = Field(
-        description="Physical process ID of the Action, or the Suggestion's ID"
-    )
-    action_id: str = Field(description="ID of the requesting Action or Suggestion")
-    tool_request_id: str = Field(description="Logical ID of the tool request")
-    render_request_id: str = Field(description="Render request ID, consumed once")
-    html_path: str = Field(description="Real path of the HTML file to render")
-    file_roots: list[str] = Field(
-        description="Real paths the page may load file:// sub-resources from"
-    )
-    private_roots: list[str] = Field(
-        description="Pantaray private storage roots the page may never load from"
-    )
-    private_root_exceptions: list[str] = Field(
-        description="Paths under private_roots that stay loadable"
-    )
-    secret_paths: list[SecretPathRule] = Field(
-        description="Files the page may never load, by name or by real path"
-    )
-    allow_network: bool = Field(
-        description="Whether the page may load http(s) sub-resources"
-    )
-
-
 # The longest `wait` a browser operation may ask for; Electron's budget for a
 # `wait` is derived from it.
 BROWSER_MAX_WAIT_SECONDS: Final = 10

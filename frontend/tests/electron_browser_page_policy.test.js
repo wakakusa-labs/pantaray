@@ -8,6 +8,7 @@ const { test } = require('node:test');
 const {
   decideBrowserRequest,
   decideFileAccess,
+  decideUserBrowserRequest,
   foldPath,
   isSecretPath,
   isWithinRoot,
@@ -290,5 +291,74 @@ test('past the host cap a new host is refused and a reported one still loads', (
   assert.deepEqual(
     decide('https://h49.example/a.js', 'GET', { contacted: contacted.slice(0, 49) }),
     reached('h49.example', 443)
+  );
+});
+
+const decideUser = (url, method, { mainFrame = false, writeHosts = [], contacted = [] } = {}) =>
+  decideUserBrowserRequest(
+    { url, method, mainFrameDocument: mainFrame },
+    { readHosts: ['Mail.Example.com'], writeHosts, backendPort: BACKEND_PORT, contacted }
+  );
+
+// Catches: the user's signed-in tab reaching a local server or the backend by any name for this
+// machine (which the app page allows for loopback), or loading a local file.
+test("the user's tab reaches nothing on this machine", () => {
+  for (const url of [
+    'http://localhost:5173/',
+    'http://app.localhost:3000/',
+    'http://127.0.0.1:5173/',
+    'http://127.1/',
+    'http://[::1]:8080/',
+    'http://0.0.0.0:5173/',
+    'http://0/',
+    'http://[::]/',
+    'http://[::ffff:127.0.0.1]:5173/',
+    `https://alias.example:${BACKEND_PORT}/`,
+    'ws://localhost:5173/hmr',
+    'file:///Users/me/notes.txt',
+    'chrome://settings',
+  ]) {
+    assert.deepEqual(decideUser(url, 'GET'), refused('not_allowed'), url);
+    assert.deepEqual(decideUser(url, 'GET', { mainFrame: true }), refused('not_allowed'), url);
+  }
+  assert.deepEqual(decideUser('about:blank', 'GET', { mainFrame: true }), local);
+});
+
+// Catches: the tab's main frame opening a site the user did not approve this run, a frame or
+// subresource of an approved site refused, or a write to an unapproved host let through.
+test("the user's tab opens approved sites only, and writes only to approved hosts", () => {
+  const writes = { writeHosts: ['api.example.com'] };
+  const cases = [
+    [
+      'https://mail.example.com/inbox',
+      'GET',
+      { mainFrame: true },
+      reached('mail.example.com', 443),
+    ],
+    ['https://other.example/', 'GET', { mainFrame: true }, refused('read_not_approved')],
+    ['https://cdn.example/app.js', 'GET', {}, reached('cdn.example', 443)],
+    ['https://ads.example/frame.html', 'GET', {}, reached('ads.example', 443)],
+    ['https://mail.example.com/send', 'POST', {}, refused('write_not_approved')],
+    ['https://api.example.com/save', 'POST', {}, refused('write_not_approved')],
+    ['https://api.example.com/save', 'POST', writes, reached('api.example.com', 443)],
+    ['wss://api.example.com/live', 'GET', {}, refused('write_not_approved')],
+    ['wss://api.example.com/live', 'GET', writes, reached('api.example.com', 443)],
+    [
+      'https://api.example.com/',
+      'GET',
+      { ...writes, mainFrame: true },
+      refused('read_not_approved'),
+    ],
+  ];
+  for (const [url, method, options, expected] of cases) {
+    assert.deepEqual(decideUser(url, method, options), expected, `${method} ${url}`);
+  }
+  const contacted = Array.from({ length: BROWSER_MAX_CONTACTED_HOSTS }, (_, i) => ({
+    host: `h${i}.example`,
+    port: 443,
+  }));
+  assert.deepEqual(
+    decideUser('https://cdn.example/a.js', 'GET', { contacted }),
+    refused('too_many_hosts')
   );
 });

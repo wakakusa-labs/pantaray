@@ -1,7 +1,8 @@
 /**
  * What a page in a hidden window may load: local files under the runtime's read rules, and
  * network requests under the command network setting. Every browser session, the task preview's
- * included, follows these rules.
+ * included, follows these rules; the session's tab in the user's browser follows
+ * `decideUserBrowserRequest`.
  */
 
 import fs from 'node:fs';
@@ -249,9 +250,45 @@ function isLoopbackHost(host: string): boolean {
   );
 }
 
+/**
+ * Whether a normalized host reaches this machine by its address: a loopback name or address, the
+ * unspecified address, which connects to this machine, or an IPv4-mapped form of either. A name
+ * that resolves here is judged as an external host.
+ */
+function reachesThisMachine(host: string): boolean {
+  return (
+    isLoopbackHost(host) ||
+    ['0.0.0.0', '::', '::ffff:0:0'].includes(host) ||
+    /^::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}$/.test(host)
+  );
+}
+
 export type BrowserRequestDecision =
   | { allowed: true; reached: ContactedHost | null }
   | { allowed: false; reason: BrowserBlockedReason };
+
+const refuse = (reason: BrowserBlockedReason): BrowserRequestDecision => ({
+  allowed: false,
+  reason,
+});
+
+/** Whether `host` (normalized) is one of `hosts`, as the runtime approved them. */
+const listsHost = (hosts: readonly string[], host: string): boolean =>
+  hosts.some((listed) => normalizedHost(listed) === host);
+
+/** A method other than a read, or a WebSocket handshake, sends data to the host. */
+const sendsData = (url: URL, method: string): boolean =>
+  WEB_SOCKET_SCHEMES.has(url.protocol) || !READ_METHODS.has(method);
+
+/** Past `BROWSER_MAX_CONTACTED_HOSTS` a new host is refused, so every host reached is reported. */
+function withinHostCap(
+  reached: ContactedHost,
+  contacted: readonly ContactedHost[]
+): BrowserRequestDecision {
+  const known = contacted.some((host) => host.host === reached.host && host.port === reached.port);
+  if (!known && contacted.length >= BROWSER_MAX_CONTACTED_HOSTS) return refuse('too_many_hosts');
+  return { allowed: true, reached };
+}
 
 /**
  * Whether a browser session's page may send one request, and the host it reaches when it may.
@@ -261,8 +298,7 @@ export type BrowserRequestDecision =
  * - With it on, nothing goes to the backend's port, under any host name: a name can resolve to
  *   this machine. Loopback takes every method. An external host takes reads only; another
  *   method or a WebSocket handshake needs the host among the run's `write_hosts`.
- * - Past `BROWSER_MAX_CONTACTED_HOSTS` a new host is refused, so every host reached is reported.
- *   `contacted` is what the session reached so far.
+ * - Past the host cap a new host is refused. `contacted` is what the session reached so far.
  */
 export function decideBrowserRequest(
   request: { url: string; method: string },
@@ -272,10 +308,6 @@ export function decideBrowserRequest(
     contacted: readonly ContactedHost[];
   }
 ): BrowserRequestDecision {
-  const refuse = (reason: BrowserBlockedReason): BrowserRequestDecision => ({
-    allowed: false,
-    reason,
-  });
   let url: URL;
   try {
     url = new URL(request.url);
@@ -291,16 +323,58 @@ export function decideBrowserRequest(
   if (reached.port === context.backendPort) return refuse('not_allowed');
   if (
     !isLoopbackHost(reached.host) &&
-    (WEB_SOCKET_SCHEMES.has(url.protocol) || !READ_METHODS.has(request.method)) &&
-    !context.policy.write_hosts.some((host) => normalizedHost(host) === reached.host)
+    sendsData(url, request.method) &&
+    !listsHost(context.policy.write_hosts, reached.host)
   ) {
     return refuse('write_not_approved');
   }
-  const known = context.contacted.some(
-    (host) => host.host === reached.host && host.port === reached.port
-  );
-  if (!known && context.contacted.length >= BROWSER_MAX_CONTACTED_HOSTS) {
-    return refuse('too_many_hosts');
+  return withinHostCap(reached, context.contacted);
+}
+
+/**
+ * Whether the tab of the session's own in the user's browser may send one request, judged on
+ * the URL Chromium reports for it, so each hop of a redirect is judged too. The tab is signed in
+ * to the user's real accounts, so it reaches less than the app's page:
+ *
+ * - nothing on this machine (loopback, or the backend's port under any name), and no file;
+ * - a document in the tab's main frame only from a host the user approved this run to open
+ *   (`read_hosts`); a frame or subresource reads from any host, as the opened site asks;
+ * - writes and WebSocket handshakes only to the run's `write_hosts`;
+ * - the host cap as on the app's page.
+ *
+ * The runtime sends user-browser requests only with the network on, so it is not judged here.
+ */
+export function decideUserBrowserRequest(
+  request: { url: string; method: string; mainFrameDocument: boolean },
+  context: {
+    readHosts: readonly string[];
+    writeHosts: readonly string[];
+    backendPort: number;
+    contacted: readonly ContactedHost[];
   }
-  return { allowed: true, reached };
+): BrowserRequestDecision {
+  let url: URL;
+  try {
+    url = new URL(request.url);
+  } catch {
+    return refuse('not_allowed');
+  }
+  if (url.protocol !== 'file:' && LOCAL_SCHEMES.has(url.protocol)) {
+    return { allowed: true, reached: null };
+  }
+  const reached = reachedHost(url);
+  if (
+    reached === null ||
+    reached.port === context.backendPort ||
+    reachesThisMachine(reached.host)
+  ) {
+    return refuse('not_allowed');
+  }
+  if (request.mainFrameDocument && !listsHost(context.readHosts, reached.host)) {
+    return refuse('read_not_approved');
+  }
+  if (sendsData(url, request.method) && !listsHost(context.writeHosts, reached.host)) {
+    return refuse('write_not_approved');
+  }
+  return withinHostCap(reached, context.contacted);
 }

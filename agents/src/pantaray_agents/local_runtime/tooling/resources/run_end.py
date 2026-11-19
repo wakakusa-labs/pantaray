@@ -41,12 +41,16 @@ async def end_run_resources(
 async def _end(
     *, db_path: Path, busy_timeout_ms: int, owner_process_ids: tuple[str, ...]
 ) -> None:
-    await end_browser_sessions(owner_process_ids=owner_process_ids)
-    await stop_run_processes(
-        db_path=db_path,
-        busy_timeout_ms=busy_timeout_ms,
-        owner_process_ids=owner_process_ids,
-    )
+    try:
+        await end_browser_sessions(owner_process_ids=owner_process_ids)
+    finally:
+        # The owners are fenced before the first send, so a failed or cancelled
+        # close leaves only the close to the sweep; the stop still runs.
+        await stop_run_processes(
+            db_path=db_path,
+            busy_timeout_ms=busy_timeout_ms,
+            owner_process_ids=owner_process_ids,
+        )
 
 
 __all__ = ["end_run_resources"]

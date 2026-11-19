@@ -59,3 +59,32 @@ async def test_a_cancelled_run_end_still_stops_the_processes(
         await asyncio.sleep(0.05)
     assert probe.closed == [OWNER]
     assert probe.stopped == [((OWNER,), True)]
+
+
+# Catches: a close whose send is cancelled or fails on the delivery side
+# skipping the process stop, so a child's terminal releases its claims while
+# its processes still run.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [asyncio.CancelledError, ConnectionResetError])
+async def test_a_failed_close_still_stops_the_processes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: type[BaseException]
+) -> None:
+    db_path = tmp_path / "runtime.db"
+    prepare_test_database(db_path, 1_000, load_default_migrations())
+    insert_agent_action(db_path=db_path)
+    _seed_broker_actor_process(db_path)
+    probe = install_run_end_probe(monkeypatch)
+    await probe.open_browser(db_path, OWNER)
+
+    async def failing_close(user_id: str, message: DesktopRequestMessage) -> bool:
+        if isinstance(message, BrowserSessionCloseRequestedMessage):
+            raise error
+        return await probe._deliver(user_id, message)
+
+    monkeypatch.setattr(relay_module, "deliver_desktop_request", failing_close)
+    with pytest.raises(error):
+        await end_run_resources(
+            db_path=db_path, busy_timeout_ms=1_000, owner_process_ids=(OWNER,)
+        )
+
+    assert probe.stopped == [((OWNER,), True)]

@@ -5,7 +5,7 @@
  * against the answer's size and digest.
  */
 
-import type { Debugger, WebContents } from 'electron';
+import type { WebContents } from 'electron';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -13,6 +13,7 @@ import path from 'node:path';
 import { writeFileAtomic } from '../atomicFile';
 import type { BrowserArtifactClaim } from './browserContract';
 import { BrowserOperationError } from './browserSession';
+import type { CdpSession } from './cdpSession';
 import { PAGE_VIEWPORT } from './pageWindowOptions';
 
 /** An image or PDF captured from the page, not yet written. */
@@ -40,7 +41,7 @@ export function decodePng(data: string): CapturedArtifact {
   return { kind: 'png', bytes, widthPx: bytes.readUInt32BE(16), heightPx: bytes.readUInt32BE(20) };
 }
 
-export async function captureViewport(cdp: Debugger): Promise<CapturedArtifact> {
+export async function captureViewport(cdp: CdpSession): Promise<CapturedArtifact> {
   const { data } = (await cdp.sendCommand('Page.captureScreenshot', { format: 'png' })) as {
     data: string;
   };
@@ -49,7 +50,7 @@ export async function captureViewport(cdp: Debugger): Promise<CapturedArtifact> 
 
 /** The whole page at the viewport's width, cut at `MAX_FULL_PAGE_HEIGHT_PX`. */
 export async function captureFullPage(
-  cdp: Debugger
+  cdp: CdpSession
 ): Promise<{ artifact: CapturedArtifact; cut: boolean }> {
   const { cssContentSize } = (await cdp.sendCommand('Page.getLayoutMetrics')) as {
     cssContentSize: { height: number };

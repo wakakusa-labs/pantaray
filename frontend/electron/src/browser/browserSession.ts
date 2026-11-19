@@ -42,6 +42,7 @@ import {
   type BrowserPageData,
   type BrowserPagePolicy,
 } from './browserContract';
+import type { CdpPage } from './cdpSession';
 import {
   decideBrowserRequest,
   serveFile,
@@ -109,12 +110,8 @@ export class BrowserOperationError extends Error {
   }
 }
 
-/** The page an operation works on, with its console since the session opened. */
-export type BrowserPage = {
-  contents: WebContents;
-  cdp: Debugger;
-  console: { lines: NonNullable<BrowserPageData['console']>; cut: boolean };
-};
+/** The app's hidden page an operation works on. */
+export type BrowserPage = { contents: WebContents; cdp: Debugger; console: CdpPage['console'] };
 
 /** What happened on the page since the session's previous answer. */
 export type PageReport = Pick<BrowserPageData, 'popups' | 'blocked'> & {

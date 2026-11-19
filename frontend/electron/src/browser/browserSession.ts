@@ -12,9 +12,9 @@
  *   ignores `print()`, `execCommand('print')` and the dialogs, and it may start no worker: a
  *   shared or service worker's WebSocket has no frame, and Electron passes only a frame's
  *   WebSocket through `webRequest` (`ElectronBrowserClient::WillInterceptWebSocket`).
- * - Every frame, an out-of-process one included, loses before its first script
- *   (`PAGE_GUARD_SCRIPT`) the APIs that connect past `webRequest` or open OS UI the sandbox and
- *   the permission handlers leave open, and its file chooser is intercepted.
+ * - Every document of every frame, an out-of-process one included, loses before its first
+ *   script the APIs that connect past `webRequest` or open OS UI the sandbox and the permission
+ *   handlers leave open (`pageGuardPreload`), and every frame's file chooser is intercepted.
  * Permissions, downloads and new windows are refused. Each refusal is reported with the next
  * answer, as is every host the page reached, once.
  *
@@ -31,6 +31,7 @@ import {
   type Session,
   type WebContents,
 } from 'electron';
+import path from 'node:path';
 
 import {
   BROWSER_MAX_BLOCKED_REQUESTS,
@@ -46,6 +47,7 @@ import {
   type ContactedHost,
   type FileAccessScope,
 } from './pagePolicy';
+import { GUARDED_APIS, removeGuardedApis } from './pageGuardPreload';
 import { PAGE_VIEWPORT, pageWindowOptions } from './pageWindowOptions';
 
 type OkResult = Extract<BrowserOperationAnswer['result'], { status: 'ok' }>;
@@ -73,28 +75,9 @@ const MAX_POPUPS_REPORTED = 10;
  */
 const DOCUMENT_POLICY =
   "sandbox allow-scripts allow-same-origin allow-forms allow-popups allow-downloads; worker-src 'none'";
-/**
- * What `PAGE_GUARD_SCRIPT` removes, by owner. Blink has no switch for any of them.
- * - Connections Electron never passes through `webRequest`: WebRTC (over TCP under any IP
- *   handling policy) and WebTransport (Electron does not intercept it).
- * - OS UI a click's user activation opens from the hidden window: the File System Access pickers
- *   (a same-origin sandbox allows them), the screen color sampler (`OpenEyeDropper`), the
- *   picture-in-picture window (`EnterPictureInPicture`), and Web Bluetooth, whose chooser picks
- *   the first device when nothing listens for `select-bluetooth-device`.
- */
-const GUARDED_APIS: readonly (readonly [owner: string, name: string])[] = [
-  ['globalThis', 'RTCPeerConnection'],
-  ['globalThis', 'webkitRTCPeerConnection'],
-  ['globalThis', 'WebTransport'],
-  ['globalThis', 'showOpenFilePicker'],
-  ['globalThis', 'showSaveFilePicker'],
-  ['globalThis', 'showDirectoryPicker'],
-  ['globalThis', 'EyeDropper'],
-  ['HTMLVideoElement.prototype', 'requestPictureInPicture'],
-  ['Navigator.prototype', 'bluetooth'],
-];
-/** Run in every new document of every frame before its own scripts. */
-const PAGE_GUARD_SCRIPT = GUARDED_APIS.map(([owner, name]) => `delete ${owner}.${name};`).join('');
+/** `removeGuardedApis` for the `about:blank` documents the preload never reaches. */
+const PAGE_GUARD_SCRIPT = `(${removeGuardedApis.toString()})(${JSON.stringify(GUARDED_APIS)});`;
+const PAGE_GUARD_PRELOAD = path.join(__dirname, 'pageGuardPreload.js');
 /** Blink's console message for a dialog or print a sandboxed document asked for. */
 const IGNORED_MODAL = /^Ignored call to '/;
 /** Every connection Chromium makes outside `webRequest` (preconnects) goes nowhere, loopback included. */
@@ -215,20 +198,13 @@ function send(cdp: Debugger, method: string, params: object, sessionId: string |
     : cdp.sendCommand(method, params, sessionId);
 }
 
-/** Closes WebRTC, the file pickers and modal reports in one frame target, nested frames included. */
+/** Guards one frame target: its `about:blank` documents, file chooser and reports, and its child frames. */
 async function guardTarget(cdp: Debugger, sessionId?: string): Promise<void> {
   await Promise.all([
     send(cdp, 'Page.enable', {}, sessionId),
     send(cdp, 'Log.enable', {}, sessionId),
     send(cdp, 'Audits.enable', {}, sessionId),
-    // `runImmediately` covers a document already committed when the frame was attached, as a
-    // srcdoc frame's is: it is paused before its own scripts run.
-    send(
-      cdp,
-      'Page.addScriptToEvaluateOnNewDocument',
-      { source: PAGE_GUARD_SCRIPT, runImmediately: true },
-      sessionId
-    ),
+    send(cdp, 'Page.addScriptToEvaluateOnNewDocument', { source: PAGE_GUARD_SCRIPT }, sessionId),
     send(cdp, 'Page.setInterceptFileChooserDialog', { enabled: true, cancel: true }, sessionId),
     // An out-of-process frame waits until it is guarded too.
     send(
@@ -368,6 +344,8 @@ export function createBrowserSessions(params: {
     // later one under the same id, shares it.
     partitions += 1;
     const partition = `browser-session-${partitions}`;
+    const ses = electronSessions.fromPartition(partition);
+    ses.registerPreloadScript({ type: 'frame', filePath: PAGE_GUARD_PRELOAD });
     const window = new BrowserWindow(pageWindowOptions(partition));
     const contents = window.webContents;
     let stop: PageSession['stop'] = () => undefined;
@@ -378,7 +356,7 @@ export function createBrowserSessions(params: {
       window,
       contents,
       cdp: contents.debugger,
-      ses: electronSessions.fromPartition(partition),
+      ses,
       backendPort: params.getBackendPort(),
       policy,
       proxiedNetwork: null,

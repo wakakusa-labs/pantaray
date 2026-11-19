@@ -14,8 +14,10 @@ const PROBE = `(w) => [
   typeof w.EyeDropper, typeof w.showOpenFilePicker, typeof w.showSaveFilePicker,
   typeof w.showDirectoryPicker, typeof w.HTMLVideoElement.prototype.requestPictureInPicture,
   typeof w.navigator.bluetooth,
+  // The guard preload exposes nothing to the page.
+  typeof w.require, typeof w.process, typeof w.electron,
 ].join()`;
-const NOTHING_LEFT = Array(9).fill('undefined').join();
+const NOTHING_LEFT = Array(12).fill('undefined').join();
 
 /** A frame that reports its probe on load and whenever its parent asks. */
 function childScript(from: string): string {

@@ -6,6 +6,7 @@ const path = require('node:path');
 const Module = require('node:module');
 const { pathToFileURL } = require('node:url');
 const { mock, test } = require('node:test');
+const vm = require('node:vm');
 
 const SESSION_MODULE = require.resolve('../electron/dist/browser/browserSession.js');
 
@@ -33,6 +34,8 @@ function fakeElectron({ load = async () => {} } = {}) {
       setPermissionRequestHandler: (handler) => (ses.permissionRequest = handler),
       setPermissionCheckHandler: (handler) => (ses.permissionCheck = handler),
       setDevicePermissionHandler: (handler) => (ses.devicePermission = handler),
+      preloads: [],
+      registerPreloadScript: (script) => ses.preloads.push(script),
       setProxy: async (config) => ses.proxies.push(config),
       closeAllConnections: async () => (ses.closedConnections += 1),
       clearStorageData: async () => ses.cleared.push('storage'),
@@ -160,7 +163,8 @@ function gate() {
 const turn = () => new Promise((resolve) => setImmediate(resolve));
 
 // Catches: sessions sharing cookies or storage, a partition persisted to disk, a page window
-// shown or focused on the user's screen, and captures at the display's device scale.
+// shown or focused on the user's screen, captures at the display's device scale, and a frame
+// without the guard preload or with Node or the preload's world reachable from the page.
 test('each session has its own in-memory partition and a window that is never shown', async () => {
   const h = harness();
   await navigate(h, 'https://a.example/', { session: 'one' });
@@ -173,6 +177,15 @@ test('each session has its own in-memory partition and a window that is never sh
   for (const window of h.windows) {
     assert.equal(window.options.show, false);
     assert.equal(window.options.focusable, false);
+    assert.equal(window.options.webPreferences.sandbox, true);
+    assert.equal(window.options.webPreferences.contextIsolation, true);
+    assert.equal(window.options.webPreferences.nodeIntegration, false);
+    // The guard preload runs in every frame of every document.
+    assert.equal(window.options.webPreferences.nodeIntegrationInSubFrames, true);
+    const ses = h.partitions.get(window.options.webPreferences.partition);
+    assert.equal(ses.preloads.length, 1);
+    assert.equal(ses.preloads[0].type, 'frame');
+    assert.ok(fs.existsSync(ses.preloads[0].filePath), ses.preloads[0].filePath);
     assert.equal(window.shown, false);
     // A command sent before the first navigation may never settle.
     assert.deepEqual(window.webContents.debugger.attached, {
@@ -353,8 +366,8 @@ test('every document is sandboxed without modals and may start no worker', async
   assert.match(headers['content-security-policy'][1], /^sandbox .*worker-src 'none'$/);
 });
 
-// Catches: an out-of-process frame running its scripts before it loses WebRTC and the file
-// pickers, or left paused forever.
+// Catches: a guarded API left in an about:blank document (which gets no preload), an API the
+// removal misses or one it takes too many, and an out-of-process frame left paused forever.
 test('every frame target is guarded before it runs', async () => {
   const h = harness();
   await navigate(h, 'https://a.example/');
@@ -373,31 +386,28 @@ test('every frame target is guarded before it runs', async () => {
   const script = cdp.commands.find(
     ({ method }) => method === 'Page.addScriptToEvaluateOnNewDocument'
   ).params.source;
-  for (const removed of [
-    'globalThis.RTCPeerConnection',
-    'globalThis.WebTransport',
-    'globalThis.showOpenFilePicker',
-    'globalThis.EyeDropper',
-    'HTMLVideoElement.prototype.requestPictureInPicture',
-    'Navigator.prototype.bluetooth',
-  ]) {
-    assert.ok(script.includes(`delete ${removed};`), removed);
-  }
+  // The script the preload also runs, on a page world holding every guarded API.
+  const world = vm.createContext({
+    RTCPeerConnection: 1,
+    webkitRTCPeerConnection: 1,
+    WebTransport: 1,
+    showOpenFilePicker: 1,
+    showSaveFilePicker: 1,
+    showDirectoryPicker: 1,
+    EyeDropper: 1,
+    HTMLVideoElement: { prototype: { requestPictureInPicture: 1, play: 1 } },
+    Navigator: { prototype: { bluetooth: 1, userAgent: 1 } },
+  });
+  vm.runInContext(script, world);
+  assert.deepEqual(Object.keys(world).sort(), ['HTMLVideoElement', 'Navigator']);
+  assert.deepEqual(Object.keys(world.HTMLVideoElement.prototype), ['play']);
+  assert.deepEqual(Object.keys(world.Navigator.prototype), ['userAgent']);
   cdp.emit('message', {}, 'Target.attachedToTarget', {
     sessionId: 'frame-1',
     targetInfo: { type: 'iframe' },
   });
   await turn();
   assert.deepEqual(guard('frame-1'), [...guarded, 'Runtime.runIfWaitingForDebugger']);
-  // A srcdoc frame's document is already there when it is attached.
-  assert.ok(
-    cdp.commands.some(
-      ({ method, params, sessionId }) =>
-        method === 'Page.addScriptToEvaluateOnNewDocument' &&
-        params.runImmediately === true &&
-        sessionId === 'frame-1'
-    )
-  );
 });
 
 // Catches: two operations of one session interleaving on its page, and one session's slow

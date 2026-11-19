@@ -65,14 +65,7 @@ async def draw_printed_pages(
         with os.fdopen(handle, "wb") as pdf_file:
             pdf_file.write(pdf)
         drawn = await draw_pdf(
-            # The PDF being drawn, named as the page for draw_pdf's errors.
-            target=ReadTarget(
-                display_path=name,
-                real_path=Path(pdf_path),
-                canonical_root_path=converted_dir,
-                root_relative_path=Path(pdf_path).name,
-                action_reference_path=None,
-            ),
+            name=name,
             pdf_path=Path(pdf_path),
             pages=pages,
             drop_pages_past_end=True,

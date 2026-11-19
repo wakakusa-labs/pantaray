@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.outcome_line import (
     OutcomeStatus,
     build_outcome_line,
+)
+from pantaray_agents.local_runtime.tooling.tool_result_storage import (
+    release_stored_tool_result,
+    store_tool_result,
 )
 from pantaray_agents.schema.agent.base import JSONValue
 
@@ -115,7 +121,40 @@ from pantaray_agents.schema.agent.base import JSONValue
                 },
                 "stderr": "de",
             },
-            "bash: ok, exit 0, 40,002 chars",
+            "bash: ok, exit 0, 40,002 chars, spilled to /x/output.txt, 40,000 chars",
+        ),
+        # Several moved texts share their result's folder.
+        (
+            "web_crawl",
+            {
+                "results": [
+                    {
+                        "raw_content": {
+                            "storage": "action_file",
+                            "media_type": "text/plain",
+                            "path": f"/x/call/output-{index}.txt",
+                            "character_count": 30_000,
+                        }
+                    }
+                    for index in range(2)
+                ]
+            },
+            "web_crawl: ok, 2 pages, spilled 2 texts to /x/call, 60,000 chars",
+        ),
+        (
+            "history_fetch",
+            {
+                "refs": ["S-1-TOOL"],
+                "content": {
+                    "storage": "action_file",
+                    "media_type": "text/plain",
+                    "path": "/x/output.txt",
+                    "character_count": 50_000,
+                },
+                "next_cursor": None,
+            },
+            "history_fetch: ok, 1 ref, 50,000 chars, spilled to /x/output.txt, "
+            "50,000 chars",
         ),
     ],
 )
@@ -153,6 +192,46 @@ def test_browser_outcome_line_leaves_the_page_out(action: str) -> None:
 
     assert line.startswith(f"browser: ok, {action}")
     assert ".test" not in line and injected not in line
+
+
+@pytest.mark.parametrize(
+    ("console", "stored_as"),
+    [
+        # Many short lines: data is stored whole, its reference left in place.
+        ([{"level": "log", "text": f"{i} " + "x" * 300} for i in range(200)], ".json"),
+        # One long line: only that text moves, deep inside data.
+        ([{"level": "error", "text": "y\n" * 15_000}], ".txt"),
+    ],
+)
+def test_browser_outcome_line_names_the_file_storage_moved_data_to(
+    tmp_path: Path, console: list[JSONValue], stored_as: str
+) -> None:
+    output: dict[str, JSONValue] = {
+        "status": "ok",
+        "action": "console",
+        "truncated": None,
+        "notes": [],
+        "network": [],
+        "untrusted": True,
+        "data": {
+            "url": "https://example.test/",
+            "title": "t",
+            "snapshot": None,
+            "console": console,
+            "popups": [],
+            "blocked": [],
+        },
+    }
+    stored = store_tool_result(
+        action_tool_results_path=tmp_path, invocation_id="call", output=output
+    )
+    release_stored_tool_result(stored)
+
+    line = build_outcome_line("browser", stored.output_json, status="ok")
+
+    (stored_file,) = (tmp_path / "call").iterdir()
+    assert stored_file.suffix == stored_as
+    assert line.startswith(f"browser: ok, console, spilled to {stored_file}, ")
 
 
 @pytest.mark.parametrize(

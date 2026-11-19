@@ -8,13 +8,20 @@ line carries what actually happened.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping, Sequence
 from typing import Literal, cast
 
 from pantaray_agents.local_runtime.tooling.brokering.broker_structured_patch import (
     count_patch_diff_lines,
 )
-from pantaray_agents.local_runtime.tooling.tool_result_spill import is_spilled_text
+from pantaray_agents.local_runtime.tooling.tool_result_spill import (
+    is_spilled_text,
+    spilled_texts,
+)
+from pantaray_agents.local_runtime.tooling.tool_result_storage import (
+    whole_result_reference,
+)
 from pantaray_agents.schema.action_conversation import RENDERER_PREPARING_OUTPUT_KIND
 from pantaray_agents.schema.agent.base import JSONValue
 
@@ -28,7 +35,6 @@ OutcomeStatus = Literal[
 ]
 
 _UNKNOWN_FAILURE_CODE = "UNKNOWN"
-_ACTION_FILE_STORAGE = "action_file"
 
 
 def build_outcome_line(
@@ -73,12 +79,15 @@ def _captured_detail(output: JSONValue) -> str:
 def _success_detail(tool_id: str, output: JSONValue) -> str:
     """Return the ``, ...`` tail of a successful outcome line, or nothing."""
 
-    if not isinstance(output, Mapping):
+    if not isinstance(output, dict):
         return ""
-    spill = _spill_detail(output)
-    if spill is not None:
-        return spill
-    return "".join(f", {part}" for part in _tool_detail(tool_id, output))
+    whole = whole_result_reference(output)
+    # A result stored whole at the top keeps none of the tool's own fields.
+    details = [] if whole is output else _tool_detail(tool_id, output)
+    moved = [whole] if whole is not None else spilled_texts(output)
+    if moved:
+        details.append(_spill_detail(moved))
+    return "".join(f", {part}" for part in details)
 
 
 def _tool_detail(tool_id: str, body: Mapping[str, JSONValue]) -> list[str]:
@@ -126,7 +135,7 @@ def _tool_detail(tool_id: str, body: Mapping[str, JSONValue]) -> list[str]:
         case "history_fetch":
             return [
                 _count(body, "refs", "ref", "refs"),
-                _chars(len(cast(str, body["content"]))),
+                _chars(_length(body["content"])),
                 *(["more available"] if body["next_cursor"] is not None else []),
             ]
         case "wait_subagents":
@@ -205,19 +214,25 @@ def _wait_subagents_detail(body: Mapping[str, JSONValue]) -> list[str]:
     return [f"{done:,} done", f"{len(results) - done:,} running"]
 
 
-def _spill_detail(body: Mapping[str, JSONValue]) -> str | None:
-    """Describe a result the runtime moved out of line into an action file."""
+def _spill_detail(moved: Sequence[dict[str, JSONValue]]) -> str:
+    """Say where storage moved part or all of a result, so the model reads it.
 
-    if body.get("storage") != _ACTION_FILE_STORAGE:
-        return None
-    paths = _text(body, "path")
-    if not paths:
-        return None
-    for key, unit in (("character_count", "chars"), ("byte_size", "bytes")):
-        size = body.get(key)
-        if isinstance(size, int) and not isinstance(size, bool):
-            return f", spilled to {paths[0]}, {size:,} {unit}"
-    return f", spilled to {paths[0]}"
+    The texts of one result are moved into one folder, named once for many.
+    """
+
+    if len(moved) > 1:
+        folder = os.path.dirname(cast(str, moved[0]["path"]))
+        total = sum(cast(int, reference["character_count"]) for reference in moved)
+        return f"spilled {len(moved):,} texts to {folder}, {_chars(total)}"
+    (reference,) = moved
+    # A binary result is measured in bytes only.
+    size = reference.get("character_count")
+    amount = (
+        _chars(size)
+        if isinstance(size, int)
+        else f"{cast(int, reference['byte_size']):,} bytes"
+    )
+    return f"spilled to {reference['path']}, {amount}"
 
 
 def _failure_code(output: JSONValue) -> str | None:

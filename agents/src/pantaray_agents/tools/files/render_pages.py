@@ -159,7 +159,10 @@ async def draw_document_pages(
     finally:
         os.close(descriptor)
     drawn = await draw_pdf(
-        target=target, pdf_path=pdf_path, pages=pages, drop_pages_past_end=False
+        name=target.display_path,
+        pdf_path=pdf_path,
+        pages=pages,
+        drop_pages_past_end=False,
     )
     return DrawnDocument(
         target=target, page_count=drawn.page_count, pages=tuple(drawn.pages)
@@ -255,7 +258,7 @@ async def _office_pdf(
         descriptor, target=target, limit=MAX_DOCUMENT_BYTES + 1
     )
     if len(payload) > MAX_DOCUMENT_BYTES:
-        raise _too_large(target, f"larger than {MAX_DOCUMENT_BYTES} bytes")
+        raise _too_large(target.display_path, f"larger than {MAX_DOCUMENT_BYTES} bytes")
     cached = converted_dir / f"{hashlib.sha256(payload).hexdigest()}.pdf"
     if cached.is_file():
         return cached
@@ -284,7 +287,7 @@ async def _office_pdf(
             fix_hint=CONTINUE_WITH_READ,
         ) from exc
     except DocumentExtractionError as exc:
-        raise _unreadable(target, exc) from exc
+        raise _unreadable(target.display_path, exc) from exc
     finally:
         os.unlink(source)
     return cached
@@ -292,12 +295,12 @@ async def _office_pdf(
 
 async def draw_pdf(
     *,
-    target: ReadTarget,
+    name: str,
     pdf_path: Path,
     pages: list[int],
     drop_pages_past_end: bool,
 ) -> RenderedPages:
-    """Draw pages of a PDF made from ``target``, refusing with a code and a hint.
+    """Draw pages of a PDF, refusing with a code and a hint that call it ``name``.
 
     With ``drop_pages_past_end`` a page past the end is left out rather than
     refused, for a caller that learns the page count only by drawing.
@@ -317,7 +320,7 @@ async def draw_pdf(
         )
     except EncryptedDocumentError as exc:
         raise BrokerPolicyError(
-            f"Cannot draw a protected PDF: {target.display_path}: {exc}",
+            f"Cannot draw a protected PDF: {name}: {exc}",
             code=RENDER_DOCUMENT_ENCRYPTED,
             fix_hint=(
                 "Open the file in its application, remove the password, and "
@@ -325,44 +328,44 @@ async def draw_pdf(
             ),
         ) from exc
     except DocumentTooLargeError as exc:
-        raise _too_large(target, exc) from exc
+        raise _too_large(name, exc) from exc
     except PageOutOfRangeError as exc:
         if drop_pages_past_end:
             in_range = [number for number in pages if number <= exc.total_units]
             if not in_range:
                 return RenderedPages(page_count=exc.total_units, pages=())
             return await draw_pdf(
-                target=target,
+                name=name,
                 pdf_path=pdf_path,
                 pages=in_range,
                 drop_pages_past_end=False,
             )
         raise BrokerPolicyError(
-            f"{target.display_path} has {exc.total_units} pages: {exc}",
+            f"{name} has {exc.total_units} pages: {exc}",
             code=RENDER_PAGE_OUT_OF_RANGE,
             fix_hint=f"Ask for page numbers between 1 and {exc.total_units}.",
         ) from exc
     except PageRenderTimeoutError as exc:
         raise BrokerPolicyError(
-            f"Drawing {target.display_path} ran out of time: {exc}",
+            f"Drawing {name} ran out of time: {exc}",
             code=RENDER_TIMED_OUT,
             fix_hint="Ask for fewer pages in one call, then call again.",
         ) from exc
     except DocumentExtractionError as exc:
-        raise _unreadable(target, exc) from exc
+        raise _unreadable(name, exc) from exc
 
 
-def _unreadable(target: ReadTarget, reason: object) -> BrokerPolicyError:
+def _unreadable(name: str, reason: object) -> BrokerPolicyError:
     return BrokerPolicyError(
-        f"Cannot draw pages of {target.display_path}: {reason}",
+        f"Cannot draw pages of {name}: {reason}",
         code=RENDER_DOCUMENT_UNREADABLE,
         fix_hint=READ_DOCUMENT_UNREADABLE_FIX_HINT,
     )
 
 
-def _too_large(target: ReadTarget, reason: object) -> BrokerPolicyError:
+def _too_large(name: str, reason: object) -> BrokerPolicyError:
     return BrokerPolicyError(
-        f"Document is too large to draw: {target.display_path}: {reason}",
+        f"Document is too large to draw: {name}: {reason}",
         code=READ_DOCUMENT_TOO_LARGE,
         fix_hint=READ_DOCUMENT_TOO_LARGE_FIX_HINT,
     )

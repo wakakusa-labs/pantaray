@@ -16,9 +16,9 @@ import sqlite3
 from pathlib import Path
 
 from ..storage.migrations.connection import configure_connection
-from ..tooling.resources.run_end import end_run_resources
 from .action_subagent_cancel import ActionSubagentCancelRequest
 from .job_types import ACTION_SUBAGENT_PROCESS_KIND
+from .run_end import end_run_resources
 
 _LIVE_CHILDREN_SQL = """
 SELECT process_id FROM processes

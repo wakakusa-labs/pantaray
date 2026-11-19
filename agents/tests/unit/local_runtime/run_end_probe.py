@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from pantaray_agents.local_runtime.runtime import browser_relay as relay_module
+from pantaray_agents.local_runtime.runtime import run_end as run_end_module
 from pantaray_agents.local_runtime.runtime.browser_contract import (
     BrowserOperationSucceeded,
 )
@@ -25,7 +26,6 @@ from pantaray_agents.local_runtime.runtime.browser_relay import (
 from pantaray_agents.local_runtime.runtime.deliverable_sessions import (
     DesktopRequestMessage,
 )
-from pantaray_agents.local_runtime.tooling.resources import run_end as run_end_module
 from pantaray_agents.schema.websocket.server_messages import (
     BrowserNavigateOperation,
     BrowserOperationRequestedMessage,

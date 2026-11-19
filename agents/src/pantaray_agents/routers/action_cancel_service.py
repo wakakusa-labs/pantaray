@@ -21,6 +21,9 @@ from pantaray_agents.local_runtime.runtime.identity import (
 from pantaray_agents.local_runtime.runtime.process_events import (
     append_local_process_event,
 )
+from pantaray_agents.local_runtime.runtime.run_end import (
+    cancel_action_runtime_resources,
+)
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
 from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
@@ -37,7 +40,6 @@ from pantaray_agents.local_runtime.tooling.resources.action_session_temp_cleanup
 )
 from pantaray_agents.local_runtime.tooling.resources.cancel_cleanup import (
     ActionCleanupPassResult,
-    cancel_action_runtime_resources,
 )
 from pantaray_agents.local_runtime.tooling.resources.resource_db_support import (
     configure_connection,

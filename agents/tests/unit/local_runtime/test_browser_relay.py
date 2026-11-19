@@ -29,9 +29,6 @@ from pantaray_agents.local_runtime.runtime.browser_relay import (
     BrowserOperationOutcome,
     BrowserRelayFailed,
 )
-from pantaray_agents.local_runtime.runtime.deliverable_sessions import (
-    DesktopRequestMessage,
-)
 from pantaray_agents.local_runtime.runtime.one_shot_requests import OneShotRequests
 from pantaray_agents.local_runtime.storage.migrations import load_default_migrations
 from pantaray_agents.schema.events import OutboundEvent
@@ -544,82 +541,20 @@ async def test_each_page_has_its_own_session_and_hosts(runtime: Runtime) -> None
 
 
 @pytest.mark.asyncio
-async def test_another_user_browser_retires_the_session_and_its_hosts(
+async def test_the_user_page_stays_bound_to_its_first_browser(
     runtime: Runtime,
 ) -> None:
-    # Catches: hosts approved for one browser carried into another, and the old
-    # browser's tab left open.
-    relay_module.allow_browser_writes(
-        owner_process_id=OWNER, browser="user", host="mail.example"
-    )
+    # Catches: hosts approved for one browser sent to another one.
     relay_module.allow_user_browser_reads(owner_process_id=OWNER, host="mail.example")
-    _, chrome = await _run(
-        runtime, NAVIGATE_ANSWER, operation=NAVIGATE, user_browser="chrome"
-    )
-    _, app = await _run(runtime, NAVIGATE_ANSWER, operation=NAVIGATE)
-
-    _, edge = await _run(
-        runtime, NAVIGATE_ANSWER, operation=NAVIGATE, user_browser="edge"
-    )
-
-    assert runtime.closes() == [chrome["session_id"]]
-    assert runtime.desktop.events[-2:] == [
-        OutboundEvent.BROWSER_SESSION_CLOSE_REQUESTED,
-        OutboundEvent.BROWSER_OPERATION_REQUESTED,
-    ]
-    assert edge["session_id"] != chrome["session_id"]
-    assert _hosts(edge) == ([], {"browser": "edge", "read_hosts": []})
-    # The app's page is not the user's browser, and keeps its session.
-    assert await _navigate(runtime) == app["session_id"]
-
-
-@pytest.mark.asyncio
-async def test_an_operation_whose_page_switched_back_while_closing_is_not_sent(
-    runtime: Runtime,
-) -> None:
-    # Catches: an operation for one browser sent with hosts another browser's
-    # page was approved for while the first waited for its old tab's close.
+    assert relay_module.bound_user_browser(OWNER) is None
     await _run(runtime, NAVIGATE_ANSWER, operation=NAVIGATE, user_browser="chrome")
-    send = runtime.desktop.send_desktop_request
-    release, both_closing = asyncio.Event(), asyncio.Event()
-    closing = 0
+    sent = len(runtime.desktop.requests)
 
-    async def held_closes(event: str, message: DesktopRequestMessage) -> bool:
-        nonlocal closing
-        if event == OutboundEvent.BROWSER_SESSION_CLOSE_REQUESTED:
-            closing += 1
-            if closing == 2:
-                both_closing.set()
-            await release.wait()
-        return await send(event, message)
+    with pytest.raises(ValueError):
+        await runtime.request(OWNER, NAVIGATE, "edge")
 
-    runtime.desktop.send_desktop_request = held_closes  # type: ignore[method-assign]
-    to_edge = asyncio.ensure_future(runtime.request(OWNER, NAVIGATE, "edge"))
-    back = asyncio.ensure_future(runtime.request(OWNER, NAVIGATE, "chrome"))
-    await both_closing.wait()
-    relay_module.allow_browser_writes(
-        owner_process_id=OWNER, browser="user", host="mail.example"
-    )
-    release.set()
-
-    # Bounded only so that sending it fails the test instead of hanging it.
-    refused = await asyncio.wait_for(to_edge, 5)
-    while (
-        not runtime.desktop.requests or "operation" not in runtime.desktop.requests[-1]
-    ):
-        await asyncio.sleep(0.005)
-    runtime.answer(runtime.desktop.requests[-1], NAVIGATE_ANSWER)
-    await back
-
-    assert isinstance(refused, BrowserRelayFailed)
-    assert refused.code == "BROWSER_SESSION_GONE"
-    # Only the page's current browser is driven; the edge operation never went.
-    sent = [
-        request["user_browser"]["browser"]  # type: ignore[index]
-        for request in runtime.desktop.requests[1:]
-        if "operation" in request
-    ]
-    assert sent == ["chrome"]
+    assert len(runtime.desktop.requests) == sent
+    assert relay_module.bound_user_browser(OWNER) == "chrome"
 
 
 @pytest.mark.asyncio
@@ -640,6 +575,8 @@ async def test_a_lost_connection_asks_again_in_a_new_session(
             runtime, answer, operation=NAVIGATE, user_browser="chrome"
         )
         sessions.append(payload["session_id"])
+    # The session ended; the page is still the same browser's.
+    assert relay_module.bound_user_browser(OWNER) == "chrome"
 
     task, last, _ = await _start(runtime, operation=NAVIGATE, user_browser="chrome")
     await asyncio.sleep(0.2)

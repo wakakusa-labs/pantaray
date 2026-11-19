@@ -20,8 +20,8 @@ The registry also keeps, per page, the hosts an approved ``allow_writes`` let it
 write to and, for the user's page, the hosts the user approved it to open: every
 operation on that page carries them, a host approved on one page never reaches
 the other, they outlast a close, and the run's end drops them. The user's page
-is bound to one user browser: an operation naming another retires its session
-and drops its hosts, since they were approved for the first.
+is bound to the user browser of its first operation for the whole run, since
+its hosts were approved for that browser.
 
 The user's page waits for its first answer without a deadline, since the user
 must allow the connection in their browser; once one answer came, Electron's
@@ -134,8 +134,7 @@ class _Session:
 @dataclass(slots=True)
 class _Page:
     current: _Session | None = None
-    # Hosts the page may write to; it only grows until the run ends, or until
-    # the user's page is bound to another browser.
+    # Hosts the page may write to; it only grows until the run ends.
     write_hosts: set[str] = field(default_factory=set)
     # The user's page only: hosts it may open, kept like ``write_hosts``.
     read_hosts: set[str] = field(default_factory=set)
@@ -144,7 +143,7 @@ class _Page:
     page_host: str | None = None
     # Whether the current session has answered once, so its connection is up.
     connected: bool = False
-    # The user's page only: the browser its session and hosts belong to.
+    # The user's page only: the browser its first operation named, for the run.
     user_browser: UserBrowserId | None = None
 
 
@@ -154,8 +153,6 @@ class _Opened:
 
     session: _Session
     connected: bool
-    # Another browser's session was retired for this one and awaits its close.
-    retired: bool
     write_hosts: tuple[str, ...]
     read_hosts: tuple[str, ...]
 
@@ -228,7 +225,8 @@ async def request_browser_operation(
     The caller has validated the operation and resolved its local paths, and
     ``policy`` is what the page may load from now on; the page may write to the
     hosts approved for it, whatever ``policy`` names. ``user_browser`` is the
-    user's browser the ``"user"`` page runs in.
+    user's browser the ``"user"`` page runs in; naming another than the one the
+    page is bound to (:func:`bound_user_browser`) raises ``ValueError``.
     """
 
     opened = _current_session(
@@ -246,24 +244,6 @@ async def request_browser_operation(
             network=(),
         )
     session = opened.session
-    if opened.retired:
-        # Before the operation, so the old browser's tab closes first.
-        await _deliver_closes(owner_process_id)
-        with _LOCK:
-            owner = _OWNERS.get(owner_process_id)
-            page = None if owner is None or owner.ending else owner.pages[browser]
-            kept = (
-                page is not None
-                and page.current == session
-                and page.user_browser == user_browser
-            )
-        if not kept:
-            # Switched or closed meanwhile: the hosts taken may be another's.
-            return BrowserRelayFailed(
-                code="BROWSER_SESSION_GONE",
-                message="This browser was switched or closed, so nothing was sent.",
-                network=(),
-            )
     # Until the user's browser answers once, the user is being asked to allow
     # the connection, which takes as long as they take; stopping the run ends it.
     timeout_seconds = (
@@ -403,6 +383,15 @@ def user_browser_read_hosts(owner_process_id: str) -> tuple[str, ...]:
         return () if owner is None else tuple(sorted(owner.pages["user"].read_hosts))
 
 
+def bound_user_browser(owner_process_id: str) -> UserBrowserId | None:
+    """The user browser the owner's page in it is bound to for the run; None
+    before its first operation."""
+
+    with _LOCK:
+        owner = _OWNERS.get(owner_process_id)
+        return None if owner is None else owner.pages["user"].user_browser
+
+
 def browser_page_host(owner_process_id: str, browser: BrowserChoice) -> str | None:
     """The host the owner's open ``browser`` page was navigated to; None for a
     local file or no page. The page may have followed links since."""
@@ -484,13 +473,11 @@ def _current_session(
         owner = _OWNERS.get(owner_process_id)
         if owner is not None and owner.ending:
             return None
-        page = None if owner is None else owner.pages[browser]
-        if (
-            page is not None
-            and page.current is not None
-            and page.user_browser == user_browser
-        ):
-            return _opened(page, page.current, retired=False)
+        if owner is not None:
+            page = owner.pages[browser]
+            _bind(page, user_browser)
+            if page.current is not None:
+                return _opened(page, page.current)
     # The sweep forgets ended owners: past that, the run's status is the fence.
     if owner_process_id not in _live_owner_ids(
         db_path, busy_timeout_ms, (owner_process_id,)
@@ -501,26 +488,28 @@ def _current_session(
         if owner.ending:
             return None
         page = owner.pages[browser]
-        retired = False
-        if page.user_browser is not None and page.user_browser != user_browser:
-            # The hosts were approved for the other browser.
-            retired = page.current is not None
-            _retire_current(owner, page)
-            page.write_hosts.clear()
-            page.read_hosts.clear()
-        page.user_browser = user_browser
+        _bind(page, user_browser)
         if page.current is None:
             page.current = _Session(user_id=user_id, session_id=str(uuid.uuid4()))
-        return _opened(page, page.current, retired=retired)
+        return _opened(page, page.current)
 
 
-def _opened(page: _Page, session: _Session, *, retired: bool) -> _Opened:
+def _bind(page: _Page, user_browser: UserBrowserId | None) -> None:
+    """Under the lock: the page's first operation binds it for the run."""
+
+    if page.user_browser is not None and page.user_browser != user_browser:
+        raise ValueError(
+            f"the run's page is bound to {page.user_browser}, not {user_browser}"
+        )
+    page.user_browser = user_browser
+
+
+def _opened(page: _Page, session: _Session) -> _Opened:
     """Under the lock."""
 
     return _Opened(
         session=session,
         connected=page.connected,
-        retired=retired,
         write_hosts=tuple(sorted(page.write_hosts)),
         read_hosts=tuple(sorted(page.read_hosts)),
     )
@@ -581,6 +570,7 @@ __all__ = [
     "BrowserRelayFailed",
     "allow_browser_writes",
     "allow_user_browser_reads",
+    "bound_user_browser",
     "browser_operation_broker",
     "browser_page_host",
     "browser_write_hosts",

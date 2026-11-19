@@ -97,7 +97,7 @@ async def save_token_accounting_error_step(
         formal_result=formal_result,
         result_line=build_outcome_line(
             slot.tool_id,
-            formal_result.output.output,
+            formal_result.output,
             status="stopped",
         ),
         started_at=exec_result.started_at,
@@ -352,7 +352,7 @@ async def _record_stopped_call(
         formal_result=formal_result,
         result_line=build_outcome_line(
             slot.tool_id,
-            formal_result.output.output,
+            formal_result.output,
             status=outcome_status,
         ),
         started_at=started_at,
@@ -410,7 +410,7 @@ async def _finalize_unreturned_call(
         formal_result=formal_result,
         result_line=build_outcome_line(
             slot.tool_id,
-            formal_result.output.output,
+            formal_result.output,
             status="failed",
             error_code=tool_error.error_code,
         ),

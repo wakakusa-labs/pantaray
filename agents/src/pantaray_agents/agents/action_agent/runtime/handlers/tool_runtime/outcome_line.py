@@ -8,13 +8,23 @@ line carries what actually happened.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping, Sequence
 from typing import Literal, cast
 
 from pantaray_agents.local_runtime.tooling.brokering.broker_structured_patch import (
     count_patch_diff_lines,
 )
-from pantaray_agents.local_runtime.tooling.tool_result_spill import is_spilled_text
+from pantaray_agents.local_runtime.tooling.tool_result_finalization import (
+    FinalizedToolOutput,
+)
+from pantaray_agents.local_runtime.tooling.tool_result_spill import (
+    is_spilled_text,
+    spilled_texts,
+)
+from pantaray_agents.local_runtime.tooling.tool_result_storage import (
+    whole_result_reference,
+)
 from pantaray_agents.schema.action_conversation import RENDERER_PREPARING_OUTPUT_KIND
 from pantaray_agents.schema.agent.base import JSONValue
 
@@ -28,18 +38,18 @@ OutcomeStatus = Literal[
 ]
 
 _UNKNOWN_FAILURE_CODE = "UNKNOWN"
-_ACTION_FILE_STORAGE = "action_file"
 
 
 def build_outcome_line(
     tool_id: str,
-    output: JSONValue,
+    finalized: FinalizedToolOutput,
     *,
     status: OutcomeStatus,
     error_code: str | None = None,
 ) -> str:
     """Render one locale-free ASCII line describing how a tool call ended."""
 
+    output = finalized.output
     match status:
         case "awaiting_approval":
             return f"{tool_id}: awaiting approval"
@@ -58,7 +68,7 @@ def build_outcome_line(
             code = _failure_code(output) or error_code or _UNKNOWN_FAILURE_CODE
             return f"{tool_id}: failed {code}"
         case "ok":
-            return f"{tool_id}: ok{_success_detail(tool_id, output)}"
+            return f"{tool_id}: ok{_success_detail(tool_id, finalized)}"
 
 
 def _captured_detail(output: JSONValue) -> str:
@@ -70,15 +80,28 @@ def _captured_detail(output: JSONValue) -> str:
     return f", {_chars(captured)} captured" if captured else ""
 
 
-def _success_detail(tool_id: str, output: JSONValue) -> str:
+def _success_detail(tool_id: str, finalized: FinalizedToolOutput) -> str:
     """Return the ``, ...`` tail of a successful outcome line, or nothing."""
 
-    if not isinstance(output, Mapping):
+    body = finalized.output
+    if not isinstance(body, dict):
         return ""
-    spill = _spill_detail(output)
-    if spill is not None:
-        return spill
-    return "".join(f", {part}" for part in _tool_detail(tool_id, output))
+    # An inline result is what the tool returned, and what a tool took from
+    # outside may hold objects shaped like storage's references. A stored one
+    # holds storage's alone: storage refuses to move texts out of a result that
+    # already holds such an object, and stores it whole instead.
+    if finalized.storage_kind == "inline_json":
+        return _joined(_tool_detail(tool_id, body))
+    whole = whole_result_reference(body)
+    if whole is body:
+        # Stored whole at the top: none of the tool's own fields are left.
+        return _joined([_spill_detail([whole])])
+    moved = [whole] if whole is not None else spilled_texts(body)
+    return _joined([*_tool_detail(tool_id, body), _spill_detail(moved)])
+
+
+def _joined(details: Sequence[str]) -> str:
+    return "".join(f", {part}" for part in details)
 
 
 def _tool_detail(tool_id: str, body: Mapping[str, JSONValue]) -> list[str]:
@@ -126,7 +149,7 @@ def _tool_detail(tool_id: str, body: Mapping[str, JSONValue]) -> list[str]:
         case "history_fetch":
             return [
                 _count(body, "refs", "ref", "refs"),
-                _chars(len(cast(str, body["content"]))),
+                _chars(_length(body["content"])),
                 *(["more available"] if body["next_cursor"] is not None else []),
             ]
         case "wait_subagents":
@@ -205,19 +228,25 @@ def _wait_subagents_detail(body: Mapping[str, JSONValue]) -> list[str]:
     return [f"{done:,} done", f"{len(results) - done:,} running"]
 
 
-def _spill_detail(body: Mapping[str, JSONValue]) -> str | None:
-    """Describe a result the runtime moved out of line into an action file."""
+def _spill_detail(moved: Sequence[dict[str, JSONValue]]) -> str:
+    """Say where storage moved part or all of a result, so the model reads it.
 
-    if body.get("storage") != _ACTION_FILE_STORAGE:
-        return None
-    paths = _text(body, "path")
-    if not paths:
-        return None
-    for key, unit in (("character_count", "chars"), ("byte_size", "bytes")):
-        size = body.get(key)
-        if isinstance(size, int) and not isinstance(size, bool):
-            return f", spilled to {paths[0]}, {size:,} {unit}"
-    return f", spilled to {paths[0]}"
+    The texts of one result are moved into one folder, named once for many.
+    """
+
+    if len(moved) > 1:
+        folder = os.path.dirname(cast(str, moved[0]["path"]))
+        total = sum(cast(int, reference["character_count"]) for reference in moved)
+        return f"spilled {len(moved):,} texts to {folder}, {_chars(total)}"
+    (reference,) = moved
+    # A binary result is measured in bytes only.
+    size = reference.get("character_count")
+    amount = (
+        _chars(size)
+        if isinstance(size, int)
+        else f"{cast(int, reference['byte_size']):,} bytes"
+    )
+    return f"spilled to {reference['path']}, {amount}"
 
 
 def _failure_code(output: JSONValue) -> str | None:

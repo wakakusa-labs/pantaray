@@ -111,7 +111,7 @@ async def _model_sees(
         completed_at="2026-10-01T00:00:01Z",
         result_line=build_outcome_line(
             tool_id,
-            output,
+            result.finalized_output,
             status="failed",
             error_code=f"ACTION_TOOL_{tool_id.upper()}_FAILED",
         ),

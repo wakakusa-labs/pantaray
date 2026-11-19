@@ -1,12 +1,12 @@
-"""The Action's render tools: a document's pages, drawn, so the model can look.
+"""The Action's ``render_pdf_page``: a document's pages, drawn, so the model can look.
 
 ``tools.files.render_pages`` draws them and decides which file may be opened.
-What this module owns, for ``render_html_page`` as well, is where the Action
-keeps them: the converted PDF with the Action, so the same file is converted
-once, and the images where the conversation page and the next turn can both
-find them again. The bytes ride
-the attachment path ``capture_screen`` puts a screenshot on, never the output,
-which is durable history the memory tools read.
+What this module owns is where the Action keeps them: the converted PDF with the
+Action, in the folder ``browser``'s printed pages convert into as well, so the
+same file is converted once, and the images where the conversation page and the
+next turn can both find them again. The bytes ride the attachment path
+``capture_screen`` puts a screenshot on, never the output, which is durable
+history the memory tools read.
 """
 
 from __future__ import annotations
@@ -68,7 +68,7 @@ async def run_render_pdf_page_executor(
     )
     if isinstance(drawn, RendererPreparing):
         return _preparing(drawn.target)
-    return rendered_pages_outcome(
+    return _rendered_pages_outcome(
         user_id=context.execution_session.user_id,
         target=drawn.target,
         pages=drawn.pages,
@@ -99,7 +99,7 @@ def rendered_documents_dir(context: BrokerContext) -> Path:
     )
 
 
-def rendered_pages_outcome(
+def _rendered_pages_outcome(
     *,
     user_id: str,
     target: ReadTarget,
@@ -170,6 +170,5 @@ def _store(*, user_id: str, page: RenderedPage) -> ToolImageAttachment:
 
 __all__ = [
     "rendered_documents_dir",
-    "rendered_pages_outcome",
     "run_render_pdf_page_executor",
 ]

@@ -204,7 +204,7 @@ async def handle_invalid_tool_call(
         completed_at=completed_at,
         result_line=build_outcome_line(
             str(tool_id),
-            formal_result.output.output,
+            formal_result.output,
             status="failed",
             error_code=validation_error.error_code,
         ),
@@ -307,7 +307,7 @@ async def handle_invalid_tool_args_shape(
         completed_at=completed_at,
         result_line=build_outcome_line(
             tool_def.tool_id,
-            formal_result.output.output,
+            formal_result.output,
             status="failed",
             error_code=validation_error.error_code,
         ),
@@ -407,7 +407,7 @@ async def handle_tool_validation_error(
         completed_at=completed_at,
         result_line=build_outcome_line(
             tool_def.tool_id,
-            formal_result.output.output,
+            formal_result.output,
             status="failed",
             error_code=validation_error.error_code,
         ),

@@ -64,15 +64,24 @@ test('the browser responder answers each operation with the artifact it claims',
             const load = process.getBuiltinModule('node:module').createRequire(args.dist);
             const { createBrowserSessions } = load(`${args.dist}/browser/browserSession.js`);
             const { createBrowserResponder } = load(`${args.dist}/browser/browserResponder.js`);
+            const { createUserBrowserSessions } = load(
+              `${args.dist}/browser/userBrowserSession.js`
+            );
             const { LocalBackendRequestError } = load(`${args.dist}/localBackend/client.js`);
             // No page here reaches this port.
             const sessions = createBrowserSessions({ getBackendPort: () => 9 });
+            // Every request here is for the app's page; none connects to a browser.
+            const userSessions = createUserBrowserSessions({
+              connect: () => Promise.reject(new Error('not used')),
+              getBackendPort: () => 9,
+            });
             const answers: unknown[] = [];
             g.e2eBrowser = {
               answers,
               respond: (isGone) =>
                 createBrowserResponder({
                   sessions,
+                  userSessions,
                   localArtifactRoot: args.artifactRoot,
                   postAnswer: async (body: unknown) => {
                     answers.push(body);
@@ -95,6 +104,7 @@ test('the browser responder answers each operation with the artifact it claims',
               secret_paths: [],
               write_hosts: [],
             },
+            user_browser: null,
           });
           return browser.answers[browser.answers.length - 1];
         },

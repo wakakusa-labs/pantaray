@@ -346,9 +346,6 @@ class BrowserOperationRequestedMessage(_BrowserModel):
 
     operation_request_id: _BrowserId = Field(description="Consumed once")
     session_id: _BrowserId = Field(description="Browser session the operation runs in")
-    action_id: _BrowserId = Field(description="ID of the requesting Action")
-    process_id: _BrowserId = Field(description="Physical process ID of the owning run")
-    tool_request_id: _BrowserId = Field(description="Logical ID of the tool request")
     operation: BrowserOperation = Field(
         description="The validated action, local paths resolved to real paths"
     )

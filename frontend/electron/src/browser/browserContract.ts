@@ -91,9 +91,6 @@ const BrowserPagePolicySchema = strict({
 const BrowserOperationRequestSchema = strict({
   operation_request_id: NonBlankSchema,
   session_id: NonBlankSchema,
-  action_id: NonBlankSchema,
-  process_id: NonBlankSchema,
-  tool_request_id: NonBlankSchema,
   operation: BrowserOperationSchema,
   policy: BrowserPagePolicySchema,
 });

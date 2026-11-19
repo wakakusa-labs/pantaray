@@ -231,9 +231,6 @@ function run(
       const request = {
         operation_request_id: 'op-e2e',
         session_id: args.session,
-        action_id: 'action-e2e',
-        process_id: 'process-e2e',
-        tool_request_id: 'tool-e2e',
         operation: args.url
           ? { action: 'navigate', target: { kind: 'web', url: args.url } }
           : { action: 'console' },

@@ -13,9 +13,9 @@ from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
 from pantaray_agents.local_runtime.runtime.browser_contract import (
     BROWSER_MAX_CONTACTED_HOSTS,
     BrowserContactedHost,
-    BrowserEngineFailureCode,
     BrowserNote,
     BrowserPageData,
+    BrowserRelayFailureCode,
     BrowserTruncation,
 )
 from pantaray_agents.schema.agent.base import JSONValue
@@ -42,16 +42,10 @@ class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
 
-# Electron's codes, and those only the runtime raises: refused before Electron is
-# asked, or a missing or unverifiable answer.
+# The relay's codes, and those the broker raises before Electron is asked.
 BrowserFailureCode = (
-    BrowserEngineFailureCode
-    | Literal[
-        "BROWSER_NETWORK_OFF",
-        "BROWSER_OUTSIDE_READ_SCOPE",
-        "BROWSER_RELAY_TIMED_OUT",
-        "BROWSER_INTEGRITY_FAILED",
-    ]
+    BrowserRelayFailureCode
+    | Literal["BROWSER_NETWORK_OFF", "BROWSER_OUTSIDE_READ_SCOPE"]
 )
 
 

@@ -106,9 +106,6 @@ test('the browser acts on a real page through snapshot refs', async ({}, testInf
           await g.e2eInteractions.respond({
             operation_request_id: id,
             session_id: 'interactions-e2e',
-            action_id: 'action-e2e',
-            process_id: 'process-e2e',
-            tool_request_id: 'tool-e2e',
             operation: args.operation,
             policy: {
               allow_network: true,

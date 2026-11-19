@@ -18,7 +18,7 @@ import stat
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, Literal
+from typing import Final
 
 from pydantic import BaseModel, ValidationError
 
@@ -51,11 +51,11 @@ from pantaray_agents.tools.files.render_pages import (
     SaveHtmlAsPdfToolArgs,
 )
 
-from ...runtime.browser_contract import BrowserBlockedRequest
+from ...runtime.browser_contract import BrowserBlockedRequest, BrowserRelayFailureCode
 from ...runtime.browser_relay import (
+    BROWSER_RELAY_TIMEOUT_SECONDS,
     BrowserOperationDone,
     BrowserRelayFailed,
-    BrowserRelayFailureCode,
     close_browser_session,
     request_browser_operation,
 )
@@ -83,47 +83,30 @@ _PAGE_RULES = (
     "loads local files only from where read can, and never anything from the "
     "network, so keep styles, fonts and images inline or in local files; "
     "refused requests are listed in blocked_requests. When the desktop app is "
-    "closed nothing answers, and the call fails after about 30 seconds."
+    "closed nothing answers, and the call fails after about "
+    f"{int(BROWSER_RELAY_TIMEOUT_SECONDS)} seconds."
 )
 
 BLOCKED_REQUESTS_NOTE: Final = "Some resources were refused; see blocked_requests."
-_PrintFailureCode = Literal[
-    "HTML_LOAD_FAILED",
-    "HTML_RENDER_TIMED_OUT",
-    "HTML_RENDERER_CRASHED",
-    "HTML_PRINT_FAILED",
-    "HTML_RENDER_RELAY_TIMED_OUT",
-    "HTML_RENDER_INTEGRITY_FAILED",
-]
 _RETRY_ONCE_HINT: Final = (
     "Try once more; if it fails again, tell the user the page could not be checked."
 )
-_FAILURE_HINTS: Final[dict[_PrintFailureCode, str]] = {
-    "HTML_LOAD_FAILED": (
-        "Check that the file is a complete HTML page; blocked requests, if any, "
-        "are listed in the message."
-    ),
-    "HTML_RENDER_TIMED_OUT": (
+# Only the codes a navigate to a local file and a print can end in have a hint.
+_FAILURE_HINTS: Final[dict[BrowserRelayFailureCode, str]] = {
+    "BROWSER_NAVIGATION_FAILED": "Check that the file is a complete HTML page.",
+    "BROWSER_TIMED_OUT": (
         "The page did not finish loading and printing in time. Remove scripts or "
         "resources that keep it busy, then try again."
     ),
-    "HTML_RENDERER_CRASHED": (
+    "BROWSER_RENDERER_CRASHED": (
         "The page crashed the browser engine. Simplify heavy scripts or very "
         "large images, then try again."
     ),
-    "HTML_PRINT_FAILED": (
+    "BROWSER_ACTION_FAILED": (
         "Check the page's @page and print CSS rules, then try again."
     ),
-    "HTML_RENDER_RELAY_TIMED_OUT": _RETRY_ONCE_HINT,
-    "HTML_RENDER_INTEGRITY_FAILED": _RETRY_ONCE_HINT,
-}
-# The engine's failures that mean the same as one of the print path's own codes;
-# any other failure is a page that did not load, or did not print.
-_SAME_FAILURE: Final[dict[BrowserRelayFailureCode, _PrintFailureCode]] = {
-    "BROWSER_TIMED_OUT": "HTML_RENDER_TIMED_OUT",
-    "BROWSER_RENDERER_CRASHED": "HTML_RENDERER_CRASHED",
-    "BROWSER_RELAY_TIMED_OUT": "HTML_RENDER_RELAY_TIMED_OUT",
-    "BROWSER_INTEGRITY_FAILED": "HTML_RENDER_INTEGRITY_FAILED",
+    "BROWSER_RELAY_TIMED_OUT": _RETRY_ONCE_HINT,
+    "BROWSER_INTEGRITY_FAILED": _RETRY_ONCE_HINT,
 }
 _SUGGESTION_PROCESS_SQL = """
 SELECT process_id FROM processes
@@ -214,9 +197,7 @@ class SuggestionHtmlPages:
 
         return execute
 
-    async def _print(
-        self, call: ReactToolCall, raw_path: str
-    ) -> tuple[ReadTarget, _Printed]:
+    async def _print(self, raw_path: str) -> tuple[ReadTarget, _Printed]:
         scope = self.files.scope
         target = resolve_html_file(scope=scope, raw_path=raw_path)
         db_path, busy_timeout_ms = resolve_local_runtime_db_config(
@@ -230,7 +211,6 @@ class SuggestionHtmlPages:
         if owner is None:
             raise _print_failed(
                 target,
-                "navigate",
                 BrowserRelayFailed(
                     code="BROWSER_SESSION_GONE",
                     message="This Suggestion has no run to own a browser.",
@@ -247,14 +227,12 @@ class SuggestionHtmlPages:
                 db_path=db_path,
                 busy_timeout_ms=busy_timeout_ms,
                 user_id=self.user_id,
-                action_id=self.run_id,
                 owner_process_id=owner,
-                tool_request_id=f"{self.run_id}:{call.call_id}",
                 operation=operation,
                 policy=policy,
             )
             if isinstance(outcome, BrowserRelayFailed):
-                raise _print_failed(target, operation.action, outcome)
+                raise _print_failed(target, outcome)
             return outcome
 
         try:
@@ -279,7 +257,7 @@ class SuggestionHtmlPages:
 
     async def _render(self, call: ReactToolCall, request: BaseModel) -> ReactToolResult:
         assert isinstance(request, RenderHtmlPageToolArgs)
-        target, printed = await self._print(call, request.path)
+        target, printed = await self._print(request.path)
         drawn, message = await draw_printed_pages(
             pdf=printed.pdf,
             name=target.display_path,
@@ -310,7 +288,7 @@ class SuggestionHtmlPages:
         assert isinstance(request, SaveHtmlAsPdfToolArgs)
         # Refused before printing, so a call that cannot be saved never prints.
         relative = folder_relative(self.folder.path, request.pdf_path)
-        target, printed = await self._print(call, request.path)
+        target, printed = await self._print(request.path)
         replaced = await asyncio.to_thread(self._write, relative, printed.pdf)
         notes = [f"Saved {target.display_path} as {relative}."]
         if replaced:
@@ -379,20 +357,11 @@ def _blocked_requests_output(printed: _Printed) -> list[JSONValue]:
     ]
 
 
-def _print_failed(
-    target: ReadTarget,
-    step: Literal["navigate", "print"],
-    failure: BrowserRelayFailed,
-) -> BrokerPolicyError:
-    """The engine's failure as the print path's own error output."""
-
-    code = _SAME_FAILURE.get(
-        failure.code, "HTML_LOAD_FAILED" if step == "navigate" else "HTML_PRINT_FAILED"
-    )
+def _print_failed(target: ReadTarget, failure: BrowserRelayFailed) -> BrokerPolicyError:
     return BrokerPolicyError(
         f"Could not print {target.display_path}: {failure.message}",
-        code=code,
-        fix_hint=_FAILURE_HINTS[code],
+        code=failure.code,
+        fix_hint=_FAILURE_HINTS.get(failure.code),
     )
 
 

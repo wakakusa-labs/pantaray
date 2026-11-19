@@ -75,7 +75,6 @@ async def runtime(
     monkeypatch.setattr(
         relay_module, "browser_operation_broker", lambda: _ELECTRON_BROKER
     )
-    monkeypatch.setattr(relay_module, "_OWNERS", {})
     db_path, context = _bootstrap_runtime_db(
         tmp_path,
         read_access_scope=getattr(request, "param", "workspace"),
@@ -200,10 +199,9 @@ async def _refused(runtime: Runtime, args: dict) -> BrokerPolicyError:
     return caught.value
 
 
-# Catches: the run's page opened for another owner, a policy looser than read's
-# (no private roots, a missing secret tier, approved write hosts), or reached
-# hosts left out of the output.
-async def test_navigate_reaches_electron_with_the_runs_owner_and_reads_policy(
+# Catches: a policy looser than read's (no private roots, a missing secret tier,
+# approved write hosts), or reached hosts left out of the output.
+async def test_navigate_reaches_electron_with_reads_policy(
     runtime: Runtime,
 ) -> None:
     db_path = runtime[0]
@@ -212,8 +210,6 @@ async def test_navigate_reaches_electron_with_the_runs_owner_and_reads_policy(
         _electron(runtime, _succeeded()),
     )
 
-    assert payload["process_id"] == BROKER_ACTOR_PROCESS_ID
-    assert payload["tool_request_id"] == "action-1:step-1:1"
     assert payload["operation"] == {
         "action": "navigate",
         "target": {"kind": "web", "url": "http://localhost:5173/"},

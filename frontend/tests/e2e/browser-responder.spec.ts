@@ -86,9 +86,6 @@ test('the browser responder answers each operation with the artifact it claims',
           await browser.respond(args.gone)({
             operation_request_id: args.id,
             session_id: 'responder-e2e',
-            action_id: 'action-e2e',
-            process_id: 'process-e2e',
-            tool_request_id: 'tool-e2e',
             operation: args.operation,
             policy: {
               allow_network: true,

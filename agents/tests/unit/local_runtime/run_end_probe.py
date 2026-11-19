@@ -74,9 +74,13 @@ class RunEndProbe:
     # Each process stop: its owners, and whether each was refused a browser
     # operation while its processes stopped.
     stopped: list[tuple[tuple[str, ...], bool]] = field(default_factory=list)
+    # The session the last delivered operation named; operations run one by one.
+    last_session_id: str | None = None
 
     async def open_browser(self, db_path: Path, owner: str) -> None:
         assert isinstance(await self._request(db_path, owner), BrowserOperationDone)
+        assert self.last_session_id is not None
+        self.sessions[owner] = self.last_session_id
 
     async def refused(self, db_path: Path, owner: str) -> bool:
         outcome = await self._request(db_path, owner)
@@ -90,9 +94,7 @@ class RunEndProbe:
             db_path=db_path,
             busy_timeout_ms=1_000,
             user_id="user-1",
-            action_id="action-1",
             owner_process_id=owner,
-            tool_request_id=f"{owner}:browser",
             operation=_NAVIGATE,
             policy=_POLICY,
         )
@@ -106,7 +108,7 @@ class RunEndProbe:
             )
             return True
         assert isinstance(message, BrowserOperationRequestedMessage)
-        self.sessions[message.process_id] = message.session_id
+        self.last_session_id = message.session_id
         relay_module.browser_operation_broker().answer(
             request_id=message.operation_request_id,
             user_id=user_id,

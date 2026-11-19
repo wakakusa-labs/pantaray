@@ -19,13 +19,16 @@ Everything taken from the page goes in the output's ``data``, marked
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Final
+from typing import Final, Literal, TypedDict
 
 from pydantic import ValidationError
 
 from pantaray_agents.local_runtime.runtime.browser_contract import (
     BrowserContactedHost,
+    BrowserNote,
     BrowserOperationSucceeded,
+    BrowserPageData,
+    BrowserTruncation,
 )
 from pantaray_agents.local_runtime.runtime.browser_relay import (
     BrowserOperationDone,
@@ -71,10 +74,15 @@ from .broker_outcome import UnprojectedBrokerToolOutcome
 from .browser_protocol import (
     BrowserAllowWritesArgs,
     BrowserCloseArgs,
+    BrowserControlOutput,
     BrowserFailureCode,
+    BrowserImageAttachment,
     BrowserNavigateArgs,
+    BrowserPageOutput,
     BrowserPrintArgs,
+    BrowserPrintOutput,
     BrowserScreenshotArgs,
+    BrowserScreenshotOutput,
     ValidatedBrowserPrintRequest,
     ValidatedBrowserRequest,
 )
@@ -128,7 +136,8 @@ async def run_browser_executor(
     if isinstance(args, BrowserCloseArgs):
         await close_browser_session(owner_process_id=context.actor_process_id)
         return UnprojectedBrokerToolOutcome(
-            status="success", output={"status": "ok", "action": "close"}
+            status="success",
+            output=_dump(BrowserControlOutput(status="ok", action="close")),
         )
     # Parsed by the contract's full union; it comes with a later release.
     if isinstance(args, BrowserAllowWritesArgs):
@@ -173,9 +182,7 @@ async def run_browser_executor(
         db_path=context.db_path,
         busy_timeout_ms=context.busy_timeout_ms,
         user_id=user_id,
-        action_id=request.action_id,
         owner_process_id=context.actor_process_id,
-        tool_request_id=request.tool_request_id,
         operation=operation,
         policy=browser_page_policy(scope, allow_network=allow_network),
     )
@@ -184,9 +191,11 @@ async def run_browser_executor(
             f"browser {args.action} failed: {outcome.message}",
             code=outcome.code,
             fix_hint=FIX_HINTS[outcome.code],
-            network=_network(outcome.network),
+            network=[host.model_dump(mode="json") for host in outcome.network],
         )
-    if isinstance(request, ValidatedBrowserPrintRequest):
+    if isinstance(args, BrowserPrintArgs):
+        # ValidatedBrowserRequest refuses print: only an approved one gets here.
+        assert isinstance(request, ValidatedBrowserPrintRequest)
         # The relay has verified the PDF a print answer claims.
         assert outcome.artifact is not None
         saved = await save_printed_pdf(
@@ -194,25 +203,32 @@ async def run_browser_executor(
         )
         return UnprojectedBrokerToolOutcome(
             status="success",
-            output={
-                **_page_output(args.action, outcome.result),
-                "pdf_path": str(saved.path),
-                "replaced": saved.replaced,
-            },
-            file_paths=(request.args.pdf_path,),
+            output=_dump(
+                BrowserPrintOutput(
+                    **_page_fields(outcome.result),
+                    action="print",
+                    pdf_path=str(saved.path),
+                    replaced=saved.replaced,
+                )
+            ),
+            file_paths=(args.pdf_path,),
             file_reference_paths=(
                 () if saved.outside_workspace else (str(saved.path),)
             ),
         )
-    if isinstance(args, BrowserScreenshotArgs) and args.printed_pages is not None:
+    if not isinstance(args, BrowserScreenshotArgs):
+        return UnprojectedBrokerToolOutcome(
+            status="success",
+            output=_dump(
+                BrowserPageOutput(**_page_fields(outcome.result), action=args.action)
+            ),
+        )
+    if args.printed_pages is not None:
         return await _printed_pages(
             context=context, requested=args.printed_pages, printed=outcome
         )
-    if outcome.artifact is None:
-        return UnprojectedBrokerToolOutcome(
-            status="success", output=_page_output(args.action, outcome.result)
-        )
     # The relay has verified the PNG a screenshot answer claims.
+    assert outcome.artifact is not None
     image = _store_image(
         user_id=user_id,
         payload=outcome.artifact,
@@ -221,8 +237,12 @@ async def run_browser_executor(
     )
     return UnprojectedBrokerToolOutcome(
         status="success",
-        output=_page_output(
-            args.action, outcome.result, attachments=[image.output_entry]
+        output=_dump(
+            BrowserScreenshotOutput(
+                **_page_fields(outcome.result),
+                action="screenshot",
+                attachments=[BrowserImageAttachment.model_validate(image.output_entry)],
+            )
         ),
         attachments=(image.attachment,),
     )
@@ -251,7 +271,7 @@ async def _printed_pages(
             str(exc),
             code=exc.code,
             fix_hint=exc.fix_hint,
-            network=_network(printed.result.network),
+            network=[host.model_dump(mode="json") for host in printed.result.network],
         ) from exc
     images = [
         _store_image(
@@ -265,25 +285,28 @@ async def _printed_pages(
     ]
     return UnprojectedBrokerToolOutcome(
         status="success",
-        output={
-            **_page_output(
-                "screenshot",
-                printed.result,
-                attachments=[image.output_entry for image in images],
-            ),
-            "page_count": drawn.page_count,
-            # The refs are in the message as well: on the string prompt path,
-            # the prompt text says where each image goes.
-            "message": " ".join(
-                [
-                    message,
-                    *(
-                        f"Page {page.number}: {image.ref}"
-                        for page, image in zip(drawn.pages, images, strict=True)
-                    ),
-                ]
-            ),
-        },
+        output=_dump(
+            BrowserScreenshotOutput(
+                **_page_fields(printed.result),
+                action="screenshot",
+                attachments=[
+                    BrowserImageAttachment.model_validate(image.output_entry)
+                    for image in images
+                ],
+                page_count=drawn.page_count,
+                # The refs are in the message as well: on the string prompt
+                # path, the prompt text says where each image goes.
+                message=" ".join(
+                    [
+                        message,
+                        *(
+                            f"Page {page.number}: {image.ref}"
+                            for page, image in zip(drawn.pages, images, strict=True)
+                        ),
+                    ]
+                ),
+            )
+        ),
         attachments=tuple(image.attachment for image in images),
     )
 
@@ -338,22 +361,37 @@ def _file_roots(scope: ReadScope) -> tuple[Path, ...]:
     )
 
 
-def _page_output(
-    action: str,
-    result: BrowserOperationSucceeded,
-    *,
-    attachments: list[JSONValue] | None = None,
-) -> dict[str, JSONValue]:
+class _PageFields(TypedDict):
+    status: Literal["ok"]
+    truncated: BrowserTruncation | None
+    notes: list[BrowserNote]
+    network: list[BrowserContactedHost]
+    untrusted: Literal[True]
+    data: BrowserPageData
+
+
+def _page_fields(result: BrowserOperationSucceeded) -> _PageFields:
+    """What every output of a page read carries; the page's text is in ``data``."""
+
     return {
         "status": "ok",
-        "action": action,
         "truncated": result.truncated,
-        "notes": list(result.notes),
-        "network": _network(result.network),
+        "notes": result.notes,
+        "network": result.network,
         "untrusted": True,
-        "data": result.page_data.model_dump(mode="json"),
-        **({} if attachments is None else {"attachments": attachments}),
+        "data": result.page_data,
     }
+
+
+def _dump(
+    output: BrowserPageOutput
+    | BrowserScreenshotOutput
+    | BrowserPrintOutput
+    | BrowserControlOutput,
+) -> JSONValue:
+    # Unset, not None: ``truncated`` and the page's own nulls stay in the output,
+    # and fields an action does not fill (``page_count``) stay out of it.
+    return output.model_dump(mode="json", exclude_unset=True)
 
 
 def _navigation_target(
@@ -380,15 +418,6 @@ def _navigation_target(
             fix_hint=exc.fix_hint or FIX_HINTS["BROWSER_OUTSIDE_READ_SCOPE"],
         ) from exc
     return BrowserFileTarget(kind="file", path=str(target.real_path))
-
-
-def _network(
-    hosts: list[BrowserContactedHost] | tuple[BrowserContactedHost, ...],
-) -> list[JSONValue]:
-    """The hosts the page reached, in the ``network`` shape every tool that lets
-    data leave the machine reports and the conversation row shows."""
-
-    return [{"host": host.host, "port": host.port} for host in hosts]
 
 
 __all__ = [

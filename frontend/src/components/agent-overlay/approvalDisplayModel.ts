@@ -344,6 +344,22 @@ function buildToolApprovalDisplay(
     };
   }
 
+  // The host is what the run's browser pages may then send data to; the page host is
+  // the site the run opened, so the user sees where the request comes from.
+  if (summaryKind === 'browser_write') {
+    const pageHost = readStringValue(summary, 'page_host');
+    return {
+      operationKey: 'overlay.approvalRequired.operation.browserWrite',
+      usesLoginEnvironment: false,
+      primaryLabelKey: 'overlay.approvalRequired.sendsTo',
+      primaryValue: readStringValue(summary, 'host') ?? t('overlay.approvalRequired.unavailable'),
+      details: pageHost
+        ? [{ labelKey: 'overlay.approvalRequired.openPage' as MessageKey, value: pageHost }]
+        : [],
+      argumentFields: [],
+    };
+  }
+
   // The named app is exactly what Electron is asked to capture, so it is what the user
   // approves; the generic line would hide the act behind "this operation".
   if (approvalPanel.toolId === 'capture_screen' || summaryKind === 'screen_capture') {

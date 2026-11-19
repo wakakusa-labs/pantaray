@@ -76,6 +76,7 @@ def _ok(
             "truncated": None,
             "network": [],
             "artifact": artifact,
+            "opened_host": None,
         }
     )
 

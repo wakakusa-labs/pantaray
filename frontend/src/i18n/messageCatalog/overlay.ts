@@ -85,6 +85,7 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.approvalRequired.operation.runPython': 'Run Python code.',
     'overlay.approvalRequired.operation.applyPatch': 'Modify files.',
     'overlay.approvalRequired.operation.captureScreen': 'Capture a window.',
+    'overlay.approvalRequired.operation.browserWrite': 'Send data from the browser.',
     'overlay.approvalRequired.operation.generic': 'Run this operation.',
     'overlay.approvalRequired.operation.integration': 'Write to {service} ({account}).',
     'overlay.approvalRequired.integration.tool': 'Action',
@@ -94,6 +95,8 @@ export const OVERLAY_MESSAGES = defineMessages({
       'It keeps running until the work ends or it is stopped.',
     'overlay.approvalRequired.command': 'Command',
     'overlay.approvalRequired.app': 'App',
+    'overlay.approvalRequired.sendsTo': 'Sends to',
+    'overlay.approvalRequired.openPage': 'Open page',
     'overlay.approvalRequired.pythonCode': 'Python code',
     'overlay.approvalRequired.pythonCodeDescription':
       'Generated Python code will run in the workspace.',
@@ -213,6 +216,7 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.approvalRequired.operation.runPython': 'Pythonコードを実行します。',
     'overlay.approvalRequired.operation.applyPatch': 'ファイルを変更します。',
     'overlay.approvalRequired.operation.captureScreen': 'ウィンドウを撮影します。',
+    'overlay.approvalRequired.operation.browserWrite': 'ブラウザからデータを送ります。',
     'overlay.approvalRequired.operation.generic': 'この操作を実行します。',
     'overlay.approvalRequired.operation.integration': '{service}（{account}）で書き込みます。',
     'overlay.approvalRequired.integration.tool': '操作',
@@ -220,6 +224,8 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.approvalRequired.backgroundNotice': '作業が終わるか止めるまで動き続けます。',
     'overlay.approvalRequired.command': 'コマンド',
     'overlay.approvalRequired.app': 'アプリ',
+    'overlay.approvalRequired.sendsTo': '送り先',
+    'overlay.approvalRequired.openPage': '開いているページ',
     'overlay.approvalRequired.pythonCode': 'Pythonコード',
     'overlay.approvalRequired.pythonCodeDescription':
       '生成されたPythonコードをワークスペース内で実行します。',

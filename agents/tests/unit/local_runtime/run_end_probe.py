@@ -61,6 +61,7 @@ _NAVIGATED = BrowserOperationSucceeded.model_validate(
         "truncated": None,
         "network": [],
         "artifact": None,
+        "opened_host": "localhost",
     }
 )
 

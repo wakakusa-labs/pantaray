@@ -22,7 +22,11 @@ from .broker_protocol import (
     ValidatedReadRequest,
     ValidatedRenderPdfPageRequest,
 )
-from .browser_protocol import ValidatedBrowserPrintRequest, ValidatedBrowserRequest
+from .browser_protocol import (
+    ValidatedBrowserPrintRequest,
+    ValidatedBrowserRequest,
+    ValidatedBrowserWriteRequest,
+)
 from .process_protocol import (
     ValidatedReadProcessOutputRequest,
     ValidatedStopProcessRequest,
@@ -41,7 +45,10 @@ DirectReadOnlyRequest = (
 )
 # Approval-gated requests, recorded with the command summary that was approved.
 GatedRequest = (
-    ValidatedPatchRequest | ValidatedBrowserPrintRequest | ValidatedCommandRequest
+    ValidatedPatchRequest
+    | ValidatedBrowserPrintRequest
+    | ValidatedBrowserWriteRequest
+    | ValidatedCommandRequest
 )
 # Every request the broker validates. These are runtime unions, so isinstance
 # checks take them as they are.

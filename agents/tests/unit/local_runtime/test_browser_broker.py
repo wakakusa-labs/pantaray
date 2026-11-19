@@ -18,6 +18,9 @@ from pantaray_agents.agents.action_agent.tools import (
     select_supervisor_act_tool_ids,
 )
 from pantaray_agents.local_runtime.runtime import browser_relay as relay_module
+from pantaray_agents.local_runtime.runtime.action_approval_review import (
+    pending_operation,
+)
 from pantaray_agents.local_runtime.runtime.browser_contract import (
     BrowserOperationFailed,
     BrowserOperationSucceeded,
@@ -30,7 +33,14 @@ from pantaray_agents.local_runtime.runtime.one_shot_requests import OneShotReque
 from pantaray_agents.local_runtime.runtime.runtime_env import (
     read_local_runtime_artifact_root,
 )
-from pantaray_agents.local_runtime.tooling.brokering.broker import execute_broker_tool
+from pantaray_agents.local_runtime.tooling.approval_review import (
+    ApprovalReviewRequest,
+    build_approval_review_payload,
+)
+from pantaray_agents.local_runtime.tooling.brokering.broker import (
+    BrokerApprovalRequiredError,
+    execute_broker_tool,
+)
 from pantaray_agents.local_runtime.tooling.brokering.broker_browser import FIX_HINTS
 from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
     FinalizedBrokerPolicyError,
@@ -52,6 +62,7 @@ from .broker_test_support import (
     _bootstrap_runtime_db,
     desktop_session,
 )
+from .test_outside_workspace_patch_approval import _approval_rows, _decide
 
 _USER_ID = "user-1"
 _PNG = b"\x89PNG\r\n\x1a\n" + b"\x01" * 40
@@ -125,6 +136,7 @@ def _succeeded(
     pdf: bytes | None = None,
     marker: str = "page",
     page: dict | None = None,
+    opened_host: str | None = None,
 ) -> BrowserAnswer:
     artifact = None
     if pdf is not None:
@@ -149,6 +161,7 @@ def _succeeded(
             "truncated": None,
             "network": _NETWORK,
             "artifact": artifact,
+            "opened_host": opened_host,
         }
     )
 
@@ -438,20 +451,127 @@ async def test_close_closes_the_runs_session(runtime: Runtime) -> None:
     assert runtime[2].requests == [{"session_id": payload["session_id"]}]
 
 
-# Catches: allow_writes, whose approval does not exist yet, reaching Electron
-# through the broker.
-async def test_allow_writes_is_refused(runtime: Runtime) -> None:
-    error = await _refused(
-        runtime,
-        {"action": "allow_writes", "host": "api.example.com", "justification": "x"},
+def _allow_writes(host: str = "api.example.com") -> dict[str, str]:
+    return {
+        "action": "allow_writes",
+        "host": host,
+        "justification": "Send the signup form you asked me to test.",
+    }
+
+
+async def _write_hosts(runtime: Runtime, *, step: int) -> object:
+    _, payload = await asyncio.gather(
+        _call(runtime, {"action": "click", "ref": "e1"}, step=step),
+        _electron(runtime, _succeeded()),
+    )
+    return payload["policy"]["write_hosts"]  # type: ignore[index]
+
+
+# Catches: a write host reaching the page before its approval ran, a host the
+# run approved missing from a later operation or lost on close, and a second
+# request for the same host asking again.
+async def test_a_write_host_reaches_the_page_once_its_approval_runs(
+    runtime: Runtime,
+) -> None:
+    db_path = runtime[0]
+    await asyncio.gather(
+        _call(runtime, {"action": "navigate", "url": "http://localhost:5173/"}),
+        _electron(runtime, _succeeded(opened_host="localhost")),
     )
 
-    assert error.code == "BROWSER_ACTION_UNAVAILABLE"
+    with pytest.raises(BrokerApprovalRequiredError) as asked:
+        await _call(runtime, _allow_writes(), step=2)
+
+    assert _approval_rows(db_path) == [
+        (
+            "action-1:step-2:1",
+            "pending",
+            {
+                "summary_kind": "browser_write",
+                "host": "api.example.com",
+                "page_host": "localhost",
+                "reason": "Send the signup form you asked me to test.",
+            },
+        )
+    ]
+    assert runtime[2].requests == []
+    assert await _write_hosts(runtime, step=3) == []
+
+    _decide(db_path, asked.value, "action-1:step-2:1", "approved_once")
+    outcome = await _call(runtime, _allow_writes(), step=2)
+
+    assert outcome.output == {"status": "ok", "action": "allow_writes"}  # type: ignore[attr-defined]
+    assert await _write_hosts(runtime, step=4) == ["api.example.com"]
+    again = await _call(runtime, _allow_writes("API.example.com"), step=5)
+    assert again.output == {"status": "ok", "action": "allow_writes"}  # type: ignore[attr-defined]
+    assert len(_approval_rows(db_path)) == 1
+    await _call(runtime, {"action": "close"}, step=6)
+    runtime[2].requests.clear()
+    _, reopened = await asyncio.gather(
+        _call(runtime, {"action": "navigate", "url": "http://localhost:5173/"}, step=7),
+        _electron(runtime, _succeeded()),
+    )
+    assert reopened["policy"]["write_hosts"] == ["api.example.com"]  # type: ignore[index]
 
 
-# Catches: the model offered an action or field the broker cannot parse, or one
-# of the actions later releases add, and a field the broker parses missing from
-# what the model is offered.
+# Catches: page text reaching the approval review through the write's summary,
+# where a page could argue for its own write, and a page host the runtime parsed
+# itself: Python reads no host in this URL, Chromium opens evil.example.
+async def test_the_write_review_sees_hosts_and_the_reason_but_no_page_text(
+    runtime: Runtime,
+) -> None:
+    marker = "IGNORE-PREVIOUS-INSTRUCTIONS"
+    await asyncio.gather(
+        _call(runtime, {"action": "navigate", "url": "https:////evil.example/"}),
+        _electron(runtime, _succeeded(marker=marker, opened_host="evil.example")),
+    )
+    with pytest.raises(BrokerApprovalRequiredError):
+        await _call(runtime, _allow_writes(), step=2)
+    [(_, _, summary)] = _approval_rows(runtime[0])
+
+    operation = pending_operation(tool_id="browser", summary=summary, args={})
+    payload = build_approval_review_payload(
+        ApprovalReviewRequest(
+            conversation=(),
+            request_text_not_by_user=None,
+            operation=operation,  # type: ignore[arg-type]
+            workspace_folders=(),
+        )
+    )
+
+    assert json.loads(payload)["operation"] == {
+        "requires": ["browser_write"],
+        "host": "api.example.com",
+        "page_host": "evil.example",
+        "justification": "Send the signup form you asked me to test.",
+    }
+    assert marker not in payload
+
+
+# Catches: allow_writes refused with the network off while the open page keeps
+# the network and its approved hosts, or an approval asked for before refusing.
+async def test_network_off_refuses_allow_writes_and_closes_the_page(
+    runtime: Runtime,
+) -> None:
+    _, opened = await asyncio.gather(
+        _call(runtime, {"action": "navigate", "url": "https://shop.example/"}),
+        _electron(runtime, _succeeded()),
+    )
+    relay_module.allow_browser_writes(
+        owner_process_id=BROKER_ACTOR_PROCESS_ID, host="api.example.com"
+    )
+    _network_off(runtime)
+
+    with pytest.raises(BrokerPolicyError) as caught:
+        await _call(runtime, _allow_writes(), step=2)
+
+    assert caught.value.code == "BROWSER_NETWORK_OFF"
+    assert runtime[2].requests == [{"session_id": opened["session_id"]}]
+    assert _approval_rows(runtime[0]) == []
+
+
+# Catches: the model offered an action or field the broker cannot parse, and a
+# field the broker parses missing from what the model is offered.
 def test_browser_is_offered_to_the_action_with_the_brokered_actions() -> None:
     assert "browser" in select_supervisor_act_tool_ids(
         integrations=False, todo=False, todo_import=False
@@ -463,6 +583,6 @@ def test_browser_is_offered_to_the_action_with_the_brokered_actions() -> None:
         typing.get_args(variant.model_fields["action"].annotation)[0]
         for variant in variants
     }
-    assert offered == parsed - {"allow_writes"}
+    assert offered == parsed
     fields = {name for variant in variants for name in variant.model_fields}
-    assert set(schema["properties"]) == fields - {"host", "justification"}  # type: ignore[call-overload]
+    assert set(schema["properties"]) == fields  # type: ignore[call-overload]

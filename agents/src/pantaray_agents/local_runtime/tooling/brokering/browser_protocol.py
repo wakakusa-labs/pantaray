@@ -8,7 +8,14 @@ from __future__ import annotations
 
 from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    RootModel,
+    model_validator,
+)
 
 from pantaray_agents.local_runtime.runtime.browser_contract import (
     BROWSER_MAX_CONTACTED_HOSTS,
@@ -80,7 +87,8 @@ class BrowserPrintArgs(_StrictModel):
 
 class BrowserAllowWritesArgs(_StrictModel):
     action: Literal["allow_writes"]
-    host: BrowserHost
+    # Lowercase, as Electron compares hosts, so one host is approved once.
+    host: Annotated[BrowserHost, AfterValidator(str.lower)]
     justification: str = Field(min_length=1, pattern=r"\S")
 
 
@@ -205,16 +213,19 @@ class ValidatedBrowserRequest(_StrictModel):
     args: BrowserToolArgs
 
     @model_validator(mode="after")
-    def _print_is_a_write(self) -> Self:
-        # print writes a file, so it is accepted only with its approval.
-        if isinstance(self.args.root, BrowserPrintArgs):
-            raise ValueError("print is accepted as a ValidatedBrowserPrintRequest")
+    def _approval_gated_actions(self) -> Self:
+        # print writes a file and allow_writes lets the page write, so each is
+        # accepted only with its approval.
+        if isinstance(self.args.root, (BrowserPrintArgs, BrowserAllowWritesArgs)):
+            raise ValueError(
+                f"{self.args.root.action} is accepted as an approval-gated request"
+            )
         return self
 
 
-class ValidatedBrowserPrintRequest(_StrictModel):
-    """A ``browser`` ``print`` the broker accepted: the approval it holds and the
-    summary that approval names, which the destination must still match."""
+class _GatedBrowserRequest(_StrictModel):
+    """A ``browser`` call the broker accepted with the approval it holds (none
+    when no approval is needed), and the summary that approval names."""
 
     tool_invocation_id: str
     manifest_id: str
@@ -222,8 +233,19 @@ class ValidatedBrowserPrintRequest(_StrictModel):
     action_id: str
     approval_session_id: str | None = None
     approval_source: ApprovalSource | None = None
-    args: BrowserPrintArgs
     command_summary_json: dict[str, JSONValue]
     tool_request_id: str
     requested_at: str
     preflight_only: bool
+
+
+class ValidatedBrowserPrintRequest(_GatedBrowserRequest):
+    """``print``: the destination must still match the summary when it is saved."""
+
+    args: BrowserPrintArgs
+
+
+class ValidatedBrowserWriteRequest(_GatedBrowserRequest):
+    """``allow_writes``: no approval once the run's pages may write to the host."""
+
+    args: BrowserAllowWritesArgs

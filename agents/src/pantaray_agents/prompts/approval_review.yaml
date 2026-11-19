@@ -24,7 +24,10 @@ system_instruction: |
     review: outside_sandbox (runs with the user's full permissions),
     outside_write (writes outside the workspace folders), login_environment (runs
     with the user's real home, Keychain and signed-in tools), integration_write
-    (changes something in a connected service through the user's account).
+    (changes something in a connected service through the user's account),
+    browser_write (lets pages in the assistant's own browser send data to host,
+    such as form posts, for the rest of this work; page_host is the site the
+    assistant opened there, null for a local file or no page).
     run_in_background true means the command keeps running after it starts,
     until the work ends or it is stopped.
   - workspace_folders: the folders the user registered for this work.

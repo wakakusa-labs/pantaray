@@ -87,7 +87,22 @@ class PendingIntegrationWrite:
     justification: str | None
 
 
-type PendingOperation = PendingCommand | PendingIntegrationWrite
+@dataclass(frozen=True, slots=True)
+class PendingBrowserWrite:
+    """Letting the run's browser pages send requests other than reads to a host.
+
+    It holds hosts and the model's reason only, so no page text can reach the
+    review through it.
+    """
+
+    host: str
+    # The host the run last opened in the browser; None for a local file or
+    # no page.
+    page_host: str | None
+    justification: str
+
+
+type PendingOperation = PendingCommand | PendingIntegrationWrite | PendingBrowserWrite
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,6 +197,13 @@ def _render_operation(operation: PendingOperation) -> dict[str, JSONValue]:
                 "arguments": operation.arguments,
                 "justification": operation.justification,
             }
+        case PendingBrowserWrite():
+            return {
+                "requires": ["browser_write"],
+                "host": operation.host,
+                "page_host": operation.page_host,
+                "justification": operation.justification,
+            }
 
 
 def _parse_verdict(text: str) -> ApprovalReviewVerdict | None:
@@ -252,6 +274,7 @@ __all__ = [
     "CommandReviewKind",
     "ConversationEntry",
     "DeclinedOperation",
+    "PendingBrowserWrite",
     "PendingCommand",
     "PendingIntegrationWrite",
     "PendingOperation",

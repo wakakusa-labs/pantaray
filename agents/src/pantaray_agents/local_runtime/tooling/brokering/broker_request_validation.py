@@ -12,6 +12,10 @@ from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import BrokerPolicyError
 from pantaray_agents.tools.files.render_pages import RenderPdfPageToolArgs
 
+from .broker_browser import (
+    build_validated_browser_write_request,
+    refuse_browser_network_use,
+)
 from .broker_browser_print import build_validated_browser_print_request
 from .broker_command_validation import (
     build_validated_command_request,
@@ -46,6 +50,7 @@ from .broker_registry import (
     validate_broker_registry,
 )
 from .browser_protocol import (
+    BrowserAllowWritesArgs,
     BrowserPrintArgs,
     BrowserToolArgs,
     ValidatedBrowserRequest,
@@ -57,7 +62,8 @@ from .process_protocol import (
 )
 
 BROKER_TOOL_ARGS_INVALID = "BROKER_TOOL_ARGS_INVALID"
-# browser asks only for print, but every call carries the request id it binds to.
+# browser asks only for print and allow_writes, but every call carries the
+# request id it binds to.
 _APPROVAL_GATED_TOOL_IDS = frozenset(
     {APPLY_PATCH_TOOL_ID, BROWSER_TOOL_ID, BASH_TOOL_ID, RUN_PYTHON_TOOL_ID}
 )
@@ -165,12 +171,23 @@ def validate_broker_request(
         preflight_only=preflight_only,
     )
     effective_requested_at = request.requested_at or "unknown"
-    if isinstance(request.args, BrowserToolArgs) and isinstance(
-        request.args.root, BrowserPrintArgs
-    ):
+    browser_args = None
+    if isinstance(request.args, BrowserToolArgs):
+        refuse_browser_network_use(context=context, call=request.args)
+        browser_args = request.args.root
+    if isinstance(browser_args, BrowserPrintArgs):
         return context, build_validated_browser_print_request(
             context=context,
-            args=request.args.root,
+            args=browser_args,
+            tool_invocation_id=effective_invocation_id,
+            tool_request_id=effective_tool_request_id,
+            requested_at=effective_requested_at,
+            preflight_only=preflight_only,
+        )
+    if isinstance(browser_args, BrowserAllowWritesArgs):
+        return context, build_validated_browser_write_request(
+            context=context,
+            args=browser_args,
             tool_invocation_id=effective_invocation_id,
             tool_request_id=effective_tool_request_id,
             requested_at=effective_requested_at,

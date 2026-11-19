@@ -121,6 +121,7 @@ def test_broker_registry_declares_path_access_kind_for_all_managed_tools() -> No
         "run_python": "exec",
         "read_process_output": "none",
         "stop_process": "none",
+        "browser": "read",
     }
 
 

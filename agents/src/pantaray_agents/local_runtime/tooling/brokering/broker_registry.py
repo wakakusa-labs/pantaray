@@ -33,6 +33,7 @@ from .broker_protocol import (
     SaveHtmlAsPdfOutput,
     ToolError,
 )
+from .browser_protocol import BrowserToolArgs, BrowserToolOutput
 from .process_protocol import ReadProcessOutputToolArgs, StopProcessToolArgs
 
 
@@ -58,6 +59,7 @@ BROKER_MODEL_REGISTRY = BrokerModelRegistry(
         "RunPythonToolArgs": RunPythonToolArgs,
         "ReadProcessOutputToolArgs": ReadProcessOutputToolArgs,
         "StopProcessToolArgs": StopProcessToolArgs,
+        "BrowserToolArgs": BrowserToolArgs,
     },
     output_models={
         "ReadToolOutput": ReadToolOutput,
@@ -71,6 +73,7 @@ BROKER_MODEL_REGISTRY = BrokerModelRegistry(
         "BashToolOutput": BashToolOutput,
         "RunPythonToolOutput": RunPythonToolOutput,
         "ProcessToolOutput": ProcessToolOutput,
+        "BrowserToolOutput": BrowserToolOutput,
     },
     error_models={
         "ToolError": ToolError,
@@ -211,6 +214,19 @@ BROKER_TOOL_REGISTRY = BrokerToolRegistry(
             output_model_ref="ProcessToolOutput",
             error_model_ref="ToolError",
             required_capabilities=["process_exec_local"],
+            approval_policy="none",
+            resource_kinds=["none"],
+        ),
+        # Local paths it opens are resolved as read resolves them; it writes
+        # nothing, so it is not approved.
+        "browser": BrokerManagedToolDefinition(
+            tool_id="browser",
+            execution_path="broker_browser",
+            path_access_kind="read",
+            input_model_ref="BrowserToolArgs",
+            output_model_ref="BrowserToolOutput",
+            error_model_ref="ToolError",
+            required_capabilities=["scoped_read"],
             approval_policy="none",
             resource_kinds=["none"],
         ),

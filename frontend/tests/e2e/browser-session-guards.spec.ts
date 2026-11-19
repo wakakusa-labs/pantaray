@@ -431,18 +431,25 @@ test('no list box or picker of a browser session page reaches the display', asyn
     const before = onScreenWindows(pid);
 
     await test.step('a hidden window without the guard does put a picker on the display', async () => {
-      await app.evaluate(async ({ BrowserWindow }) => {
-        const control = new BrowserWindow({
-          show: false,
-          webPreferences: { partition: 'e2e-picker-control', sandbox: true },
-        });
-        (globalThis as { e2ePickerControl?: Electron.BrowserWindow }).e2ePickerControl = control;
-        await control.loadURL('data:text/html,<input id="color" type="color">');
-        await control.webContents.executeJavaScript(
-          "document.getElementById('color').showPicker()",
-          true
-        );
-      });
+      const opened = await app.evaluate(
+        async ({ BrowserWindow }, optionsPath) => {
+          const load = process.getBuiltinModule('node:module').createRequire(optionsPath);
+          const { pageWindowOptions } = load(optionsPath);
+          // A session's own window, painting while hidden, in a partition with no guard preload.
+          const control = new BrowserWindow(pageWindowOptions('e2e-picker-control'));
+          (globalThis as { e2ePickerControl?: Electron.BrowserWindow }).e2ePickerControl = control;
+          await control.loadURL('data:text/html,<input id="color" type="color">');
+          return control.webContents.executeJavaScript(
+            `const color = document.getElementById('color');
+            color.showPicker();
+            new Promise((resolve) => setTimeout(() => resolve(color.matches(':open')), 500))`,
+            true
+          );
+        },
+        path.join(__dirname, '../../electron/dist/browser/pageWindowOptions.js')
+      );
+      // Blink's own view of the picker, apart from the display's.
+      expect(opened).toBe(true);
       await settle();
       expect(onScreenWindows(pid)).toBeGreaterThan(before);
       await app.evaluate(() =>

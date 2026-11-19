@@ -40,7 +40,6 @@ from pantaray_agents.local_runtime.runtime.utc_timestamps import (
     now_utc_iso,
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
-    BROWSER_TOOL_ID,
     GLOB_TOOL_ID,
     GREP_TOOL_ID,
     LIST_TOOL_ID,
@@ -129,8 +128,6 @@ NON_PREFLIGHT_BROKERED_TOOL_IDS = frozenset(
         # They reach only processes this run's approved bash calls started.
         READ_PROCESS_OUTPUT_TOOL_ID,
         STOP_PROCESS_TOOL_ID,
-        # Until it can write to external hosts, nothing it does needs approval.
-        BROWSER_TOOL_ID,
     }
 )
 PREFLIGHT_APPROVAL_BROKERED_TOOL_IDS = (
@@ -151,10 +148,6 @@ def _build_tool_runtime_context(*, runtime) -> ToolRuntimeContext:
         ),
     )
     return ToolRuntimeContext(max_parallel_memory_queries=raw_parallel)
-
-
-def _requires_preflight_approval(tool_id: str) -> bool:
-    return tool_id in PREFLIGHT_APPROVAL_TOOL_IDS
 
 
 def _preflight_blocks_execution(result: ToolExecutionPreparation) -> bool:
@@ -416,13 +409,9 @@ async def run_tool(
         exc.finalized_output = finalized_validation_result
         exc.tool_invocation_id = validation_invocation_id
         raise
-    tool_request_id = (
-        resolve_tool_request_id(state=state, step_id=step_id)
-        if tool_def.tool_id in PREFLIGHT_APPROVAL_TOOL_IDS
-        else step_id
-    )
-    invocation_id: str | None = None
-    if _requires_preflight_approval(tool_def.tool_id):
+    tool_request_id = step_id
+    if tool_def.tool_id in PREFLIGHT_APPROVAL_TOOL_IDS:
+        tool_request_id = resolve_tool_request_id(state=state, step_id=step_id)
         preflight_result = (
             await run_consent_gated_preflight(
                 step_id=step_id,
@@ -456,7 +445,7 @@ async def run_tool(
             )
             finalized_preflight.tool_request_id = tool_request_id
             return finalized_preflight
-    invocation_id = None
+    invocation_id: str | None = None
     if _uses_action_runtime_audit(tool_def.tool_id):
         invocation_id = start_action_tool_invocation(
             state=state,

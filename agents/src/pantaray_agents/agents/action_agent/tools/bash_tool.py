@@ -132,7 +132,7 @@ BASH_TOOL_FIELD_PRESENTATION = (
             "folder. Programs that need the window server, such as GUI apps and "
             "browsers, always crash inside the sandbox, so set it on their first "
             "run; to look at HTML or export it to PDF, use render_html_page or "
-            "save_html_as_pdf instead of starting a browser. Never set it "
+            "the browser tool's print instead of starting a browser. Never set it "
             "pre-emptively for anything else, for convenience, or before trying "
             "the command normally.\n"
             "- Each call needs approval for this exact command, then runs it "

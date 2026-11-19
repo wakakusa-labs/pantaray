@@ -18,6 +18,7 @@ from pantaray_agents.local_runtime.runtime.browser_contract import (
     BrowserPageData,
     BrowserTruncation,
 )
+from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.websocket.server_messages import (
     BrowserBackOperation,
     BrowserClickOperation,
@@ -33,6 +34,8 @@ from pantaray_agents.schema.websocket.server_messages import (
     BrowserWaitOperation,
 )
 from pantaray_agents.tools.files.render_pages import PageNumbers
+
+from ..models import ApprovalSource
 
 
 class _StrictModel(BaseModel):
@@ -195,3 +198,27 @@ class ValidatedBrowserRequest(_StrictModel):
     tool_request_id: str
     requested_at: str
     args: BrowserToolArgs
+
+    @model_validator(mode="after")
+    def _print_is_a_write(self) -> Self:
+        # print writes a file, so it is accepted only with its approval.
+        if isinstance(self.args.root, BrowserPrintArgs):
+            raise ValueError("print is accepted as a ValidatedBrowserPrintRequest")
+        return self
+
+
+class ValidatedBrowserPrintRequest(_StrictModel):
+    """A ``browser`` ``print`` the broker accepted: the approval it holds and the
+    summary that approval names, which the destination must still match."""
+
+    tool_invocation_id: str
+    manifest_id: str
+    execution_session_id: str
+    action_id: str
+    approval_session_id: str | None = None
+    approval_source: ApprovalSource | None = None
+    args: BrowserPrintArgs
+    command_summary_json: dict[str, JSONValue]
+    tool_request_id: str
+    requested_at: str
+    preflight_only: bool

@@ -22,7 +22,6 @@ from .brokering.broker_common import (
     RENDER_HTML_PAGE_TOOL_ID,
     RENDER_PDF_PAGE_TOOL_ID,
     RUN_PYTHON_TOOL_ID,
-    SAVE_HTML_AS_PDF_TOOL_ID,
     STOP_PROCESS_TOOL_ID,
 )
 from .brokering.broker_protocol import ApplyPatchToolArgs
@@ -54,7 +53,6 @@ BROKERED_TOOL_IDS = frozenset(
         GLOB_TOOL_ID,
         GREP_TOOL_ID,
         APPLY_PATCH_TOOL_ID,
-        SAVE_HTML_AS_PDF_TOOL_ID,
         BASH_TOOL_ID,
         RUN_PYTHON_TOOL_ID,
         READ_PROCESS_OUTPUT_TOOL_ID,

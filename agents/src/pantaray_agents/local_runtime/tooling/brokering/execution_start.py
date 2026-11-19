@@ -26,8 +26,8 @@ from .broker_common import BrokerContext
 from .broker_protocol import (
     ValidatedCommandRequest,
     ValidatedPatchRequest,
-    ValidatedSaveHtmlAsPdfRequest,
 )
+from .browser_protocol import ValidatedBrowserPrintRequest
 from .direct_execution_start import (
     DirectReadOnlyRequest,
     GatedRequest,
@@ -133,7 +133,7 @@ def claim_broker_execution_start(
             validated,
             (
                 ValidatedPatchRequest,
-                ValidatedSaveHtmlAsPdfRequest,
+                ValidatedBrowserPrintRequest,
                 ValidatedCommandRequest,
             ),
         ):

@@ -40,6 +40,7 @@ from pantaray_agents.schema.websocket.server_messages import (
     BrowserNavigateOperation,
     BrowserOperation,
     BrowserPagePolicy,
+    BrowserPrintOperation,
     BrowserScreenshotOperation,
     BrowserWebTarget,
     SecretPathRule,
@@ -51,6 +52,7 @@ from pantaray_agents.tools.files.secret_paths import secret_path_patterns
 
 from ..repository.command_network_settings import load_command_network_enabled
 from .action_path_policy import read_scope
+from .broker_browser_print import save_printed_pdf
 from .broker_common import BrokerContext, ensure_session_capabilities
 from .broker_direct_render_html import _file_roots
 from .broker_failure_finalization import NetworkReachedPolicyError
@@ -62,6 +64,7 @@ from .browser_protocol import (
     BrowserNavigateArgs,
     BrowserPrintArgs,
     BrowserScreenshotArgs,
+    ValidatedBrowserPrintRequest,
     ValidatedBrowserRequest,
 )
 
@@ -100,17 +103,23 @@ FIX_HINTS: Final[dict[BrowserFailureCode, str]] = {
 
 
 async def run_browser_executor(
-    *, context: BrokerContext, request: ValidatedBrowserRequest
+    *,
+    context: BrokerContext,
+    request: ValidatedBrowserRequest | ValidatedBrowserPrintRequest,
 ) -> UnprojectedBrokerToolOutcome:
     ensure_session_capabilities(context=context)
-    args = request.args.root
+    args = (
+        request.args
+        if isinstance(request, ValidatedBrowserPrintRequest)
+        else request.args.root
+    )
     if isinstance(args, BrowserCloseArgs):
         await close_browser_session(owner_process_id=context.actor_process_id)
         return UnprojectedBrokerToolOutcome(
             status="success", output={"status": "ok", "action": "close"}
         )
     # Parsed by the contract's full union; these come with later releases.
-    if isinstance(args, (BrowserPrintArgs, BrowserAllowWritesArgs)) or (
+    if isinstance(args, BrowserAllowWritesArgs) or (
         isinstance(args, BrowserScreenshotArgs) and args.printed_pages is not None
     ):
         raise BrokerPolicyError(
@@ -144,6 +153,8 @@ async def run_browser_executor(
         operation = BrowserScreenshotOperation(
             action="screenshot", ref=args.ref, full_page=args.full_page
         )
+    elif isinstance(args, BrowserPrintArgs):
+        operation = BrowserPrintOperation(action="print")
     else:
         operation = args
     outcome = await request_browser_operation(
@@ -162,6 +173,24 @@ async def run_browser_executor(
             code=outcome.code,
             fix_hint=FIX_HINTS[outcome.code],
             network=_network(outcome.network),
+        )
+    if isinstance(request, ValidatedBrowserPrintRequest):
+        # The relay has verified the PDF a print answer claims.
+        assert outcome.artifact is not None
+        saved = await save_printed_pdf(
+            context=context, request=request, pdf=outcome.artifact
+        )
+        return UnprojectedBrokerToolOutcome(
+            status="success",
+            output={
+                **_page_output(args.action, outcome.result),
+                "pdf_path": str(saved.path),
+                "replaced": saved.replaced,
+            },
+            file_paths=(request.args.pdf_path,),
+            file_reference_paths=(
+                () if saved.outside_workspace else (str(saved.path),)
+            ),
         )
     if outcome.artifact is None:
         return UnprojectedBrokerToolOutcome(

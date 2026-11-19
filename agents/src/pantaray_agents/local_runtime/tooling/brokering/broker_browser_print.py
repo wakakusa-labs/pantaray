@@ -1,10 +1,9 @@
-"""The Action's PDF export: an HTML page printed by the desktop app, then saved.
+"""``browser`` ``print``: the run's page printed by the desktop app, then saved.
 
-The page is printed exactly as ``render_html_page`` shows it
-(``broker_direct_render_html``). The PDF is written under ``apply_patch``'s rules
-for one file: the same writable paths and approval summary, so a folder outside
-the registered workspaces needs approval every time; the same recheck of the
-destination before writing; and the workspace root lock while it is written.
+The PDF is written under ``apply_patch``'s rules for one file: the same writable
+paths and approval summary, so a folder outside the registered workspaces needs
+approval every time; the same recheck of the destination after printing; and
+the workspace root lock while it is written.
 """
 
 from __future__ import annotations
@@ -12,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import os
 import stat
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from pantaray_agents.local_runtime.descriptor_write import (
@@ -20,17 +19,14 @@ from pantaray_agents.local_runtime.descriptor_write import (
     write_bytes_at_descriptor,
 )
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
-from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import BrokerPolicyError
-from pantaray_agents.tools.files.read_scope import ReadScope
-from pantaray_agents.tools.files.render_pages import SaveHtmlAsPdfToolArgs
 
 from ..locks.workspace_lock_coordinator import (
     WorkspaceLockConflictError,
     acquire_workspace_root_lock,
     release_workspace_lock,
 )
-from .action_path_policy import WRITE_PATH_DENIED, WRITE_PATH_NOT_FOUND, read_scope
+from .action_path_policy import WRITE_PATH_DENIED, WRITE_PATH_NOT_FOUND
 from .action_subagent_broker_authority import authorize_direct_workspace_writes
 from .broker_common import (
     BrokerContext,
@@ -43,44 +39,44 @@ from .broker_direct import (
     build_patch_approval_summary,
     resolve_patch_mount_plan,
 )
-from .broker_direct_render_html import (
-    BLOCKED_REQUESTS_NOTE,
-    blocked_requests_output,
-    network_output,
-    print_html_file,
-    resolve_html_file,
-)
-from .broker_outcome import UnprojectedBrokerToolOutcome
-from .broker_protocol import ValidatedSaveHtmlAsPdfRequest
+from .browser_protocol import BrowserPrintArgs, ValidatedBrowserPrintRequest
 
 
-def build_validated_save_pdf_request(
+@dataclass(frozen=True, slots=True)
+class SavedPdf:
+    path: Path
+    replaced: bool
+    # Approved for this one call; file references bind to manifest roots only.
+    outside_workspace: bool
+
+
+def build_validated_browser_print_request(
     *,
     context: BrokerContext,
-    args: SaveHtmlAsPdfToolArgs,
+    args: BrowserPrintArgs,
     tool_invocation_id: str | None,
     tool_request_id: str,
     requested_at: str,
     preflight_only: bool,
-) -> ValidatedSaveHtmlAsPdfRequest:
-    # Both ends are checked before the user is asked, so an approval is never
-    # spent on a call that cannot run.
-    resolve_html_file(scope=_html_read_scope(context), raw_path=args.path)
-    plan, _ = _pdf_destination(context=context, pdf_path=args.pdf_path)
+) -> ValidatedBrowserPrintRequest:
+    # Checked before the user is asked, so an approval is never spent on a
+    # destination that cannot be written.
+    write_context = _write_context(context)
+    plan, _ = _pdf_destination(context=write_context, pdf_path=args.pdf_path)
     if not preflight_only and not tool_invocation_id:
-        raise BrokerPolicyError("tool_invocation_id is required for save_html_as_pdf")
+        raise BrokerPolicyError("tool_invocation_id is required for browser print")
     command_summary = build_patch_approval_summary(
-        context=context, patch_paths=(args.pdf_path,), plan=plan
+        context=write_context, patch_paths=(args.pdf_path,), plan=plan
     )
     approval_session_id, approval_source = ensure_tool_authorization(
-        context=context,
+        context=write_context,
         tool_invocation_id=tool_invocation_id,
         tool_request_id=tool_request_id,
         command_summary=command_summary,
         requested_at=requested_at,
         require_user_prompt=plan.outside_workspace_folder is not None,
     )
-    return ValidatedSaveHtmlAsPdfRequest(
+    return ValidatedBrowserPrintRequest(
         tool_invocation_id=tool_invocation_id or "",
         manifest_id=context.manifest_id,
         execution_session_id=context.execution_session.execution_session_id,
@@ -95,73 +91,58 @@ def build_validated_save_pdf_request(
     )
 
 
-async def run_save_html_as_pdf_executor(
-    *, context: BrokerContext, request: ValidatedSaveHtmlAsPdfRequest
-) -> UnprojectedBrokerToolOutcome:
-    target, rendered = await print_html_file(
-        context=context,
-        scope=_html_read_scope(context),
-        raw_path=request.args.path,
-        action_id=request.action_id,
-        tool_request_id=request.tool_request_id,
-    )
+async def save_printed_pdf(
+    *, context: BrokerContext, request: ValidatedBrowserPrintRequest, pdf: bytes
+) -> SavedPdf:
+    """Write the printed PDF where the approved call named."""
+
+    write_context = _write_context(context)
     # Resolved again after printing, the step closest to the write: consent
     # names the file and its folder, and a path now leading elsewhere is not
     # what was approved.
     plan, destination = _pdf_destination(
-        context=context, pdf_path=request.args.pdf_path
+        context=write_context, pdf_path=request.args.pdf_path
     )
     if (
         build_patch_approval_summary(
-            context=context, patch_paths=(request.args.pdf_path,), plan=plan
+            context=write_context, patch_paths=(request.args.pdf_path,), plan=plan
         )
         != request.command_summary_json
     ):
         raise BrokerPolicyError(
-            "save_html_as_pdf destination changed after approval",
+            "browser print destination changed after approval",
             code=PATCH_ERROR_PATH_RETARGETED,
         )
     # The lock and the write run in one thread, so a Stop that abandons the
     # wait still leaves a whole file and a released lock behind.
     replaced = await asyncio.to_thread(
         _write_pdf_locked,
-        context=context,
+        context=write_context,
         request=request,
         plan=plan,
         destination=destination,
-        pdf=rendered.pdf,
+        pdf=pdf,
     )
-    notes = [
-        f"Saved {target.display_path} as {destination} ({len(rendered.pdf)} bytes)."
-    ]
-    if replaced:
-        notes.append("It replaced the file that was there.")
-    if rendered.blocked_requests:
-        notes.append(BLOCKED_REQUESTS_NOTE)
-    output: dict[str, JSONValue] = {
-        "status": "saved",
-        "path": target.display_path,
-        "pdf_path": str(destination),
-        "byte_size": len(rendered.pdf),
-        "replaced": replaced,
-        "blocked_requests": blocked_requests_output(rendered),
-        "network": network_output(rendered.network),
-        "message": " ".join(notes),
-    }
-    return UnprojectedBrokerToolOutcome(
-        status="success",
-        output=output,
-        file_paths=(request.args.pdf_path,),
-        # File references bind to manifest roots; an approved outside folder has none.
-        file_reference_paths=(
-            () if plan.outside_workspace_folder is not None else (str(destination),)
+    return SavedPdf(
+        path=destination,
+        replaced=replaced,
+        outside_workspace=plan.outside_workspace_folder is not None,
+    )
+
+
+def _write_context(context: BrokerContext) -> BrokerContext:
+    # The browser reads; print alone writes, as apply_patch does: its
+    # destination resolves as a write and is authorized as a scoped write, which
+    # the setting approves inside the registered workspaces.
+    return replace(
+        context,
+        path_access_kind="write",
+        tool_definition=replace(
+            context.tool_definition,
+            intent_class="surgical_edit",
+            required_capabilities=("scoped_write",),
         ),
     )
-
-
-def _html_read_scope(context: BrokerContext) -> ReadScope:
-    # The page is read as ``read`` would read it, from this write tool's context.
-    return read_scope(replace(context, path_access_kind="read"))
 
 
 def _pdf_destination(
@@ -189,7 +170,7 @@ def _pdf_destination(
 def _write_pdf_locked(
     *,
     context: BrokerContext,
-    request: ValidatedSaveHtmlAsPdfRequest,
+    request: ValidatedBrowserPrintRequest,
     plan: PatchMountPlan,
     destination: Path,
     pdf: bytes,
@@ -213,7 +194,7 @@ def _write_pdf_locked(
     try:
         if destination.resolve(strict=False) != destination:
             raise BrokerPolicyError(
-                "save_html_as_pdf destination changed after workspace lock acquisition",
+                "browser print destination changed after workspace lock acquisition",
                 code=PATCH_ERROR_PATH_RETARGETED,
             )
         authorize_direct_workspace_writes(
@@ -255,4 +236,4 @@ def _write_pdf_locked(
         )
 
 
-__all__ = ["build_validated_save_pdf_request", "run_save_html_as_pdf_executor"]
+__all__ = ["SavedPdf", "build_validated_browser_print_request", "save_printed_pdf"]

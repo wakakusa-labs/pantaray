@@ -106,7 +106,7 @@ def _tool_detail(tool_id: str, body: Mapping[str, JSONValue]) -> list[str]:
             return _command_detail(body)
         case "apply_patch":
             return _apply_patch_detail(body)
-        case "save_html_as_pdf":
+        case "browser" if body.get("action") == "print":
             return [
                 *_text(body, "pdf_path"),
                 *(["replaced existing file"] if body["replaced"] else []),

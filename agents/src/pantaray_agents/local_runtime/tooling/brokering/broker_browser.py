@@ -111,6 +111,10 @@ _RETRY_ONCE: Final = (
     "used. The desktop app must be open."
 )
 _NAVIGATE_AGAIN: Final = "The page was discarded. Navigate again to continue."
+_USER_CAN_FIX: Final = (
+    "Tell the user, in their language, what the message says, and wait for them "
+    "before trying their browser again."
+)
 FIX_HINTS: Final[dict[BrowserFailureCode, str]] = {
     "BROWSER_NO_PAGE": "Open a page with navigate first.",
     "BROWSER_REF_UNKNOWN": _SNAPSHOT_AGAIN,
@@ -125,6 +129,13 @@ FIX_HINTS: Final[dict[BrowserFailureCode, str]] = {
     "BROWSER_ACTION_FAILED": (
         "Take a snapshot to see the page as it is now, then try another way."
     ),
+    "BROWSER_USER_NOT_RUNNING": _USER_CAN_FIX,
+    "BROWSER_USER_DEBUGGING_OFF": _USER_CAN_FIX,
+    "BROWSER_USER_FILE_BLOCKED": _USER_CAN_FIX,
+    "BROWSER_USER_DENIED": (
+        "The user declined. Use their browser again only if they ask you to."
+    ),
+    "BROWSER_USER_UNAVAILABLE": "Tell the user their browser could not be used.",
     "BROWSER_NETWORK_OFF": (
         "The command network setting is off, which blocks every URL, localhost "
         "included. Open a local file instead, or ask the user to turn it on."

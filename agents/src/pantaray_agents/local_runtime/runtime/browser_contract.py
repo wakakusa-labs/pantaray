@@ -32,6 +32,15 @@ BrowserEngineFailureCode = Literal[
     "BROWSER_SESSION_GONE",
     # A valid page or ref, but Chromium could not carry the operation out.
     "BROWSER_ACTION_FAILED",
+    # The user's browser could not be connected to; the message names it.
+    "BROWSER_USER_NOT_RUNNING",
+    "BROWSER_USER_DEBUGGING_OFF",
+    # macOS kept Pantaray from reading the browser's files.
+    "BROWSER_USER_FILE_BLOCKED",
+    # The user did not allow Pantaray to use the browser.
+    "BROWSER_USER_DENIED",
+    # Any other reason, which is not reported.
+    "BROWSER_USER_UNAVAILABLE",
 ]
 
 # What a relayed operation fails with: Electron's codes, or no answer in time, or
@@ -47,6 +56,8 @@ BrowserBlockedReason = Literal[
     "write_not_approved",
     "not_allowed",
     "too_many_hosts",
+    # A page in the user's browser on a host this run was not approved to open.
+    "read_not_approved",
 ]
 
 # What Electron refused or dismissed on the page's behalf. A refused popup's URL is

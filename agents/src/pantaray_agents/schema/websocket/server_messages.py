@@ -9,6 +9,7 @@ from ..agent.suggestion import (
     SuggestionInteractionContract,
 )
 from ..overlay_bootstrap import SuggestionTodoView
+from ..user_browser import UserBrowserId
 
 type ErrorPayload = dict[str, JSONValue]
 
@@ -343,6 +344,14 @@ class BrowserPagePolicy(_BrowserModel):
     write_hosts: list[BrowserHost]
 
 
+class BrowserUserTarget(_BrowserModel):
+    """The operation runs in a tab of the session's own in the user's browser."""
+
+    browser: UserBrowserId
+    # Hosts the user approved this run to open in that tab.
+    read_hosts: list[BrowserHost]
+
+
 class BrowserOperationRequestedMessage(_BrowserModel):
     """WebSocket event "browser_operation_requested", for the desktop client only
     and never forwarded to the renderer; answered by ``POST /local/action-browser``."""
@@ -353,6 +362,25 @@ class BrowserOperationRequestedMessage(_BrowserModel):
         description="The validated action, local paths resolved to real paths"
     )
     policy: BrowserPagePolicy
+    user_browser: BrowserUserTarget | None = Field(
+        description="The user's browser to run in; null for the app's hidden page"
+    )
+
+    @model_validator(mode="after")
+    def _user_browser_is_web_only(self) -> Self:
+        # The user's browser opens no local file and prints nothing, and it is
+        # never used with the command network off.
+        if self.user_browser is None:
+            return self
+        if not self.policy.allow_network:
+            raise ValueError("the user's browser needs the network on")
+        if isinstance(self.operation, BrowserPrintOperation):
+            raise ValueError("the user's browser does not print")
+        if isinstance(self.operation, BrowserNavigateOperation) and isinstance(
+            self.operation.target, BrowserFileTarget
+        ):
+            raise ValueError("the user's browser opens no local file")
+        return self
 
 
 class BrowserSessionCloseRequestedMessage(_BrowserModel):

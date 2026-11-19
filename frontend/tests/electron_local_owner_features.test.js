@@ -86,6 +86,7 @@ test('desktop features bind guest and expired-account requests, preferences, rea
         secret_paths: [],
         write_hosts: [],
       },
+      user_browser: null,
     },
   });
   const requests = [];

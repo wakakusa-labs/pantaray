@@ -28,9 +28,36 @@ later.onclick = () => setTimeout(() => {
 }, 500);
 </script></body>`;
 
+// A transparent layer over Cancel that would turn a click on it into Confirm.
+const OVERLAY = `<!doctype html><title>Overlay</title><body style="margin:0">
+<button id="cancel" style="position:absolute;left:0;top:0;width:200px;height:60px">Cancel</button>
+<div id="cover" style="position:absolute;left:0;top:0;width:200px;height:60px"></div>
+<p id="log" style="margin-top:100px">Nothing yet</p>
+<script>
+cover.onmousemove = () => (log.textContent = 'Hovered the cover');
+cover.onclick = () => (log.textContent = 'Confirmed');
+cancel.onclick = () => (log.textContent = 'Canceled');
+</script></body>`;
+
+const PICKERS = `<!doctype html><title>Pickers</title><body>
+<label>Name <input id="name"></label>
+<label>Size <select id="size"><option>Small</option><option>Large</option></select></label>
+<label>Shade <input id="shade" type="color"></label>
+<label>Visit <input id="visit" type="date"></label>
+<label>Fruit <input id="fruit" list="fruits"></label>
+<datalist id="fruits"><option value="Apple"><option value="Pear"></datalist>
+</body>`;
+
+const PAGES: Record<string, string> = {
+  '/form.html': FORM,
+  '/overlay.html': OVERLAY,
+  '/pickers.html': PICKERS,
+};
+
 type Result = {
   status: 'ok' | 'failed';
   code?: string;
+  message?: string;
   truncated?: string | null;
   page_data?: { snapshot: string | null; console: { level: string; text: string }[] | null };
   artifact?: { width_px?: number; height_px?: number } | null;
@@ -38,9 +65,9 @@ type Result = {
 
 // eslint-disable-next-line no-empty-pattern
 test('the browser acts on a real page through snapshot refs', async ({}, testInfo) => {
-  const server: Server = createServer((_request, response) => {
+  const server: Server = createServer((request, response) => {
     response.writeHead(200, { 'Content-Type': 'text/html' });
-    response.end(FORM);
+    response.end(PAGES[request.url ?? '']);
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -148,6 +175,47 @@ test('the browser acts on a real page through snapshot refs', async ({}, testInf
       const shot = await run({ action: 'screenshot', ref: add });
       expect(shot.result.artifact).toMatchObject({ width_px: 200, height_px: 60 });
       expect(shot.corner).toEqual([255, 0, 0]);
+    });
+
+    await test.step('a click or hover on a covered element is refused and reaches nothing', async () => {
+      await act({ action: 'navigate', target: { kind: 'web', url: `${origin}/overlay.html` } });
+      const cancel = refOf(await snapshot(), 'button "Cancel"');
+      for (const action of ['click', 'hover']) {
+        const refused = await act({ action, ref: cancel });
+        expect(refused.code).toBe('BROWSER_ACTION_FAILED');
+        expect(refused.message).toContain('Another element covers this one');
+      }
+      expect(await snapshot()).toContain('Nothing yet');
+    });
+
+    await test.step('no click, typing or key reaches a list or picker field', async () => {
+      await act({ action: 'navigate', target: { kind: 'web', url: `${origin}/pickers.html` } });
+      const fields = await snapshot();
+      for (const field of ['combobox "Size"', 'combobox "Fruit"']) {
+        const ref = refOf(fields, field);
+        expect((await act({ action: 'click', ref })).code, field).toBe('BROWSER_ACTION_FAILED');
+      }
+      for (const label of ['Shade', 'Visit']) {
+        const ref = new RegExp(`"${label}" \\[ref=(e\\d+)\\]`).exec(fields)?.[1];
+        expect(ref, `${label} in\n${fields}`).toBeTruthy();
+        expect((await act({ action: 'click', ref })).code, label).toBe('BROWSER_ACTION_FAILED');
+      }
+      const fruit = refOf(fields, 'combobox "Fruit"');
+      expect((await act({ action: 'type', ref: fruit, text: 'Ap' })).code).toBe(
+        'BROWSER_ACTION_FAILED'
+      );
+      // Tab from the name field lands on the list box; only Tab and Escape reach it there.
+      expect(
+        (await act({ action: 'type', ref: refOf(fields, 'textbox "Name"'), text: 'Ada' })).status
+      ).toBe('ok');
+      expect((await act({ action: 'press', key: 'Tab' })).status).toBe('ok');
+      for (const key of [' ', 'Enter', 'ArrowDown', 'Alt+ArrowDown']) {
+        expect((await act({ action: 'press', key })).code, key).toBe('BROWSER_ACTION_FAILED');
+      }
+      expect((await act({ action: 'press', key: 'Escape' })).status).toBe('ok');
+      const size = refOf(fields, 'combobox "Size"');
+      expect((await act({ action: 'select', ref: size, values: ['Large'] })).status).toBe('ok');
+      expect(await snapshot()).toMatch(/combobox "Size" \[ref=e\d+\]: Large/);
     });
   } finally {
     server.close();

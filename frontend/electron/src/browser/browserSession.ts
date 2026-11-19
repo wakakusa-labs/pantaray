@@ -243,6 +243,14 @@ async function guardChild(
   }
 }
 
+/**
+ * The text in a string of its own. V8 may keep a cut of a long string as a view on the whole, so
+ * a kept cut would keep the page's whole message alive.
+ */
+function copied(text: string): string {
+  return Buffer.from(text, 'utf16le').toString('utf16le');
+}
+
 /** A log names an error only by its class: its message can carry page text or a private URL. */
 function errorName(error: unknown): string {
   return error instanceof Error ? error.name : typeof error;
@@ -403,7 +411,7 @@ export function createBrowserSessions(params: {
     window.on('closed', () => discard(page, sessionGone()));
     contents.on('console-message', ({ level, message }) => {
       const kept = page.console;
-      kept.lines.push({ level, text: message.slice(0, MAX_CONSOLE_LINE_CHARS) });
+      kept.lines.push({ level, text: copied(message.slice(0, MAX_CONSOLE_LINE_CHARS)) });
       if (message.length > MAX_CONSOLE_LINE_CHARS) kept.cut = true;
       if (kept.lines.length > MAX_CONSOLE_LINES) {
         kept.lines.shift();

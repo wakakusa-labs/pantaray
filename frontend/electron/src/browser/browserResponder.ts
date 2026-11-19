@@ -1,6 +1,8 @@
 /**
- * Answers `browser_operation_requested`: runs the operation in its session and posts the result
- * to `POST /local/action-browser`, with the screenshot or PDF written where the runtime reads it.
+ * Answers `browser_operation_requested`: runs the operation in its session, the app's hidden page
+ * or, when the request names `user_browser`, a tab of the session's own in the user's browser,
+ * and posts the result to `POST /local/action-browser`, with the screenshot or PDF written where
+ * the runtime reads it.
  */
 
 import type { WebContents } from 'electron';
@@ -19,7 +21,6 @@ import {
   BROWSER_NAVIGATION_BUDGET_MS,
   BROWSER_OPERATION_BUDGET_MS,
   BrowserOperationError,
-  type BrowserPage,
   type BrowserSessions,
 } from './browserSession';
 import {
@@ -32,7 +33,9 @@ import {
 } from './capture';
 import { captureElement, interact } from './interactions';
 import { reachedHost } from './pagePolicy';
+import type { CdpPage } from './cdpSession';
 import { takeSnapshot } from './snapshot';
+import type { UserBrowserPage, UserBrowserSessions } from './userBrowserSession';
 
 type OkResult = Extract<BrowserOperationAnswer['result'], { status: 'ok' }>;
 
@@ -49,11 +52,17 @@ const NOTHING: OperationValue = { artifact: null, truncated: null, snapshot: nul
 const ERR_ABORTED = -3;
 
 type LoggerLike = { error?: (name: string, payload?: unknown) => void };
+type NavigateTarget = Extract<BrowserOperation, { action: 'navigate' }>['target'];
 
-export async function navigate(
-  contents: WebContents,
-  target: Extract<BrowserOperation, { action: 'navigate' }>['target']
-): Promise<void> {
+/** How an operation moves the page, which differs between the app's page and the user's tab. */
+type PageNavigation = {
+  navigate(target: NavigateTarget): Promise<void>;
+  back(): Promise<void>;
+  /** Null where the page does not print: the user's browser. */
+  print: (() => Promise<CapturedArtifact>) | null;
+};
+
+export async function navigate(contents: WebContents, target: NavigateTarget): Promise<void> {
   const url = target.kind === 'web' ? target.url : pathToFileURL(target.path).href;
   try {
     await contents.loadURL(url);
@@ -117,13 +126,36 @@ export function openedHost(operation: BrowserOperation): string | null {
   return reachedHost(new URL(operation.target.url))?.host ?? null;
 }
 
-async function perform(operation: BrowserOperation, page: BrowserPage): Promise<OperationValue> {
+const appNavigation = (contents: WebContents): PageNavigation => ({
+  navigate: (target) => navigate(contents, target),
+  back: () => goBack(contents),
+  print: () => printPage(contents),
+});
+
+/** The runtime sends the user's browser no file and no print; the contract refuses both. */
+const notOffered = () =>
+  new BrowserOperationError('BROWSER_ACTION_FAILED', "The user's browser opens web pages only.");
+
+const userNavigation = (page: UserBrowserPage): PageNavigation => ({
+  navigate: async (target) => {
+    if (target.kind !== 'web') throw notOffered();
+    await page.navigate(target.url);
+  },
+  back: () => page.back(),
+  print: null,
+});
+
+async function perform(
+  operation: BrowserOperation,
+  page: CdpPage,
+  navigation: PageNavigation
+): Promise<OperationValue> {
   switch (operation.action) {
     case 'navigate':
-      await navigate(page.contents, operation.target);
+      await navigation.navigate(operation.target);
       return NOTHING;
     case 'back':
-      await goBack(page.contents);
+      await navigation.back();
       return NOTHING;
     case 'screenshot': {
       if (operation.ref == null && operation.full_page !== true) {
@@ -136,7 +168,8 @@ async function perform(operation: BrowserOperation, page: BrowserPage): Promise<
       return { ...NOTHING, artifact, truncated: cut ? 'page_too_tall' : null };
     }
     case 'print':
-      return { ...NOTHING, artifact: await printPage(page.contents) };
+      if (navigation.print === null) throw notOffered();
+      return { ...NOTHING, artifact: await navigation.print() };
     case 'snapshot': {
       const { text, cut } = await takeSnapshot(page, operation.ref);
       return { ...NOTHING, snapshot: text, truncated: cut ? 'snapshot_too_long' : null };
@@ -166,6 +199,7 @@ function budgetOf(operation: BrowserOperation): number {
  */
 export function createBrowserResponder(params: {
   sessions: BrowserSessions;
+  userSessions: UserBrowserSessions;
   localArtifactRoot: string;
   postAnswer: (body: BrowserOperationAnswer) => Promise<unknown>;
   logger?: LoggerLike | null;
@@ -174,9 +208,15 @@ export function createBrowserResponder(params: {
     const id = request.operation_request_id;
     let written: string | null = null;
     try {
-      const settled = await params.sessions.run(request, budgetOf(request.operation), (page) =>
-        perform(request.operation, page)
-      );
+      const budget = budgetOf(request.operation);
+      const settled =
+        request.user_browser === null
+          ? await params.sessions.run(request, budget, (page) =>
+              perform(request.operation, page, appNavigation(page.contents))
+            )
+          : await params.userSessions.run(request, request.user_browser, budget, (page) =>
+              perform(request.operation, page, userNavigation(page))
+            );
       let result: BrowserOperationAnswer['result'];
       if (settled.status === 'failed') {
         result = settled;

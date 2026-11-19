@@ -104,6 +104,7 @@ function harness() {
         secret_paths: [],
         write_hosts: [],
       },
+      user_browser: null,
     });
     return answers.at(-1).result;
   };

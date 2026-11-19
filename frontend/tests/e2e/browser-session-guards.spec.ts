@@ -108,16 +108,17 @@ window.ready = video.play().then(() => new Promise((resolve) => setTimeout(resol
 <div id="host"></div>
 <iframe src="${crossSiteOrigin}/pickers-child.html" style="${at(300, 100, 300, 150)};border:0"></iframe>
 <script>
-const shadow = host.attachShadow({ mode: 'closed' });
+const byId = (id) => document.getElementById(id);
+const shadow = byId('host').attachShadow({ mode: 'closed' });
 shadow.innerHTML = '<input type="color">';
 window.tried = [];
-open.onclick = () => {
-  for (const field of [list, color, date, suggest]) {
+byId('open').onclick = () => {
+  for (const field of ['list', 'color', 'date', 'suggest'].map(byId)) {
     try { field.showPicker(); tried.push('opened'); } catch (error) { tried.push(error.name); }
   }
-  color.click();
+  byId('color').click();
   shadow.querySelector('input').click();
-  color.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  byId('color').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
 };
 </script></body>`,
     // A cross-site frame: a picker field under the click, and a script that clicks another.

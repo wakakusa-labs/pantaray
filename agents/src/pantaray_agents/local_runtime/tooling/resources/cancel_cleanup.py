@@ -6,7 +6,6 @@ from pathlib import Path
 
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 
-from ..brokering.broker_process import stop_run_processes
 from .cancel_cleanup_persistence import (
     CleanupPersistenceError,
     persist_action_cleanup_failure,
@@ -17,6 +16,7 @@ from .resource_repository import (
     list_recoverable_tool_runtime_resources_for_action,
     list_run_owner_process_ids_for_action_session,
 )
+from .run_end import end_run_resources
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,9 +69,9 @@ async def cancel_action_runtime_resources(
 ) -> ActionCleanupPassResult:
     """The cleanup at the end of an Action's run, by its own worker or a Stop.
 
-    The run's long-running processes, and its subagents', are stopped first
-    through the supervisor, which audits how they ended and releases what they
-    held; the pass after it reaps whatever is still registered.
+    The run's browser sessions and long-running processes, and its subagents',
+    are ended first; the supervisor audits how each process ended and releases
+    what it held, and the pass after it reaps whatever is still registered.
     """
 
     owner_process_ids = await asyncio.to_thread(
@@ -81,7 +81,7 @@ async def cancel_action_runtime_resources(
         action_id=action_id,
         execution_session_id=execution_session_id,
     )
-    await stop_run_processes(
+    await end_run_resources(
         db_path=db_path,
         busy_timeout_ms=busy_timeout_ms,
         owner_process_ids=owner_process_ids,

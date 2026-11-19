@@ -30,8 +30,10 @@ from pantaray_agents.local_runtime.tooling.resources.resource_repository import 
 )
 
 from .action_seed import insert_agent_action
+from .broker_test_support import _seed_broker_actor_process
 from .migrated_db import prepare_test_database
 from .resource_recovery_test_support import register_running_apply_patch_invocation
+from .run_end_probe import install_run_end_probe
 
 
 def _bootstrap_runtime_db(tmp_path: Path) -> tuple[Path, object]:
@@ -134,6 +136,61 @@ async def test_cancel_action_runtime_resources_cleans_temp_file(tmp_path: Path) 
         "action_cancel_post_cleanup_completed",
         "temp_file: post-terminal action cancel cleanup completed",
     )
+
+
+# Catches: the Action terminal or a Stop leaving a run's browser page open, or
+# its processes running, or ending another Action's run that is still live.
+@pytest.mark.asyncio
+async def test_the_cleanup_ends_the_browser_and_processes_of_the_runs_it_ends(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path, context = _bootstrap_runtime_db(tmp_path)
+    _seed_broker_actor_process(db_path, process_id="action-process")
+    _seed_broker_actor_process(
+        db_path,
+        process_id="child-process",
+        kind="action_subagent",
+        parent_process_id="action-process",
+    )
+    insert_agent_action(db_path=db_path, action_id="action-2")
+    _seed_broker_actor_process(db_path, process_id="other-run", action_id="action-2")
+    for owner in ("action-process", "child-process"):
+        temp_file = context.workspace_path / f"{owner}.tmp"
+        temp_file.write_text("temporary\n", encoding="utf-8")
+        create_tool_runtime_resource(
+            db_path=db_path,
+            busy_timeout_ms=1_000,
+            resource=ToolRuntimeResourceCreateInput(
+                resource_id=f"resource-{owner}",
+                execution_session_id=context.execution_session_id,
+                tool_invocation_id="invocation-1",
+                action_id="action-1",
+                resource_kind="temp_file",
+                status="active",
+                created_at="2026-03-23T00:00:01Z",
+                pid=None,
+                pgid=None,
+                process_start_signature=None,
+                resource_path=str(temp_file),
+                owner_process_id=owner,
+            ),
+        )
+    probe = install_run_end_probe(monkeypatch)
+    for owner in ("action-process", "child-process", "other-run"):
+        await probe.open_browser(db_path, owner)
+
+    await cancel_action_runtime_resources(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        action_id="action-1",
+        execution_session_id=context.execution_session_id,
+    )
+
+    assert probe.stopped == [(("action-process", "child-process"), True)]
+    assert sorted(probe.closed) == ["action-process", "child-process"]
+    # Their status is still running: a late request is refused all the same.
+    assert await probe.refused(db_path, "action-process")
+    assert not await probe.refused(db_path, "other-run")
 
 
 @pytest.mark.asyncio

@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
+from tests.unit.local_runtime.run_end_probe import RunEndProbe, install_run_end_probe
 
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime import (
     subagent_cancel,
@@ -74,6 +75,7 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
 from pantaray_agents.local_runtime.tooling.repository.command_network_settings import (
     update_command_network_enabled,
 )
+from pantaray_agents.local_runtime.tooling.resources import run_end as run_end_module
 from pantaray_agents.local_runtime.tooling.resources.resource_cleanup import (
     process_exists,
 )
@@ -1135,7 +1137,8 @@ def test_cancel_before_the_gated_pause_commits_settles_canceled_and_interrupts(
         claim_workspace=True,
     )
     _gate_edits(monkeypatch)
-    stops = _record_process_stops(monkeypatch)
+    probe, held = _record_run_ends(monkeypatch)
+    asyncio.run(probe.open_browser(db_path, "child-process"))
     real_park = subagent_job.park_action_subagent_for_approval
 
     def cancel_then_pause(**kwargs: object) -> object:
@@ -1160,61 +1163,74 @@ def test_cancel_before_the_gated_pause_commits_settles_canceled_and_interrupts(
         ).fetchone() == ("interrupted",)
     _assert_canceled(db_path)
     # Catches: the pause settling the canceled child, and releasing its
-    # claims, before its processes are stopped.
-    assert stops == [(("child-process",), 1)]
+    # claims, before its run is ended, or ending it without its browser.
+    assert probe.stopped == [(("child-process",), True)]
+    assert held == [1]
+    assert probe.closed == ["child-process"]
 
 
-def _record_process_stops(
+def _record_run_ends(
     monkeypatch: pytest.MonkeyPatch,
-) -> list[tuple[tuple[str, ...], int]]:
-    """Each stop of a child's processes, with how many claims it still held."""
+) -> tuple[RunEndProbe, list[int]]:
+    """Each end of a child's run, and how many claims it still held while its
+    processes stopped."""
 
-    stops: list[tuple[tuple[str, ...], int]] = []
+    probe = install_run_end_probe(monkeypatch)
+    held: list[int] = []
+    stop = run_end_module.stop_run_processes
 
     async def record(
         *, db_path: Path, busy_timeout_ms: int, owner_process_ids: tuple[str, ...]
     ) -> None:
         with sqlite3.connect(db_path) as connection:
-            held = connection.execute(
-                "SELECT COUNT(*) FROM action_subagent_resource_claims "
-                "WHERE child_process_id='child-process' AND released_at IS NULL"
-            ).fetchone()[0]
-        stops.append((owner_process_ids, held))
+            held.append(
+                connection.execute(
+                    "SELECT COUNT(*) FROM action_subagent_resource_claims "
+                    "WHERE child_process_id='child-process' AND released_at IS NULL"
+                ).fetchone()[0]
+            )
+        await stop(
+            db_path=db_path,
+            busy_timeout_ms=busy_timeout_ms,
+            owner_process_ids=owner_process_ids,
+        )
 
-    monkeypatch.setattr(subagent_job, "stop_run_processes", record)
-    return stops
+    monkeypatch.setattr(run_end_module, "stop_run_processes", record)
+    return probe, held
 
 
-# Catches: a child's processes stopped by its approval pause (they keep running
-# while the user decides), left running past its end, or stopped only after
-# its terminal released the claims they may still write under.
-def test_a_childs_processes_outlive_its_approval_pause_and_stop_before_its_claims_go(
+# Catches: a child's run ended by its approval pause (its processes and page
+# keep running while the user decides), left running past its end, or ended
+# only after its terminal released the claims they may still write under.
+def test_a_childs_run_outlives_its_approval_pause_and_ends_before_its_claims_go(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    stops = _record_process_stops(monkeypatch)
+    probe, held = _record_run_ends(monkeypatch)
     db_path, payload, session_id, request_id = _pause_gated_child(monkeypatch, tmp_path)
-    assert stops == []
+    assert (probe.stopped, probe.closed) == ([], [])
+    # Not refused: the pause has not begun the run's end.
+    asyncio.run(probe.open_browser(db_path, "child-process"))
 
     _decide(db_path, session_id, request_id, "approved_once")
     _resume_child(monkeypatch, db_path, payload)
 
-    assert stops == [(("child-process",), 1)]
+    assert probe.stopped == [(("child-process",), True)]
+    assert held == [1]
+    assert probe.closed == ["child-process"]
 
 
-# Catches: a parent's cancel stopping the processes of a child it does not
-# own (another run's, named by the model), or not those of its own child.
+# Catches: a parent's cancel ending the browser or processes of a child it does
+# not own (another run's, named by the model), or not those of its own child.
 @pytest.mark.asyncio
-async def test_a_cancel_stops_only_a_live_child_of_the_parent_that_asks(
+async def test_a_cancel_ends_only_a_live_child_of_the_parent_that_asks(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     db_path, _payload = _running_child(tmp_path, profile_id=ACTION_EXECUTING_PROFILE_ID)
-    stopped: list[tuple[str, ...]] = []
+    probe = install_run_end_probe(monkeypatch)
+    for owner in ("parent-process", "child-process"):
+        await probe.open_browser(db_path, owner)
 
-    async def record(**kwargs: object) -> None:
-        stopped.append(kwargs["owner_process_ids"])  # type: ignore[arg-type]
-
-    monkeypatch.setattr(process_stop, "stop_run_processes", record)
-    for parent_process_id in ("parent-process", "other-parent"):
+    async def cancel(parent_process_id: str) -> None:
         await process_stop.stop_action_subagent_child_processes(
             db_path=db_path,
             busy_timeout_ms=1_000,
@@ -1227,7 +1243,12 @@ async def test_a_cancel_stops_only_a_live_child_of_the_parent_that_asks(
             ),
         )
 
-    assert stopped == [("child-process",), ()]
+    await cancel("other-parent")
+    assert (probe.stopped, probe.closed) == ([], [])
+    await cancel("parent-process")
+
+    assert probe.stopped == [(("child-process",), True)]
+    assert probe.closed == ["child-process"]
 
 
 _BACKGROUND_BASH_CALL = LlmToolCall(

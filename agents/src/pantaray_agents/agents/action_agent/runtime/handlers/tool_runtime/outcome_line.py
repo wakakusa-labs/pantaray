@@ -106,13 +106,10 @@ def _tool_detail(tool_id: str, body: Mapping[str, JSONValue]) -> list[str]:
             return _command_detail(body)
         case "apply_patch":
             return _apply_patch_detail(body)
-        case "browser" if body.get("page_count") is not None:
-            return [_count(body, "attachments", "page", "pages")]
-        case "browser" if body.get("action") == "print":
-            return [
-                *_text(body, "pdf_path"),
-                *(["replaced existing file"] if body["replaced"] else []),
-            ]
+        case "browser":
+            # Only what the runtime reports: everything taken from the page, its
+            # URL included, is untrusted and stays in ``data``.
+            return [*_text(body, "action"), *_browser_detail(body)]
         case "web_search":
             searches = [s for s in _items(body, "searches") if isinstance(s, Mapping)]
             found = sum(len(_items(search, "results")) for search in searches)
@@ -157,6 +154,17 @@ def _read_detail(body: Mapping[str, JSONValue]) -> list[str]:
             return [_count(body, "attachments", "attachment", "attachments")]
         case _:
             return []
+
+
+def _browser_detail(body: Mapping[str, JSONValue]) -> list[str]:
+    if body.get("page_count") is not None:
+        return [_count(body, "attachments", "page", "pages")]
+    if body.get("action") == "print":
+        return [
+            *_text(body, "pdf_path"),
+            *(["replaced existing file"] if body["replaced"] else []),
+        ]
+    return []
 
 
 def _command_detail(body: Mapping[str, JSONValue]) -> list[str]:

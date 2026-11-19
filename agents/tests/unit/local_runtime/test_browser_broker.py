@@ -43,9 +43,6 @@ from pantaray_agents.local_runtime.tooling.brokering.browser_protocol import (
 from pantaray_agents.local_runtime.tooling.repository.command_network_settings import (
     update_command_network_enabled,
 )
-from pantaray_agents.tasks.internal_jobs.action_subagent_broker import (
-    _CHILD_BROKER_TOOLS,
-)
 from pantaray_agents.tools.contract import BrokerPolicyError
 from pantaray_agents.tools.files.secret_paths import secret_path_patterns
 
@@ -453,14 +450,12 @@ async def test_allow_writes_is_refused(runtime: Runtime) -> None:
 
 
 # Catches: the model offered an action or field the broker cannot parse, or one
-# of the actions later releases add, a field the broker parses missing from what
-# the model is offered, and the tool reaching subagents before their variant
-# exists.
-def test_browser_is_offered_to_the_action_alone_with_the_brokered_actions() -> None:
+# of the actions later releases add, and a field the broker parses missing from
+# what the model is offered.
+def test_browser_is_offered_to_the_action_with_the_brokered_actions() -> None:
     assert "browser" in select_supervisor_act_tool_ids(
         integrations=False, todo=False, todo_import=False
     )
-    assert "browser" not in {tool.tool_id for tool in _CHILD_BROKER_TOOLS}
     schema = TOOL_REGISTRY["browser"].build_validation_input_schema()
     offered = set(schema["properties"]["action"]["enum"])  # type: ignore[index]
     variants = typing.get_args(BrowserToolArgs.model_fields["root"].annotation)

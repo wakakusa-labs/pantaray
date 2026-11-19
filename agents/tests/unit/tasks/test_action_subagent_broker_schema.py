@@ -3,11 +3,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, cast
 
+from pantaray_agents.agents.action_agent.tools.browser_tool import BROWSER_TOOL
 from pantaray_agents.local_runtime.tooling.brokering.broker_patch_read_gate import (
     build_needs_read_output,
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
     ApplyPatchUpdateChange,
+)
+from pantaray_agents.local_runtime.tooling.brokering.browser_protocol import (
+    BrowserToolOutput,
 )
 from pantaray_agents.local_runtime.tooling.tool_result_storage import (
     release_stored_tool_result,
@@ -17,10 +21,10 @@ from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tasks.internal_jobs.action_subagent_broker import (
     build_action_subagent_broker_tools,
 )
-from pantaray_agents.tools.contract import validate_json_value
+from pantaray_agents.tools.contract import ReactToolDefinition, validate_json_value
 
 
-def _response_schema(tmp_path: Path, tool_name: str) -> object:
+def _child_tool(tmp_path: Path, tool_name: str) -> ReactToolDefinition:
     tools = build_action_subagent_broker_tools(
         db_path=tmp_path / "runtime.db",
         busy_timeout_ms=1_000,
@@ -29,7 +33,31 @@ def _response_schema(tmp_path: Path, tool_name: str) -> object:
         agents_md=cast(Any, None),
         reviewer=cast(Any, None),
     )
-    return next(tool for tool in tools if tool.name == tool_name).response_schema
+    return next(tool for tool in tools if tool.name == tool_name)
+
+
+def _response_schema(tmp_path: Path, tool_name: str) -> object:
+    return _child_tool(tmp_path, tool_name).response_schema
+
+
+def test_child_browser_takes_every_action_of_the_action_but_screenshot(
+    tmp_path: Path,
+) -> None:
+    # A child cannot receive images, so screenshot is refused before it runs.
+    request_schema = _child_tool(tmp_path, "browser").request_schema
+    offered = cast(Any, BROWSER_TOOL.build_validation_input_schema()["properties"])[
+        "action"
+    ]["enum"]
+    assert "screenshot" in offered
+
+    refused = [
+        action
+        for action in offered
+        if validate_json_value(schema=request_schema, value={"action": action})
+        is not None
+    ]
+
+    assert refused == ["screenshot"]
 
 
 def _stored(tmp_path: Path, output: JSONValue) -> JSONValue:
@@ -59,6 +87,36 @@ def test_child_tool_accepts_its_result_with_long_texts_moved_out(
     broken = dict(moved)
     broken["stdout"] = {**cast(dict[str, JSONValue], moved["stdout"]), "extra": 1}
     assert validate_json_value(schema=schema, value=broken) is not None
+
+
+def test_child_browser_accepts_a_large_page_stored_whole(tmp_path: Path) -> None:
+    # Many short console lines move no text out, so storage keeps the untrusted
+    # wrapper and puts the reference of the whole result in its data.
+    output = BrowserToolOutput.model_validate(
+        {
+            "status": "ok",
+            "action": "console",
+            "truncated": None,
+            "notes": [],
+            "network": [{"host": "localhost", "port": 5173}],
+            "untrusted": True,
+            "data": {
+                "url": "http://localhost:5173/",
+                "title": "App",
+                "snapshot": None,
+                "console": [{"level": "log", "text": "x" * 400}] * 60,
+                "popups": [],
+                "blocked": [],
+            },
+        }
+    ).model_dump(mode="json")
+    stored = _stored(tmp_path, cast(JSONValue, output))
+    assert isinstance(stored, dict)
+    assert cast(dict[str, JSONValue], stored["data"])["storage"] == "action_file"
+
+    schema = cast(Any, _response_schema(tmp_path, "browser"))
+
+    assert validate_json_value(schema=schema, value=stored) is None
 
 
 def test_child_patch_accepts_target_windows_with_their_text_moved_out(

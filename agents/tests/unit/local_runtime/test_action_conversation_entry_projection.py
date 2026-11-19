@@ -467,6 +467,12 @@ def test_rejects_processing_tool_with_terminal_output() -> None:
         pytest.param("render_html_page", "success", {"kind": "html_pages"}, id="drawn"),
         pytest.param("save_html_as_pdf", "success", {"status": "saved"}, id="saved"),
         pytest.param(
+            "browser",
+            "success",
+            {"status": "ok", "action": "navigate", "data": {}},
+            id="browser",
+        ),
+        pytest.param(
             "render_html_page",
             "error",
             {"status": "error", "error": {"message": "timed out"}},

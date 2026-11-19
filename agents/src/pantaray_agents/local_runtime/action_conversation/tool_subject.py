@@ -37,7 +37,7 @@ _STRUCTURE_OPENERS = ("{", "[")
 # tool's result can carry an outside service's data, whose ``network`` says nothing about
 # where this call went.
 _NETWORK_REPORTING_TOOLS = frozenset(
-    {"render_html_page", "save_html_as_pdf", "bash", "run_python"}
+    {"render_html_page", "save_html_as_pdf", "browser", "bash", "run_python"}
 )
 # A host is named without the port its scheme reaches by default.
 _DEFAULT_PORTS = frozenset({80, 443})
@@ -109,6 +109,9 @@ _TOOL_SUBJECTS: dict[str, _ArgsSubject] = {
     "render_pdf_page": _text("path"),
     "render_html_page": _text("path"),
     "save_html_as_pdf": _text("pdf_path"),
+    # navigate names the URL it opens and print the PDF it writes; every other
+    # action acts on the page already open.
+    "browser": _text("url", "pdf_path"),
     "list": _text("path"),
     "glob": _text("pattern"),
     "grep": _pattern_in_path,

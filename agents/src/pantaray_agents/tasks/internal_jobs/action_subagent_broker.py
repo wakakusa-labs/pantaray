@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -21,6 +21,7 @@ from pantaray_agents.agents.action_agent.tools.base import ToolDefinition
 from pantaray_agents.agents.action_agent.tools.bash_tool import (
     ACTION_SUBAGENT_BASH_TOOL,
 )
+from pantaray_agents.agents.action_agent.tools.browser_tool import BROWSER_TOOL
 from pantaray_agents.agents.action_agent.tools.discovery_tools import (
     GLOB_TOOL,
     GREP_TOOL,
@@ -62,6 +63,7 @@ from pantaray_agents.local_runtime.tooling.repository.approval_sessions import (
     load_approval_session_by_request,
 )
 from pantaray_agents.local_runtime.tooling.tool_result_spill import (
+    STORED_RESULT_SCHEMA,
     accepting_spilled_texts,
 )
 from pantaray_agents.local_runtime.tooling.tool_result_storage import (
@@ -85,6 +87,23 @@ from pantaray_agents.tools.contract import (
 if TYPE_CHECKING:
     from pantaray_agents.dependencies import LLMClientProtocol
 
+
+def _child_browser_tool() -> ToolDefinition:
+    """The Action's ``browser`` without ``screenshot``: a child cannot receive
+    images, so it is not offered a call that could only be refused."""
+
+    schema = BROWSER_TOOL.build_validation_input_schema()
+    properties = cast(dict[str, JSONValue], schema["properties"])
+    action = cast(dict[str, JSONValue], properties["action"])
+    action["enum"] = [
+        offered
+        for offered in cast(list[JSONValue], action["enum"])
+        if offered != "screenshot"
+    ]
+    del properties["full_page"], properties["printed_pages"]
+    return replace(BROWSER_TOOL, input_schema=schema)
+
+
 _CHILD_BROKER_TOOLS = (
     READ_TOOL,
     LIST_TOOL,
@@ -95,35 +114,12 @@ _CHILD_BROKER_TOOLS = (
     READ_PROCESS_OUTPUT_TOOL,
     STOP_PROCESS_TOOL,
     RUN_PYTHON_TOOL,
+    _child_browser_tool(),
 )
 APPROVAL_DENIED_MESSAGE = (
     "The requested tool call was denied by the user. "
     "Treat this tool call as skipped and continue."
 )
-_ACTION_FILE_JSON_RESULT_SCHEMA: JsonSchema = {
-    "type": "object",
-    "additionalProperties": False,
-    "required": [
-        "storage",
-        "path",
-        "media_type",
-        "byte_size",
-        "character_count",
-        "line_count",
-    ],
-    "properties": {
-        "storage": {"type": "string", "enum": ["action_file"]},
-        "path": {"type": "string", "minLength": 1},
-        "media_type": {"type": "string", "enum": ["application/json"]},
-        "byte_size": {"type": "integer", "minimum": 0},
-        "character_count": {"type": "integer", "minimum": 0},
-        "line_count": {"type": "integer", "minimum": 1},
-        "preview": {"type": "string"},
-        "retry_hint": {"type": "string"},
-        "status": {"type": "string"},
-        "network": {"type": "array"},
-    },
-}
 _APPROVAL_DENIED_RESULT_SCHEMA: JsonSchema = {
     "type": "object",
     "additionalProperties": False,
@@ -481,7 +477,7 @@ def _child_response_schema(definition: ToolDefinition) -> JsonSchema:
         success_schema={
             "oneOf": [
                 output_schema,
-                dict(_ACTION_FILE_JSON_RESULT_SCHEMA),
+                dict(STORED_RESULT_SCHEMA),
                 dict(_APPROVAL_DENIED_RESULT_SCHEMA),
             ]
         }

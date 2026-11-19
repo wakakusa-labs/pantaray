@@ -7,6 +7,7 @@
 
 import type { Debugger, WebContents } from 'electron';
 import { createHash } from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
 
 import { writeFileAtomic } from '../atomicFile';
@@ -77,6 +78,15 @@ export async function printPage(contents: WebContents): Promise<CapturedArtifact
     );
   }
   return { kind: 'pdf', bytes };
+}
+
+/**
+ * Removes every artifact handed over and not taken. Electron is the only writer there, so this is
+ * for when no runtime can read one any more: its backend generation ended, maybe before the
+ * answer reached it, in which case nothing else would ever remove the file.
+ */
+export function clearBrowserArtifacts(localArtifactRoot: string): void {
+  fs.rmSync(path.join(localArtifactRoot, '.tmp', 'browser'), { recursive: true, force: true });
 }
 
 /** Where the artifact goes; the runtime derives the same path from the same id. */

@@ -21,6 +21,7 @@ import { createScreenCaptureResponder } from '../capture/screenCaptureRuntime';
 import { createHtmlRenderResponder } from '../render/htmlRender';
 import { createBrowserResponder } from '../browser/browserResponder';
 import { createBrowserSessions } from '../browser/browserSession';
+import { clearBrowserArtifacts } from '../browser/capture';
 import { createHtmlPreviewPdfs } from '../render/htmlPreview';
 import { createActionFetcher } from '../actions/actionFetch';
 import { createChatFetcher } from '../chat/chatFetch';
@@ -529,9 +530,15 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
 
   return {
     applyLocalOwner,
-    /** Every browser session belongs to the backend generation that opened it. */
-    closeBrowserSessions: browserSessions.closeAll,
+    /** When the backend generation ends: everything the browser holds for it goes. */
+    closeBrowserSessions: () => {
+      browserSessions.closeAll();
+      clearBrowserArtifacts(params.localArtifactRoot);
+    },
     prepareOwnerChange: () => {
+      // The helper keeps running, so no close for the old owner's sessions will arrive. Their
+      // artifacts stay: the same backend may still be reading one.
+      browserSessions.closeAll();
       params.notificationWindow.clearForOwnerChange();
       heldPanels.length = 0;
       conversationOverlay.onOwnerChanged(null);

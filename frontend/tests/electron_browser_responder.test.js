@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const { createHash } = require('node:crypto');
 const { EventEmitter } = require('node:events');
+const { png, fakeBrowserElectron } = require('./helpers/browser_electron_fakes');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -17,120 +18,6 @@ const {
 } = require('../electron/dist/auth/localBackendHelperManager.js');
 
 const BACKEND_PORT = 49152;
-const PDF = Buffer.from('%PDF-1.7 printed');
-
-/** A PNG header of the given size; the code under test reads only the signature and IHDR. */
-function png(width, height) {
-  const size = Buffer.alloc(8);
-  size.writeUInt32BE(width, 0);
-  size.writeUInt32BE(height, 4);
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]),
-    Buffer.from('IHDR'),
-    size,
-    Buffer.alloc(16),
-  ]);
-}
-
-/** Fake Electron: one session per partition, windows whose page `load` and `cdp` script. */
-function fakeElectron({ load = async () => {}, cdp = async () => ({}) } = {}) {
-  const partitions = new Map();
-  const windows = [];
-  function fromPartition(name) {
-    if (partitions.has(name)) return partitions.get(name);
-    const ses = new EventEmitter();
-    Object.assign(ses, {
-      proxies: [],
-      closedConnections: 0,
-      cleared: [],
-      protocol: {
-        handle: (_scheme, handler) => (ses.fileHandler = handler),
-        unhandle: (scheme) => (ses.unhandled = scheme),
-      },
-      webRequest: {
-        onBeforeRequest: (listener) => (ses.beforeRequest = listener),
-        onHeadersReceived: (listener) => (ses.headersReceived = listener),
-      },
-      registerPreloadScript: () => undefined,
-      setPermissionRequestHandler: (handler) => (ses.permissionRequest = handler),
-      setPermissionCheckHandler: (handler) => (ses.permissionCheck = handler),
-      setDevicePermissionHandler: (handler) => (ses.devicePermission = handler),
-      setProxy: async (config) => ses.proxies.push(config),
-      closeAllConnections: async () => (ses.closedConnections += 1),
-      clearStorageData: async () => ses.cleared.push('storage'),
-      clearCache: async () => ses.cleared.push('cache'),
-    });
-    partitions.set(name, ses);
-    return ses;
-  }
-  class BrowserWindow extends EventEmitter {
-    constructor(options) {
-      super();
-      this.options = options;
-      this.destroyed = false;
-      this.shown = false;
-      const history = [];
-      const contents = new EventEmitter();
-      const debuggerApi = new EventEmitter();
-      Object.assign(debuggerApi, {
-        commands: [],
-        attach: (version) => (debuggerApi.attached = version),
-        sendCommand: async (method, params, sessionId) => {
-          debuggerApi.commands.push({ method, params, sessionId });
-          return cdp(method, params, { contents, debuggerApi });
-        },
-      });
-      const ses = fromPartition(options.webPreferences.partition);
-      Object.assign(contents, {
-        debugger: debuggerApi,
-        history,
-        getURL: () => history.at(-1) ?? '',
-        getTitle: () => `title of ${history.at(-1)}`,
-        // The session loads about:blank before it attaches CDP; the page's history starts after.
-        loadURL: async (url) => {
-          if (url === 'about:blank') return;
-          await load(url, { ses, contents });
-          history.push(url);
-        },
-        isLoading: () => false,
-        printToPDF: async (printOptions) => {
-          contents.printOptions = printOptions;
-          return PDF;
-        },
-        navigationHistory: {
-          canGoBack: () => history.length > 1,
-          goBack: () => {
-            history.pop();
-            setImmediate(() => contents.emit('did-navigate'));
-          },
-        },
-        setWindowOpenHandler: (handler) => (contents.openHandler = handler),
-        setWebRTCIPHandlingPolicy: (policy) => (contents.webRtcPolicy = policy),
-      });
-      this.webContents = contents;
-      windows.push(this);
-    }
-
-    show() {
-      this.shown = true;
-    }
-
-    focus() {
-      this.shown = true;
-    }
-
-    isDestroyed() {
-      return this.destroyed;
-    }
-
-    destroy() {
-      this.destroyed = true;
-      this.emit('closed');
-    }
-  }
-  return { partitions, windows, electron: { BrowserWindow, session: { fromPartition } } };
-}
-
 function loadOnElectron(electron) {
   const fresh = () =>
     [SESSION_MODULE, RESPONDER_MODULE, CAPTURE_MODULE].forEach((p) => delete require.cache[p]);
@@ -149,7 +36,7 @@ function loadOnElectron(electron) {
 }
 
 function harness(scripts = {}, postAnswer = async () => ({})) {
-  const fake = fakeElectron(scripts);
+  const fake = fakeBrowserElectron(scripts);
   const { createBrowserSessions, createBrowserResponder } = loadOnElectron(fake.electron);
   const artifactRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-browser-'));
   const sessions = createBrowserSessions({ getBackendPort: () => BACKEND_PORT });
@@ -263,21 +150,27 @@ test('screenshots and prints write the artifact their claim describes', async ()
   assert.equal(claimOf(printed, 'pdf').artifact.kind, 'pdf');
 });
 
-// Catches: an artifact left behind when the runtime already gave up on the operation.
-test('an artifact the runtime no longer waits for is removed', async () => {
-  const h = harness(
-    {
-      cdp: async (method) =>
-        method === 'Page.captureScreenshot' ? { data: png(1280, 800).toString('base64') } : {},
-    },
-    async (body) => {
-      if (body.result.artifact) throw new LocalBackendRequestError('gone', 404);
-    }
-  );
-  await h.respond(navigate('https://a.example/'));
-  const shot = screenshot();
-  await h.respond(shot);
-  assert.equal(fs.existsSync(h.artifactPath(shot.operation_request_id, 'png')), false);
+// Catches: an artifact left behind when the runtime already gave up on the operation, and one
+// removed while a runtime that took the answer may still be reading it (a dropped connection).
+test('an artifact is removed only once the runtime said it does not wait for it', async () => {
+  for (const [failure, kept] of [
+    [new LocalBackendRequestError('gone', 404), false],
+    [new TypeError('fetch failed'), true],
+  ]) {
+    const h = harness(
+      {
+        cdp: async (method) =>
+          method === 'Page.captureScreenshot' ? { data: png(1280, 800).toString('base64') } : {},
+      },
+      async (body) => {
+        if (body.result.artifact) throw failure;
+      }
+    );
+    await h.respond(navigate('https://a.example/'));
+    const shot = screenshot();
+    await h.respond(shot);
+    assert.equal(fs.existsSync(h.artifactPath(shot.operation_request_id, 'png')), kept);
+  }
 });
 
 // Catches: a failed post logged with its message, which can repeat page text or a private URL.

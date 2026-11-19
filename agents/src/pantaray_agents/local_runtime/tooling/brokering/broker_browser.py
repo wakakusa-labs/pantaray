@@ -9,12 +9,16 @@ operation carries the setting, so the page reaches no host, loopback included.
 The page belongs to the calling run (its ``actor_process_id``), which the run's
 end closes.
 
+``screenshot {printed_pages}`` prints the page as ``print`` does and attaches
+the pages drawn, as ``render_pdf_page`` draws a PDF.
+
 Everything taken from the page goes in the output's ``data``, marked
 ``untrusted``, and nowhere else; storage keeps a large one's preview there too.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Final
 
 from pydantic import ValidationError
@@ -24,6 +28,7 @@ from pantaray_agents.local_runtime.runtime.browser_contract import (
     BrowserOperationSucceeded,
 )
 from pantaray_agents.local_runtime.runtime.browser_relay import (
+    BrowserOperationDone,
     BrowserRelayFailed,
     close_browser_session,
     request_browser_operation,
@@ -32,9 +37,15 @@ from pantaray_agents.local_runtime.runtime.local_image_store import (
     write_local_image_blob,
 )
 from pantaray_agents.local_runtime.runtime.tool_image_attachments import (
+    ToolImageAttachment,
     assemble_tool_image,
 )
+from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
+    MANAGED_DIRECTORY_MODE,
+)
+from pantaray_agents.local_runtime.tooling.documents import RENDERED_PAGE_MEDIA_TYPE
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.schema.read_access import READ_ACCESS_SCOPE_FULL_ACCESS
 from pantaray_agents.schema.websocket.server_messages import (
     BrowserFileTarget,
     BrowserNavigateOperation,
@@ -54,7 +65,7 @@ from ..repository.command_network_settings import load_command_network_enabled
 from .action_path_policy import read_scope
 from .broker_browser_print import save_printed_pdf
 from .broker_common import BrokerContext, ensure_session_capabilities
-from .broker_direct_render_html import _file_roots
+from .broker_direct_render_pdf import rendered_documents_dir
 from .broker_failure_finalization import NetworkReachedPolicyError
 from .broker_outcome import UnprojectedBrokerToolOutcome
 from .browser_protocol import (
@@ -67,6 +78,7 @@ from .browser_protocol import (
     ValidatedBrowserPrintRequest,
     ValidatedBrowserRequest,
 )
+from .printed_pages import draw_printed_pages
 
 BROWSER_ACTION_UNAVAILABLE: Final = "BROWSER_ACTION_UNAVAILABLE"
 _WEB_SCHEMES: Final = ("http://", "https://")
@@ -118,10 +130,8 @@ async def run_browser_executor(
         return UnprojectedBrokerToolOutcome(
             status="success", output={"status": "ok", "action": "close"}
         )
-    # Parsed by the contract's full union; these come with later releases.
-    if isinstance(args, BrowserAllowWritesArgs) or (
-        isinstance(args, BrowserScreenshotArgs) and args.printed_pages is not None
-    ):
+    # Parsed by the contract's full union; it comes with a later release.
+    if isinstance(args, BrowserAllowWritesArgs):
         raise BrokerPolicyError(
             f"browser {args.action} is not available",
             code=BROWSER_ACTION_UNAVAILABLE,
@@ -149,12 +159,14 @@ async def run_browser_executor(
             action="navigate",
             target=_navigation_target(args.url, scope),
         )
+    elif isinstance(args, BrowserPrintArgs) or (
+        isinstance(args, BrowserScreenshotArgs) and args.printed_pages is not None
+    ):
+        operation = BrowserPrintOperation(action="print")
     elif isinstance(args, BrowserScreenshotArgs):
         operation = BrowserScreenshotOperation(
             action="screenshot", ref=args.ref, full_page=args.full_page
         )
-    elif isinstance(args, BrowserPrintArgs):
-        operation = BrowserPrintOperation(action="print")
     else:
         operation = args
     outcome = await request_browser_operation(
@@ -192,16 +204,20 @@ async def run_browser_executor(
                 () if saved.outside_workspace else (str(saved.path),)
             ),
         )
+    if isinstance(args, BrowserScreenshotArgs) and args.printed_pages is not None:
+        return await _printed_pages(
+            context=context, requested=args.printed_pages, printed=outcome
+        )
     if outcome.artifact is None:
         return UnprojectedBrokerToolOutcome(
             status="success", output=_page_output(args.action, outcome.result)
         )
     # The relay has verified the PNG a screenshot answer claims.
-    blob = write_local_image_blob(
-        user_id=user_id, payload=outcome.artifact, mime_type="image/png"
-    )
-    image = assemble_tool_image(
-        blob, display_name=lambda image_id: f"browser-{image_id}.png"
+    image = _store_image(
+        user_id=user_id,
+        payload=outcome.artifact,
+        mime_type="image/png",
+        prefix="browser",
     )
     return UnprojectedBrokerToolOutcome(
         status="success",
@@ -209,6 +225,74 @@ async def run_browser_executor(
             args.action, outcome.result, attachments=[image.output_entry]
         ),
         attachments=(image.attachment,),
+    )
+
+
+async def _printed_pages(
+    *, context: BrokerContext, requested: list[int], printed: BrowserOperationDone
+) -> UnprojectedBrokerToolOutcome:
+    """Draw the requested pages of the printed PDF and attach them."""
+
+    # The relay has verified the PDF a print answer claims.
+    assert printed.artifact is not None
+    converted_dir = rendered_documents_dir(context)
+    converted_dir.mkdir(mode=MANAGED_DIRECTORY_MODE, exist_ok=True)
+    # Named by no URL or title: what the page says goes in data alone.
+    drawn, message = await draw_printed_pages(
+        pdf=printed.artifact,
+        name="the page",
+        requested=requested,
+        converted_dir=converted_dir,
+    )
+    images = [
+        _store_image(
+            user_id=context.execution_session.user_id,
+            payload=page.payload,
+            mime_type=RENDERED_PAGE_MEDIA_TYPE,
+            prefix=f"page-{page.number}",
+            output_fields={"page_number": page.number},
+        )
+        for page in drawn.pages
+    ]
+    return UnprojectedBrokerToolOutcome(
+        status="success",
+        output={
+            **_page_output(
+                "screenshot",
+                printed.result,
+                attachments=[image.output_entry for image in images],
+            ),
+            "page_count": drawn.page_count,
+            # The refs are in the message as well: on the string prompt path,
+            # the prompt text says where each image goes.
+            "message": " ".join(
+                [
+                    message,
+                    *(
+                        f"Page {page.number}: {image.ref}"
+                        for page, image in zip(drawn.pages, images, strict=True)
+                    ),
+                ]
+            ),
+        },
+        attachments=tuple(image.attachment for image in images),
+    )
+
+
+def _store_image(
+    *,
+    user_id: str,
+    payload: bytes,
+    mime_type: str,
+    prefix: str,
+    output_fields: dict[str, JSONValue] | None = None,
+) -> ToolImageAttachment:
+    blob = write_local_image_blob(user_id=user_id, payload=payload, mime_type=mime_type)
+    suffix = Path(blob.storage_path).suffix
+    return assemble_tool_image(
+        blob,
+        display_name=lambda image_id: f"{prefix}-{image_id}{suffix}",
+        output_fields=output_fields or {},
     )
 
 
@@ -232,6 +316,16 @@ def browser_page_policy(scope: ReadScope, *, allow_network: bool) -> BrowserPage
         ],
         # Writes to external hosts need an approval no release asks for yet.
         write_hosts=[],
+    )
+
+
+def _file_roots(scope: ReadScope) -> tuple[Path, ...]:
+    """The folders the page may load local files from: those read may open."""
+
+    if scope.read_access_scope == READ_ACCESS_SCOPE_FULL_ACCESS:
+        return (Path("/"),)
+    return tuple(
+        root.canonical_real_path for root in scope.manifest_roots if root.can_read
     )
 
 

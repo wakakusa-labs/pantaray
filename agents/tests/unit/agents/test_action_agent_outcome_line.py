@@ -43,6 +43,11 @@ from pantaray_agents.schema.agent.base import JSONValue
         ),
         ("browser", {"action": "snapshot", "data": {}}, "browser: ok"),
         (
+            "browser",
+            {"action": "screenshot", "page_count": 3, "attachments": [{}, {}]},
+            "browser: ok, 2 pages",
+        ),
+        (
             "web_extract",
             {"results": [{"url": "https://example.test/a", "raw_content": "y" * 2300}]},
             "web_extract: ok, 2,300 chars, https://example.test/a",

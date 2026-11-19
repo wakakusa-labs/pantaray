@@ -39,7 +39,6 @@ from .native_tool_use import (
 from .process_tools import READ_PROCESS_OUTPUT_TOOL, STOP_PROCESS_TOOL
 from .read_tool import READ_TOOL
 from .remember_tool import REMEMBER_TOOL, REMEMBER_TOOL_ID
-from .render_html_page_tool import RENDER_HTML_PAGE_TOOL
 from .render_pdf_page_tool import (
     RENDER_PDF_PAGE_TOOL,
     RENDER_PDF_PAGE_TOOL_ID,
@@ -176,7 +175,6 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
         WEB_CRAWL_TOOL,
         READ_TOOL,
         RENDER_PDF_PAGE_TOOL,
-        RENDER_HTML_PAGE_TOOL,
         LIST_TOOL,
         GLOB_TOOL,
         GREP_TOOL,
@@ -223,7 +221,6 @@ SUPERVISOR_SINGLE_REACT_TOOL_IDS: tuple[str, ...] = (
     WEB_CRAWL_TOOL.tool_id,
     READ_TOOL.tool_id,
     RENDER_PDF_PAGE_TOOL.tool_id,
-    RENDER_HTML_PAGE_TOOL.tool_id,
     LIST_TOOL.tool_id,
     GLOB_TOOL.tool_id,
     GREP_TOOL.tool_id,

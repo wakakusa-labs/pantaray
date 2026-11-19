@@ -45,7 +45,6 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
     LIST_TOOL_ID,
     READ_PROCESS_OUTPUT_TOOL_ID,
     READ_TOOL_ID,
-    RENDER_HTML_PAGE_TOOL_ID,
     RENDER_PDF_PAGE_TOOL_ID,
     STOP_PROCESS_TOOL_ID,
 )
@@ -121,7 +120,6 @@ NON_PREFLIGHT_BROKERED_TOOL_IDS = frozenset(
     {
         READ_TOOL_ID,
         RENDER_PDF_PAGE_TOOL_ID,
-        RENDER_HTML_PAGE_TOOL_ID,
         LIST_TOOL_ID,
         GLOB_TOOL_ID,
         GREP_TOOL_ID,

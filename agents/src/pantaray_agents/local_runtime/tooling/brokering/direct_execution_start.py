@@ -20,7 +20,6 @@ from .broker_protocol import (
     ValidatedListRequest,
     ValidatedPatchRequest,
     ValidatedReadRequest,
-    ValidatedRenderHtmlPageRequest,
     ValidatedRenderPdfPageRequest,
 )
 from .browser_protocol import ValidatedBrowserPrintRequest, ValidatedBrowserRequest
@@ -32,7 +31,6 @@ from .process_protocol import (
 type DirectReadOnlyRequest = (
     ValidatedReadRequest
     | ValidatedRenderPdfPageRequest
-    | ValidatedRenderHtmlPageRequest
     | ValidatedListRequest
     | ValidatedGlobRequest
     | ValidatedGrepRequest
@@ -123,7 +121,6 @@ def build_direct_invocation_start(
         (
             ValidatedReadRequest,
             ValidatedRenderPdfPageRequest,
-            ValidatedRenderHtmlPageRequest,
             ValidatedListRequest,
             ValidatedGlobRequest,
             ValidatedGrepRequest,

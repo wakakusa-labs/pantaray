@@ -51,9 +51,8 @@ def _utc_now() -> str:
     return format_iso8601_utc_z_milliseconds(datetime.now(UTC))
 
 
-def _emit_message(message: object) -> None:
-    assert hasattr(message, "model_dump_json")
-    sys.stdout.buffer.write(encode_message(message))  # type: ignore[arg-type]
+def _emit_message(message: BaseModel) -> None:
+    sys.stdout.buffer.write(encode_message(message))
     sys.stdout.buffer.flush()
 
 

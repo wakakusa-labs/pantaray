@@ -26,7 +26,7 @@ function load() {
     Module._load = originalLoad;
   }
 }
-const { connectUserBrowser } = load();
+const { CdpCommandError, connectUserBrowser } = load();
 
 /**
  * A stand-in for the browser's debugging endpoint: `mode` holds every handshake ('hold'),
@@ -72,14 +72,13 @@ function applicationSupport(t, { port, lockPid = process.pid, portFile } = {}) {
   return { root, userDataDir };
 }
 
-function fakeRunner({
-  lsof = { exitCode: 0, stdout: 'p4242\nf20\n' },
-  codesign = { exitCode: 0, stdout: '' },
-} = {}) {
+/** lsof lists `lsof` (exiting 1 when it lists nothing); codesign exits `codesign`. */
+function fakeRunner({ lsof = 'p4242\nf20\n', codesign = 0 } = {}) {
   const calls = [];
   const runner = async (file, args) => {
     calls.push({ file, args });
-    return file === '/usr/sbin/lsof' ? lsof : codesign;
+    if (file === '/usr/sbin/lsof') return { exitCode: lsof === '' ? 1 : 0, stdout: lsof };
+    return { exitCode: codesign, stdout: '' };
   };
   return { runner, calls };
 }
@@ -158,18 +157,8 @@ test('each state of the browser and its files gets the code the user can act on'
     ['lock of a quit browser', { lockPid: deadPid, port: 9222 }, {}, 'BROWSER_USER_NOT_RUNNING'],
     ['no port file', {}, {}, 'BROWSER_USER_DEBUGGING_OFF', /chrome:\/\/inspect\/#remote-debugging/],
     ['malformed port file', { portFile: 'x\n/elsewhere\n' }, {}, 'BROWSER_USER_UNAVAILABLE'],
-    [
-      'port file left after debugging was turned off',
-      { port: 9222 },
-      { lsof: { exitCode: 1, stdout: '' } },
-      'BROWSER_USER_DEBUGGING_OFF',
-    ],
-    [
-      'two processes on the port',
-      { port: 9222 },
-      { lsof: { exitCode: 0, stdout: 'p1\nf3\np2\nf4\n' } },
-      'BROWSER_USER_UNAVAILABLE',
-    ],
+    ['debugging turned off, file left', { port: 9222 }, { lsof: '' }, 'BROWSER_USER_DEBUGGING_OFF'],
+    ['two listeners', { port: 9222 }, { lsof: 'p1\nf3\np2\nf4\n' }, 'BROWSER_USER_UNAVAILABLE'],
   ];
   for (const [name, files, runs, code, message] of cases) {
     const { root } = applicationSupport(t, files);
@@ -194,7 +183,7 @@ test('each state of the browser and its files gets the code the user can act on'
 test('a listener that is not the signed browser never gets the socket', async (t) => {
   const endpoint = await browserEndpoint(t, 'hold');
   const { root } = applicationSupport(t, { port: endpoint.port });
-  const { runner, calls } = fakeRunner({ codesign: { exitCode: 3, stdout: '' } });
+  const { runner, calls } = fakeRunner({ codesign: 3 });
   const notice = fakeNotice();
   await assert.rejects(connect(root, { runner, notice }), failsWith('BROWSER_USER_UNAVAILABLE'));
   assert.equal(endpoint.upgrades.length, 0);
@@ -203,13 +192,10 @@ test('a listener that is not the signed browser never gets the socket', async (t
   const [flag, option, requirement, pid] = calls[1].args;
   assert.deepEqual([flag, option, pid], ['--verify', '-R', '4242']);
   assert.match(requirement, /leaf\[subject\.OU\] = "EQHXZ8M8AV"/);
-  assert.match(
-    requirement,
-    /identifier "com\.google\.Chrome" or identifier "com\.google\.Chrome\.helper"/
-  );
+  assert.match(requirement, /"com\.google\.Chrome" or identifier "com\.google\.Chrome\.helper"/);
 });
 
-test('the connection touches only targets and sessions of its own', async (t) => {
+test('a tab reaches only its own sessions, hears only them, and has its popups closed', async (t) => {
   const received = [];
   let browserSide;
   const endpoint = await browserEndpoint(t, (socket) => {
@@ -228,80 +214,69 @@ test('the connection touches only targets and sessions of its own', async (t) =>
   });
   const { root } = applicationSupport(t, { port: endpoint.port });
   const connection = await connect(root);
+  const popups = [];
+  const tab = await connection.openTab((url) => popups.push(url));
   const events = [];
-  connection.cdp.on('message', (_event, method, params, sessionId) =>
-    events.push({ method, targetId: params.targetInfo?.targetId ?? params.targetId, sessionId })
-  );
-  const refused = async (method, params, sessionId) =>
-    assert.rejects(connection.cdp.sendCommand(method, params, sessionId), /not sent/);
+  tab.cdp.on('message', (_event, method, _params, sessionId) => events.push([method, sessionId]));
+  const refused = (method, params, sessionId) =>
+    assert.rejects(tab.cdp.sendCommand(method, params, sessionId), CdpCommandError, method);
 
-  await connection.cdp.sendCommand('Target.createTarget', { url: 'about:blank', hidden: true });
-  await refused('Page.navigate', { url: 'https://example.com' }, 'own-page');
-  await refused('Target.closeTarget', { targetId: 'users-tab' });
+  // Chromium routes Target commands by the target they name, whichever session carries them.
+  await refused('Target.getTargets', {});
   await refused('Target.attachToTarget', { targetId: 'users-tab', flatten: true });
-  await refused('Target.setAutoAttach', { autoAttach: true, flatten: true });
+  await refused('Target.closeTarget', { targetId: 'users-tab' });
+  await refused('Storage.getCookies', {});
+  await refused('Network.getAllCookies', {});
   await refused('Browser.setDownloadBehavior', { behavior: 'allow' });
   // An empty session id is the browser itself in Chromium.
-  await refused('Target.getTargets', {}, '');
-  await refused('Runtime.evaluate', { expression: 'document.cookie' }, 'users-session');
-  await connection.cdp.sendCommand('Target.attachToTarget', { targetId: 'own', flatten: true });
-  await connection.cdp.sendCommand('Page.navigate', { url: 'https://example.com' }, 'own-page');
-  // Chromium routes Target commands by the target they name, whichever session carries them.
-  await refused('Target.getTargets', {}, 'own-page');
-  await refused('Target.attachToTarget', { targetId: 'users-tab', flatten: true }, 'own-page');
-  await refused('Target.closeTarget', { targetId: 'users-tab' }, 'own-page');
-  await refused('Target.setDiscoverTargets', { discover: true }, 'own-page');
-  await refused('Storage.getCookies', {}, 'own-page');
-  await refused('Network.getAllCookies', {}, 'own-page');
+  await refused('Page.navigate', { url: 'https://example.com' }, '');
+  await refused('Page.navigate', { url: 'https://example.com' }, 'users-session');
+  await tab.cdp.sendCommand('Page.navigate', { url: 'https://example.com' });
 
   const send = (method, params, sessionId) =>
     browserSide.send(JSON.stringify({ method, params, sessionId }));
-  const nextEvents = async (count) => {
-    while (events.length < count) await new Promise((r) => setTimeout(r, 10));
-    return events.splice(0, count);
-  };
   send('Target.targetCreated', {
     targetInfo: { targetId: 'users-tab', url: 'https://mail.example' },
   });
-  send('Target.targetCreated', { targetInfo: { targetId: 'popup', openerId: 'own' } });
   send('Target.targetInfoChanged', { targetInfo: { targetId: 'users-tab' } });
-  send('Target.targetDestroyed', { targetId: 'popup' });
   send('Runtime.consoleAPICalled', { type: 'log' }, 'users-session');
+  send('Target.targetCreated', {
+    targetInfo: { targetId: 'popup', openerId: 'own', url: 'https://popup.example/' },
+  });
+  send('Page.loadEventFired', { timestamp: 1 }, 'own-page');
   send(
     'Target.attachedToTarget',
     { sessionId: 'own-frame', targetInfo: { targetId: 'frame', type: 'iframe' } },
     'own-page'
   );
-  send('Page.loadEventFired', { timestamp: 1 }, 'own-frame');
-  assert.deepEqual(await nextEvents(4), [
-    { method: 'Target.targetCreated', targetId: 'popup', sessionId: undefined },
-    { method: 'Target.targetDestroyed', targetId: 'popup', sessionId: undefined },
-    { method: 'Target.attachedToTarget', targetId: 'frame', sessionId: 'own-page' },
-    { method: 'Page.loadEventFired', targetId: undefined, sessionId: 'own-frame' },
+  send('Page.frameNavigated', {}, 'own-frame');
+  while (events.length < 3) await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(events, [
+    ['Page.loadEventFired', undefined],
+    ['Target.attachedToTarget', undefined],
+    ['Page.frameNavigated', 'own-frame'],
   ]);
-  await connection.cdp.sendCommand('Runtime.runIfWaitingForDebugger', {}, 'own-frame');
+  assert.deepEqual(popups, ['https://popup.example/']);
+  await tab.cdp.sendCommand('Runtime.runIfWaitingForDebugger', {}, 'own-frame');
+  await tab.close();
 
-  send('Target.detachedFromTarget', { sessionId: 'own-frame', targetId: 'frame' }, 'own-page');
-  await nextEvents(1);
-  await refused('Runtime.runIfWaitingForDebugger', {}, 'own-frame');
-  await connection.cdp.sendCommand('Target.closeTarget', { targetId: 'own' });
   assert.deepEqual(
-    received.map(({ method, sessionId }) => [method, sessionId]),
+    received.map(({ method, params, sessionId }) => [method, params.targetId, sessionId]),
     [
-      ['Target.createTarget', undefined],
-      ['Target.attachToTarget', undefined],
-      ['Page.navigate', 'own-page'],
-      ['Runtime.runIfWaitingForDebugger', 'own-frame'],
-      ['Target.closeTarget', undefined],
+      ['Target.setDiscoverTargets', undefined, undefined],
+      ['Target.createTarget', undefined, undefined],
+      ['Target.attachToTarget', 'own', undefined],
+      ['Page.navigate', undefined, 'own-page'],
+      ['Target.closeTarget', 'popup', undefined],
+      ['Runtime.runIfWaitingForDebugger', undefined, 'own-frame'],
+      ['Target.closeTarget', 'own', undefined],
     ]
   );
+  assert.deepEqual(received[1].params, { url: 'about:blank', hidden: true, background: true });
 
   connection.close();
   await connection.closed;
-  await assert.rejects(
-    connection.cdp.sendCommand('Target.getTargetInfo', { targetId: 'own' }),
-    /closed/
-  );
+  await assert.rejects(tab.cdp.sendCommand('Page.enable', {}), /closed/);
 });
 
 test('stopping the run ends a check that never answers', async (t) => {

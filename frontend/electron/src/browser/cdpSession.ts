@@ -1,9 +1,9 @@
 /**
  * The CDP connection the browser engine's page code drives, whichever page it is: Electron's
- * `webContents.debugger` for the app's hidden page, or a WebSocket to the user's browser
- * (`userBrowserConnection`). Both use the flat-session shape: a command or event names the
- * target session it belongs to by `sessionId`; one without goes to, or comes from, what the
- * connection was opened on (the app's page, or the user's whole browser).
+ * `webContents.debugger` for the app's hidden page, or a tab of the user's browser
+ * (`UserBrowserTab.cdp` in `userBrowserConnection`). Both use the flat-session shape: a command
+ * or event of one of the page's frame or worker sessions names it by `sessionId`; one without
+ * goes to, or comes from, the page itself.
  */
 
 import type { BrowserPageData } from './browserContract';

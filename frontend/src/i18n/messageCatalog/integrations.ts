@@ -23,7 +23,7 @@ export const INTEGRATION_MESSAGES = defineMessages({
     'settings.integrations.accessDescription.read_only':
       'Reads only; never sends or changes anything',
     'settings.integrations.accessDescription.read_write':
-      'Also sends, creates and changes things. Asks you before each one',
+      'Also sends, creates and changes things. Asks you first when it should',
     'settings.integrations.moreActions': 'More actions for {account}',
     'settings.integrations.reconnect': 'Reconnect',
     'settings.integrations.disconnect': 'Disconnect',
@@ -99,7 +99,7 @@ export const INTEGRATION_MESSAGES = defineMessages({
     'settings.integrations.accessDescription.off': 'このアカウントは使いません',
     'settings.integrations.accessDescription.read_only': '読むだけで、送信や変更はしません',
     'settings.integrations.accessDescription.read_write':
-      '送信・作成・変更もします。実行する前に毎回確認します',
+      '送信・作成・変更もします。必要なときは先に確認します',
     'settings.integrations.moreActions': '{account} のその他の操作',
     'settings.integrations.reconnect': 'つなぎ直す',
     'settings.integrations.disconnect': '接続を解除',

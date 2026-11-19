@@ -11,17 +11,16 @@ A missing, unreadable or malformed file counts as debugging off.
 
 from __future__ import annotations
 
-import os
-import pwd
-from pathlib import Path
-
-from pantaray_agents.schema.user_browser import KNOWN_USER_BROWSERS, UserBrowserId
+from pantaray_agents.schema.user_browser import UserBrowserId
+from pantaray_agents.tools.files.secret_paths import user_browser_data_dirs
 
 # The port a Chrome-family browser's debugging is conventionally started on,
 # denied even where no file names it: a browser run with another
 # --user-data-dir, or files macOS keeps from this process.
 DEFAULT_DEBUGGING_PORT = 9222
 _MAX_PORT = 65_535
+# Line 1 is the port, so a longer file is cut before it is parsed.
+_READ_LIMIT_BYTES = 64
 
 
 def protected_browser_ports() -> list[int]:
@@ -47,21 +46,16 @@ def browsers_with_debugging_on() -> list[UserBrowserId]:
 
 def _debugging_ports() -> dict[UserBrowserId, int]:
     ports: dict[UserBrowserId, int] = {}
-    support = _home() / "Library" / "Application Support"
-    for browser_id, browser in KNOWN_USER_BROWSERS.items():
+    for browser_id, user_data_dir in user_browser_data_dirs().items():
         try:
-            text = (support / browser.user_data_dir / "DevToolsActivePort").read_text(
-                encoding="ascii"
-            )
+            with (user_data_dir / "DevToolsActivePort").open("rb") as file:
+                text = file.read(_READ_LIMIT_BYTES).decode("ascii")
         except (OSError, UnicodeDecodeError):
             continue
         # Line 1 is the port, line 2 the browser target's path.
         first_line = text.partition("\n")[0].strip()
-        if first_line.isdigit() and 0 < int(first_line) <= _MAX_PORT:
-            ports[browser_id] = int(first_line)
+        if 0 < len(first_line) <= 5 and first_line.isdigit():
+            port = int(first_line)
+            if 0 < port <= _MAX_PORT:
+                ports[browser_id] = port
     return ports
-
-
-def _home() -> Path:
-    # The OS account's home, as the secret path rules use, not $HOME.
-    return Path(pwd.getpwuid(os.getuid()).pw_dir)

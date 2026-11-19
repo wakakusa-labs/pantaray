@@ -30,7 +30,7 @@ from functools import cache
 from pathlib import Path
 from typing import Literal
 
-from pantaray_agents.schema.user_browser import KNOWN_USER_BROWSERS
+from pantaray_agents.schema.user_browser import KNOWN_USER_BROWSERS, UserBrowserId
 from pantaray_agents.tools.contract import BrokerPolicyError
 
 SECRET_PATH_WITHHELD = "SECRET_PATH_WITHHELD"
@@ -68,6 +68,16 @@ def secret_path_patterns(tier: SecretTier) -> tuple[SecretPathPattern, ...]:
     """The rules of one tier, for the current OS account's home folder."""
 
     return tuple(rule for rule in _rules(_home()) if rule.tier == tier)
+
+
+def user_browser_data_dirs() -> dict[UserBrowserId, Path]:
+    """Each known browser's user-data-dir in the OS account's home, in table order."""
+
+    support = _home() / "Library" / "Application Support"
+    return {
+        browser_id: support / browser.user_data_dir
+        for browser_id, browser in KNOWN_USER_BROWSERS.items()
+    }
 
 
 def withheld_reason(path: Path, *, credentials_readable: bool) -> SecretWithheld | None:
@@ -313,6 +323,7 @@ __all__ = [
     "refuse_withheld_paths",
     "secret_path_error",
     "secret_path_patterns",
+    "user_browser_data_dirs",
     "withheld_folder_reason",
     "withheld_reason",
 ]

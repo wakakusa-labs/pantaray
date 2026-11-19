@@ -6,7 +6,11 @@ from pathlib import Path, PurePosixPath
 from pantaray_agents.tools.files.pantaray_agents_md import (
     pantaray_agents_md_write_patterns,
 )
-from pantaray_agents.tools.files.secret_paths import SecretTier, secret_path_patterns
+from pantaray_agents.tools.files.secret_paths import (
+    SecretTier,
+    secret_path_patterns,
+    user_browser_data_dirs,
+)
 
 from .command_sandbox_protocol import SandboxCommandSpec
 from .macos_runtime import toolchain_read_roots
@@ -75,6 +79,18 @@ def render_seatbelt_profile(
                 tiers=("app_secret",)
                 if request.use_login_environment
                 else ("app_secret", "cli_credential"),
+            ),
+            # The browser-file rules match by path, which renaming a browser's
+            # folder or one above it would escape, as for private storage.
+            *(
+                f'(deny file-write* (literal "{_escape_seatbelt_string(str(folder))}"))'
+                for folder in dict.fromkeys(
+                    folder
+                    for user_data_dir in user_browser_data_dirs().values()
+                    for folder in (user_data_dir, *user_data_dir.parents)
+                    # Nothing can rename "/".
+                    if str(folder) != "/"
+                )
             ),
             # Only an approved apply_patch writes the Pantaray-wide AGENTS.md.
             *(

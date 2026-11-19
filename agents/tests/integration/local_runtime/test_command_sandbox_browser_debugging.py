@@ -14,7 +14,6 @@ from pathlib import Path
 
 import pytest
 
-from pantaray_agents.local_runtime.tooling.sandbox import browser_debugging_ports
 from pantaray_agents.local_runtime.tooling.sandbox.command_sandbox_request import (
     compose_sandbox_request,
 )
@@ -44,7 +43,6 @@ def test_commands_cannot_reach_the_browser_port_or_its_files(
     (chrome / "Local State").write_text(LOCAL_STATE, encoding="utf-8")
     (brave / "Local State").write_text(LOCAL_STATE, encoding="utf-8")
     monkeypatch.setattr(secret_paths, "_home", lambda: home)
-    monkeypatch.setattr(browser_debugging_ports, "_home", lambda: home)
     ordinary = start_tcp_probe_server()
     debugging = start_tcp_probe_server()
     (chrome / "DevToolsActivePort").write_text(
@@ -61,6 +59,10 @@ def test_commands_cannot_reach_the_browser_port_or_its_files(
         "move": f"mv {quoted_chrome}/'Local State' {quoted_chrome}/moved",
         "brave": f"cat {shlex.quote(str(brave))}/'Local State'",
         "preferences": f"cat {quoted_chrome}/Default/Preferences",
+        "create": f"touch {quoted_chrome}/Default/new",
+        "rename-profile": f"mv {quoted_chrome} {quoted_chrome}-moved",
+        "rename-parent": f"mv {shlex.quote(str(chrome.parent))}"
+        f" {shlex.quote(str(support / 'Google-moved'))}",
     }
     try:
         stdout = _run_sandboxed(
@@ -86,6 +88,9 @@ def test_commands_cannot_reach_the_browser_port_or_its_files(
         "move=no",
         "brave=no",
         "preferences=yes",
+        "create=yes",
+        "rename-profile=no",
+        "rename-parent=no",
     ]
     assert ordinary.hits == [b"connected"]
     assert debugging.hits == []

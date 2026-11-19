@@ -4,24 +4,25 @@ from pathlib import Path
 
 import pytest
 
-from pantaray_agents.local_runtime.tooling.sandbox import browser_debugging_ports
 from pantaray_agents.local_runtime.tooling.sandbox.browser_debugging_ports import (
     browsers_with_debugging_on,
     protected_browser_ports,
 )
+from pantaray_agents.tools.files import secret_paths
 
 
 def test_each_readable_port_file_counts_and_a_bad_one_is_skipped(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(browser_debugging_ports, "_home", lambda: tmp_path)
+    monkeypatch.setattr(secret_paths, "_home", lambda: tmp_path)
     support = tmp_path / "Library" / "Application Support"
     # Brave's file first and with the lower port: neither may decide the order.
     contents: dict[str, bytes] = {
         "BraveSoftware/Brave-Browser": b"50001",
         "Google/Chrome": b"53110\n/devtools/browser/0b1c\n",
         "Microsoft Edge": b"not a port\n",
-        "Google/Chrome Beta": b"70000\n",
+        # int() refuses over 4,300 digits: this must be skipped, not raised.
+        "Google/Chrome Beta": b"9" * 5000,
         "Google/Chrome Canary": b"\xff\xfe\n",
     }
     for user_data_dir, content in contents.items():

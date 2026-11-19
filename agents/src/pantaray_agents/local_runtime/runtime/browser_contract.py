@@ -114,6 +114,9 @@ class BrowserOperationSucceeded(_AnswerModel):
     network: list[BrowserContactedHost] = Field(max_length=BROWSER_MAX_CONTACTED_HOSTS)
     # A PNG for ``screenshot``, a PDF for ``print``; null for every other operation.
     artifact: BrowserArtifactClaim | None
+    # The host a web navigate opened, as Chromium parsed its URL, so the runtime
+    # never parses one itself; null for a file and every other operation.
+    opened_host: BrowserHost | None
 
 
 class BrowserOperationFailed(_AnswerModel):

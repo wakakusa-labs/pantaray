@@ -31,7 +31,6 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
-from urllib.parse import urlsplit
 
 from pantaray_agents.local_runtime.descriptor_access import (
     DescriptorPathError,
@@ -43,7 +42,6 @@ from pantaray_agents.schema.websocket.server_messages import (
     BrowserOperationRequestedMessage,
     BrowserPagePolicy,
     BrowserSessionCloseRequestedMessage,
-    BrowserWebTarget,
 )
 
 from ..storage.migrations.connection import configure_connection
@@ -121,8 +119,8 @@ class _Owner:
     unclosed: set[_Session] = field(default_factory=set)
     # Hosts the run's pages may write to; it only grows until the run ends.
     write_hosts: set[str] = field(default_factory=set)
-    # The host of the URL the runtime last navigated the current session to:
-    # the runtime's own record, never read from the page. None for a file.
+    # The host the current session's last navigate opened, as Electron parsed
+    # the requested URL; never read from the page. None for a file.
     page_host: str | None = None
 
 
@@ -203,13 +201,8 @@ async def request_browser_operation(
         if isinstance(operation, BrowserNavigateOperation):
             with _LOCK:
                 owner = _OWNERS.get(owner_process_id)
-                target = operation.target
                 if owner is not None and owner.current == session:
-                    owner.page_host = (
-                        urlsplit(target.url).hostname
-                        if isinstance(target, BrowserWebTarget)
-                        else None
-                    )
+                    owner.page_host = answer.opened_host
         # Off the event loop: a PDF may be large, and this loop may also serve the
         # local HTTP API and the WebSocket.
         return await asyncio.to_thread(

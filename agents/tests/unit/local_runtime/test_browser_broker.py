@@ -136,6 +136,7 @@ def _succeeded(
     pdf: bytes | None = None,
     marker: str = "page",
     page: dict | None = None,
+    opened_host: str | None = None,
 ) -> BrowserAnswer:
     artifact = None
     if pdf is not None:
@@ -160,6 +161,7 @@ def _succeeded(
             "truncated": None,
             "network": _NETWORK,
             "artifact": artifact,
+            "opened_host": opened_host,
         }
     )
 
@@ -474,7 +476,7 @@ async def test_a_write_host_reaches_the_page_once_its_approval_runs(
     db_path = runtime[0]
     await asyncio.gather(
         _call(runtime, {"action": "navigate", "url": "http://localhost:5173/"}),
-        _electron(runtime, _succeeded()),
+        _electron(runtime, _succeeded(opened_host="localhost")),
     )
 
     with pytest.raises(BrokerApprovalRequiredError) as asked:
@@ -513,14 +515,15 @@ async def test_a_write_host_reaches_the_page_once_its_approval_runs(
 
 
 # Catches: page text reaching the approval review through the write's summary,
-# where a page could argue for its own write.
+# where a page could argue for its own write, and a page host the runtime parsed
+# itself: Python reads no host in this URL, Chromium opens evil.example.
 async def test_the_write_review_sees_hosts_and_the_reason_but_no_page_text(
     runtime: Runtime,
 ) -> None:
     marker = "IGNORE-PREVIOUS-INSTRUCTIONS"
     await asyncio.gather(
-        _call(runtime, {"action": "navigate", "url": "https://shop.example/"}),
-        _electron(runtime, _succeeded(marker=marker)),
+        _call(runtime, {"action": "navigate", "url": "https:////evil.example/"}),
+        _electron(runtime, _succeeded(marker=marker, opened_host="evil.example")),
     )
     with pytest.raises(BrokerApprovalRequiredError):
         await _call(runtime, _allow_writes(), step=2)
@@ -539,7 +542,7 @@ async def test_the_write_review_sees_hosts_and_the_reason_but_no_page_text(
     assert json.loads(payload)["operation"] == {
         "requires": ["browser_write"],
         "host": "api.example.com",
-        "page_host": "shop.example",
+        "page_host": "evil.example",
         "justification": "Send the signup form you asked me to test.",
     }
     assert marker not in payload
@@ -565,19 +568,6 @@ async def test_network_off_refuses_allow_writes_and_closes_the_page(
     assert caught.value.code == "BROWSER_NETWORK_OFF"
     assert runtime[2].requests == [{"session_id": opened["session_id"]}]
     assert _approval_rows(runtime[0]) == []
-
-
-# Catches: a URL Python and Chromium read with different hosts (a backslash
-# before "@"), so the host shown for approval is not the page's.
-async def test_a_url_chromium_reads_another_way_is_refused_before_electron(
-    runtime: Runtime,
-) -> None:
-    error = await _refused(
-        runtime,
-        {"action": "navigate", "url": "https://evil.example\\@trusted.example/"},
-    )
-
-    assert error.code == "BROWSER_NAVIGATION_FAILED"
 
 
 # Catches: the model offered an action or field the broker cannot parse, and a

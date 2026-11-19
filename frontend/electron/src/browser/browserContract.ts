@@ -29,8 +29,8 @@ const PositiveIntSchema = z.number().int().positive();
 const NavigateOperationSchema = strict({
   action: z.literal('navigate'),
   target: z.discriminatedUnion('kind', [
-    // No blank, backslash or control character: the backend's URL parser would read
-    // another host than Chromium's. Same rule as the backend's BrowserWebTarget.
+    // No blank, backslash or control character, which the URL parser drops or rewrites.
+    // Same rule as the backend's BrowserWebTarget.
     // eslint-disable-next-line no-control-regex
     strict({ kind: z.literal('web'), url: z.string().regex(/^https?:\/\/[^\s\\\x00-\x1f\x7f]+$/) }),
     // A local document `read` may open, by its real path.
@@ -164,6 +164,8 @@ export const BrowserOperationAnswerSchema = strict({
       network: ContactedHostsSchema,
       // A PNG for `screenshot`, a PDF for `print`; null for every other operation.
       artifact: BrowserArtifactClaimSchema.nullable(),
+      // The host a web navigate opened, as Chromium parsed its URL; null for everything else.
+      opened_host: HostSchema.nullable(),
     }),
     strict({
       status: z.literal('failed'),

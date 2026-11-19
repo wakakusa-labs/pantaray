@@ -31,6 +31,7 @@ import {
   type CapturedArtifact,
 } from './capture';
 import { captureElement, interact } from './interactions';
+import { reachedHost } from './pagePolicy';
 import { takeSnapshot } from './snapshot';
 
 type OkResult = Extract<BrowserOperationAnswer['result'], { status: 'ok' }>;
@@ -104,6 +105,16 @@ async function goBack(contents: WebContents): Promise<void> {
     contents.on('did-fail-load', onFailed);
     contents.navigationHistory.goBack();
   });
+}
+
+/**
+ * The host a navigate opens, by the WHATWG parser Chromium loads the URL with, so the runtime
+ * never parses it itself. Read from the request, never from the page or where a redirect led;
+ * null for a file and for every other operation.
+ */
+export function openedHost(operation: BrowserOperation): string | null {
+  if (operation.action !== 'navigate' || operation.target.kind !== 'web') return null;
+  return reachedHost(new URL(operation.target.url))?.host ?? null;
 }
 
 async function perform(operation: BrowserOperation, page: BrowserPage): Promise<OperationValue> {
@@ -191,6 +202,7 @@ export function createBrowserResponder(params: {
           truncated,
           network,
           artifact: claim,
+          opened_host: openedHost(request.operation),
         };
       }
       // Sent once, never retried: the runtime takes the first answer and reads the artifact

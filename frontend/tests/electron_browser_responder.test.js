@@ -113,6 +113,25 @@ test('navigate and back answer with the page, and a failed load names only its e
   assert.doesNotMatch(failed.message, /secret-token/);
 });
 
+// Catches: an opened host the runtime would have to parse itself, or one parsed otherwise than
+// Chromium loads it (an empty authority, a percent-encoded or numeric host), which would name a
+// site the page did not open in the write approval.
+test('a navigate answer names the host WHATWG parses from the requested URL', async () => {
+  const h = harness();
+  for (const url of ['https:////evil.example/', 'https://%65vil.example/', 'http://0x08080808/']) {
+    const opened = navigate(url);
+    await h.respond(opened);
+    assert.equal(h.answerOf(opened.operation_request_id).opened_host, new URL(url).hostname);
+  }
+  assert.deepEqual(
+    ['evil.example', 'evil.example', '8.8.8.8'],
+    h.answers.map((answer) => answer.result.opened_host)
+  );
+  const file = operation({ action: 'navigate', target: { kind: 'file', path: '/work/deck.html' } });
+  await h.respond(file);
+  assert.equal(h.answerOf(file.operation_request_id).opened_host, null);
+});
+
 // Catches: a claim that does not match the file written, an image at the wrong size, a full
 // page past the cap without `page_too_tall`, and a print that leaves no PDF.
 test('screenshots and prints write the artifact their claim describes', async () => {

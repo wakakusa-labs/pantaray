@@ -277,8 +277,9 @@ class BrowserConsoleOperation(_BrowserModel):
 
 class BrowserWebTarget(_BrowserModel):
     kind: Literal["web"]
-    # No blank, backslash or control character: Chromium's URL parser drops or
-    # rewrites them where Python's does not, so the two would read another host.
+    # No blank, backslash or control character, which Chromium's URL parser
+    # drops or rewrites. Only Electron parses the URL: it reports the host it
+    # opened in the answer's ``opened_host``.
     url: str = Field(pattern=r"^https?://[^\s\\\x00-\x1f\x7f]+$")
 
 

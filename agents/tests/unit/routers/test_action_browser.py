@@ -28,6 +28,7 @@ RESULT = {
     "truncated": None,
     "network": [{"host": "localhost", "port": 5173}],
     "artifact": {"kind": "pdf", "byte_size": 2048, "sha256": "a" * 64},
+    "opened_host": None,
 }
 
 

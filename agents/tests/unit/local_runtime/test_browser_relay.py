@@ -60,7 +60,9 @@ POLICY = BrowserPagePolicy(
 )
 
 
-def _succeeded(artifact: dict[str, object] | None) -> BrowserOperationSucceeded:
+def _succeeded(
+    artifact: dict[str, object] | None, opened_host: str | None = None
+) -> BrowserOperationSucceeded:
     return BrowserOperationSucceeded.model_validate(
         {
             "status": "ok",
@@ -76,6 +78,7 @@ def _succeeded(artifact: dict[str, object] | None) -> BrowserOperationSucceeded:
             "truncated": None,
             "network": NETWORK,
             "artifact": artifact,
+            "opened_host": opened_host,
         }
     )
 
@@ -88,7 +91,7 @@ PNG_CLAIM = {
     "height_px": 800,
 }
 SCREENSHOT_ANSWER = _succeeded(PNG_CLAIM)
-NAVIGATE_ANSWER = _succeeded(None)
+NAVIGATE_ANSWER = _succeeded(None, opened_host="localhost")
 
 
 def _failed(code: str) -> BrowserOperationFailed:

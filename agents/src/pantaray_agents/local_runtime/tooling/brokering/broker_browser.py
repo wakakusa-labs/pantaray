@@ -23,7 +23,6 @@ from pydantic import ValidationError
 from pantaray_agents.local_runtime.runtime.browser_contract import (
     BrowserContactedHost,
     BrowserOperationSucceeded,
-    BrowserPageData,
     BrowserTruncation,
 )
 from pantaray_agents.local_runtime.runtime.browser_relay import (
@@ -38,10 +37,7 @@ from pantaray_agents.local_runtime.runtime.tool_image_attachments import (
     assemble_tool_image,
 )
 from pantaray_agents.schema.agent.base import JSONValue
-from pantaray_agents.schema.tool_result import (
-    largest_fitting_size,
-    serialize_json_tool_output,
-)
+from pantaray_agents.schema.tool_result import largest_fitting_size
 from pantaray_agents.schema.websocket.server_messages import (
     BrowserFileTarget,
     BrowserNavigateOperation,
@@ -89,7 +85,7 @@ _NAVIGATE_AGAIN: Final = "The page was discarded. Navigate again to continue."
 FIX_HINTS: Final[dict[BrowserFailureCode, str]] = {
     "BROWSER_NO_PAGE": "Open a page with navigate first.",
     "BROWSER_REF_UNKNOWN": _SNAPSHOT_AGAIN,
-    "BROWSER_REF_STALE": (f"The page changed since the snapshot. {_SNAPSHOT_AGAIN}"),
+    "BROWSER_REF_STALE": f"The page changed since the snapshot. {_SNAPSHOT_AGAIN}",
     "BROWSER_NAVIGATION_FAILED": (
         "Check the URL or path. For a local dev server, check with "
         "read_process_output that it is running."
@@ -225,78 +221,56 @@ def _fitted_output(
     *,
     attachments: list[JSONValue] | None = None,
 ) -> dict[str, JSONValue]:
-    """The output, its page text cut to one length when the whole would not fit
-    inline. A larger result would be stored away and shown as a preview outside
-    ``data``, where page text would no longer be marked untrusted."""
+    """The output, its page text cut to the longest length that fits inline. A
+    larger result would be stored away and shown as a preview outside ``data``,
+    where page text would no longer be marked untrusted."""
 
-    def output(cut: int | None) -> dict[str, JSONValue]:
-        page = result.page_data if cut is None else _cut_page(result.page_data, cut)
+    page = result.page_data
+    console = page.console or []
+    texts = [page.url, page.title, page.snapshot or "", *page.popups]
+    texts += [line.text for line in console] + [item.url for item in page.blocked]
+
+    def output(length: int) -> dict[str, JSONValue]:
+        def cut(text: str) -> str:
+            return text if len(text) <= length else f"{text[:length]}…"
+
+        cut_page = page.model_copy(
+            update={
+                "url": cut(page.url),
+                "title": cut(page.title),
+                "snapshot": None if page.snapshot is None else cut(page.snapshot),
+                "console": None
+                if page.console is None
+                else [m.model_copy(update={"text": cut(m.text)}) for m in console],
+                "popups": [cut(url) for url in page.popups],
+                "blocked": [
+                    b.model_copy(update={"url": cut(b.url)}) for b in page.blocked
+                ],
+            }
+        )
         truncated = result.truncated
-        if cut is not None and truncated is None:
+        if truncated is None and any(len(text) > length for text in texts):
             truncated = _CUT_TRUNCATION.get(action)
-        built: dict[str, JSONValue] = {
+        return {
             "status": "ok",
             "action": action,
             "truncated": truncated,
             "notes": list(result.notes),
             "network": _network(result.network),
             "untrusted": True,
-            "data": page.model_dump(mode="json"),
+            "data": cut_page.model_dump(mode="json"),
+            **({} if attachments is None else {"attachments": attachments}),
         }
-        if attachments is not None:
-            built["attachments"] = attachments
-        return built
 
-    whole = output(None)
-    if (
-        len(serialize_json_tool_output(whole))
-        <= ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT
-    ):
-        return whole
     # Design limit: cut to nothing, the output is bounded by how many console
     # lines, popups and blocked requests Electron reports; it fits while those
     # stay in the hundreds.
     return output(
         largest_fitting_size(
             output,
-            high=max(len(text) for text in _page_texts(result.page_data)),
+            high=max(len(text) for text in texts),
             limit=ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT,
         )
-    )
-
-
-def _page_texts(page: BrowserPageData) -> list[str]:
-    return [
-        page.url,
-        page.title,
-        *([] if page.snapshot is None else [page.snapshot]),
-        *(line.text for line in page.console or ()),
-        *page.popups,
-        *(blocked.url for blocked in page.blocked),
-    ]
-
-
-def _cut_page(page: BrowserPageData, length: int) -> BrowserPageData:
-    def cut(text: str) -> str:
-        return text if len(text) <= length else f"{text[:length]}…"
-
-    return page.model_copy(
-        update={
-            "url": cut(page.url),
-            "title": cut(page.title),
-            "snapshot": None if page.snapshot is None else cut(page.snapshot),
-            "console": None
-            if page.console is None
-            else [
-                line.model_copy(update={"text": cut(line.text)})
-                for line in page.console
-            ],
-            "popups": [cut(url) for url in page.popups],
-            "blocked": [
-                blocked.model_copy(update={"url": cut(blocked.url)})
-                for blocked in page.blocked
-            ],
-        }
     )
 
 

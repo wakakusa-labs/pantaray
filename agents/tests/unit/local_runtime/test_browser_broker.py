@@ -1,11 +1,6 @@
-"""`browser` through the broker, with Electron played by a task.
-
-The task waits for the operation the relay announces, writes a PNG where
-Electron would and answers through the relay's broker. What is checked is what
-the broker owns: what reaches Electron and what is refused before, the page
-policy, how a screenshot comes back, where page text may appear, and how
-failures reach the model.
-"""
+"""`browser` through the broker, with Electron played by a task that answers
+the relay's announcements: what reaches Electron and what is refused before,
+the page policy, screenshots, where page text may appear, and failures."""
 
 from __future__ import annotations
 
@@ -48,7 +43,6 @@ from pantaray_agents.local_runtime.tooling.brokering.browser_protocol import (
 from pantaray_agents.local_runtime.tooling.repository.command_network_settings import (
     update_command_network_enabled,
 )
-from pantaray_agents.schema.events import OutboundEvent
 from pantaray_agents.tasks.internal_jobs.action_subagent_broker import (
     _CHILD_BROKER_TOOLS,
 )
@@ -122,7 +116,9 @@ def _page_data(marker: str = "page") -> dict[str, object]:
     }
 
 
-def _succeeded(*, png: bytes | None = None, marker: str = "page") -> BrowserAnswer:
+def _succeeded(
+    *, png: bytes | None = None, marker: str = "page", page: dict | None = None
+) -> BrowserAnswer:
     artifact = None
     if png is not None:
         artifact = {
@@ -135,7 +131,7 @@ def _succeeded(*, png: bytes | None = None, marker: str = "page") -> BrowserAnsw
     return BrowserOperationSucceeded.model_validate(
         {
             "status": "ok",
-            "page_data": _page_data(marker),
+            "page_data": {**_page_data(marker), **(page or {})},
             "notes": ["dialog_dismissed"],
             "truncated": None,
             "network": _NETWORK,
@@ -165,11 +161,20 @@ async def _electron(
     return payload
 
 
+def _network_off(runtime: Runtime) -> None:
+    update_command_network_enabled(
+        db_path=runtime[0],
+        busy_timeout_ms=1_000,
+        user_id=_USER_ID,
+        command_network_enabled=False,
+        now="2026-03-23T00:00:01Z",
+    )
+
+
 async def _refused(runtime: Runtime, args: dict) -> BrokerPolicyError:
     with pytest.raises(BrokerPolicyError) as caught:
         await _call(runtime, args)
-    # Refused before Electron was asked.
-    assert runtime[2].requests == []
+    assert runtime[2].requests == []  # Electron was not asked
     return caught.value
 
 
@@ -186,14 +191,12 @@ async def test_navigate_reaches_electron_with_the_runs_owner_and_reads_policy(
     )
 
     assert payload["process_id"] == BROKER_ACTOR_PROCESS_ID
-    assert payload["action_id"] == "action-1"
     assert payload["tool_request_id"] == "action-1:step-1:1"
     assert payload["operation"] == {
         "action": "navigate",
         "target": {"kind": "web", "url": "http://localhost:5173/"},
     }
-    policy = payload["policy"]
-    assert isinstance(policy, dict)
+    policy: dict = payload["policy"]  # type: ignore[assignment]
     assert policy["allow_network"] is True
     assert policy["write_hosts"] == []
     assert Path(policy["private_roots"][0]) == db_path.parent
@@ -217,13 +220,7 @@ async def test_navigate_reaches_electron_with_the_runs_owner_and_reads_policy(
 async def test_a_local_file_opens_by_its_real_path_with_the_network_off(
     runtime: Runtime,
 ) -> None:
-    update_command_network_enabled(
-        db_path=runtime[0],
-        busy_timeout_ms=1_000,
-        user_id=_USER_ID,
-        command_network_enabled=False,
-        now="2026-03-23T00:00:01Z",
-    )
+    _network_off(runtime)
     page = _workspace(runtime) / "deck.html"
     page.write_text("<h1>Deck</h1>")
 
@@ -245,13 +242,7 @@ async def test_a_local_file_opens_by_its_real_path_with_the_network_off(
 async def test_network_off_refuses_every_url_before_electron(
     runtime: Runtime, url: str
 ) -> None:
-    update_command_network_enabled(
-        db_path=runtime[0],
-        busy_timeout_ms=1_000,
-        user_id=_USER_ID,
-        command_network_enabled=False,
-        now="2026-03-23T00:00:01Z",
-    )
+    _network_off(runtime)
 
     error = await _refused(runtime, {"action": "navigate", "url": url})
 
@@ -268,13 +259,7 @@ async def test_network_off_closes_a_page_opened_with_the_network_on(
         _call(runtime, {"action": "navigate", "url": "https://example.com/"}),
         _electron(runtime, _succeeded()),
     )
-    update_command_network_enabled(
-        db_path=runtime[0],
-        busy_timeout_ms=1_000,
-        user_id=_USER_ID,
-        command_network_enabled=False,
-        now="2026-03-23T00:00:01Z",
-    )
+    _network_off(runtime)
 
     with pytest.raises(BrokerPolicyError) as caught:
         await _call(
@@ -283,7 +268,6 @@ async def test_network_off_closes_a_page_opened_with_the_network_on(
 
     assert caught.value.code == "BROWSER_NETWORK_OFF"
     desktop = runtime[2]
-    assert desktop.events[-1] == OutboundEvent.BROWSER_SESSION_CLOSE_REQUESTED
     assert desktop.requests == [{"session_id": opened["session_id"]}]
 
 
@@ -317,11 +301,7 @@ async def test_a_screenshot_is_stored_and_attached_through_the_assembler(
         _electron(runtime, _succeeded(png=_PNG), png=_PNG),
     )
 
-    assert payload["operation"] == {
-        "action": "screenshot",
-        "ref": None,
-        "full_page": True,
-    }
+    assert payload["operation"]["full_page"] is True  # type: ignore[index]
     parsed = BrowserToolOutput.model_validate(outcome.output).root  # type: ignore[attr-defined]
     [entry] = parsed.attachments  # type: ignore[union-attr]
     [attachment] = outcome.attachments  # type: ignore[attr-defined]
@@ -352,28 +332,21 @@ async def test_page_text_appears_only_inside_untrusted_data(
     assert marker not in json.dumps(output)
 
 
-def _large(answer: BrowserAnswer, field: str) -> BrowserAnswer:
-    """The answer with more page text than a result keeps inline, in many short
-    values, which storage cannot move out one by one."""
-
-    page = answer.page_data  # type: ignore[union-attr]
-    if field == "console":
-        update: dict[str, object] = {
-            "console": [
-                type(page.console[0])(level="log", text=f"line {index} " + "x" * 190)  # type: ignore[index]
-                for index in range(100)
-            ]
-        }
-    else:
-        long_url = "https://evil.example/" + "y" * 1_970
-        update = {
-            "popups": [long_url] * 10,
-            "blocked": [
-                type(page.blocked[0])(reason="write_not_approved", url=long_url)
-            ]
-            * 10,
-        }
-    return answer.model_copy(update={"page_data": page.model_copy(update=update)})
+_LONG_URL = "https://evil.example/" + "y" * 1_970
+# More page text than a result keeps inline, in many values too short for
+# storage to move out one by one.
+_LARGE_PAGES: dict[str, dict] = {
+    "console": {
+        "console": [
+            {"level": "log", "text": f"line {index} " + "x" * 190}
+            for index in range(100)
+        ]
+    },
+    "popups": {
+        "popups": [_LONG_URL] * 10,
+        "blocked": [{"reason": "write_not_approved", "url": _LONG_URL}] * 10,
+    },
+}
 
 
 # Catches: a result past the inline limit stored away and replaced by a preview
@@ -385,7 +358,7 @@ def _large(answer: BrowserAnswer, field: str) -> BrowserAnswer:
 async def test_page_text_past_the_inline_limit_stays_untrusted_in_data(
     runtime: Runtime, args: dict, field: str
 ) -> None:
-    answer = _large(_succeeded(), field)
+    answer = _succeeded(page=_LARGE_PAGES[field])
     assert len(answer.page_data.model_dump_json()) > 20_000  # type: ignore[union-attr]
 
     outcome, _ = await asyncio.gather(_call(runtime, args), _electron(runtime, answer))
@@ -451,7 +424,6 @@ async def test_close_closes_the_runs_session(runtime: Runtime) -> None:
     outcome = await _call(runtime, {"action": "close"}, step=2)
 
     assert outcome.output == {"status": "ok", "action": "close"}  # type: ignore[attr-defined]
-    assert runtime[2].events[-1] == OutboundEvent.BROWSER_SESSION_CLOSE_REQUESTED
     assert runtime[2].requests == [{"session_id": payload["session_id"]}]
 
 

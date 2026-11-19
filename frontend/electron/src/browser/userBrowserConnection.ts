@@ -6,8 +6,9 @@
  *
  * The connection reaches the whole browser, but carries only what this run's own tabs need: at
  * the browser level it sends the few `Target` commands below, the target-naming ones only for a
- * target it created or one such a target opened, and it passes on no browser-level event about
- * any other target, so the user's tabs never reach this process.
+ * target it created or one such a target opened; within a session, only to a session it attached
+ * to one of those targets or one such a session auto-attached. It passes on no event about any
+ * other target or from any other session, so the user's tabs never reach this process.
  */
 
 import type { ClientRequest } from 'node:http';
@@ -37,16 +38,31 @@ type WebSocketClient = {
 const WebSocket = require('ws') as new (url: string) => WebSocketClient;
 
 export type CommandResult = { exitCode: number; stdout: string };
-/** Runs a program without a shell; rejects only when it could not be started. */
-export type CommandRunner = (file: string, args: readonly string[]) => Promise<CommandResult>;
+/**
+ * Runs a program without a shell and kills it when `signal` aborts. Rejects when it could not be
+ * started, was killed, or ran past its time.
+ */
+export type CommandRunner = (
+  file: string,
+  args: readonly string[],
+  signal: AbortSignal
+) => Promise<CommandResult>;
 
-export const runCommand: CommandRunner = (file, args) =>
+/** lsof and codesign answer in well under a second; one stuck past this makes the browser unusable. */
+const CHECK_TIMEOUT_MS = 5_000;
+
+export const runCommand: CommandRunner = (file, args, signal) =>
   new Promise((resolve, reject) => {
-    execFile(file, args, { encoding: 'utf8' }, (error, stdout) => {
-      if (error === null) resolve({ exitCode: 0, stdout });
-      else if (typeof error.code === 'number') resolve({ exitCode: error.code, stdout });
-      else reject(error);
-    });
+    execFile(
+      file,
+      args,
+      { encoding: 'utf8', signal, timeout: CHECK_TIMEOUT_MS },
+      (error, stdout) => {
+        if (error === null) resolve({ exitCode: 0, stdout });
+        else if (typeof error.code === 'number') resolve({ exitCode: error.code, stdout });
+        else reject(error);
+      }
+    );
   });
 
 export type UserBrowserConnection = {
@@ -147,17 +163,27 @@ async function endpointOf(
   return { port, path: pathLine };
 }
 
+/** Runs a check; an abort ends the wait at once, whether or not the runner heeds it. */
 async function run(
   runner: CommandRunner,
   file: string,
   args: readonly string[],
+  signal: AbortSignal,
   refuse: Refusal
 ): Promise<CommandResult> {
+  let onAbort: () => void = () => undefined;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
   try {
-    return await runner(file, args);
+    return await Promise.race([runner(file, args, signal), aborted]);
   } catch {
-    // The program could not start; nothing about the browser is known.
+    if (signal.aborted) throw signal.reason;
+    // The check could not start, or did not finish in time: nothing about the browser is known.
     throw refuse.unavailable();
+  } finally {
+    signal.removeEventListener('abort', onAbort);
   }
 }
 
@@ -172,12 +198,14 @@ async function verifyListener(
   port: number,
   browser: KnownBrowser,
   runner: CommandRunner,
+  signal: AbortSignal,
   refuse: Refusal
 ): Promise<void> {
   const listing = await run(
     runner,
     '/usr/sbin/lsof',
     ['-nP', `-iTCP@127.0.0.1:${port}`, '-sTCP:LISTEN', '-Fp'],
+    signal,
     refuse
   );
   // lsof exits 1 when nothing matches.
@@ -198,6 +226,7 @@ async function verifyListener(
     runner,
     '/usr/bin/codesign',
     ['--verify', '-R', requirement, [...pids][0]],
+    signal,
     refuse
   );
   if (verified.exitCode !== 0) throw refuse.unavailable();
@@ -208,7 +237,11 @@ type CdpMessage = {
   result?: unknown;
   error?: { message?: string };
   method?: string;
-  params?: { targetId?: string; targetInfo?: { targetId?: string; openerId?: string } };
+  params?: {
+    sessionId?: string;
+    targetId?: string;
+    targetInfo?: { targetId?: string; openerId?: string };
+  };
   sessionId?: string;
 };
 type Listener = Parameters<CdpSession['on']>[1];
@@ -221,21 +254,40 @@ function cdpOver(socket: WebSocketClient): UserBrowserConnection {
     { resolve: (value: unknown) => void; reject: (e: Error) => void }
   >();
   const listeners: Listener[] = [];
-  /** Targets this connection created, and the ones they opened. */
+  /** Targets this connection created, the ones they opened, and the ones their sessions attached. */
   const own = new Set<string>();
+  /** Sessions attached to those targets. */
+  const ownSessions = new Set<string>();
   let isClosed = false;
   let onClosed: () => void = () => undefined;
   const closed = new Promise<void>((resolve) => (onClosed = resolve));
 
-  /** A browser-level event passes only when it is about a target of this connection's own. */
+  /**
+   * An event passes when it comes from a session of this connection's own or, at the browser
+   * level, is about a target of its own; the sessions those events attach and detach are kept.
+   */
   function admitted(message: CdpMessage): boolean {
-    if (message.sessionId !== undefined) return true;
     const info = message.params?.targetInfo;
-    if (info?.openerId !== undefined && own.has(info.openerId) && info.targetId !== undefined) {
-      own.add(info.targetId);
+    let passes: boolean;
+    if (message.sessionId !== undefined) {
+      passes = ownSessions.has(message.sessionId);
+      // What a session of ours auto-attaches is a frame or worker of our tab.
+      if (passes && message.method === 'Target.attachedToTarget' && info?.targetId !== undefined) {
+        own.add(info.targetId);
+      }
+    } else {
+      if (info?.openerId !== undefined && own.has(info.openerId) && info.targetId !== undefined) {
+        own.add(info.targetId);
+      }
+      const targetId = info?.targetId ?? message.params?.targetId;
+      passes = targetId !== undefined && own.has(targetId);
     }
-    const targetId = info?.targetId ?? message.params?.targetId;
-    return targetId !== undefined && own.has(targetId);
+    const childSession = message.params?.sessionId;
+    if (passes && childSession !== undefined) {
+      if (message.method === 'Target.attachedToTarget') ownSessions.add(childSession);
+      if (message.method === 'Target.detachedFromTarget') ownSessions.delete(childSession);
+    }
+    return passes;
   }
 
   socket.on('message', (data) => {
@@ -267,13 +319,14 @@ function cdpOver(socket: WebSocketClient): UserBrowserConnection {
 
   const cdp: CdpSession = {
     async sendCommand(method, params = {}, sessionId) {
-      if (sessionId === undefined) {
-        const targetId = (params as { targetId?: unknown }).targetId;
-        const ownTarget = typeof targetId === 'string' && own.has(targetId);
-        if (!BROWSER_COMMANDS.has(method) || (TARGET_NAMING.has(method) && !ownTarget)) {
-          throw new CdpCommandError(`${method} is not sent to the user's browser.`);
-        }
-      }
+      const targetId = (params as { targetId?: unknown }).targetId;
+      const ownTarget = typeof targetId === 'string' && own.has(targetId);
+      // An empty session id names the browser itself; like any other unknown id, it is not ours.
+      const allowed =
+        sessionId === undefined
+          ? BROWSER_COMMANDS.has(method) && (!TARGET_NAMING.has(method) || ownTarget)
+          : ownSessions.has(sessionId);
+      if (!allowed) throw new CdpCommandError(`${method} is not sent to the user's browser.`);
       // `ws` drops what is sent after the close, which would never be answered.
       if (isClosed) throw new CdpCommandError('The connection to the browser closed.');
       nextId += 1;
@@ -285,6 +338,9 @@ function cdpOver(socket: WebSocketClient): UserBrowserConnection {
       const value = await result;
       // An event about the new target that came before this answer was not passed on.
       if (method === 'Target.createTarget') own.add((value as { targetId: string }).targetId);
+      if (method === 'Target.attachToTarget' && sessionId === undefined) {
+        ownSessions.add((value as { sessionId: string }).sessionId);
+      }
       return value;
     },
     on(_event, listener) {
@@ -353,7 +409,7 @@ export async function connectUserBrowser(params: {
   params.signal.throwIfAborted();
   const endpoint = await endpointOf(userDataDir, refuse);
   params.signal.throwIfAborted();
-  await verifyListener(endpoint.port, browser, params.runner, refuse);
+  await verifyListener(endpoint.port, browser, params.runner, params.signal, refuse);
   params.signal.throwIfAborted();
   return openSocket(
     `ws://127.0.0.1:${endpoint.port}${endpoint.path}`,

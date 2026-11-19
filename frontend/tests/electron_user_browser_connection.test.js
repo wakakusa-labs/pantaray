@@ -209,7 +209,7 @@ test('a listener that is not the signed browser never gets the socket', async (t
   );
 });
 
-test('the connection touches only targets of its own', async (t) => {
+test('the connection touches only targets and sessions of its own', async (t) => {
   const received = [];
   let browserSide;
   const endpoint = await browserEndpoint(t, (socket) => {
@@ -217,7 +217,12 @@ test('the connection touches only targets of its own', async (t) => {
     socket.on('message', (data) => {
       const message = JSON.parse(data);
       received.push(message);
-      const result = message.method === 'Target.createTarget' ? { targetId: 'own' } : {};
+      const result =
+        message.method === 'Target.createTarget'
+          ? { targetId: 'own' }
+          : message.method === 'Target.attachToTarget'
+            ? { sessionId: 'own-page' }
+            : {};
       socket.send(JSON.stringify({ id: message.id, result }));
     });
   });
@@ -227,42 +232,62 @@ test('the connection touches only targets of its own', async (t) => {
   connection.cdp.on('message', (_event, method, params, sessionId) =>
     events.push({ method, targetId: params.targetInfo?.targetId ?? params.targetId, sessionId })
   );
+  const refused = async (method, params, sessionId) =>
+    assert.rejects(connection.cdp.sendCommand(method, params, sessionId), /not sent/);
 
   await connection.cdp.sendCommand('Target.createTarget', { url: 'about:blank', hidden: true });
-  for (const [method, params] of [
-    ['Target.closeTarget', { targetId: 'users-tab' }],
-    ['Target.attachToTarget', { targetId: 'users-tab', flatten: true }],
-    ['Target.setAutoAttach', { autoAttach: true, flatten: true }],
-    ['Browser.setDownloadBehavior', { behavior: 'allow' }],
-  ]) {
-    await assert.rejects(connection.cdp.sendCommand(method, params), /not sent/);
-  }
+  await refused('Page.navigate', { url: 'https://example.com' }, 'own-page');
+  await refused('Target.closeTarget', { targetId: 'users-tab' });
+  await refused('Target.attachToTarget', { targetId: 'users-tab', flatten: true });
+  await refused('Target.setAutoAttach', { autoAttach: true, flatten: true });
+  await refused('Browser.setDownloadBehavior', { behavior: 'allow' });
+  // An empty session id is the browser itself in Chromium.
+  await refused('Target.getTargets', {}, '');
+  await refused('Runtime.evaluate', { expression: 'document.cookie' }, 'users-session');
+  await connection.cdp.sendCommand('Target.attachToTarget', { targetId: 'own', flatten: true });
   await connection.cdp.sendCommand('Page.navigate', { url: 'https://example.com' }, 'own-page');
-  await connection.cdp.sendCommand('Target.closeTarget', { targetId: 'own' });
-  assert.deepEqual(
-    received.map(({ method, sessionId }) => [method, sessionId]),
-    [
-      ['Target.createTarget', undefined],
-      ['Page.navigate', 'own-page'],
-      ['Target.closeTarget', undefined],
-    ]
-  );
 
   const send = (method, params, sessionId) =>
     browserSide.send(JSON.stringify({ method, params, sessionId }));
+  const nextEvents = async (count) => {
+    while (events.length < count) await new Promise((r) => setTimeout(r, 10));
+    return events.splice(0, count);
+  };
   send('Target.targetCreated', {
     targetInfo: { targetId: 'users-tab', url: 'https://mail.example' },
   });
   send('Target.targetCreated', { targetInfo: { targetId: 'popup', openerId: 'own' } });
   send('Target.targetInfoChanged', { targetInfo: { targetId: 'users-tab' } });
   send('Target.targetDestroyed', { targetId: 'popup' });
-  send('Page.loadEventFired', { timestamp: 1 }, 'own-page');
-  while (events.length < 3) await new Promise((r) => setTimeout(r, 10));
-  assert.deepEqual(events, [
+  send('Runtime.consoleAPICalled', { type: 'log' }, 'users-session');
+  send(
+    'Target.attachedToTarget',
+    { sessionId: 'own-frame', targetInfo: { targetId: 'frame', type: 'iframe' } },
+    'own-page'
+  );
+  send('Page.loadEventFired', { timestamp: 1 }, 'own-frame');
+  assert.deepEqual(await nextEvents(4), [
     { method: 'Target.targetCreated', targetId: 'popup', sessionId: undefined },
     { method: 'Target.targetDestroyed', targetId: 'popup', sessionId: undefined },
-    { method: 'Page.loadEventFired', targetId: undefined, sessionId: 'own-page' },
+    { method: 'Target.attachedToTarget', targetId: 'frame', sessionId: 'own-page' },
+    { method: 'Page.loadEventFired', targetId: undefined, sessionId: 'own-frame' },
   ]);
+  await connection.cdp.sendCommand('Runtime.runIfWaitingForDebugger', {}, 'own-frame');
+
+  send('Target.detachedFromTarget', { sessionId: 'own-frame', targetId: 'frame' }, 'own-page');
+  await nextEvents(1);
+  await refused('Runtime.runIfWaitingForDebugger', {}, 'own-frame');
+  await connection.cdp.sendCommand('Target.closeTarget', { targetId: 'own' });
+  assert.deepEqual(
+    received.map(({ method, sessionId }) => [method, sessionId]),
+    [
+      ['Target.createTarget', undefined],
+      ['Target.attachToTarget', undefined],
+      ['Page.navigate', 'own-page'],
+      ['Runtime.runIfWaitingForDebugger', 'own-frame'],
+      ['Target.closeTarget', undefined],
+    ]
+  );
 
   connection.close();
   await connection.closed;
@@ -270,4 +295,21 @@ test('the connection touches only targets of its own', async (t) => {
     connection.cdp.sendCommand('Target.getTargetInfo', { targetId: 'own' }),
     /closed/
   );
+});
+
+test('stopping the run ends a check that never answers', async (t) => {
+  const { root } = applicationSupport(t, { port: 9222 });
+  const signals = [];
+  const runner = (_file, _args, signal) => {
+    signals.push(signal);
+    return new Promise(() => undefined);
+  };
+  const controller = new AbortController();
+  const connecting = connect(root, { runner, signal: controller.signal });
+  while (signals.length === 0) await new Promise((r) => setTimeout(r, 10));
+  const reason = new Error('the run stopped');
+  controller.abort(reason);
+  await assert.rejects(connecting, (error) => error === reason);
+  // The runner gets the signal, so the real one kills its child.
+  assert.equal(signals[0], controller.signal);
 });

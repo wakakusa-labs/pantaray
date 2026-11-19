@@ -439,17 +439,23 @@ test('no list box or picker of a browser session page reaches the display', asyn
           const control = new BrowserWindow(pageWindowOptions('e2e-picker-control'));
           (globalThis as { e2ePickerControl?: Electron.BrowserWindow }).e2ePickerControl = control;
           await control.loadURL('data:text/html,<input id="color" type="color">');
+          // As every click, key and typing of a session does: the never focused page acts focused.
+          control.webContents.debugger.attach('1.3');
+          await control.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', {
+            enabled: true,
+          });
           return control.webContents.executeJavaScript(
             `const color = document.getElementById('color');
             color.showPicker();
-            new Promise((resolve) => setTimeout(() => resolve(color.matches(':open')), 500))`,
+            const now = color.matches(':open');
+            new Promise((resolve) => setTimeout(() => resolve([now, color.matches(':open')]), 500))`,
             true
           );
         },
         path.join(__dirname, '../../electron/dist/browser/pageWindowOptions.js')
       );
       // Blink's own view of the picker, apart from the display's.
-      expect(opened).toBe(true);
+      expect(opened).toEqual([true, true]);
       await settle();
       expect(onScreenWindows(pid)).toBeGreaterThan(before);
       await app.evaluate(() =>

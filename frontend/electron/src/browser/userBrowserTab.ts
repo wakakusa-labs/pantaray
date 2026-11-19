@@ -5,7 +5,8 @@
  *   SharedWorker and service workers, which Fetch interception does not see; a worker loses
  *   WebSocket and WebTransport, and service workers are bypassed;
  * - every request pauses in Fetch and is judged by `decideUserBrowserRequest`, each redirect hop
- *   on its own; a document answered as an attachment is refused, so nothing is downloaded;
+ *   on its own; a document answered as an attachment, or with a type the browser does not
+ *   display (`opensAsDownload`), is refused, so nothing is downloaded;
  * - JavaScript dialogs are dismissed and file choosers refused.
  * A frame or worker whose guard failed stays paused and never runs. Each refusal and every host
  * the tab reached goes to the session's `TabContext`, which reports it with the next answer.
@@ -74,6 +75,8 @@ const FETCH_PATTERNS = [
   { urlPattern: '*', resourceType: 'Document', requestStage: 'Response' },
 ];
 const ATTACHMENT = /^\s*attachment/i;
+/** The document types the browser displays in the tab; it downloads any other. */
+const DISPLAYED_TYPE = /^(text\/[^;]+|image\/[^;]+|application\/(pdf|json|xml|[^;]+\+xml))$/;
 
 type RequestPaused = {
   requestId: string;
@@ -115,6 +118,23 @@ function reach(context: TabContext, host: ContactedHost): void {
 
 function block(context: TabContext, reason: BrowserBlockedReason, url: string): void {
   if (context.blocked.length < BROWSER_MAX_BLOCKED_REQUESTS) context.blocked.push({ reason, url });
+}
+
+/**
+ * Whether a document response would be saved rather than shown: an attachment, or a body of a
+ * type the browser does not display. A failed load, a redirect and an empty answer have no body
+ * to save; a body without a type is refused too, since the browser would guess it.
+ */
+function opensAsDownload(paused: RequestPaused): boolean {
+  const status = paused.responseStatusCode;
+  if (status === undefined || (status >= 300 && status < 400) || status === 204 || status === 205) {
+    return false;
+  }
+  const header = (name: string) =>
+    paused.responseHeaders?.find((entry) => entry.name.toLowerCase() === name)?.value;
+  if (ATTACHMENT.test(header('content-disposition') ?? '')) return true;
+  const type = (header('content-type') ?? '').split(';')[0].trim().toLowerCase();
+  return !DISPLAYED_TYPE.test(type);
 }
 
 /** Guards a frame target, the tab's own (`sessionId` undefined) or an out-of-process frame. */
@@ -205,10 +225,7 @@ function watchTab(
       return answer('Fetch.failRequest', { errorReason: 'BlockedByClient' });
     };
     if (paused.responseStatusCode !== undefined || paused.responseErrorReason !== undefined) {
-      const disposition = paused.responseHeaders?.find(
-        (header) => header.name.toLowerCase() === 'content-disposition'
-      );
-      if (disposition !== undefined && ATTACHMENT.test(disposition.value)) {
+      if (opensAsDownload(paused)) {
         context.notes.add('download_refused');
         return void refuse();
       }

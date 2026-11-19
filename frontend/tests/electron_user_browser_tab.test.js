@@ -291,6 +291,27 @@ test('downloads are refused, dialogs dismissed and popups reported', SETTLES, as
     responseHeaders: [{ name: 'Content-Disposition', value: 'attachment; filename=r.pdf' }],
   });
   assert.equal(await download, 'Fetch.failRequest');
+  // A body the browser would not display is saved as a download, with or without the header;
+  // a page, a redirect and a failed load continue.
+  const answerTo = (fields) =>
+    h.pause({
+      request: { url: 'https://a.example/file', method: 'GET' },
+      resourceType: 'Document',
+      ...fields,
+    });
+  const typed = (status, type) => ({
+    responseStatusCode: status,
+    responseHeaders: type === null ? [] : [{ name: 'content-type', value: type }],
+  });
+  assert.equal(await answerTo(typed(200, 'application/octet-stream')), 'Fetch.failRequest');
+  assert.equal(await answerTo(typed(200, null)), 'Fetch.failRequest');
+  assert.equal(await answerTo(typed(200, 'Text/HTML; charset=utf-8')), 'Fetch.continueRequest');
+  assert.equal(await answerTo(typed(200, 'application/pdf')), 'Fetch.continueRequest');
+  assert.equal(await answerTo(typed(302, null)), 'Fetch.continueRequest');
+  assert.equal(
+    await answerTo({ responseErrorReason: 'ConnectionRefused' }),
+    'Fetch.continueRequest'
+  );
   h.emit('Page.javascriptDialogOpening', { type: 'alert', message: 'hi' });
   h.state.onPopup('https://pop.example/');
   assert.deepEqual([...h.context.notes].sort(), [

@@ -1,5 +1,5 @@
 import { test, expect, type ElectronApplication } from '@playwright/test';
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import path from 'node:path';
@@ -160,17 +160,35 @@ const KEYS: Record<string, Key> = {
 };
 
 /**
- * The windows the app's main process has on the display, as the window server lists them. A list
- * box's NSMenu and a picker's popup window are among them; a hidden window is not.
+ * The most windows the app's main process had on the display at once over `ms`, as the window
+ * server lists them every 20 ms. A list box's NSMenu and a picker's popup window are among them,
+ * however briefly they stay; a hidden window is not.
  */
-function onScreenWindows(pid: number): number {
+function mostOnScreenWindows(pid: number, ms: number): Promise<number> {
   const script = `ObjC.import('CoreGraphics');
-const all = ObjC.deepUnwrap(ObjC.castRefToObject(
-  $.CGWindowListCopyWindowInfo($.kCGWindowListOptionOnScreenOnly, $.kCGNullWindowID)));
-all.filter((window) => window.kCGWindowOwnerPID === ${pid}).length`;
-  return Number(
-    execFileSync('osascript', ['-l', 'JavaScript', '-e', script], { encoding: 'utf8' })
+const end = Date.now() + ${ms};
+let most = 0;
+while (Date.now() < end) {
+  const all = ObjC.deepUnwrap(ObjC.castRefToObject(
+    $.CGWindowListCopyWindowInfo($.kCGWindowListOptionOnScreenOnly, $.kCGNullWindowID)));
+  most = Math.max(most, all.filter((window) => window.kCGWindowOwnerPID === ${pid}).length);
+  delay(0.02);
+}
+most`;
+  return new Promise((resolve, reject) =>
+    execFile('osascript', ['-l', 'JavaScript', '-e', script], (error, stdout) =>
+      error === null ? resolve(Number(stdout)) : reject(error)
+    )
   );
+}
+
+/** The most on-screen windows while `act` runs and for a while after, from a moment before. */
+async function mostWindowsAround(pid: number, act: () => Promise<unknown>): Promise<number> {
+  const watching = mostOnScreenWindows(pid, 2_500);
+  // osascript takes a moment to start watching.
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  await act();
+  return watching;
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 700));
@@ -428,51 +446,53 @@ test('no list box or picker of a browser session page reaches the display', asyn
       return process.pid;
     });
     await settle();
-    const before = onScreenWindows(pid);
+    const before = await mostOnScreenWindows(pid, 300);
 
     await test.step('a hidden window without the guard does put a picker on the display', async () => {
-      const opened = await app.evaluate(
-        async ({ BrowserWindow }, optionsPath) => {
-          const load = process.getBuiltinModule('node:module').createRequire(optionsPath);
-          const { pageWindowOptions } = load(optionsPath);
-          // A session's own window, painting while hidden, in a partition with no guard preload.
-          const control = new BrowserWindow(pageWindowOptions('e2e-picker-control'));
-          (globalThis as { e2ePickerControl?: Electron.BrowserWindow }).e2ePickerControl = control;
-          await control.loadURL('data:text/html,<input id="color" type="color">');
-          // As every click, key and typing of a session does: the never focused page acts focused.
-          control.webContents.debugger.attach('1.3');
-          await control.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', {
-            enabled: true,
-          });
-          return control.webContents.executeJavaScript(
-            `const color = document.getElementById('color');
-            color.showPicker();
-            const now = color.matches(':open');
-            new Promise((resolve) => setTimeout(() => resolve([now, color.matches(':open')]), 500))`,
-            true
-          );
-        },
-        path.join(__dirname, '../../electron/dist/browser/pageWindowOptions.js')
-      );
+      let opened: unknown;
+      const most = await mostWindowsAround(pid, async () => {
+        opened = await app.evaluate(
+          async ({ BrowserWindow }, optionsPath) => {
+            const load = process.getBuiltinModule('node:module').createRequire(optionsPath);
+            const { pageWindowOptions } = load(optionsPath);
+            // A session's own window, painting while hidden, in a partition with no guard preload.
+            const control = new BrowserWindow(pageWindowOptions('e2e-picker-control'));
+            (globalThis as { e2ePickerControl?: Electron.BrowserWindow }).e2ePickerControl =
+              control;
+            await control.loadURL('data:text/html,<input id="color" type="color">');
+            // As every click, key and typing of a session does: the never focused page acts focused.
+            control.webContents.debugger.attach('1.3');
+            await control.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', {
+              enabled: true,
+            });
+            return control.webContents.executeJavaScript(
+              "document.getElementById('color').showPicker(); document.getElementById('color').matches(':open')",
+              true
+            );
+          },
+          path.join(__dirname, '../../electron/dist/browser/pageWindowOptions.js')
+        );
+      });
       // Blink's own view of the picker, apart from the display's.
-      expect(opened).toEqual([true, true]);
-      await settle();
-      expect(onScreenWindows(pid)).toBeGreaterThan(before);
+      expect(opened).toBe(true);
+      expect(most).toBeGreaterThan(before);
       await app.evaluate(() =>
         (globalThis as { e2ePickerControl?: Electron.BrowserWindow }).e2ePickerControl?.destroy()
       );
       await settle();
-      expect(onScreenWindows(pid)).toBe(before);
+      expect(await mostOnScreenWindows(pid, 300)).toBe(before);
     });
 
     const session = 'pickers';
     const loaded = await run(app, { session, url: `${origin}/pickers.html`, expression: null });
     expect(loaded.status).toBe('ok');
     const opensNothing = async (call: { clicks?: { x: number; y: number }[]; keys?: Key[] }) => {
-      const settled = await run(app, { session, url: null, expression: null, ...call });
-      expect(settled.status).toBe('ok');
-      await settle();
-      expect(onScreenWindows(pid)).toBe(before);
+      let settled: Settled | undefined;
+      const most = await mostWindowsAround(pid, async () => {
+        settled = await run(app, { session, url: null, expression: null, ...call });
+      });
+      expect(settled?.status).toBe('ok');
+      expect(most).toBe(before);
     };
 
     await test.step('a click on any field opens nothing', async () => {

@@ -70,6 +70,10 @@ export const BROWSER_NAVIGATION_BUDGET_MS = 20_000;
 export const BROWSER_OPERATION_BUDGET_MS = 10_000;
 
 const MAX_POPUPS_REPORTED = 10;
+// Design limit: the console keeps its latest lines, each cut at a length, and a cut answers
+// `console_too_long`; raise them when that hides lines the agent needed.
+const MAX_CONSOLE_LINES = 100;
+const MAX_CONSOLE_LINE_CHARS = 500;
 /**
  * Added to every document's own policy. `allow-same-origin` keeps cookies and storage working;
  * `allow-popups` and `allow-downloads` let those attempts reach the handlers that refuse and
@@ -97,8 +101,12 @@ export class BrowserOperationError extends Error {
   }
 }
 
-/** The page an operation works on. */
-export type BrowserPage = { contents: WebContents; cdp: Debugger };
+/** The page an operation works on, with its console since the session opened. */
+export type BrowserPage = {
+  contents: WebContents;
+  cdp: Debugger;
+  console: { lines: NonNullable<BrowserPageData['console']>; cut: boolean };
+};
 
 /** What happened on the page since the session's previous answer. */
 export type PageReport = Pick<BrowserPageData, 'popups' | 'blocked'> & {
@@ -374,6 +382,7 @@ export function createBrowserSessions(params: {
       notes: new Set(),
       popups: [],
       blocked: [],
+      console: { lines: [], cut: false },
       ready: Promise.resolve(),
       queue: Promise.resolve(),
       end: null,
@@ -392,6 +401,15 @@ export function createBrowserSessions(params: {
       )
     );
     window.on('closed', () => discard(page, sessionGone()));
+    contents.on('console-message', ({ level, message }) => {
+      const kept = page.console;
+      kept.lines.push({ level, text: message.slice(0, MAX_CONSOLE_LINE_CHARS) });
+      if (message.length > MAX_CONSOLE_LINE_CHARS) kept.cut = true;
+      if (kept.lines.length > MAX_CONSOLE_LINES) {
+        kept.lines.shift();
+        kept.cut = true;
+      }
+    });
     page.ready = attachDebugger(contents, page.cdp);
     page.ready.catch(() => undefined);
     sessions.set(id, page);

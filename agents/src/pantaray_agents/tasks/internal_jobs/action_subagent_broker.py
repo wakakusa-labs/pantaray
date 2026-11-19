@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -21,7 +21,9 @@ from pantaray_agents.agents.action_agent.tools.base import ToolDefinition
 from pantaray_agents.agents.action_agent.tools.bash_tool import (
     ACTION_SUBAGENT_BASH_TOOL,
 )
-from pantaray_agents.agents.action_agent.tools.browser_tool import BROWSER_TOOL
+from pantaray_agents.agents.action_agent.tools.browser_tool import (
+    ACTION_SUBAGENT_BROWSER_TOOL,
+)
 from pantaray_agents.agents.action_agent.tools.discovery_tools import (
     GLOB_TOOL,
     GREP_TOOL,
@@ -88,22 +90,6 @@ if TYPE_CHECKING:
     from pantaray_agents.dependencies import LLMClientProtocol
 
 
-def _child_browser_tool() -> ToolDefinition:
-    """The Action's ``browser`` without ``screenshot``: a child cannot receive
-    images, so it is not offered a call that could only be refused."""
-
-    schema = BROWSER_TOOL.build_validation_input_schema()
-    properties = cast(dict[str, JSONValue], schema["properties"])
-    action = cast(dict[str, JSONValue], properties["action"])
-    action["enum"] = [
-        offered
-        for offered in cast(list[JSONValue], action["enum"])
-        if offered != "screenshot"
-    ]
-    del properties["full_page"], properties["printed_pages"]
-    return replace(BROWSER_TOOL, input_schema=schema)
-
-
 _CHILD_BROKER_TOOLS = (
     READ_TOOL,
     LIST_TOOL,
@@ -114,7 +100,7 @@ _CHILD_BROKER_TOOLS = (
     READ_PROCESS_OUTPUT_TOOL,
     STOP_PROCESS_TOOL,
     RUN_PYTHON_TOOL,
-    _child_browser_tool(),
+    ACTION_SUBAGENT_BROWSER_TOOL,
 )
 APPROVAL_DENIED_MESSAGE = (
     "The requested tool call was denied by the user. "

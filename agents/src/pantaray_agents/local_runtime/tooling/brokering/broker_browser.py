@@ -237,13 +237,22 @@ async def _printed_pages(
     assert printed.artifact is not None
     converted_dir = rendered_documents_dir(context)
     converted_dir.mkdir(mode=MANAGED_DIRECTORY_MODE, exist_ok=True)
-    # Named by no URL or title: what the page says goes in data alone.
-    drawn, message = await draw_printed_pages(
-        pdf=printed.artifact,
-        name="the page",
-        requested=requested,
-        converted_dir=converted_dir,
-    )
+    try:
+        # Named by no URL or title: what the page says goes in data alone.
+        drawn, message = await draw_printed_pages(
+            pdf=printed.artifact,
+            name="the page",
+            requested=requested,
+            converted_dir=converted_dir,
+        )
+    except BrokerPolicyError as exc:
+        # The print already reached hosts, and Electron reports them only once.
+        raise NetworkReachedPolicyError(
+            str(exc),
+            code=exc.code,
+            fix_hint=exc.fix_hint,
+            network=_network(printed.result.network),
+        ) from exc
     images = [
         _store_image(
             user_id=context.execution_session.user_id,

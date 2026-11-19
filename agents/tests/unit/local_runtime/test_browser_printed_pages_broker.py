@@ -24,6 +24,7 @@ from pantaray_agents.local_runtime.runtime.browser_relay import (
 from pantaray_agents.local_runtime.runtime.runtime_env import (
     read_local_runtime_artifact_root,
 )
+from pantaray_agents.local_runtime.tooling.brokering import printed_pages
 from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
     FinalizedBrokerPolicyError,
 )
@@ -31,6 +32,8 @@ from pantaray_agents.local_runtime.tooling.brokering.browser_protocol import (
     BrowserScreenshotOutput,
     BrowserToolOutput,
 )
+from pantaray_agents.local_runtime.tooling.documents import PageRenderTimeoutError
+from pantaray_agents.tools.files import render_pages
 
 from .test_browser_broker import (
     _NETWORK,
@@ -163,6 +166,46 @@ async def test_a_failed_print_keeps_its_code_hint_and_network(
     assert isinstance(error, FinalizedBrokerPolicyError)
     assert error.code == "BROWSER_NO_PAGE"
     assert "No page is open." in str(error)
+    assert error.fix_hint
+    assert isinstance(error.finalized_output, dict)
+    assert error.finalized_output["network"] == _NETWORK
+
+
+async def _render_timed_out(**_: object) -> object:
+    raise PageRenderTimeoutError("still drawing")
+
+
+# Catches: a print that reached hosts but whose PDF could not be drawn losing
+# those hosts, which Electron has already reported once.
+@pytest.mark.parametrize(
+    ("patch", "code"),
+    [
+        pytest.param(
+            (printed_pages, "MAX_DOCUMENT_BYTES", 10),
+            "HTML_PDF_TOO_LARGE",
+            id="over-cap",
+        ),
+        pytest.param(
+            (render_pages, "render_pdf_pages", _render_timed_out),
+            "RENDER_TIMED_OUT",
+            id="draw-timeout",
+        ),
+    ],
+)
+async def test_a_refused_draw_keeps_the_hosts_the_print_reached(
+    runtime: Runtime,  # noqa: F811
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    patch: tuple[object, str, object],
+    code: str,
+) -> None:
+    monkeypatch.setattr(*patch)
+
+    with pytest.raises(FinalizedBrokerPolicyError) as caught:
+        await _printed_pages(runtime, [1], _pdf(tmp_path, 1))
+
+    error = caught.value
+    assert error.code == code
     assert error.fix_hint
     assert isinstance(error.finalized_output, dict)
     assert error.finalized_output["network"] == _NETWORK

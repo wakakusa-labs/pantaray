@@ -27,7 +27,7 @@ from .broker_protocol import (
     RunPythonToolOutput,
     ToolError,
 )
-from .browser_protocol import BrowserToolArgs, BrowserToolOutput
+from .browser_protocol import BrowserToolCall, BrowserToolOutput
 from .process_protocol import ReadProcessOutputToolArgs, StopProcessToolArgs
 
 
@@ -51,7 +51,7 @@ BROKER_MODEL_REGISTRY = BrokerModelRegistry(
         "RunPythonToolArgs": RunPythonToolArgs,
         "ReadProcessOutputToolArgs": ReadProcessOutputToolArgs,
         "StopProcessToolArgs": StopProcessToolArgs,
-        "BrowserToolArgs": BrowserToolArgs,
+        "BrowserToolCall": BrowserToolCall,
     },
     output_models={
         "ReadToolOutput": ReadToolOutput,
@@ -184,13 +184,14 @@ BROKER_TOOL_REGISTRY = BrokerToolRegistry(
             approval_policy="none",
             resource_kinds=["none"],
         ),
-        # Local paths it opens are resolved as read resolves them. print alone
-        # writes, under apply_patch's rules, so only print is approved.
+        # Local paths it opens are resolved as read resolves them. print (under
+        # apply_patch's rules), allow_writes and a site opened in the user's
+        # browser are approved; nothing else is.
         "browser": BrokerManagedToolDefinition(
             tool_id="browser",
             execution_path="broker_browser",
             path_access_kind="read",
-            input_model_ref="BrowserToolArgs",
+            input_model_ref="BrowserToolCall",
             output_model_ref="BrowserToolOutput",
             error_model_ref="ToolError",
             required_capabilities=["scoped_read"],

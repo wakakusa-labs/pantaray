@@ -65,6 +65,7 @@ from .browser_protocol import (
     ValidatedBrowserPrintRequest,
     ValidatedBrowserRequest,
     ValidatedBrowserWriteRequest,
+    ValidatedUserBrowserReadRequest,
 )
 from .execution_start import claim_broker_execution_start
 from .process_protocol import (
@@ -87,6 +88,7 @@ _BROWSER_REQUESTS = (
     ValidatedBrowserRequest,
     ValidatedBrowserPrintRequest,
     ValidatedBrowserWriteRequest,
+    ValidatedUserBrowserReadRequest,
 )
 
 
@@ -142,11 +144,11 @@ async def execute_broker_tool(
             requested_at=requested_at,
             preflight_only=preflight_only,
         )
-    except BrowserNetworkOffError:
+    except BrowserNetworkOffError as refused:
         # A page opened while the network was on keeps it until Electron is
         # sent the setting, which this refusal never does: the page ends.
         await close_browser_session(
-            owner_process_id=actor_process_id, browser="pantaray"
+            owner_process_id=actor_process_id, browser=refused.browser
         )
         raise
     if isinstance(validated, ValidatedPatchRequest) and validated.preflight_only:

@@ -26,6 +26,7 @@ from .browser_protocol import (
     ValidatedBrowserPrintRequest,
     ValidatedBrowserRequest,
     ValidatedBrowserWriteRequest,
+    ValidatedUserBrowserReadRequest,
 )
 from .process_protocol import (
     ValidatedReadProcessOutputRequest,
@@ -48,6 +49,7 @@ GatedRequest = (
     ValidatedPatchRequest
     | ValidatedBrowserPrintRequest
     | ValidatedBrowserWriteRequest
+    | ValidatedUserBrowserReadRequest
     | ValidatedCommandRequest
 )
 # Every request the broker validates. These are runtime unions, so isinstance

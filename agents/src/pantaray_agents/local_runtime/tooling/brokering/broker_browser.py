@@ -1,14 +1,15 @@
-"""The Action's ``browser`` tool: the run's one page in the desktop app's browser.
+"""The Action's ``browser`` tool: the run's page in the desktop app's browser, and
+its tab in the user's own browser (``broker_user_browser``).
 
 Electron runs the page (``runtime.browser_relay``); this executor owns what it
 is asked to do. A local file opens only if ``read`` may open it, and the page
 loads local files only where ``read`` may, never Pantaray's private storage or a
 file holding secrets. With the command network setting off, a call that needs
-the network (a URL to open, a host to write to) is refused when it is
-validated, before Electron or anyone is asked, and the broker then closes the
-run's page; every other operation carries the setting, so the page reaches no
-host, loopback included.
-The page belongs to the calling run (its ``actor_process_id``), which the run's
+the network (a URL to open, a host to write to, anything but close in the
+user's browser) is refused when it is validated, before Electron or anyone is
+asked, and the broker then closes that page; every other operation carries the
+setting, so the page reaches no host, loopback included.
+The pages belong to the calling run (its ``actor_process_id``), which the run's
 end closes.
 
 ``screenshot {printed_pages}`` prints the page as ``print`` does and attaches
@@ -41,6 +42,7 @@ from pantaray_agents.local_runtime.runtime.browser_relay import (
     BrowserOperationDone,
     BrowserRelayFailed,
     allow_browser_writes,
+    allow_user_browser_reads,
     browser_page_host,
     browser_write_hosts,
     close_browser_session,
@@ -59,6 +61,11 @@ from pantaray_agents.local_runtime.tooling.action_session_temp_paths import (
 from pantaray_agents.local_runtime.tooling.documents import RENDERED_PAGE_MEDIA_TYPE
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.read_access import READ_ACCESS_SCOPE_FULL_ACCESS
+from pantaray_agents.schema.user_browser import (
+    KNOWN_USER_BROWSERS,
+    BrowserChoice,
+    UserBrowserId,
+)
 from pantaray_agents.schema.websocket.server_messages import (
     BrowserFileTarget,
     BrowserNavigateOperation,
@@ -86,10 +93,10 @@ from .broker_direct_render_pdf import rendered_documents_dir
 from .broker_failure_finalization import NetworkReachedPolicyError
 from .broker_outcome import UnprojectedBrokerToolOutcome
 from .browser_protocol import (
+    FIX_HINTS,
     BrowserAllowWritesArgs,
     BrowserCloseArgs,
     BrowserControlOutput,
-    BrowserFailureCode,
     BrowserImageAttachment,
     BrowserNavigateArgs,
     BrowserPageOutput,
@@ -97,82 +104,53 @@ from .browser_protocol import (
     BrowserPrintOutput,
     BrowserScreenshotArgs,
     BrowserScreenshotOutput,
-    BrowserToolArgs,
+    BrowserToolCall,
     ValidatedBrowserPrintRequest,
     ValidatedBrowserRequest,
     ValidatedBrowserWriteRequest,
+    ValidatedUserBrowserReadRequest,
 )
 from .printed_pages import draw_printed_pages
 
 _WEB_SCHEMES: Final = ("http://", "https://")
-_SNAPSHOT_AGAIN: Final = "Take a new snapshot and use a ref from it."
-_RETRY_ONCE: Final = (
-    "Try once more; if it fails again, tell the user the browser could not be "
-    "used. The desktop app must be open."
-)
-_NAVIGATE_AGAIN: Final = "The page was discarded. Navigate again to continue."
-_USER_CAN_FIX: Final = (
-    "Tell the user, in their language, what the message says, and wait for them "
-    "before trying their browser again."
-)
-FIX_HINTS: Final[dict[BrowserFailureCode, str]] = {
-    "BROWSER_NO_PAGE": "Open a page with navigate first.",
-    "BROWSER_REF_UNKNOWN": _SNAPSHOT_AGAIN,
-    "BROWSER_REF_STALE": f"The page changed since the snapshot. {_SNAPSHOT_AGAIN}",
-    "BROWSER_NAVIGATION_FAILED": (
-        "Check the URL or path. For a local dev server, check with "
-        "read_process_output that it is running."
-    ),
-    "BROWSER_TIMED_OUT": _NAVIGATE_AGAIN,
-    "BROWSER_RENDERER_CRASHED": _NAVIGATE_AGAIN,
-    "BROWSER_SESSION_GONE": "The page was closed. Navigate again to continue.",
-    "BROWSER_ACTION_FAILED": (
-        "Take a snapshot to see the page as it is now, then try another way."
-    ),
-    "BROWSER_USER_NOT_RUNNING": _USER_CAN_FIX,
-    "BROWSER_USER_DEBUGGING_OFF": _USER_CAN_FIX,
-    "BROWSER_USER_FILE_BLOCKED": _USER_CAN_FIX,
-    "BROWSER_USER_DENIED": (
-        "The user declined. Use their browser again only if they ask you to."
-    ),
-    "BROWSER_USER_UNAVAILABLE": "Tell the user their browser could not be used.",
-    "BROWSER_NETWORK_OFF": (
-        "The command network setting is off, which blocks every URL, localhost "
-        "included. Open a local file instead, or ask the user to turn it on."
-    ),
-    "BROWSER_OUTSIDE_READ_SCOPE": (
-        "Open a file read may open (see Workspace Path Rules), or an http(s) URL."
-    ),
-    "BROWSER_RELAY_TIMED_OUT": _RETRY_ONCE,
-    "BROWSER_INTEGRITY_FAILED": _RETRY_ONCE,
-}
 
 
 class BrowserNetworkOffError(BrokerPolicyError):
     """A browser call that needs the network, refused while the setting is off.
 
     The page keeps the network until Electron is sent the setting, which this
-    refusal never does, so whoever raises it ends with the run's page closed.
+    refusal never does, so whoever raises it ends with ``browser``'s page closed.
     """
+
+    def __init__(self, message: str, *, browser: BrowserChoice) -> None:
+        super().__init__(
+            message,
+            code="BROWSER_NETWORK_OFF",
+            fix_hint=FIX_HINTS["BROWSER_NETWORK_OFF"],
+        )
+        self.browser: BrowserChoice = browser
 
 
 def refuse_browser_network_use(
-    *, context: BrokerContext, call: BrowserToolArgs
+    *, context: BrokerContext, call: BrowserToolCall
 ) -> None:
     """Raise :class:`BrowserNetworkOffError` for a call that needs the network
-    while the user's setting is off."""
+    while the user's setting is off: in the user's browser, every call but
+    close."""
 
-    args = call.root
-    needs_network = isinstance(args, BrowserAllowWritesArgs) or (
-        isinstance(args, BrowserNavigateArgs)
-        and args.url.strip().startswith(_WEB_SCHEMES)
-    )
+    args = call.call.root
+    if call.browser == "user":
+        needs_network = not isinstance(args, BrowserCloseArgs)
+    else:
+        needs_network = isinstance(args, BrowserAllowWritesArgs) or (
+            isinstance(args, BrowserNavigateArgs)
+            and args.url.strip().startswith(_WEB_SCHEMES)
+        )
     if needs_network and not _network_enabled(context):
         raise BrowserNetworkOffError(
             f"browser {args.action} was refused: the command network setting is "
             "off, so this run's page was closed",
-            code="BROWSER_NETWORK_OFF",
-            fix_hint=FIX_HINTS["BROWSER_NETWORK_OFF"],
+            browser=call.browser,
         )
 
 
@@ -180,25 +158,31 @@ def build_validated_browser_write_request(
     *,
     context: BrokerContext,
     args: BrowserAllowWritesArgs,
+    user_browser: UserBrowserId | None,
     tool_invocation_id: str | None,
     tool_request_id: str,
     requested_at: str,
     preflight_only: bool,
 ) -> ValidatedBrowserWriteRequest:
-    """Accept ``allow_writes``: with its approval, unless the run may already
-    write to the host."""
+    """Accept ``allow_writes`` for the app's page, or for the run's tab in
+    ``user_browser``: with its approval, unless that page may already write to
+    the host."""
 
     owner_process_id = context.actor_process_id
+    browser: BrowserChoice = "pantaray" if user_browser is None else "user"
     # Names no page text: the host the runtime opened, not what the page says.
     command_summary: dict[str, JSONValue] = {
         "summary_kind": "browser_write",
         "host": args.host,
-        "page_host": browser_page_host(owner_process_id, "pantaray"),
+        "page_host": browser_page_host(owner_process_id, browser),
         # The model's user-facing reason, shown as the approval question.
         "reason": args.justification,
     }
+    if user_browser is not None:
+        # So an approval for the app's page never covers the user's browser.
+        command_summary["browser"] = KNOWN_USER_BROWSERS[user_browser].display_name
     approval_session_id, approval_source = None, None
-    if args.host not in browser_write_hosts(owner_process_id, "pantaray"):
+    if args.host not in browser_write_hosts(owner_process_id, browser):
         if not preflight_only and not tool_invocation_id:
             raise BrokerPolicyError(
                 "tool_invocation_id is required for browser allow_writes"
@@ -218,6 +202,7 @@ def build_validated_browser_write_request(
         action_id=context.execution_session.action_id or "unknown",
         approval_session_id=approval_session_id,
         approval_source=approval_source,
+        browser=browser,
         args=args,
         command_summary_json=command_summary,
         tool_request_id=tool_request_id,
@@ -231,33 +216,39 @@ async def run_browser_executor(
     context: BrokerContext,
     request: ValidatedBrowserRequest
     | ValidatedBrowserPrintRequest
-    | ValidatedBrowserWriteRequest,
+    | ValidatedBrowserWriteRequest
+    | ValidatedUserBrowserReadRequest,
 ) -> UnprojectedBrokerToolOutcome:
     ensure_session_capabilities(context=context)
+    owner_process_id = context.actor_process_id
     args = (
         request.args.root
         if isinstance(request, ValidatedBrowserRequest)
         else request.args
     )
-    if isinstance(args, BrowserCloseArgs):
+    if isinstance(request, ValidatedBrowserRequest) and isinstance(
+        args, BrowserCloseArgs
+    ):
         await close_browser_session(
-            owner_process_id=context.actor_process_id, browser="pantaray"
+            owner_process_id=owner_process_id, browser=request.browser
         )
-    elif isinstance(args, BrowserAllowWritesArgs):
+    elif isinstance(request, ValidatedBrowserWriteRequest):
         # Only an approved call, or one for a host already allowed, gets here.
         allow_browser_writes(
-            owner_process_id=context.actor_process_id,
-            browser="pantaray",
-            host=args.host,
+            owner_process_id=owner_process_id,
+            browser=request.browser,
+            host=request.args.host,
         )
     if isinstance(args, (BrowserCloseArgs, BrowserAllowWritesArgs)):
         return UnprojectedBrokerToolOutcome(
             status="success",
             output=_dump(BrowserControlOutput(status="ok", action=args.action)),
         )
+    if isinstance(request, ValidatedUserBrowserReadRequest):
+        # Only an approved call, or one for a host already allowed, gets here.
+        allow_user_browser_reads(owner_process_id=owner_process_id, host=request.host)
     scope = read_scope(context)
     user_id = context.execution_session.user_id
-    allow_network = _network_enabled(context)
     operation: BrowserOperation
     if isinstance(args, BrowserNavigateArgs):
         operation = BrowserNavigateOperation(
@@ -274,16 +265,36 @@ async def run_browser_executor(
         )
     else:
         operation = args
-    outcome = await request_browser_operation(
-        db_path=context.db_path,
-        busy_timeout_ms=context.busy_timeout_ms,
-        user_id=user_id,
-        owner_process_id=context.actor_process_id,
-        browser="pantaray",
-        user_browser=None,
-        operation=operation,
-        policy=browser_page_policy(scope, allow_network=allow_network),
+    user_browser = (
+        request.user_browser
+        if isinstance(
+            request, (ValidatedBrowserRequest, ValidatedUserBrowserReadRequest)
+        )
+        else None
     )
+    if user_browser is None:
+        outcome = await request_browser_operation(
+            db_path=context.db_path,
+            busy_timeout_ms=context.busy_timeout_ms,
+            user_id=user_id,
+            owner_process_id=owner_process_id,
+            browser="pantaray",
+            user_browser=None,
+            operation=operation,
+            policy=browser_page_policy(scope, allow_network=_network_enabled(context)),
+        )
+    else:
+        outcome = await request_browser_operation(
+            db_path=context.db_path,
+            busy_timeout_ms=context.busy_timeout_ms,
+            user_id=user_id,
+            owner_process_id=owner_process_id,
+            browser="user",
+            user_browser=user_browser,
+            operation=operation,
+            # Validation refused the call with the network off.
+            policy=browser_page_policy(scope, allow_network=True),
+        )
     if isinstance(outcome, BrowserRelayFailed):
         raise NetworkReachedPolicyError(
             f"browser {args.action} failed: {outcome.message}",
@@ -507,17 +518,7 @@ def _navigation_target(
 
     url = url.strip()
     if url.startswith(_WEB_SCHEMES):
-        try:
-            return BrowserWebTarget(kind="web", url=url)
-        except ValidationError as exc:
-            raise BrokerPolicyError(
-                f"Not a URL the browser can open: {url}",
-                code="BROWSER_NAVIGATION_FAILED",
-                fix_hint=(
-                    "Percent-encode spaces, backslashes and control characters "
-                    "in the URL."
-                ),
-            ) from exc
+        return web_target(url)
     try:
         target = resolve_read_target(scope=scope, raw_path=url)
     except BrokerPolicyError as exc:
@@ -529,11 +530,26 @@ def _navigation_target(
     return BrowserFileTarget(kind="file", path=str(target.real_path))
 
 
+def web_target(url: str) -> BrowserWebTarget:
+    """An http(s) URL as Electron is sent it."""
+
+    try:
+        return BrowserWebTarget(kind="web", url=url)
+    except ValidationError as exc:
+        raise BrokerPolicyError(
+            f"Not a URL the browser can open: {url}",
+            code="BROWSER_NAVIGATION_FAILED",
+            fix_hint=(
+                "Percent-encode spaces, backslashes and control characters in the URL."
+            ),
+        ) from exc
+
+
 __all__ = [
-    "FIX_HINTS",
     "BrowserNetworkOffError",
     "browser_page_policy",
     "build_validated_browser_write_request",
     "refuse_browser_network_use",
     "run_browser_executor",
+    "web_target",
 ]

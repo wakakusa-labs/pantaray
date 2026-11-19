@@ -3,9 +3,11 @@
 Electron runs the page (``runtime.browser_relay``); this executor owns what it
 is asked to do. A local file opens only if ``read`` may open it, and the page
 loads local files only where ``read`` may, never Pantaray's private storage or a
-file holding secrets. With the command network setting off, a URL is refused
-here, before Electron is asked, and the run's page is closed; every other
-operation carries the setting, so the page reaches no host, loopback included.
+file holding secrets. With the command network setting off, a call that needs
+the network (a URL to open, a host to write to) is refused when it is
+validated, before Electron or anyone is asked, and the broker then closes the
+run's page; every other operation carries the setting, so the page reaches no
+host, loopback included.
 The page belongs to the calling run (its ``actor_process_id``), which the run's
 end closes.
 
@@ -95,6 +97,7 @@ from .browser_protocol import (
     BrowserPrintOutput,
     BrowserScreenshotArgs,
     BrowserScreenshotOutput,
+    BrowserToolArgs,
     ValidatedBrowserPrintRequest,
     ValidatedBrowserRequest,
     ValidatedBrowserWriteRequest,
@@ -134,6 +137,34 @@ FIX_HINTS: Final[dict[BrowserFailureCode, str]] = {
 }
 
 
+class BrowserNetworkOffError(BrokerPolicyError):
+    """A browser call that needs the network, refused while the setting is off.
+
+    The page keeps the network until Electron is sent the setting, which this
+    refusal never does, so whoever raises it ends with the run's page closed.
+    """
+
+
+def refuse_browser_network_use(
+    *, context: BrokerContext, call: BrowserToolArgs
+) -> None:
+    """Raise :class:`BrowserNetworkOffError` for a call that needs the network
+    while the user's setting is off."""
+
+    args = call.root
+    needs_network = isinstance(args, BrowserAllowWritesArgs) or (
+        isinstance(args, BrowserNavigateArgs)
+        and args.url.strip().startswith(_WEB_SCHEMES)
+    )
+    if needs_network and not _network_enabled(context):
+        raise BrowserNetworkOffError(
+            f"browser {args.action} was refused: the command network setting is "
+            "off, so this run's page was closed",
+            code="BROWSER_NETWORK_OFF",
+            fix_hint=FIX_HINTS["BROWSER_NETWORK_OFF"],
+        )
+
+
 def build_validated_browser_write_request(
     *,
     context: BrokerContext,
@@ -144,15 +175,8 @@ def build_validated_browser_write_request(
     preflight_only: bool,
 ) -> ValidatedBrowserWriteRequest:
     """Accept ``allow_writes``: with its approval, unless the run may already
-    write to the host. Refused with the network off, before anyone is asked."""
+    write to the host."""
 
-    if not _network_enabled(context):
-        raise BrokerPolicyError(
-            f"Writes to {args.host} were not allowed: the command network setting "
-            "is off",
-            code="BROWSER_NETWORK_OFF",
-            fix_hint=FIX_HINTS["BROWSER_NETWORK_OFF"],
-        )
     owner_process_id = context.actor_process_id
     # Names no page text: the host the runtime opened, not what the page says.
     command_summary: dict[str, JSONValue] = {
@@ -219,16 +243,6 @@ async def run_browser_executor(
     allow_network = _network_enabled(context)
     operation: BrowserOperation
     if isinstance(args, BrowserNavigateArgs):
-        if args.url.strip().startswith(_WEB_SCHEMES) and not allow_network:
-            # A page opened while the network was on keeps it until Electron is
-            # sent the setting, which this refusal never does: the page ends.
-            await close_browser_session(owner_process_id=context.actor_process_id)
-            raise BrokerPolicyError(
-                f"{args.url.strip()} was not opened: the command network setting "
-                "is off, so this run's page was closed",
-                code="BROWSER_NETWORK_OFF",
-                fix_hint=FIX_HINTS["BROWSER_NETWORK_OFF"],
-            )
         operation = BrowserNavigateOperation(
             action="navigate",
             target=_navigation_target(args.url, scope),
@@ -480,7 +494,10 @@ def _navigation_target(
             raise BrokerPolicyError(
                 f"Not a URL the browser can open: {url}",
                 code="BROWSER_NAVIGATION_FAILED",
-                fix_hint="Percent-encode spaces and other blanks in the URL.",
+                fix_hint=(
+                    "Percent-encode spaces, backslashes and control characters "
+                    "in the URL."
+                ),
             ) from exc
     try:
         target = resolve_read_target(scope=scope, raw_path=url)
@@ -495,7 +512,9 @@ def _navigation_target(
 
 __all__ = [
     "FIX_HINTS",
+    "BrowserNetworkOffError",
     "browser_page_policy",
     "build_validated_browser_write_request",
+    "refuse_browser_network_use",
     "run_browser_executor",
 ]

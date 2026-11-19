@@ -4,6 +4,7 @@ import asyncio
 import logging
 from pathlib import Path
 
+from pantaray_agents.local_runtime.runtime.browser_relay import close_browser_session
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import BrokerPolicyError
@@ -23,7 +24,7 @@ from ..tool_result_finalization import (
 )
 from ..tool_result_validation import ToolOutputValidationError
 from .action_path_policy import read_scope
-from .broker_browser import run_browser_executor
+from .broker_browser import BrowserNetworkOffError, run_browser_executor
 from .broker_command_validation import verify_outside_workspace_folders_unchanged
 from .broker_common import (
     ApprovalDecisionError,
@@ -126,20 +127,26 @@ async def execute_broker_tool(
     requested_at: str | None = None,
     preflight_only: bool = False,
 ) -> BrokerPreflightOutcome | BrokerToolOutcome:
-    context, validated = validate_broker_request(
-        db_path=db_path,
-        busy_timeout_ms=busy_timeout_ms,
-        tool_id=tool_id,
-        user_id=user_id,
-        actor_process_id=actor_process_id,
-        manifest_id=manifest_id,
-        execution_session_id=execution_session_id,
-        args=args,
-        invocation_id=invocation_id,
-        tool_request_id=tool_request_id,
-        requested_at=requested_at,
-        preflight_only=preflight_only,
-    )
+    try:
+        context, validated = validate_broker_request(
+            db_path=db_path,
+            busy_timeout_ms=busy_timeout_ms,
+            tool_id=tool_id,
+            user_id=user_id,
+            actor_process_id=actor_process_id,
+            manifest_id=manifest_id,
+            execution_session_id=execution_session_id,
+            args=args,
+            invocation_id=invocation_id,
+            tool_request_id=tool_request_id,
+            requested_at=requested_at,
+            preflight_only=preflight_only,
+        )
+    except BrowserNetworkOffError:
+        # A page opened while the network was on keeps it until Electron is
+        # sent the setting, which this refusal never does: the page ends.
+        await close_browser_session(owner_process_id=actor_process_id)
+        raise
     if isinstance(validated, ValidatedPatchRequest) and validated.preflight_only:
         return BrokerPreflightOutcome(
             status="success",

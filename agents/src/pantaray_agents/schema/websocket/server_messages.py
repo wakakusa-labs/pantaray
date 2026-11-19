@@ -277,7 +277,9 @@ class BrowserConsoleOperation(_BrowserModel):
 
 class BrowserWebTarget(_BrowserModel):
     kind: Literal["web"]
-    url: str = Field(pattern=r"^https?://\S+$")
+    # No blank, backslash or control character: Chromium's URL parser drops or
+    # rewrites them where Python's does not, so the two would read another host.
+    url: str = Field(pattern=r"^https?://[^\s\\\x00-\x1f\x7f]+$")
 
 
 class BrowserFileTarget(_BrowserModel):

@@ -29,7 +29,10 @@ const PositiveIntSchema = z.number().int().positive();
 const NavigateOperationSchema = strict({
   action: z.literal('navigate'),
   target: z.discriminatedUnion('kind', [
-    strict({ kind: z.literal('web'), url: z.string().regex(/^https?:\/\/\S+$/) }),
+    // No blank, backslash or control character: the backend's URL parser would read
+    // another host than Chromium's. Same rule as the backend's BrowserWebTarget.
+    // eslint-disable-next-line no-control-regex
+    strict({ kind: z.literal('web'), url: z.string().regex(/^https?:\/\/[^\s\\\x00-\x1f\x7f]+$/) }),
     // A local document `read` may open, by its real path.
     strict({ kind: z.literal('file'), path: z.string().regex(/^\//) }),
   ]),

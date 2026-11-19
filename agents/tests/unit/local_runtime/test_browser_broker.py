@@ -545,17 +545,39 @@ async def test_the_write_review_sees_hosts_and_the_reason_but_no_page_text(
     assert marker not in payload
 
 
-# Catches: an approval asked for, or a host allowed, while the network setting
-# keeps the page off the network.
-async def test_network_off_refuses_allow_writes_before_anyone_is_asked(
+# Catches: allow_writes refused with the network off while the open page keeps
+# the network and its approved hosts, or an approval asked for before refusing.
+async def test_network_off_refuses_allow_writes_and_closes_the_page(
     runtime: Runtime,
 ) -> None:
+    _, opened = await asyncio.gather(
+        _call(runtime, {"action": "navigate", "url": "https://shop.example/"}),
+        _electron(runtime, _succeeded()),
+    )
+    relay_module.allow_browser_writes(
+        owner_process_id=BROKER_ACTOR_PROCESS_ID, host="api.example.com"
+    )
     _network_off(runtime)
 
-    error = await _refused(runtime, _allow_writes())
+    with pytest.raises(BrokerPolicyError) as caught:
+        await _call(runtime, _allow_writes(), step=2)
 
-    assert error.code == "BROWSER_NETWORK_OFF"
+    assert caught.value.code == "BROWSER_NETWORK_OFF"
+    assert runtime[2].requests == [{"session_id": opened["session_id"]}]
     assert _approval_rows(runtime[0]) == []
+
+
+# Catches: a URL Python and Chromium read with different hosts (a backslash
+# before "@"), so the host shown for approval is not the page's.
+async def test_a_url_chromium_reads_another_way_is_refused_before_electron(
+    runtime: Runtime,
+) -> None:
+    error = await _refused(
+        runtime,
+        {"action": "navigate", "url": "https://evil.example\\@trusted.example/"},
+    )
+
+    assert error.code == "BROWSER_NAVIGATION_FAILED"
 
 
 # Catches: the model offered an action or field the broker cannot parse, and a

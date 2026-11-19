@@ -12,7 +12,10 @@ from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import BrokerPolicyError
 from pantaray_agents.tools.files.render_pages import RenderPdfPageToolArgs
 
-from .broker_browser import build_validated_browser_write_request
+from .broker_browser import (
+    build_validated_browser_write_request,
+    refuse_browser_network_use,
+)
 from .broker_browser_print import build_validated_browser_print_request
 from .broker_command_validation import (
     build_validated_command_request,
@@ -168,9 +171,10 @@ def validate_broker_request(
         preflight_only=preflight_only,
     )
     effective_requested_at = request.requested_at or "unknown"
-    browser_args = (
-        request.args.root if isinstance(request.args, BrowserToolArgs) else None
-    )
+    browser_args = None
+    if isinstance(request.args, BrowserToolArgs):
+        refuse_browser_network_use(context=context, call=request.args)
+        browser_args = request.args.root
     if isinstance(browser_args, BrowserPrintArgs):
         return context, build_validated_browser_print_request(
             context=context,

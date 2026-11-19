@@ -8,6 +8,7 @@ from pantaray_agents.tools.contract import ToolConcurrency
 from .apply_patch_tool import APPLY_PATCH_TOOL
 from .base import ToolDefinition
 from .bash_tool import BASH_TOOL
+from .browser_tool import BROWSER_TOOL
 from .capture_screen_tool import CAPTURE_SCREEN_TOOL, CAPTURE_SCREEN_TOOL_ID
 from .discovery_tools import GLOB_TOOL, GREP_TOOL, LIST_TOOL
 from .draft_final_answer_tool import (
@@ -112,6 +113,7 @@ __all__ = [
     "WAIT_SUBAGENTS_TOOL_ID",
     "APPLY_PATCH_TOOL",
     "BASH_TOOL",
+    "BROWSER_TOOL",
     "READ_PROCESS_OUTPUT_TOOL",
     "STOP_PROCESS_TOOL",
     "CAPTURE_SCREEN_TOOL",
@@ -185,6 +187,7 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
         READ_PROCESS_OUTPUT_TOOL,
         STOP_PROCESS_TOOL,
         RUN_PYTHON_TOOL,
+        BROWSER_TOOL,
         CAPTURE_SCREEN_TOOL,
         WRITE_SESSION_MEMORY_TOOL,
         DRAFT_FINAL_ANSWER_TOOL,
@@ -232,6 +235,7 @@ SUPERVISOR_SINGLE_REACT_TOOL_IDS: tuple[str, ...] = (
     READ_PROCESS_OUTPUT_TOOL.tool_id,
     STOP_PROCESS_TOOL.tool_id,
     RUN_PYTHON_TOOL.tool_id,
+    BROWSER_TOOL.tool_id,
     CAPTURE_SCREEN_TOOL.tool_id,
     WRITE_SESSION_MEMORY_TOOL.tool_id,
     SPAWN_SUBAGENT_TOOL.tool_id,

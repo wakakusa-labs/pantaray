@@ -29,6 +29,7 @@ from pantaray_agents.tools.files.render_pages import (
 
 from ..models import ApprovalSource, BrokerNetworkPolicy
 from ..sandbox.egress_proxy import NetworkDestination
+from .browser_protocol import BrowserToolArgs
 from .process_protocol import ReadProcessOutputToolArgs, StopProcessToolArgs
 
 BrokerExecutionPath = Literal[
@@ -44,6 +45,7 @@ BrokerExecutionPath = Literal[
     "broker_sandbox_python",
     "broker_process_read",
     "broker_process_stop",
+    "broker_browser",
 ]
 BrokerCapability = Literal["scoped_read", "scoped_write", "process_exec_local"]
 BrokerApprovalPolicy = Literal["none", "prompt_each_time", "durable_grant"]
@@ -400,6 +402,7 @@ type BrokerToolArgs = (
     | RunPythonToolArgs
     | ReadProcessOutputToolArgs
     | StopProcessToolArgs
+    | BrowserToolArgs
 )
 
 

@@ -183,3 +183,15 @@ class BrowserToolOutput(
     ]
 ):
     model_config = ConfigDict(strict=True)
+
+
+class ValidatedBrowserRequest(_StrictModel):
+    """A ``browser`` call the broker accepted, with the call's identity."""
+
+    tool_invocation_id: str | None = None
+    manifest_id: str
+    execution_session_id: str
+    action_id: str
+    tool_request_id: str
+    requested_at: str
+    args: BrowserToolArgs

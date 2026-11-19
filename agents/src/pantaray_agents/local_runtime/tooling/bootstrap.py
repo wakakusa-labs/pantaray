@@ -27,6 +27,7 @@ from .action_session_temp_paths import (
 from .brokering.broker_common import (
     APPLY_PATCH_TOOL_ID,
     BASH_TOOL_ID,
+    BROWSER_TOOL_ID,
     GLOB_TOOL_ID,
     GREP_TOOL_ID,
     LIST_TOOL_ID,
@@ -107,6 +108,7 @@ WORKSPACE_TOOL_IDS = frozenset(
         RUN_PYTHON_TOOL_ID,
         READ_PROCESS_OUTPUT_TOOL_ID,
         STOP_PROCESS_TOOL_ID,
+        BROWSER_TOOL_ID,
     }
 )
 HIGH_RISK_TOOL_IDS = frozenset(

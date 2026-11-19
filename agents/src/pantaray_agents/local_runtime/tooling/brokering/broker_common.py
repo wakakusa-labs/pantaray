@@ -43,6 +43,7 @@ BASH_TOOL_ID = "bash"
 RUN_PYTHON_TOOL_ID = "run_python"
 READ_PROCESS_OUTPUT_TOOL_ID = "read_process_output"
 STOP_PROCESS_TOOL_ID = "stop_process"
+BROWSER_TOOL_ID = "browser"
 RUNNING_SESSION_STATUS = "running"
 ALLOWED_CAPABILITIES_KEY = "allowed_capabilities"
 APPROVAL_STATUS_PENDING: Literal["pending"] = "pending"
@@ -485,6 +486,7 @@ __all__ = [
     "APPROVAL_STATUS_PENDING",
     "ApprovalDecisionError",
     "BASH_TOOL_ID",
+    "BROWSER_TOOL_ID",
     "BrokerApprovalDeniedError",
     "BrokerApprovalRequiredError",
     "BrokerContext",

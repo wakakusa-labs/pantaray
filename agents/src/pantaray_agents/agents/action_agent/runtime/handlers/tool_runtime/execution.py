@@ -40,6 +40,7 @@ from pantaray_agents.local_runtime.runtime.utc_timestamps import (
     now_utc_iso,
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker_common import (
+    BROWSER_TOOL_ID,
     GLOB_TOOL_ID,
     GREP_TOOL_ID,
     LIST_TOOL_ID,
@@ -128,6 +129,8 @@ NON_PREFLIGHT_BROKERED_TOOL_IDS = frozenset(
         # They reach only processes this run's approved bash calls started.
         READ_PROCESS_OUTPUT_TOOL_ID,
         STOP_PROCESS_TOOL_ID,
+        # Until it can write to external hosts, nothing it does needs approval.
+        BROWSER_TOOL_ID,
     }
 )
 PREFLIGHT_APPROVAL_BROKERED_TOOL_IDS = (

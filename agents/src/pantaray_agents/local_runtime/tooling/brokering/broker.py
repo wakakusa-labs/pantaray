@@ -31,6 +31,7 @@ from ..tool_result_finalization import (
 )
 from ..tool_result_validation import ToolOutputValidationError
 from .action_path_policy import read_scope
+from .broker_browser import run_browser_executor
 from .broker_command_validation import (
     build_validated_command_request,
     build_validated_python_request,
@@ -94,6 +95,7 @@ from .broker_registry import (
     BROKER_TOOL_REGISTRY,
     validate_broker_registry,
 )
+from .browser_protocol import ValidatedBrowserRequest
 from .execution_start import claim_broker_execution_start
 from .process_protocol import (
     ValidatedReadProcessOutputRequest,
@@ -122,7 +124,8 @@ _ARGS_REQUESTS: dict[
     | type[ValidatedGlobRequest]
     | type[ValidatedGrepRequest]
     | type[ValidatedReadProcessOutputRequest]
-    | type[ValidatedStopProcessRequest],
+    | type[ValidatedStopProcessRequest]
+    | type[ValidatedBrowserRequest],
 ] = {
     "broker_direct_read": ValidatedReadRequest,
     "broker_direct_render_html": ValidatedRenderHtmlPageRequest,
@@ -131,6 +134,7 @@ _ARGS_REQUESTS: dict[
     "broker_direct_grep": ValidatedGrepRequest,
     "broker_process_read": ValidatedReadProcessOutputRequest,
     "broker_process_stop": ValidatedStopProcessRequest,
+    "broker_browser": ValidatedBrowserRequest,
 }
 
 logger = logging.getLogger(__name__)
@@ -192,6 +196,7 @@ def _validate_request(
     | ValidatedGrepRequest
     | ValidatedReadProcessOutputRequest
     | ValidatedStopProcessRequest
+    | ValidatedBrowserRequest
     | ValidatedPatchRequest
     | ValidatedSaveHtmlAsPdfRequest
     | ValidatedCommandRequest,
@@ -460,6 +465,8 @@ async def execute_broker_tool(
             validated, (ValidatedReadProcessOutputRequest, ValidatedStopProcessRequest)
         ):
             outcome = await run_process_control(context=context, request=validated)
+        elif isinstance(validated, ValidatedBrowserRequest):
+            outcome = await run_browser_executor(context=context, request=validated)
         else:
             verify_outside_workspace_folders_unchanged(
                 context=context, request=validated

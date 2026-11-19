@@ -24,6 +24,7 @@ from .broker_protocol import (
     ValidatedRenderPdfPageRequest,
     ValidatedSaveHtmlAsPdfRequest,
 )
+from .browser_protocol import ValidatedBrowserRequest
 from .process_protocol import (
     ValidatedReadProcessOutputRequest,
     ValidatedStopProcessRequest,
@@ -38,6 +39,7 @@ type DirectReadOnlyRequest = (
     | ValidatedGrepRequest
     | ValidatedReadProcessOutputRequest
     | ValidatedStopProcessRequest
+    | ValidatedBrowserRequest
 )
 # Approval-gated requests, recorded with the command summary that was approved.
 type GatedRequest = (
@@ -128,6 +130,7 @@ def build_direct_invocation_start(
             ValidatedGrepRequest,
             ValidatedReadProcessOutputRequest,
             ValidatedStopProcessRequest,
+            ValidatedBrowserRequest,
         ),
     ):
         return _build_read_only_invocation_start(

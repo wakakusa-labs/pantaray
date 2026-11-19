@@ -267,6 +267,15 @@ function errorName(error: unknown): string {
   return error instanceof Error ? error.name : typeof error;
 }
 
+// Outside guardSession, whose closures share one scope with `page`: the session keeps these
+// after the page closes.
+const refusePermission = () => false;
+const refusePermissionRequest = (
+  _contents: unknown,
+  _permission: unknown,
+  callback: (granted: boolean) => void
+) => callback(false);
+
 function guardSession(page: PageSession): void {
   const { ses, contents } = page;
   ses.protocol.handle('file', async (request) => {
@@ -306,9 +315,9 @@ function guardSession(page: PageSession): void {
     const decision = decide(url, 'GET');
     if (decision.allowed && decision.reached !== null) reach(page, decision.reached);
   });
-  ses.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
-  ses.setPermissionCheckHandler(() => false);
-  ses.setDevicePermissionHandler(() => false);
+  ses.setPermissionRequestHandler(refusePermissionRequest);
+  ses.setPermissionCheckHandler(refusePermission);
+  ses.setDevicePermissionHandler(refusePermission);
   ses.on('will-download', (event) => {
     event.preventDefault();
     page.notes.add('download_refused');

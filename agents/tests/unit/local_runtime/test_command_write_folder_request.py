@@ -20,7 +20,6 @@ from pantaray_agents.local_runtime.tooling.brokering.action_subagent_broker_auth
     ACTION_SUBAGENT_WRITE_DENIED,
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker import (
-    BROKER_TOOL_ARGS_INVALID,
     BrokerApprovalRequiredError,
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker_command_validation import (
@@ -32,6 +31,9 @@ from pantaray_agents.local_runtime.tooling.brokering.broker_outcome import (
 )
 from pantaray_agents.local_runtime.tooling.brokering.broker_protocol import (
     ValidatedCommandRequest,
+)
+from pantaray_agents.local_runtime.tooling.brokering.broker_request_validation import (
+    BROKER_TOOL_ARGS_INVALID,
 )
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import BrokerPolicyError

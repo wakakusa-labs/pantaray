@@ -2,18 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import uuid
 from pathlib import Path
-from typing import cast
-
-from pydantic import ValidationError
 
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import BrokerPolicyError
 from pantaray_agents.tools.files.discovery import run_glob, run_grep, run_list
 from pantaray_agents.tools.files.read_scope import ReadScope
-from pantaray_agents.tools.files.render_pages import RenderPdfPageToolArgs
 
 from ..resources.resource_tracking import (
     register_path_resource,
@@ -29,17 +24,8 @@ from ..tool_result_finalization import (
 from ..tool_result_validation import ToolOutputValidationError
 from .action_path_policy import read_scope
 from .broker_browser import run_browser_executor
-from .broker_browser_print import build_validated_browser_print_request
-from .broker_command_validation import (
-    build_validated_command_request,
-    build_validated_python_request,
-    verify_outside_workspace_folders_unchanged,
-)
+from .broker_command_validation import verify_outside_workspace_folders_unchanged
 from .broker_common import (
-    APPLY_PATCH_TOOL_ID,
-    BASH_TOOL_ID,
-    BROWSER_TOOL_ID,
-    RUN_PYTHON_TOOL_ID,
     ApprovalDecisionError,
     BrokerApprovalDeniedError,
     BrokerApprovalRequiredError,
@@ -48,9 +34,8 @@ from .broker_common import (
     FinalizedBrokerPolicyError,
     apply_approval_decision,
     ensure_session_capabilities,
-    load_broker_context,
 )
-from .broker_direct import build_validated_patch_request, run_apply_patch_executor
+from .broker_direct import run_apply_patch_executor
 from .broker_direct_read import run_read_executor
 from .broker_direct_render_pdf import run_render_pdf_page_executor
 from .broker_failure_finalization import (
@@ -66,13 +51,6 @@ from .broker_outcome import (
 )
 from .broker_process import run_process_control, start_background_command
 from .broker_protocol import (
-    ApplyPatchToolArgs,
-    BashToolArgs,
-    BrokerExecutionPath,
-    BrokerManagedToolDefinition,
-    BrokerToolArgs,
-    BrokerToolRequest,
-    RunPythonToolArgs,
     ValidatedCommandRequest,
     ValidatedGlobRequest,
     ValidatedGrepRequest,
@@ -81,17 +59,8 @@ from .broker_protocol import (
     ValidatedReadRequest,
     ValidatedRenderPdfPageRequest,
 )
-from .broker_registry import (
-    BROKER_MODEL_REGISTRY,
-    BROKER_TOOL_REGISTRY,
-    validate_broker_registry,
-)
-from .browser_protocol import (
-    BrowserPrintArgs,
-    BrowserToolArgs,
-    ValidatedBrowserPrintRequest,
-    ValidatedBrowserRequest,
-)
+from .broker_request_validation import validate_broker_request
+from .browser_protocol import ValidatedBrowserPrintRequest, ValidatedBrowserRequest
 from .execution_start import claim_broker_execution_start
 from .process_protocol import (
     ValidatedReadProcessOutputRequest,
@@ -107,214 +76,7 @@ class BrokerCompletionPersistenceError(RuntimeError):
         self.tool_invocation_id = tool_invocation_id
 
 
-BROKER_TOOL_ARGS_INVALID = "BROKER_TOOL_ARGS_INVALID"
-# browser asks only for print, but every call carries the request id it binds to.
-_APPROVAL_GATED_TOOL_IDS = frozenset(
-    {APPLY_PATCH_TOOL_ID, BROWSER_TOOL_ID, BASH_TOOL_ID, RUN_PYTHON_TOOL_ID}
-)
-# Read-only requests that carry their parsed arguments as they are.
-_ARGS_REQUESTS: dict[
-    BrokerExecutionPath,
-    type[ValidatedReadRequest]
-    | type[ValidatedListRequest]
-    | type[ValidatedGlobRequest]
-    | type[ValidatedGrepRequest]
-    | type[ValidatedReadProcessOutputRequest]
-    | type[ValidatedStopProcessRequest]
-    | type[ValidatedBrowserRequest],
-] = {
-    "broker_direct_read": ValidatedReadRequest,
-    "broker_direct_list": ValidatedListRequest,
-    "broker_direct_glob": ValidatedGlobRequest,
-    "broker_direct_grep": ValidatedGrepRequest,
-    "broker_process_read": ValidatedReadProcessOutputRequest,
-    "broker_process_stop": ValidatedStopProcessRequest,
-    "broker_browser": ValidatedBrowserRequest,
-}
-
 logger = logging.getLogger(__name__)
-
-
-def _effective_tool_request_id(
-    *,
-    tool_id: str,
-    tool_request_id: str | None,
-) -> str:
-    if tool_id in _APPROVAL_GATED_TOOL_IDS:
-        if tool_request_id is None or not tool_request_id.strip():
-            raise BrokerPolicyError(
-                "tool_request_id is required for approval-gated tools"
-            )
-        return tool_request_id
-    return tool_request_id or str(uuid.uuid4())
-
-
-def _effective_tool_invocation_id(
-    *,
-    tool_id: str,
-    invocation_id: str | None,
-    tool_request_id: str,
-    preflight_only: bool,
-) -> str | None:
-    if invocation_id is not None and invocation_id.strip():
-        return invocation_id
-    if tool_id in _APPROVAL_GATED_TOOL_IDS:
-        if preflight_only:
-            return None
-        return f"{tool_id}:{tool_request_id}"
-    if preflight_only:
-        return None
-    return tool_request_id
-
-
-def _validate_request(
-    *,
-    db_path: Path,
-    busy_timeout_ms: int,
-    tool_id: str,
-    user_id: str,
-    actor_process_id: str,
-    manifest_id: str,
-    execution_session_id: str,
-    args: dict[str, JSONValue],
-    invocation_id: str | None,
-    tool_request_id: str | None,
-    requested_at: str | None,
-    preflight_only: bool,
-) -> tuple[
-    BrokerContext,
-    ValidatedReadRequest
-    | ValidatedRenderPdfPageRequest
-    | ValidatedListRequest
-    | ValidatedGlobRequest
-    | ValidatedGrepRequest
-    | ValidatedReadProcessOutputRequest
-    | ValidatedStopProcessRequest
-    | ValidatedBrowserRequest
-    | ValidatedPatchRequest
-    | ValidatedBrowserPrintRequest
-    | ValidatedCommandRequest,
-]:
-    validate_broker_registry()
-    definition = BROKER_TOOL_REGISTRY.definitions.get(tool_id)
-    if definition is None:
-        raise BrokerPolicyError(f"unsupported broker tool: {tool_id}")
-    context = load_broker_context(
-        db_path=db_path,
-        busy_timeout_ms=busy_timeout_ms,
-        tool_id=tool_id,
-        path_access_kind=definition.path_access_kind,
-        user_id=user_id,
-        actor_process_id=actor_process_id,
-        manifest_id=manifest_id,
-        execution_session_id=execution_session_id,
-    )
-    request = BrokerToolRequest(
-        tool_id=tool_id,
-        user_id=user_id,
-        manifest_id=manifest_id,
-        execution_session_id=execution_session_id,
-        args=_parse_args(definition=definition, args=args),
-        invocation_id=invocation_id,
-        tool_request_id=tool_request_id,
-        requested_at=requested_at,
-        preflight_only=preflight_only,
-    )
-    effective_tool_request_id = _effective_tool_request_id(
-        tool_id=request.tool_id,
-        tool_request_id=request.tool_request_id,
-    )
-    effective_invocation_id = _effective_tool_invocation_id(
-        tool_id=request.tool_id,
-        invocation_id=request.invocation_id,
-        tool_request_id=effective_tool_request_id,
-        preflight_only=preflight_only,
-    )
-    effective_requested_at = request.requested_at or "unknown"
-    if isinstance(request.args, BrowserToolArgs) and isinstance(
-        request.args.root, BrowserPrintArgs
-    ):
-        return context, build_validated_browser_print_request(
-            context=context,
-            args=request.args.root,
-            tool_invocation_id=effective_invocation_id,
-            tool_request_id=effective_tool_request_id,
-            requested_at=effective_requested_at,
-            preflight_only=preflight_only,
-        )
-    args_request = _ARGS_REQUESTS.get(definition.execution_path)
-    if args_request is not None:
-        # The model refuses arguments parsed for another tool.
-        return context, args_request.model_validate(
-            {
-                "tool_invocation_id": effective_invocation_id,
-                "manifest_id": request.manifest_id,
-                "execution_session_id": request.execution_session_id,
-                "action_id": context.execution_session.action_id or "unknown",
-                "tool_request_id": effective_tool_request_id,
-                "requested_at": effective_requested_at,
-                "args": request.args,
-            }
-        )
-    if definition.execution_path == "broker_direct_render_pdf":
-        assert isinstance(request.args, RenderPdfPageToolArgs)
-        return context, ValidatedRenderPdfPageRequest(
-            tool_invocation_id=effective_invocation_id,
-            manifest_id=request.manifest_id,
-            execution_session_id=request.execution_session_id,
-            action_id=context.execution_session.action_id or "unknown",
-            tool_request_id=effective_tool_request_id,
-            requested_at=effective_requested_at,
-            path=request.args.path,
-            pages=request.args.pages,
-        )
-    if definition.execution_path == "broker_direct_patch":
-        assert isinstance(request.args, ApplyPatchToolArgs)
-        return context, build_validated_patch_request(
-            context=context,
-            args=request.args,
-            tool_invocation_id=effective_invocation_id,
-            tool_request_id=effective_tool_request_id,
-            requested_at=effective_requested_at,
-            preflight_only=preflight_only,
-        )
-    if definition.execution_path == "broker_sandbox_command":
-        assert isinstance(request.args, BashToolArgs)
-        return context, build_validated_command_request(
-            context=context,
-            args=request.args,
-            tool_invocation_id=effective_invocation_id,
-            tool_request_id=effective_tool_request_id,
-            requested_at=effective_requested_at,
-            preflight_only=preflight_only,
-        )
-    if definition.execution_path == "broker_sandbox_python":
-        assert isinstance(request.args, RunPythonToolArgs)
-        return context, build_validated_python_request(
-            context=context,
-            args=request.args,
-            tool_invocation_id=effective_invocation_id,
-            tool_request_id=effective_tool_request_id,
-            requested_at=effective_requested_at,
-            preflight_only=preflight_only,
-        )
-    raise BrokerPolicyError(
-        f"unsupported broker execution path: {definition.execution_path}"
-    )
-
-
-def _parse_args(
-    *, definition: BrokerManagedToolDefinition, args: dict[str, JSONValue]
-) -> BrokerToolArgs:
-    model = BROKER_MODEL_REGISTRY.input_models[definition.input_model_ref]
-    try:
-        return cast(BrokerToolArgs, model.model_validate(args))
-    except ValidationError as exc:
-        raise BrokerPolicyError(
-            f"{BROKER_TOOL_ARGS_INVALID}: invalid {definition.tool_id} arguments: "
-            f"{exc}",
-            code=BROKER_TOOL_ARGS_INVALID,
-        ) from exc
 
 
 def _superseded_by_cancel(
@@ -354,7 +116,7 @@ async def execute_broker_tool(
     requested_at: str | None = None,
     preflight_only: bool = False,
 ) -> BrokerPreflightOutcome | BrokerToolOutcome:
-    context, validated = _validate_request(
+    context, validated = validate_broker_request(
         db_path=db_path,
         busy_timeout_ms=busy_timeout_ms,
         tool_id=tool_id,

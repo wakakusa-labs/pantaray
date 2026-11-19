@@ -121,6 +121,10 @@ from pantaray_agents.local_runtime.runtime.connection_store import (  # noqa: E4
 from pantaray_agents.local_runtime.runtime.session_store import (  # noqa: E402
     reset_desktop_session_store,
 )
+from pantaray_agents.local_runtime.tooling import (  # noqa: E402
+    action_session_temp_paths,
+    outside_workspace_grant,
+)
 from pantaray_agents.local_runtime.tooling.brokering import (  # noqa: E402
     command_runtime,
 )
@@ -182,6 +186,28 @@ def reset_browser_relay_owners(monkeypatch: pytest.MonkeyPatch) -> None:
     """A run end marks its owners ending in the relay's process-wide registry;
     a later test reusing an owner id must not find it refused."""
     monkeypatch.setattr(browser_relay, "_OWNERS", {})
+
+
+_REAL_HOME = Path.home().resolve()
+_SESSION_PRIVATE_TEMP_PARENT = _TEST_SESSION_ROOT.resolve() / "pantaray-command-temp"
+_app_private_temp_parent = action_session_temp_paths.private_temp_parent
+
+
+def _private_temp_parent_outside_real_home() -> Path:
+    # A test that stands in its own HOME keeps the app's layout under it.
+    if Path.home().resolve() == _REAL_HOME:
+        return _SESSION_PRIVATE_TEMP_PARENT
+    return _app_private_temp_parent()
+
+
+@pytest.fixture(autouse=True)
+def keep_command_temp_dirs_out_of_real_home(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every fresh test db makes its own command temp root; none may land in
+    the developer's ~/Library/Caches."""
+    for module in (action_session_temp_paths, outside_workspace_grant):
+        monkeypatch.setattr(
+            module, "private_temp_parent", _private_temp_parent_outside_real_home
+        )
 
 
 @pytest.fixture(autouse=True)

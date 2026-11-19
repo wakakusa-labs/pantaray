@@ -92,10 +92,18 @@ def test_command_dies_with_its_broker(
     tmp_path: Path, broker_signal: signal.Signals
 ) -> None:
     db_path = tmp_path / "runtime.db"
+    # The killed broker leaves its command temp dir under this home; conftest
+    # does not reach the broker's interpreter to keep it out of the real one.
+    home = tmp_path / "home"
+    home.mkdir()
     broker = subprocess.Popen(
         [sys.executable, "-c", BROKER_SCRIPT, str(tmp_path)],
         cwd=AGENTS_ROOT,
-        env={**os.environ, "PYTHONPATH": f"{AGENTS_ROOT}:{AGENTS_ROOT / 'src'}"},
+        env={
+            **os.environ,
+            "PYTHONPATH": f"{AGENTS_ROOT}:{AGENTS_ROOT / 'src'}",
+            "HOME": str(home),
+        },
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
     )

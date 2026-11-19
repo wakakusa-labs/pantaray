@@ -67,7 +67,11 @@ def test_action_storage_component_rejects_non_component_identity(value: str) -> 
         validate_action_storage_component(field_name="identity", value=value)
 
 
-def test_command_temp_dir_has_no_whitespace_and_stays_private(tmp_path: Path) -> None:
+def test_command_temp_dir_has_no_whitespace_and_stays_private(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A stand-in home keeps the app's own layout without touching the real one.
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
     # The app's data dir is ~/Library/Application Support/pantaray.
     db_path = tmp_path / "Application Support" / "pantaray" / "runtime.db"
     db_path.parent.mkdir(parents=True)

@@ -37,7 +37,7 @@ const { createBrowserSessions, createBrowserResponder, createUserBrowserSessions
  * first and its subresources as `[url, method]`; each paused request waits for the session's
  * Fetch answer.
  */
-function fakeUserBrowser({ site = {}, command = () => undefined } = {}) {
+function fakeUserBrowser({ site = {}, command = () => undefined, closeTab = async () => {} } = {}) {
   const commands = [];
   const listeners = [];
   const answers = new Map();
@@ -92,7 +92,13 @@ function fakeUserBrowser({ site = {}, command = () => undefined } = {}) {
     async openTab(onPopup) {
       state.tabsOpened += 1;
       state.onPopup = onPopup;
-      return { cdp, close: async () => (state.tabsClosed += 1) };
+      return {
+        cdp,
+        close: () => {
+          state.tabsClosed += 1;
+          return closeTab();
+        },
+      };
     },
     closed: new Promise((resolve) => (closeConnection = resolve)),
     close() {
@@ -280,4 +286,70 @@ test('a tab that cannot be guarded is closed and the session ends', SETTLES, asy
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual([h.state.tabsClosed > 0, h.state.connectionClosed], [true, true]);
   assert.equal((await h.navigate('https://a.example/')).code, 'BROWSER_SESSION_GONE');
+});
+
+/** Settles once `method` was sent and holds its answer until `release` is called. */
+function heldCommand(method) {
+  let release = () => undefined;
+  let onSent = () => undefined;
+  const sent = new Promise((resolve) => (onSent = resolve));
+  const command = (name, _params, sessionId) => {
+    if (name !== method || sessionId !== undefined) return undefined;
+    onSent();
+    return new Promise((resolve) => (release = () => resolve({})));
+  };
+  return { command, sent, release: () => release() };
+}
+
+// Catches: a close (the run stopped) while the tab's guards are being installed that lets the
+// operation go on once they finish, so a finished run drives the user's browser.
+test('a close while the tab is being guarded sends it nothing more', SETTLES, async () => {
+  const held = heldCommand('Fetch.enable');
+  const h = harness({ command: held.command });
+  const pending = h.navigate('https://a.example/');
+  await held.sent;
+  h.userSessions.close('session-1');
+  assert.equal(h.state.connectionClosed, true);
+  assert.equal((await pending).code, 'BROWSER_SESSION_GONE');
+  held.release();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(h.sent('Page.navigate').length, 0);
+  assert.equal(h.sent('Runtime.enable').length, 0);
+});
+
+// Catches: a close that waits for the browser to close the tab before closing the connection,
+// so a browser that never answers keeps the run's connection open.
+test('a close never waits on the browser to close the connection', SETTLES, async () => {
+  const h = harness({ closeTab: () => new Promise(() => {}) });
+  assert.equal((await h.navigate('https://a.example/')).status, 'ok');
+  h.userSessions.closeAll();
+  assert.equal(h.state.connectionClosed, true);
+});
+
+// Catches: work started on a tab whose guards finished only after the operation's budget ran
+// out, acting on the user's browser for an operation already answered as timed out.
+test('an operation past its budget while the tab is guarded never runs', SETTLES, async () => {
+  const held = heldCommand('Fetch.enable');
+  const browser = fakeUserBrowser({ command: held.command });
+  const sessions = createUserBrowserSessions({
+    connect: async () => browser.connection,
+    getBackendPort: () => BACKEND_PORT,
+  });
+  let worked = false;
+  const settled = await sessions.run(
+    {
+      session_id: 's',
+      operation: { action: 'navigate', target: { kind: 'web', url: 'https://a.example/' } },
+      policy: { allow_network: true, write_hosts: [] },
+    },
+    { browser: 'chrome', read_hosts: ['a.example'] },
+    20,
+    async () => (worked = true)
+  );
+  assert.equal(settled.code, 'BROWSER_TIMED_OUT');
+  held.release();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(worked, false);
+  assert.equal(browser.sent('Runtime.enable').length, 0);
+  assert.deepEqual([browser.state.tabsClosed, browser.state.connectionClosed], [1, false]);
 });

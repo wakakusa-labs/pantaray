@@ -14,6 +14,11 @@
  * connection kept, so the next `navigate` opens a new tab without asking the user again. A
  * session ends on close, when the browser drops the connection, or when its tab cannot be
  * guarded; its id is refused from then on.
+ *
+ * Nothing waits on the browser to stop: ending the session aborts its signal and closes the
+ * connection at once, which takes the hidden tab with it; a timeout aborts the tab's signal and
+ * asks the browser to close it without waiting. Either way the tab is sent nothing more
+ * (`userBrowserTab`), so an operation still running never acts again.
  */
 
 import type { UserBrowserId } from './browserContract';
@@ -44,13 +49,18 @@ type UserSession = TabContext & {
   browser: UserBrowserId;
   abort: AbortController;
   connection: Promise<UserBrowserConnection>;
+  /** The connection once open, so ending the session closes it at once. */
+  connected: UserBrowserConnection | null;
   /** The tab operations run in; null before the first `navigate` and after a timeout. */
-  tab: Promise<GuardedTab> | null;
+  tab: TabSlot | null;
   queue: Promise<void>;
   end: BrowserOperationError | null;
   ended: Promise<never>;
   stop: (reason: BrowserOperationError) => void;
 };
+
+/** A tab being opened or open, and the signal it lives under: the session's and its own. */
+type TabSlot = { opening: Promise<GuardedTab>; abort: AbortController; signal: AbortSignal };
 
 const sessionGone = () =>
   new BrowserOperationError('BROWSER_SESSION_GONE', 'This browser session was closed.');
@@ -94,18 +104,7 @@ export function createUserBrowserSessions(params: {
   /** Ids closed or ended; the runtime mints a new id for the run's next session. */
   const ended = new Set<string>();
 
-  /** The tab goes with the connection, so a tab that cannot be closed first is gone too. */
-  async function release(session: UserSession): Promise<void> {
-    let connection: UserBrowserConnection;
-    try {
-      connection = await session.connection;
-    } catch {
-      return; // Refused or aborted: nothing was opened.
-    }
-    await session.tab?.then((tab) => tab.handle.close()).catch(() => undefined);
-    connection.close();
-  }
-
+  /** Ends the session: its tab is sent nothing more, and the connection takes the tab with it. */
   function discard(session: UserSession, reason: BrowserOperationError): void {
     if (session.end !== null) return;
     session.end = reason;
@@ -113,7 +112,14 @@ export function createUserBrowserSessions(params: {
     sessions.delete(session.id);
     session.stop(reason);
     session.abort.abort(reason);
-    void release(session);
+    session.connected?.close();
+  }
+
+  /** Retires the slot's tab; the browser closes it in its own time, as no one waits for it. */
+  function retireTab(session: UserSession, slot: TabSlot, reason: BrowserOperationError): void {
+    slot.abort.abort(reason);
+    if (session.tab === slot) session.tab = null;
+    void slot.opening.then((tab) => tab.handle.close()).catch(() => undefined);
   }
 
   function open(id: string, browser: UserBrowserId): UserSession {
@@ -126,6 +132,7 @@ export function createUserBrowserSessions(params: {
       browser,
       abort,
       connection: params.connect(browser, abort.signal),
+      connected: null,
       tab: null,
       backendPort: params.getBackendPort(),
       readHosts: [],
@@ -141,7 +148,12 @@ export function createUserBrowserSessions(params: {
       stop,
     };
     session.connection.then(
-      (connection) => connection.closed.then(() => discard(session, unavailable(browser))),
+      (connection) => {
+        // Opened just as the session ended: nothing will use it.
+        if (session.end !== null) return connection.close();
+        session.connected = connection;
+        void connection.closed.then(() => discard(session, unavailable(browser)));
+      },
       () => undefined
     );
     sessions.set(id, session);
@@ -174,30 +186,34 @@ export function createUserBrowserSessions(params: {
       discard(session, reason);
       return failed(reason);
     }
+    if (session.end !== null) return failed(session.end);
     if (session.tab === null) {
       if (request.operation.action !== 'navigate') return failed(noPage());
+      const abort = new AbortController();
+      const signal = AbortSignal.any([session.abort.signal, abort.signal]);
       const { browser } = session;
-      session.tab = openGuardedTab(session, connection, params.logger).catch(() => {
-        throw unavailable(browser);
+      const opening = openGuardedTab(session, connection, signal, params.logger).catch(() => {
+        throw signal.aborted ? signal.reason : unavailable(browser);
       });
-      session.tab.catch(() => undefined);
+      opening.catch(() => undefined);
+      session.tab = { opening, abort, signal };
     }
-    const opening = session.tab;
+    const slot = session.tab;
     let timer: NodeJS.Timeout | undefined;
     const budget = new Promise<never>((_resolve, reject) => {
-      timer = setTimeout(
-        () =>
-          reject(
-            new BrowserOperationError(
-              'BROWSER_TIMED_OUT',
-              `The page did not finish within ${budgetMs / 1000} s, so its tab was closed.`
-            )
-          ),
-        budgetMs
-      );
+      timer = setTimeout(() => {
+        const error = new BrowserOperationError(
+          'BROWSER_TIMED_OUT',
+          `The page did not finish within ${budgetMs / 1000} s, so its tab was closed.`
+        );
+        // The work past its budget must not act on the tab again, nor a later operation share it.
+        retireTab(session, slot, error);
+        reject(error);
+      }, budgetMs);
     });
     const job = (async () => {
-      const tab = await opening;
+      const tab = await slot.opening;
+      slot.signal.throwIfAborted();
       const value = await work(tab.page);
       return { value, ...(await tab.location()) };
     })();
@@ -210,11 +226,6 @@ export function createUserBrowserSessions(params: {
       if (session.end !== null) return failed(session.end);
       if (error instanceof BrowserOperationError) {
         if (error.code === 'BROWSER_USER_UNAVAILABLE') discard(session, error);
-        // The work past its budget may still act on the tab, so no later operation may share it.
-        if (error.code === 'BROWSER_TIMED_OUT' && session.tab === opening) {
-          session.tab = null;
-          void opening.then((tab) => tab.handle.close()).catch(() => undefined);
-        }
         return failed(error);
       }
       params.logger?.error?.('USER_BROWSER_OPERATION_ERR', {

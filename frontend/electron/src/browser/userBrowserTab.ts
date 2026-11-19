@@ -10,6 +10,9 @@
  * - JavaScript dialogs are dismissed and file choosers refused.
  * A frame or worker whose guard failed stays paused and never runs. Each refusal and every host
  * the tab reached goes to the session's `TabContext`, which reports it with the next answer.
+ *
+ * The tab lives under one signal: once it aborts, nothing more is sent to the tab, guards and
+ * operations alike; every command is refused with the signal's reason.
  */
 
 import { BROWSER_MAX_BLOCKED_REQUESTS, type BrowserPageData } from './browserContract';
@@ -163,13 +166,23 @@ async function guardWorker(cdp: CdpSession, sessionId: string): Promise<void> {
   ]);
 }
 
+/** The tab's commands, refused once `signal` aborts. */
+function gated(cdp: CdpSession, signal: AbortSignal): CdpSession {
+  return {
+    sendCommand: (method, params, sessionId) =>
+      signal.aborted ? Promise.reject(signal.reason) : cdp.sendCommand(method, params, sessionId),
+    on: (event, listener) => cdp.on(event, listener),
+  };
+}
+
 /**
- * Opens and guards a tab and watches what it does. Any failure closes the tab and rejects: an
- * unguarded tab is never used.
+ * Opens and guards a tab and watches what it does, under `signal`. Any failure closes the tab
+ * and rejects: an unguarded tab is never used.
  */
 export async function openGuardedTab(
   context: TabContext,
   connection: UserBrowserConnection,
+  signal: AbortSignal,
   logger: LoggerLike | null | undefined
 ): Promise<GuardedTab> {
   let handle: UserBrowserTab | undefined;
@@ -178,11 +191,12 @@ export async function openGuardedTab(
       context.notes.add('popup_refused');
       if (context.popups.length < MAX_POPUPS_REPORTED) context.popups.push(url);
     });
-    const tab = watchTab(context, handle, logger);
+    signal.throwIfAborted();
+    const tab = watchTab(context, handle, gated(handle.cdp, signal), logger);
     await tab.ready;
     return tab;
   } catch (error) {
-    logger?.error?.('USER_BROWSER_TAB_GUARD_ERR', { error: errorName(error) });
+    if (!signal.aborted) logger?.error?.('USER_BROWSER_TAB_GUARD_ERR', { error: errorName(error) });
     // The tab goes with the connection if it cannot be closed now.
     handle?.close().catch(() => undefined);
     throw error;
@@ -192,9 +206,9 @@ export async function openGuardedTab(
 function watchTab(
   context: TabContext,
   handle: UserBrowserTab,
+  cdp: CdpSession,
   logger: LoggerLike | null | undefined
 ): GuardedTab & { ready: Promise<void> } {
-  const { cdp } = handle;
   const console: CdpPage['console'] = { lines: [], cut: false };
   let mainFrameId: string | null = null;
   /** Main-frame documents the tab refused, so a navigate they failed still answers. */

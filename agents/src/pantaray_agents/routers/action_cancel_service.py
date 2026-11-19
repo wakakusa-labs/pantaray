@@ -130,12 +130,14 @@ async def _run_cancel_cleanup_pass(
     action_id: str,
     execution_session_id: str,
     suggestion_id: str | None,
+    process_id: str | None,
 ) -> ActionCleanupPassResult:
     result = await cancel_action_runtime_resources(
         db_path=db_path,
         busy_timeout_ms=busy_timeout_ms,
         action_id=action_id,
         execution_session_id=execution_session_id,
+        run_process_id=process_id,
     )
     if result.warning_message is not None:
         logger.error(
@@ -367,6 +369,7 @@ async def _cleanup_canceled_action_session(
             action_id=action_id,
             execution_session_id=execution_session_id,
             suggestion_id=suggestion_id,
+            process_id=process_id,
         )
     except (MigrationError, OSError, sqlite3.Error) as exc:
         post_terminal_cleanup_incomplete = True

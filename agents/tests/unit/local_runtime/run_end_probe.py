@@ -123,7 +123,6 @@ class RunEndProbe:
 
 def install_run_end_probe(monkeypatch: pytest.MonkeyPatch) -> RunEndProbe:
     probe = RunEndProbe()
-    monkeypatch.setattr(relay_module, "_OWNERS", {})
     monkeypatch.setattr(relay_module, "deliver_desktop_request", probe._deliver)
     monkeypatch.setattr(run_end_module, "stop_run_processes", probe._stop)
     return probe

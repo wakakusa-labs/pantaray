@@ -112,6 +112,9 @@ os.environ.pop("AWS_REGION", None)
 os.environ["NODE_ENV"] = "test"
 os.environ["USE_MOCKS"] = "true"
 
+from pantaray_agents.local_runtime.runtime import (  # noqa: E402
+    browser_relay,
+)
 from pantaray_agents.local_runtime.runtime.connection_store import (  # noqa: E402
     reset_connection_store,
 )
@@ -172,6 +175,13 @@ def reset_local_desktop_session() -> None:
     yield
     reset_connection_store()
     reset_desktop_session_store()
+
+
+@pytest.fixture(autouse=True)
+def reset_browser_relay_owners(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A run end marks its owners ending in the relay's process-wide registry;
+    a later test reusing an owner id must not find it refused."""
+    monkeypatch.setattr(browser_relay, "_OWNERS", {})
 
 
 @pytest.fixture(autouse=True)

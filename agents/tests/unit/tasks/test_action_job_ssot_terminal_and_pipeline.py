@@ -248,6 +248,9 @@ async def test_action_job_error_persists_terminal_before_stream_end_and_uses_las
 
     async def _record_child_cleanup(**kwargs) -> ActionCleanupPassResult:  # noqa: ANN003
         assert kwargs["execution_session_id"] == "session-1"
+        # Catches: the terminal not ending the run itself, whose browser page
+        # outlives it when the run started no command.
+        assert kwargs["run_process_id"] == "proc"
         calls["order"].append(("cleanup", "children"))
         return _empty_cleanup_result()
 

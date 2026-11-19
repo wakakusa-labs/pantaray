@@ -164,6 +164,7 @@ async def _run_action_job(job_payload: ActionJobRuntimePayload) -> None:
                 busy_timeout_ms=busy_timeout_ms,
                 action_id=action_id,
                 execution_session_id=execution_session_id,
+                run_process_id=process_id,
             )
             if cleanup_result.warning_message is not None:
                 logger.warning(

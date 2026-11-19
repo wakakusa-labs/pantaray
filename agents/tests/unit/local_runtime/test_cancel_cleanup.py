@@ -112,6 +112,7 @@ async def test_cancel_action_runtime_resources_cleans_temp_file(tmp_path: Path) 
         busy_timeout_ms=1_000,
         action_id="action-1",
         execution_session_id=context.execution_session_id,
+        run_process_id=None,
     )
 
     assert result.cleaned_count == 1
@@ -184,6 +185,7 @@ async def test_the_cleanup_ends_the_browser_and_processes_of_the_runs_it_ends(
         busy_timeout_ms=1_000,
         action_id="action-1",
         execution_session_id=context.execution_session_id,
+        run_process_id="action-process",
     )
 
     assert probe.stopped == [(("action-process", "child-process"), True)]
@@ -191,6 +193,29 @@ async def test_the_cleanup_ends_the_browser_and_processes_of_the_runs_it_ends(
     # Their status is still running: a late request is refused all the same.
     assert await probe.refused(db_path, "action-process")
     assert not await probe.refused(db_path, "other-run")
+
+
+# Catches: an Action run that used the browser but started no command keeping
+# its page open past its terminal or Stop, since no resource names it.
+@pytest.mark.asyncio
+async def test_the_cleanup_ends_the_run_itself_when_it_started_no_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path, context = _bootstrap_runtime_db(tmp_path)
+    _seed_broker_actor_process(db_path, process_id="action-process")
+    probe = install_run_end_probe(monkeypatch)
+    await probe.open_browser(db_path, "action-process")
+
+    await cancel_action_runtime_resources(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        action_id="action-1",
+        execution_session_id=context.execution_session_id,
+        run_process_id="action-process",
+    )
+
+    assert probe.closed == ["action-process"]
+    assert probe.stopped == [(("action-process",), True)]
 
 
 @pytest.mark.asyncio
@@ -218,6 +243,7 @@ async def test_cancel_action_runtime_resources_cleans_workspace_lock(
         busy_timeout_ms=1_000,
         action_id="action-1",
         execution_session_id=context.execution_session_id,
+        run_process_id=None,
     )
 
     assert result.cleaned_count == 1
@@ -274,6 +300,7 @@ async def test_cancel_action_runtime_resources_retries_and_records_warning(
         busy_timeout_ms=1_000,
         action_id="action-1",
         execution_session_id=context.execution_session_id,
+        run_process_id=None,
     )
 
     assert result.cleaned_count == 0
@@ -362,6 +389,7 @@ async def test_cancel_action_runtime_resources_counts_one_affected_resource_when
         busy_timeout_ms=1_000,
         action_id="action-1",
         execution_session_id=context.execution_session_id,
+        run_process_id=None,
     )
 
     assert result.affected_resource_count == 1
@@ -426,6 +454,7 @@ async def test_cancel_cleanup_event_failure_rolls_back_abandoned_transition(
         busy_timeout_ms=1_000,
         action_id="action-1",
         execution_session_id=context.execution_session_id,
+        run_process_id=None,
     )
 
     assert result.affected_resource_count == 1
@@ -498,6 +527,7 @@ async def test_cancel_action_runtime_resources_uses_persistence_failure_message_
         busy_timeout_ms=1_000,
         action_id="action-1",
         execution_session_id=context.execution_session_id,
+        run_process_id=None,
     )
 
     assert result.execution_failure_count == 0

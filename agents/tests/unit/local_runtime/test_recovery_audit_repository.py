@@ -211,6 +211,7 @@ def test_list_action_recovery_audit_events_projects_cancel_cleanup_failure(
             busy_timeout_ms=1_000,
             action_id="action-1",
             execution_session_id=context.execution_session_id,
+            run_process_id=None,
         )
     )
 

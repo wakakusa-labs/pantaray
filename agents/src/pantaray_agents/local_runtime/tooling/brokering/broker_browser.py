@@ -4,12 +4,14 @@ Electron runs the page (``runtime.browser_relay``); this executor owns what it
 is asked to do. A local file opens only if ``read`` may open it, and the page
 loads local files only where ``read`` may, never Pantaray's private storage or a
 file holding secrets. With the command network setting off, a URL is refused
-here, before Electron is asked, and the page reaches no host, loopback included.
+here, before Electron is asked, and the run's page is closed; every other
+operation carries the setting, so the page reaches no host, loopback included.
 The page belongs to the calling run (its ``actor_process_id``), which the run's
 end closes.
 
 Everything taken from the page goes in the output's ``data``, marked
-``untrusted``, and nowhere else.
+``untrusted``, and nowhere else; the output is cut to fit inline so that storage
+never replaces it with a preview outside ``data``.
 """
 
 from __future__ import annotations
@@ -20,6 +22,9 @@ from pydantic import ValidationError
 
 from pantaray_agents.local_runtime.runtime.browser_contract import (
     BrowserContactedHost,
+    BrowserOperationSucceeded,
+    BrowserPageData,
+    BrowserTruncation,
 )
 from pantaray_agents.local_runtime.runtime.browser_relay import (
     BrowserRelayFailed,
@@ -33,6 +38,10 @@ from pantaray_agents.local_runtime.runtime.tool_image_attachments import (
     assemble_tool_image,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_agents.schema.tool_result import (
+    largest_fitting_size,
+    serialize_json_tool_output,
+)
 from pantaray_agents.schema.websocket.server_messages import (
     BrowserFileTarget,
     BrowserNavigateOperation,
@@ -48,6 +57,7 @@ from pantaray_agents.tools.files.read_target import resolve_read_target
 from pantaray_agents.tools.files.secret_paths import secret_path_patterns
 
 from ..repository.command_network_settings import load_command_network_enabled
+from ..tool_result_storage import ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT
 from .action_path_policy import read_scope
 from .broker_common import BrokerContext, ensure_session_capabilities
 from .broker_direct_render_html import _file_roots
@@ -70,6 +80,11 @@ _RETRY_ONCE: Final = (
     "Try once more; if it fails again, tell the user the browser could not be "
     "used. The desktop app must be open."
 )
+# What a cut reports when Electron reported none: the action's own long text.
+_CUT_TRUNCATION: Final[dict[str, BrowserTruncation]] = {
+    "snapshot": "snapshot_too_long",
+    "console": "console_too_long",
+}
 _NAVIGATE_AGAIN: Final = "The page was discarded. Navigate again to continue."
 FIX_HINTS: Final[dict[BrowserFailureCode, str]] = {
     "BROWSER_NO_PAGE": "Open a page with navigate first.",
@@ -124,9 +139,19 @@ async def run_browser_executor(
     )
     operation: BrowserOperation
     if isinstance(args, BrowserNavigateArgs):
+        if args.url.strip().startswith(_WEB_SCHEMES) and not allow_network:
+            # A page opened while the network was on keeps it until Electron is
+            # sent the setting, which this refusal never does: the page ends.
+            await close_browser_session(owner_process_id=context.actor_process_id)
+            raise BrokerPolicyError(
+                f"{args.url.strip()} was not opened: the command network setting "
+                "is off, so this run's page was closed",
+                code="BROWSER_NETWORK_OFF",
+                fix_hint=FIX_HINTS["BROWSER_NETWORK_OFF"],
+            )
         operation = BrowserNavigateOperation(
             action="navigate",
-            target=_navigation_target(args.url, scope, allow_network=allow_network),
+            target=_navigation_target(args.url, scope),
         )
     elif isinstance(args, BrowserScreenshotArgs):
         operation = BrowserScreenshotOperation(
@@ -151,18 +176,10 @@ async def run_browser_executor(
             fix_hint=FIX_HINTS[outcome.code],
             network=_network(outcome.network),
         )
-    result = outcome.result
-    output: dict[str, JSONValue] = {
-        "status": "ok",
-        "action": args.action,
-        "truncated": result.truncated,
-        "notes": list(result.notes),
-        "network": _network(result.network),
-        "untrusted": True,
-        "data": result.page_data.model_dump(mode="json"),
-    }
     if outcome.artifact is None:
-        return UnprojectedBrokerToolOutcome(status="success", output=output)
+        return UnprojectedBrokerToolOutcome(
+            status="success", output=_fitted_output(args.action, outcome.result)
+        )
     # The relay has verified the PNG a screenshot answer claims.
     blob = write_local_image_blob(
         user_id=user_id, payload=outcome.artifact, mime_type="image/png"
@@ -172,7 +189,9 @@ async def run_browser_executor(
     )
     return UnprojectedBrokerToolOutcome(
         status="success",
-        output={**output, "attachments": [image.output_entry]},
+        output=_fitted_output(
+            args.action, outcome.result, attachments=[image.output_entry]
+        ),
         attachments=(image.attachment,),
     )
 
@@ -200,19 +219,94 @@ def browser_page_policy(scope: ReadScope, *, allow_network: bool) -> BrowserPage
     )
 
 
+def _fitted_output(
+    action: str,
+    result: BrowserOperationSucceeded,
+    *,
+    attachments: list[JSONValue] | None = None,
+) -> dict[str, JSONValue]:
+    """The output, its page text cut to one length when the whole would not fit
+    inline. A larger result would be stored away and shown as a preview outside
+    ``data``, where page text would no longer be marked untrusted."""
+
+    def output(cut: int | None) -> dict[str, JSONValue]:
+        page = result.page_data if cut is None else _cut_page(result.page_data, cut)
+        truncated = result.truncated
+        if cut is not None and truncated is None:
+            truncated = _CUT_TRUNCATION.get(action)
+        built: dict[str, JSONValue] = {
+            "status": "ok",
+            "action": action,
+            "truncated": truncated,
+            "notes": list(result.notes),
+            "network": _network(result.network),
+            "untrusted": True,
+            "data": page.model_dump(mode="json"),
+        }
+        if attachments is not None:
+            built["attachments"] = attachments
+        return built
+
+    whole = output(None)
+    if (
+        len(serialize_json_tool_output(whole))
+        <= ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT
+    ):
+        return whole
+    # Design limit: cut to nothing, the output is bounded by how many console
+    # lines, popups and blocked requests Electron reports; it fits while those
+    # stay in the hundreds.
+    return output(
+        largest_fitting_size(
+            output,
+            high=max(len(text) for text in _page_texts(result.page_data)),
+            limit=ACTION_TOOL_RESULT_INLINE_CHARACTER_LIMIT,
+        )
+    )
+
+
+def _page_texts(page: BrowserPageData) -> list[str]:
+    return [
+        page.url,
+        page.title,
+        *([] if page.snapshot is None else [page.snapshot]),
+        *(line.text for line in page.console or ()),
+        *page.popups,
+        *(blocked.url for blocked in page.blocked),
+    ]
+
+
+def _cut_page(page: BrowserPageData, length: int) -> BrowserPageData:
+    def cut(text: str) -> str:
+        return text if len(text) <= length else f"{text[:length]}…"
+
+    return page.model_copy(
+        update={
+            "url": cut(page.url),
+            "title": cut(page.title),
+            "snapshot": None if page.snapshot is None else cut(page.snapshot),
+            "console": None
+            if page.console is None
+            else [
+                line.model_copy(update={"text": cut(line.text)})
+                for line in page.console
+            ],
+            "popups": [cut(url) for url in page.popups],
+            "blocked": [
+                blocked.model_copy(update={"url": cut(blocked.url)})
+                for blocked in page.blocked
+            ],
+        }
+    )
+
+
 def _navigation_target(
-    url: str, scope: ReadScope, *, allow_network: bool
+    url: str, scope: ReadScope
 ) -> BrowserWebTarget | BrowserFileTarget:
-    """An http(s) URL when the network is on, or a file ``read`` may open."""
+    """An http(s) URL, the network being on, or a file ``read`` may open."""
 
     url = url.strip()
     if url.startswith(_WEB_SCHEMES):
-        if not allow_network:
-            raise BrokerPolicyError(
-                f"{url} was not opened: the command network setting is off",
-                code="BROWSER_NETWORK_OFF",
-                fix_hint=FIX_HINTS["BROWSER_NETWORK_OFF"],
-            )
         try:
             return BrowserWebTarget(kind="web", url=url)
         except ValidationError as exc:

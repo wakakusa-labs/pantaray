@@ -259,6 +259,34 @@ async def test_network_off_refuses_every_url_before_electron(
     assert error.fix_hint == FIX_HINTS["BROWSER_NETWORK_OFF"]
 
 
+# Catches: a page opened with the network on keeping it after the user turned
+# it off, because the refused navigate never sent Electron the new setting.
+async def test_network_off_closes_a_page_opened_with_the_network_on(
+    runtime: Runtime,
+) -> None:
+    _, opened = await asyncio.gather(
+        _call(runtime, {"action": "navigate", "url": "https://example.com/"}),
+        _electron(runtime, _succeeded()),
+    )
+    update_command_network_enabled(
+        db_path=runtime[0],
+        busy_timeout_ms=1_000,
+        user_id=_USER_ID,
+        command_network_enabled=False,
+        now="2026-03-23T00:00:01Z",
+    )
+
+    with pytest.raises(BrokerPolicyError) as caught:
+        await _call(
+            runtime, {"action": "navigate", "url": "https://x.example/"}, step=2
+        )
+
+    assert caught.value.code == "BROWSER_NETWORK_OFF"
+    desktop = runtime[2]
+    assert desktop.events[-1] == OutboundEvent.BROWSER_SESSION_CLOSE_REQUESTED
+    assert desktop.requests == [{"session_id": opened["session_id"]}]
+
+
 # Catches: a file read may not open (outside the workspace, Pantaray's own
 # storage, a secret) handed to Electron to load.
 @pytest.mark.parametrize("subject", ["outside", "private-storage", "secret"])
@@ -322,6 +350,57 @@ async def test_page_text_appears_only_inside_untrusted_data(
     for field in _PAGE_FIELDS:
         assert f"{marker}-{field}" in data
     assert marker not in json.dumps(output)
+
+
+def _large(answer: BrowserAnswer, field: str) -> BrowserAnswer:
+    """The answer with more page text than a result keeps inline, in many short
+    values, which storage cannot move out one by one."""
+
+    page = answer.page_data  # type: ignore[union-attr]
+    if field == "console":
+        update: dict[str, object] = {
+            "console": [
+                type(page.console[0])(level="log", text=f"line {index} " + "x" * 190)  # type: ignore[index]
+                for index in range(100)
+            ]
+        }
+    else:
+        long_url = "https://evil.example/" + "y" * 1_970
+        update = {
+            "popups": [long_url] * 10,
+            "blocked": [
+                type(page.blocked[0])(reason="write_not_approved", url=long_url)
+            ]
+            * 10,
+        }
+    return answer.model_copy(update={"page_data": page.model_copy(update=update)})
+
+
+# Catches: a result past the inline limit stored away and replaced by a preview
+# outside ``data``, so page text reaches the model without the untrusted mark.
+@pytest.mark.parametrize(
+    ("args", "field"),
+    [({"action": "console"}, "console"), ({"action": "back"}, "popups")],
+)
+async def test_page_text_past_the_inline_limit_stays_untrusted_in_data(
+    runtime: Runtime, args: dict, field: str
+) -> None:
+    answer = _large(_succeeded(), field)
+    assert len(answer.page_data.model_dump_json()) > 20_000  # type: ignore[union-attr]
+
+    outcome, _ = await asyncio.gather(_call(runtime, args), _electron(runtime, answer))
+
+    assert outcome.output_storage_kind == "inline_json"  # type: ignore[attr-defined]
+    parsed = BrowserToolOutput.model_validate(outcome.output).root  # type: ignore[attr-defined]
+    assert parsed.untrusted is True  # type: ignore[union-attr]
+    data = parsed.data  # type: ignore[union-attr]
+    if field == "console":
+        assert parsed.truncated == "console_too_long"  # type: ignore[union-attr]
+        assert data.console is not None and len(data.console) == 100
+        assert data.console[0].text.startswith("line 0 ")
+    else:
+        assert len(data.popups) == 10 and len(data.blocked) == 10
+        assert data.popups[0].endswith("…")
 
 
 # Catches: an Electron failure that reaches the model without its code, its

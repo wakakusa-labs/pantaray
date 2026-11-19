@@ -89,11 +89,16 @@ function fakeUserBrowser({ site = {}, command = () => undefined, closeTab = asyn
   };
   let closeConnection = () => undefined;
   const connection = {
-    async openTab(onPopup) {
+    // As the real connection does, sends nothing for a tab whose signal aborted.
+    async openTab(onPopup, signal) {
       state.tabsOpened += 1;
       state.onPopup = onPopup;
       return {
-        cdp,
+        cdp: {
+          ...cdp,
+          sendCommand: (...args) =>
+            signal.aborted ? Promise.reject(signal.reason) : cdp.sendCommand(...args),
+        },
         close: () => {
           state.tabsClosed += 1;
           return closeTab();

@@ -9,7 +9,7 @@ relay runs, leaves when it closes, and counts only while it can still send.
 The runtime consults this registry and the WebSocket layer fills it, so it sits
 with the runtime.
 
-A desktop request (a screen capture, an HTML render, a browser operation or
+A desktop request (a screen capture, a browser operation or a browser session
 close) is handed to the newest of these sessions, whichever Action asked and
 whether or not a session follows that Action. The asking tool runs on a worker thread with its own event loop, so each
 session is recorded with the loop that serves it and the send runs there.
@@ -26,7 +26,6 @@ from pantaray_agents.schema.events import OutboundEvent
 from pantaray_agents.schema.websocket.server_messages import (
     BrowserOperationRequestedMessage,
     BrowserSessionCloseRequestedMessage,
-    HtmlRenderRequestedMessage,
     ScreenCaptureRequestedMessage,
 )
 
@@ -34,14 +33,12 @@ logger = logging.getLogger(__name__)
 
 type DesktopRequestMessage = (
     ScreenCaptureRequestedMessage
-    | HtmlRenderRequestedMessage
     | BrowserOperationRequestedMessage
     | BrowserSessionCloseRequestedMessage
 )
 
 _DESKTOP_REQUEST_EVENTS: dict[type[DesktopRequestMessage], OutboundEvent] = {
     ScreenCaptureRequestedMessage: OutboundEvent.SCREEN_CAPTURE_REQUESTED,
-    HtmlRenderRequestedMessage: OutboundEvent.HTML_RENDER_REQUESTED,
     BrowserOperationRequestedMessage: OutboundEvent.BROWSER_OPERATION_REQUESTED,
     BrowserSessionCloseRequestedMessage: (
         OutboundEvent.BROWSER_SESSION_CLOSE_REQUESTED
@@ -97,7 +94,7 @@ async def deliver_desktop_request(
     """Send a desktop request through the owner's newest session that can send,
     and say whether that session sent it.
 
-    One session only: each delivery makes the desktop capture or render once,
+    One session only: each delivery makes the desktop act once,
     and only the first answer is accepted. The newest is the one the desktop
     reads, because Electron main keeps a single socket and ignores one it has
     replaced; an older session still listed is a socket whose close the server

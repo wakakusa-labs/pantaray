@@ -207,7 +207,14 @@ async function guardTarget(cdp: Debugger, sessionId?: string): Promise<void> {
     send(cdp, 'Page.enable', {}, sessionId),
     send(cdp, 'Log.enable', {}, sessionId),
     send(cdp, 'Audits.enable', {}, sessionId),
-    send(cdp, 'Page.addScriptToEvaluateOnNewDocument', { source: PAGE_GUARD_SCRIPT }, sessionId),
+    // `runImmediately` covers a document already committed when the frame was attached, as a
+    // srcdoc frame's is: it is paused before its own scripts run.
+    send(
+      cdp,
+      'Page.addScriptToEvaluateOnNewDocument',
+      { source: PAGE_GUARD_SCRIPT, runImmediately: true },
+      sessionId
+    ),
     send(cdp, 'Page.setInterceptFileChooserDialog', { enabled: true, cancel: true }, sessionId),
     // An out-of-process frame waits until it is guarded too.
     send(

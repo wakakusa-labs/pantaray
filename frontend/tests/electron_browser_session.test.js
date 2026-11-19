@@ -381,6 +381,15 @@ test('every frame target is guarded before it runs', async () => {
   });
   await turn();
   assert.deepEqual(guard('frame-1'), [...guarded, 'Runtime.runIfWaitingForDebugger']);
+  // A srcdoc frame's document is already there when it is attached.
+  assert.ok(
+    cdp.commands.some(
+      ({ method, params, sessionId }) =>
+        method === 'Page.addScriptToEvaluateOnNewDocument' &&
+        params.runImmediately === true &&
+        sessionId === 'frame-1'
+    )
+  );
 });
 
 // Catches: two operations of one session interleaving on its page, and one session's slow

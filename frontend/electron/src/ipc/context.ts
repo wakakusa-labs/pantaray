@@ -62,6 +62,7 @@ import type { RunFile } from '../actions/actionDocumentHtml';
 import type { HtmlPreviewPdfs } from '../render/htmlPreview';
 import type { createActionFetcher } from '../actions/actionFetch';
 import type { ActionLiveRefreshOutcome } from '../actions/actionLiveCore';
+import type { UserBrowserId } from '../browser/browserContract';
 import type { ChatTurnState } from '../chat/chatContracts';
 import type { TaskDraftStore } from '../actions/taskDraftStore';
 import type { createChatFetcher } from '../chat/chatFetch';
@@ -217,6 +218,8 @@ export type MainContext = {
     refreshAndResumeActionConversation: (actionId: string) => Promise<ActionLiveRefreshOutcome>;
     /** Resolves once the Action's page no longer shows the run as its active one, or on reset. */
     whenRunEnds: (request: { actionId: string; processId: string }) => Promise<void>;
+    /** Brings the user's browser to the front; rejects when macOS could not. */
+    openUserBrowser: (browser: UserBrowserId) => Promise<void>;
   };
 
   ui: {

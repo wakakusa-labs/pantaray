@@ -48,6 +48,7 @@ import type {
   ActionConversationPageRequest,
   ActionToolOutputRequest,
 } from '../../electron/src/actions/actionFetch';
+import type { UserBrowserId } from '../../electron/src/browser/browserContract';
 import type { ActionLiveUpdate } from '../../electron/src/actions/actionLiveCore';
 import type { TaskDraftChange } from '../../electron/src/actions/taskDraftStore';
 import type { TaskDraft, TaskDraftWork } from '../../electron/src/ipc/schemas/taskDrafts';
@@ -360,6 +361,8 @@ declare global {
         openConversation: (request: { actionId: string }) => Promise<void>;
         /** Stops the run the window shows; rejects when the Stop was not accepted. */
         stopAction: (request: ActionStopRequest) => Promise<void>;
+        /** Brings the browser the Action waits on to the front; a failure is only logged. */
+        openUserBrowser: (request: { browser: UserBrowserId }) => Promise<void>;
         /**
          * Stops that run and, once it has ended, resumes it with the messages waiting for it.
          * Rejects when the Stop was not accepted.

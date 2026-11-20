@@ -75,6 +75,11 @@ const ConversationOverlay = ({
   const [transientToolSteps, setTransientToolSteps] = useState<readonly ActionTransientToolStep[]>(
     []
   );
+  // Kept with its Action, so a panel that moves on to another Action shows none of these.
+  const [userBrowserWaits, setUserBrowserWaits] = useState<Pick<
+    ActionLiveSnapshot,
+    'actionId' | 'userBrowserWaits'
+  > | null>(null);
   const {
     composer,
     conversationActionId,
@@ -132,6 +137,7 @@ const ConversationOverlay = ({
         setLiveState(null);
         setTransientToolSteps([]);
         setApprovalBlockers([]);
+        setUserBrowserWaits(null);
         composerGenerationRef.current += 1;
         setComposer(initialComposerState(initialActionId));
       } else if (
@@ -149,6 +155,7 @@ const ConversationOverlay = ({
         }
         setTransientToolSteps(update.snapshot.transientToolSteps);
         setApprovalBlockers(update.snapshot.approvalBlockers);
+        setUserBrowserWaits({ actionId, userBrowserWaits: update.snapshot.userBrowserWaits });
         if (update.snapshot.page) {
           const page = update.snapshot.page;
           if (submissionControlRef.current?.contains(document.activeElement)) {
@@ -529,6 +536,11 @@ const ConversationOverlay = ({
       isActionStreamFinished={state.isActionStreamFinished}
       approvalUiState={approvalUiState}
       approvalBlockers={approvalBlockers}
+      userBrowserWaits={
+        userBrowserWaits?.actionId === conversationActionId
+          ? userBrowserWaits.userBrowserWaits
+          : undefined
+      }
       isSubmittingApproval={approval.isSubmittingApproval}
       approvalErrorMessage={approval.approvalErrorMessage}
       showBusyIndicator={showBusyIndicator}

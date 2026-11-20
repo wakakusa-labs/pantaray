@@ -52,6 +52,7 @@ const MAIN_AND_OVERLAY_CHANNELS = new Set<IpcChannel>([
   'action:withdrawMessage',
   'action:stop',
   'action:sendNow',
+  'action:openUserBrowser',
   'overlay:submitApprovalDecision',
   'history:markCompletionViewed',
   // Read-only: both windows' composers title a pasted task or suggestion link.

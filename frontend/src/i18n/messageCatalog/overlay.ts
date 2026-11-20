@@ -4,6 +4,8 @@ export const OVERLAY_MESSAGES = defineMessages({
   en: {
     'overlay.actioning': 'Running',
     'overlay.thinking': 'Thinking',
+    'overlay.userBrowserWait': 'Waiting for you to allow Pantaray in {browser}',
+    'overlay.userBrowserWait.open': 'Open {browser}',
     'overlay.executionStoppedWithError': 'An error occurred and execution stopped.',
     'overlay.executionCanceled': 'Stopped.',
     'overlay.conversation.idle': 'Load older messages',
@@ -141,6 +143,8 @@ export const OVERLAY_MESSAGES = defineMessages({
   ja: {
     'overlay.actioning': '実行中',
     'overlay.thinking': '考えています',
+    'overlay.userBrowserWait': '{browser} で許可を待っています',
+    'overlay.userBrowserWait.open': '{browser} を開く',
     'overlay.executionStoppedWithError': 'エラーが発生し、処理が終了しました。',
     'overlay.executionCanceled': '停止しました。',
     'overlay.conversation.idle': '以前のメッセージを読み込む',

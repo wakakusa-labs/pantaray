@@ -3,6 +3,7 @@ import { Check, CircleAlert, Clipboard, PictureInPicture2 } from 'lucide-react';
 
 import type { ActionConversationView as ActionConversationViewModel } from '../../../electron/src/actions/actionConversationModel';
 import { ActionConversationView } from '@/components/action-conversation/ActionConversationView';
+import { UserBrowserWaitLine } from '@/components/action-conversation/UserBrowserWaitLine';
 import { ApprovalPanel } from '@/components/agent-overlay/ApprovalPanel';
 import { MarkdownBlock } from '@/components/agent-overlay/MarkdownRenderer';
 import {
@@ -284,6 +285,7 @@ export function ActionTaskPane({
         </div>
       </div>
       <div className="action-task__dock">
+        <UserBrowserWaitLine browsers={task.userBrowserWaits} />
         {status.kind === 'approval_pending' && approval.blockers.length > 0 ? (
           <div className="action-task__approvals">
             {approval.blockers.map((blocker) => (

@@ -4,6 +4,7 @@ import overlayBackground from '@/assets/images/agentoverlay_back.png';
 import { useI18n } from '@/context/useI18n';
 import type { MessageKey } from '@/i18n/types';
 import { OpenWorkContext } from '@/components/action-conversation/sentMessageRefs';
+import { UserBrowserWaitLine } from '@/components/action-conversation/UserBrowserWaitLine';
 import type { WorkKey } from '@/components/chat/chatTimeline';
 import { splitWorkKey } from '@/history/historySelection';
 import { useCopyWorkLink } from '@/history/useCopyWorkLink';
@@ -39,6 +40,7 @@ import {
 } from 'lucide-react';
 import styled, { keyframes } from 'styled-components';
 import type { ActionApprovalBlocker } from '../../../electron/src/actions/actionLiveCore';
+import type { UserBrowserId } from '../../../electron/src/browser/browserContract';
 import { useCollapsedFocusBoundary } from './useCollapsedFocusBoundary';
 import type { ClipboardCopyStatus } from './useClipboardCopy';
 
@@ -167,6 +169,8 @@ type AgentOverlayShellProps = {
   isActionStreamFinished: boolean;
   approvalUiState: 'hidden' | 'approval_pending';
   approvalBlockers?: readonly ActionApprovalBlocker[];
+  /** The user's browsers the run waits on for the user to allow Pantaray in. */
+  userBrowserWaits?: readonly UserBrowserId[];
   isSubmittingApproval?: boolean;
   approvalErrorMessage?: string | null;
   /**
@@ -248,6 +252,7 @@ const AgentOverlayShell = ({
   isActionStreamFinished,
   approvalUiState,
   approvalBlockers = [],
+  userBrowserWaits = [],
   isSubmittingApproval = false,
   approvalErrorMessage = null,
   showBusyIndicator,
@@ -499,6 +504,7 @@ const AgentOverlayShell = ({
       </ContentFade>
 
       <ComposerDock ref={composerRef}>
+        <UserBrowserWaitLine browsers={userBrowserWaits} />
         {showApprovalPanel ? (
           <ApprovalDock>
             {approvalBlockers.map((blocker) => (

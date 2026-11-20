@@ -39,8 +39,14 @@ import {
 
 export type { UserBrowserPage } from './userBrowserTab';
 
-/** What the request names of the user's browser: which one, and the hosts the tab may open. */
-export type UserBrowserTarget = { browser: UserBrowserId; read_hosts: string[] };
+/**
+ * What the request names of the user's browser: which one, the Action whose run asks for it, and
+ * the hosts the tab may open.
+ */
+export type UserBrowserTarget = { browser: UserBrowserId; action_id: string; read_hosts: string[] };
+
+/** An Action waiting for the user to allow Pantaray in their browser. */
+export type UserBrowserWait = { actionId: string; browser: UserBrowserId };
 
 type LoggerLike = { error?: (name: string, payload?: unknown) => void };
 
@@ -94,8 +100,17 @@ function drain(session: UserSession): PageReport {
 export type UserBrowserSessions = ReturnType<typeof createUserBrowserSessions>;
 
 export function createUserBrowserSessions(params: {
-  /** Connects to the user's browser; rejects with `signal.reason` once `signal` aborts. */
-  connect: (browser: UserBrowserId, signal: AbortSignal) => Promise<UserBrowserConnection>;
+  /**
+   * Connects to the user's browser, calling `waitForUser` while the user is asked to allow it;
+   * rejects with `signal.reason` once `signal` aborts.
+   */
+  connect: (
+    browser: UserBrowserId,
+    waitForUser: () => () => void,
+    signal: AbortSignal
+  ) => Promise<UserBrowserConnection>;
+  /** Shows the wait in the Action's chat; the returned closer takes it down. */
+  showWait: (wait: UserBrowserWait) => () => void;
   /** The backend's own port, which the tab may not reach under any host name. */
   getBackendPort: () => number;
   logger?: LoggerLike | null;
@@ -122,7 +137,7 @@ export function createUserBrowserSessions(params: {
     void slot.opening.then((tab) => tab.handle.close()).catch(() => undefined);
   }
 
-  function open(id: string, browser: UserBrowserId): UserSession {
+  function open(id: string, { browser, action_id: actionId }: UserBrowserTarget): UserSession {
     const abort = new AbortController();
     let stop: UserSession['stop'] = () => undefined;
     const endedPromise = new Promise<never>((_resolve, reject) => (stop = reject));
@@ -131,7 +146,11 @@ export function createUserBrowserSessions(params: {
       id,
       browser,
       abort,
-      connection: params.connect(browser, abort.signal),
+      connection: params.connect(
+        browser,
+        () => params.showWait({ actionId, browser }),
+        abort.signal
+      ),
       connected: null,
       tab: null,
       backendPort: params.getBackendPort(),
@@ -272,7 +291,7 @@ export function createUserBrowserSessions(params: {
       let session = sessions.get(id);
       if (session === undefined) {
         if (request.operation.action !== 'navigate') return refuse(noPage());
-        session = open(id, target.browser);
+        session = open(id, target);
       }
       const opened = session;
       const settled = opened.queue.then(() => execute(opened, request, target, budgetMs, work));

@@ -775,6 +775,7 @@ function liveUpdate(
     pageVersion: 1,
     transientToolSteps: [],
     approvalBlockers,
+    userBrowserWaits: [],
     lifecycle: null,
   };
   return { kind: 'action_updated', snapshot };

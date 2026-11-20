@@ -96,6 +96,7 @@ test('Both windows act on an Action; History opens and suggestion reads belong t
     'action:withdrawMessage',
     'action:stop',
     'action:sendNow',
+    'action:openUserBrowser',
     'overlay:submitApprovalDecision',
     'clipboard:writeText',
     'history:markCompletionViewed',

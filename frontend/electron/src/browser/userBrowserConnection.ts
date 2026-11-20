@@ -64,6 +64,23 @@ export const runCommand: CommandRunner = (file, args, signal) =>
   });
 
 /**
+ * Brings the browser to the front, where it asks the user to allow Pantaray. Only the user's own
+ * press calls this: nothing takes focus on its own.
+ */
+export async function bringUserBrowserForward(
+  browser: UserBrowserId,
+  runner: CommandRunner
+): Promise<void> {
+  const { bundleId } = KNOWN_BROWSERS[browser];
+  const { exitCode } = await runner(
+    '/usr/bin/open',
+    ['-b', bundleId],
+    new AbortController().signal
+  );
+  if (exitCode !== 0) throw new Error(`open -b ${bundleId} exited with ${exitCode}.`);
+}
+
+/**
  * One hidden background tab of the caller's own. `cdp` sends to the tab's own session when no
  * `sessionId` is given, or to a frame or worker session the tab reported, and hears only those
  * sessions' events; the tab's own come without a `sessionId`, as from Electron's `Debugger`.
@@ -463,12 +480,11 @@ function browserOver(socket: WebSocketClient): UserBrowserConnection {
 
 /**
  * Opens the WebSocket and waits, with no time limit, for the user to allow it in the browser;
- * the notice is up for as long as that wait lasts. `signal` ends the wait.
+ * `waitForUser` is told when that wait starts, and its closer when it ends. `signal` ends it.
  */
 function openSocket(
   url: string,
-  browser: KnownBrowser,
-  showNotice: (browser: KnownBrowser) => () => void,
+  waitForUser: () => () => void,
   signal: AbortSignal,
   refuse: Refusal
 ): Promise<UserBrowserConnection> {
@@ -476,13 +492,13 @@ function openSocket(
     // `ws` sends no Origin header, which the browser would refuse at once, and sets no handshake
     // timeout unless asked to.
     const socket = new WebSocket(url);
-    const closeNotice = showNotice(browser);
+    const endWait = waitForUser();
     let settled = false;
     const settle = (finish: () => void) => {
       if (settled) return;
       settled = true;
       signal.removeEventListener('abort', onAbort);
-      closeNotice();
+      endWait();
       finish();
     };
     const fail = (error: unknown) => {
@@ -509,7 +525,8 @@ export async function connectUserBrowser(params: {
   /** `~/Library/Application Support`, where every known browser keeps its user-data-dir. */
   applicationSupportDir: string;
   runner: CommandRunner;
-  showNotice: (browser: KnownBrowser) => () => void;
+  /** Called as the browser starts asking the user to allow Pantaray; the closer, once that ends. */
+  waitForUser: () => () => void;
   signal: AbortSignal;
 }): Promise<UserBrowserConnection> {
   const browser = KNOWN_BROWSERS[params.browser];
@@ -523,8 +540,7 @@ export async function connectUserBrowser(params: {
   params.signal.throwIfAborted();
   return openSocket(
     `ws://127.0.0.1:${endpoint.port}${endpoint.path}`,
-    browser,
-    params.showNotice,
+    params.waitForUser,
     params.signal,
     refuse
   );

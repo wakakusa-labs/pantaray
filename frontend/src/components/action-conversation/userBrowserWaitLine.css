@@ -1,0 +1,41 @@
+/* Above the composer, as approvals are: the run waits on the user there. */
+.user-browser-wait {
+  margin-bottom: var(--space-sm);
+}
+
+.user-browser-wait__line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs) var(--space-md);
+  align-items: center;
+  justify-content: space-between;
+  margin: 0;
+  padding: var(--space-xs) 0;
+  border-top: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.user-browser-wait__line button {
+  padding: var(--space-xs) var(--space-md);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--text-primary);
+  background: var(--button-fill);
+  box-shadow: var(--button-face-highlight);
+  font: inherit;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.user-browser-wait__line button:hover {
+  background: var(--button-fill-hover);
+}
+
+.user-browser-wait__line button:active {
+  background: var(--button-fill-active);
+}
+
+.user-browser-wait__line button:focus-visible {
+  outline: 2px solid currentcolor;
+  outline-offset: 2px;
+}

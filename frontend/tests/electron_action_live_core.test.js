@@ -1047,3 +1047,62 @@ for (const status of ['error', 'timeout', 'canceled', 'success']) {
     await started.refreshDone;
   });
 }
+
+function userBrowserWaitHarness() {
+  let status = 'processing';
+  const updates = [];
+  const coordinator = createActionLiveCoordinator({
+    latestPages: immediateLatestPages(async (actionId) =>
+      conversationPage(actionId, null, 'run-1', status)
+    ),
+    publish: (update) => updates.push(update),
+    surfaceRefreshError: (_actionId, error) => assert.fail(error),
+  });
+  const waitsOf = (actionId) =>
+    updates.filter((update) => update.snapshot?.actionId === actionId).at(-1)?.snapshot
+      .userBrowserWaits;
+  return { coordinator, updates, waitsOf, finish: () => (status = 'success') };
+}
+
+// Catches: the wait shown in another Action's chat, dropped by a mid-run page read, or taken
+// down by the first of two waits to end while the other still waits on the user.
+test("a user-browser wait stays on its own Action's snapshot until its last closer runs", async () => {
+  const { coordinator, waitsOf } = userBrowserWaitHarness();
+  await coordinator.refresh('action-b');
+  const endFirst = coordinator.beginUserBrowserWait({ actionId: 'action-a', browser: 'chrome' });
+  const endSecond = coordinator.beginUserBrowserWait({ actionId: 'action-a', browser: 'chrome' });
+  assert.deepStrictEqual(waitsOf('action-a'), ['chrome']);
+  assert.deepStrictEqual(coordinator.getSnapshot('action-b').userBrowserWaits, []);
+
+  await coordinator.refresh('action-a');
+  assert.deepStrictEqual(waitsOf('action-a'), ['chrome']);
+  endFirst();
+  endFirst();
+  assert.deepStrictEqual(waitsOf('action-a'), ['chrome']);
+  endSecond();
+  assert.deepStrictEqual(waitsOf('action-a'), []);
+});
+
+// Catches: a finished Action still showing the wait, or a closer that runs after it ended
+// publishing a fresh snapshot that a window's cache keeps as a live Action.
+test('the end of the Action clears its wait and a later closer publishes nothing', async () => {
+  const { coordinator, updates, waitsOf, finish } = userBrowserWaitHarness();
+  const end = coordinator.beginUserBrowserWait({ actionId: 'action-a', browser: 'edge' });
+  finish();
+  await coordinator.refresh('action-a');
+  assert.deepStrictEqual(waitsOf('action-a'), []);
+  assert.equal(coordinator.getSnapshot('action-a'), null);
+  const published = updates.length;
+  end();
+  assert.equal(updates.length, published);
+  assert.equal(coordinator.getSnapshot('action-a'), null);
+
+  const endBeforeReset = coordinator.beginUserBrowserWait({
+    actionId: 'action-a',
+    browser: 'edge',
+  });
+  coordinator.clearAll();
+  const afterReset = updates.length;
+  endBeforeReset();
+  assert.equal(updates.length, afterReset);
+});

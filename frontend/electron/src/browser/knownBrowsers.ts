@@ -8,7 +8,7 @@
 import type { UserBrowserId } from './browserContract';
 
 export type KnownBrowser = {
-  /** What the user reads, in messages and the notice. */
+  /** What the user reads, in messages and the chat. */
   name: string;
   /** Under `~/Library/Application Support`. */
   userDataDir: string;

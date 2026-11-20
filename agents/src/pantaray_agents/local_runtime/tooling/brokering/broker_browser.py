@@ -27,7 +27,7 @@ Everything taken from the page goes in the output's ``data``, marked
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Final, Literal, TypedDict
+from typing import Final, Literal, TypedDict, cast
 
 from pydantic import ValidationError
 
@@ -294,6 +294,8 @@ async def run_browser_executor(
             operation=operation,
             # Validation refused the call with the network off.
             policy=browser_page_policy(scope, allow_network=True),
+            # The broker boundary refused a session bound to no Action.
+            action_id=cast(str, context.execution_session.action_id),
         )
     if isinstance(outcome, BrowserRelayFailed):
         raise NetworkReachedPolicyError(

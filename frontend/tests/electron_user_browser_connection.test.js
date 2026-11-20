@@ -26,7 +26,7 @@ function load() {
     Module._load = originalLoad;
   }
 }
-const { CdpCommandError, connectUserBrowser } = load();
+const { CdpCommandError, bringUserBrowserForward, connectUserBrowser } = load();
 
 /**
  * A stand-in for the browser's debugging endpoint: `mode` holds every handshake ('hold'),
@@ -85,21 +85,22 @@ function fakeRunner({ lsof = 'p4242\nf20\n', codesign = 0 } = {}) {
   return { runner, calls };
 }
 
-function fakeNotice() {
-  const notice = { shown: [], closed: 0 };
-  notice.show = (browser) => {
-    notice.shown.push(browser.name);
-    return () => (notice.closed += 1);
+/** Counts the waits for the user that started and the ones whose closer ran. */
+function fakeWait() {
+  const wait = { started: 0, ended: 0 };
+  wait.begin = () => {
+    wait.started += 1;
+    return () => (wait.ended += 1);
   };
-  return notice;
+  return wait;
 }
 
-function connect(root, { runner = fakeRunner().runner, notice = fakeNotice(), signal } = {}) {
+function connect(root, { runner = fakeRunner().runner, wait = fakeWait(), signal } = {}) {
   return connectUserBrowser({
     browser: 'chrome',
     applicationSupportDir: root,
     runner,
-    showNotice: notice.show,
+    waitForUser: wait.begin,
     signal: signal ?? new AbortController().signal,
   });
 }
@@ -110,13 +111,13 @@ const failsWith = (code, message) => (error) => {
   return true;
 };
 
-test('the wait for Allow has no time limit, and stopping it closes the socket and the notice', async (t) => {
+test('the wait for Allow has no time limit, and stopping it closes the socket and the wait', async (t) => {
   const endpoint = await browserEndpoint(t, 'hold');
   const { root } = applicationSupport(t, { port: endpoint.port });
-  const notice = fakeNotice();
+  const wait = fakeWait();
   const controller = new AbortController();
   let settled = false;
-  const connecting = connect(root, { notice, signal: controller.signal });
+  const connecting = connect(root, { wait, signal: controller.signal });
   connecting.then(
     () => (settled = true),
     () => (settled = true)
@@ -129,14 +130,13 @@ test('the wait for Allow has no time limit, and stopping it closes the socket an
   assert.equal(request.headers.origin, undefined);
   await new Promise((r) => setTimeout(r, 300));
   assert.equal(settled, false);
-  assert.deepEqual(notice.shown, ['Google Chrome']);
-  assert.equal(notice.closed, 0);
+  assert.deepEqual([wait.started, wait.ended], [1, 0]);
 
   const reason = new Error('the run stopped');
   controller.abort(reason);
   await assert.rejects(connecting, (error) => error === reason);
   await closed;
-  assert.equal(notice.closed, 1);
+  assert.deepEqual([wait.started, wait.ended], [1, 1]);
 });
 
 test("the user's refusal is told apart from any other failed handshake", async (t) => {
@@ -146,9 +146,9 @@ test("the user's refusal is told apart from any other failed handshake", async (
   ]) {
     const endpoint = await browserEndpoint(t, status);
     const { root } = applicationSupport(t, { port: endpoint.port });
-    const notice = fakeNotice();
-    await assert.rejects(connect(root, { notice }), failsWith(code, /Google Chrome/));
-    assert.equal(notice.closed, 1);
+    const wait = fakeWait();
+    await assert.rejects(connect(root, { wait }), failsWith(code, /Google Chrome/));
+    assert.deepEqual([wait.started, wait.ended], [1, 1]);
   }
 });
 
@@ -184,10 +184,10 @@ test('a listener that is not the signed browser never gets the socket', async (t
   const endpoint = await browserEndpoint(t, 'hold');
   const { root } = applicationSupport(t, { port: endpoint.port });
   const { runner, calls } = fakeRunner({ codesign: 3 });
-  const notice = fakeNotice();
-  await assert.rejects(connect(root, { runner, notice }), failsWith('BROWSER_USER_UNAVAILABLE'));
+  const wait = fakeWait();
+  await assert.rejects(connect(root, { runner, wait }), failsWith('BROWSER_USER_UNAVAILABLE'));
   assert.equal(endpoint.upgrades.length, 0);
-  assert.deepEqual(notice.shown, []);
+  assert.equal(wait.started, 0);
   assert.ok(calls[0].args.includes(`-iTCP@127.0.0.1:${endpoint.port}`));
   const [flag, option, requirement, pid] = calls[1].args;
   assert.deepEqual([flag, option, pid], ['--verify', '-R', '4242']);
@@ -215,7 +215,10 @@ test('a tab reaches only its own sessions and frames, hears only them, and has i
     });
   });
   const { root } = applicationSupport(t, { port: endpoint.port });
-  const connection = await connect(root);
+  const wait = fakeWait();
+  const connection = await connect(root, { wait });
+  // Allowed: the wait ended as the socket opened.
+  assert.deepEqual([wait.started, wait.ended], [1, 1]);
   const popups = [];
   const tab = await connection.openTab((url) => popups.push(url), new AbortController().signal);
   const events = [];
@@ -375,4 +378,19 @@ test('stopping the run ends a check that never answers', async (t) => {
   await assert.rejects(connecting, (error) => error === reason);
   // The runner gets the signal, so the real one kills its child.
   assert.equal(signals[0], controller.signal);
+});
+
+// Catches: the button opening another app than the browser that asks, or a refused open passing
+// as done.
+test('bringing the browser forward opens its own app, and a refused open rejects', async () => {
+  const calls = [];
+  await bringUserBrowserForward('chrome_beta', async (file, args) => {
+    calls.push([file, ...args]);
+    return { exitCode: 0, stdout: '' };
+  });
+  assert.deepEqual(calls, [['/usr/bin/open', '-b', 'com.google.Chrome.beta']]);
+  await assert.rejects(
+    bringUserBrowserForward('edge', async () => ({ exitCode: 1, stdout: '' })),
+    /com\.microsoft\.edgemac/
+  );
 });

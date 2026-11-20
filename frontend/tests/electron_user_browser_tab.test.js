@@ -209,13 +209,19 @@ test('a failed load names its error, and back settles on a restored page', SETTL
 const GUARDS = [
   'Page.addScriptToEvaluateOnNewDocument',
   'Page.setInterceptFileChooserDialog',
+  'Network.enable',
   'Network.setBypassServiceWorker',
   'Fetch.enable',
 ];
+// Chrome ignores the service worker bypass until Network is enabled in that session.
+const bypassesServiceWorkers = (methods) =>
+  methods.includes('Network.enable') &&
+  methods.indexOf('Network.enable') < methods.indexOf('Network.setBypassServiceWorker');
 
 // Catches: a page or one of its frames or workers running before its guards are in place (so it
-// can open a WebSocket or service worker Fetch never sees), a frame resumed after its guard
-// failed, or a worker left paused forever by a guard command Chrome lacks on workers.
+// can open a WebSocket, or have the site's installed service worker send requests Fetch never
+// sees), a frame resumed after its guard failed, or a worker left paused forever by a guard
+// command Chrome lacks on workers.
 test(
   'the tab and every frame and worker it attaches are guarded before they run',
   SETTLES,
@@ -234,6 +240,7 @@ test(
     const methods = h.commands.filter((c) => c.sessionId === undefined).map((c) => c.method);
     const navigated = methods.indexOf('Page.navigate');
     for (const guard of GUARDS) assert.ok(methods.indexOf(guard) < navigated, guard);
+    assert.ok(bypassesServiceWorkers(methods));
     const script = h.sent('Page.addScriptToEvaluateOnNewDocument')[0].params.source;
     for (const name of ['WebSocket', 'SharedWorker', 'serviceWorker', 'RTCPeerConnection']) {
       assert.match(script, new RegExp(name));
@@ -247,12 +254,14 @@ test(
     await new Promise((resolve) => setImmediate(resolve));
     const frame = h.commands.filter((c) => c.sessionId === 'frame-1').map((c) => c.method);
     for (const guard of GUARDS) assert.ok(frame.includes(guard), guard);
+    assert.ok(bypassesServiceWorkers(frame));
     assert.equal(frame.at(-1), 'Runtime.runIfWaitingForDebugger');
     assert.equal(
       h.sent('Page.addScriptToEvaluateOnNewDocument', 'frame-1')[0].params.source,
       script
     );
     const worker = h.commands.filter((c) => c.sessionId === 'worker-1');
+    assert.ok(bypassesServiceWorkers(worker.map((c) => c.method)));
     assert.match(
       worker.find((c) => c.method === 'Runtime.evaluate').params.expression,
       /WebSocket/

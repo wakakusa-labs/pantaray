@@ -362,10 +362,6 @@ export function decideUserBrowserRequest(
   if (url.protocol !== 'file:' && LOCAL_SCHEMES.has(url.protocol)) {
     return { allowed: true, reached: null };
   }
-  // The user's extensions load their own files into the pages they run on; those reach no host.
-  if (url.protocol === 'chrome-extension:' && !request.mainFrameDocument) {
-    return { allowed: true, reached: null };
-  }
   const reached = reachedHost(url);
   if (
     reached === null ||

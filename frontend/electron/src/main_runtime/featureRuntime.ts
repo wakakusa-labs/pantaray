@@ -22,7 +22,7 @@ import { createBrowserResponder } from '../browser/browserResponder';
 import { createBrowserSessions } from '../browser/browserSession';
 import { clearBrowserArtifacts } from '../browser/capture';
 import { connectUserBrowser, runCommand } from '../browser/userBrowserConnection';
-import { showUserBrowserNotice } from '../browser/userBrowserNotice';
+import { openUserBrowser } from '../browser/userBrowserForward';
 import { createUserBrowserSessions } from '../browser/userBrowserSession';
 import { createHtmlPreviewPdfs } from '../render/htmlPreview';
 import { createActionFetcher } from '../actions/actionFetch';
@@ -200,14 +200,15 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
   };
   const browserSessions = createBrowserSessions({ getBackendPort, logger: params.logger });
   const userBrowserSessions = createUserBrowserSessions({
-    connect: (browser, signal) =>
+    connect: (browser, waitForUser, signal) =>
       connectUserBrowser({
         browser,
         applicationSupportDir: app.getPath('appData'),
         runner: runCommand,
-        showNotice: (known) => showUserBrowserNotice(known.name, params.getUiLanguage()),
+        waitForUser,
         signal,
       }),
+    showWait: (wait) => orchestration.beginUserBrowserWait(wait),
     getBackendPort,
     logger: params.logger,
   });
@@ -457,6 +458,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
           refreshActionConversation: orchestration.refreshActionConversation,
           refreshAndResumeActionConversation: orchestration.refreshAndResumeActionConversation,
           whenRunEnds: orchestration.whenRunEnds,
+          openUserBrowser: (browser, kind) => openUserBrowser(browser, kind, runCommand),
         },
         chat: {
           ...createChatFetcher({ requestJson, getUserId }),

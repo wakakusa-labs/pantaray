@@ -51,6 +51,9 @@ export function useActionTask(actionId: string) {
   const [transientToolSteps, setTransientToolSteps] = useState<readonly ActionTransientToolStep[]>(
     []
   );
+  const [userBrowserWaits, setUserBrowserWaits] = useState<ActionLiveSnapshot['userBrowserWaits']>(
+    []
+  );
   const appliedPageVersionRef = useRef(0);
   // Main resumes the Action's unfinished run only after reading its page, so a failed open leaves
   // no live updates at all; only another open recovers them.
@@ -94,6 +97,7 @@ export function useActionTask(actionId: string) {
         setLive(null);
         setTransientToolSteps([]);
         setApprovalBlockers([]);
+        setUserBrowserWaits([]);
         composerGenerationRef.current += 1;
         setComposer(initialComposerState(actionId));
         return;
@@ -111,6 +115,7 @@ export function useActionTask(actionId: string) {
       }
       setTransientToolSteps(snapshot.transientToolSteps);
       setApprovalBlockers(snapshot.approvalBlockers);
+      setUserBrowserWaits(snapshot.userBrowserWaits);
     });
   }, [
     actions,
@@ -212,6 +217,8 @@ export function useActionTask(actionId: string) {
       loadOlder,
       reopen,
     },
+    /** What the run waits on the user for in their browsers. */
+    userBrowserWaits,
     approval: {
       blockers: approval.approvalBlockers,
       isSubmitting: approval.isSubmittingApproval,

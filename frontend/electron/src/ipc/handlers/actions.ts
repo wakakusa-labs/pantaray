@@ -16,6 +16,7 @@ import {
   ActionConversationOverlayRequestSchema,
   ActionConversationPageRequestSchema,
   ActionMessageRequestSchema,
+  ActionOpenUserBrowserRequestSchema,
   ActionResumeRequestSchema,
   ActionStopRequestSchema,
   ActionToolOutputRequestSchema,
@@ -220,6 +221,20 @@ export function registerActionHandlers(ctx: MainContext, registrar: IpcRegistrar
       await ctx.actions.stopAction(parsed);
     } finally {
       await ctx.actions.refreshAndResumeActionConversation(parsed.actionId);
+    }
+  });
+  // The user asked, from either window, for the browser an Action waits on. A failure leaves them
+  // nothing to act on, so it is logged, not shown.
+  registrar.handle('action:openUserBrowser', async (_event, request) => {
+    const { browser, kind } = parseInput(
+      ActionOpenUserBrowserRequestSchema,
+      'action:openUserBrowser',
+      request
+    );
+    try {
+      await ctx.actions.openUserBrowser(browser, kind);
+    } catch (error) {
+      console.error('Failed to bring the user browser forward:', error);
     }
   });
   // Send now: stop the run the waiting messages are queued for and, once it has ended, resume,

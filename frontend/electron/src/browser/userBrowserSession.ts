@@ -3,9 +3,10 @@
  * background tab of the session's own (`userBrowserConnection`), signed in to the user's real
  * accounts. The app's hidden page never serves these sessions, nor they the app's.
  *
- * The first operation connects. The user allows the connection in their browser, which takes as
- * long as it takes; only closing the session ends that wait. The operation's budget starts once
- * the connection is open and covers opening and guarding the tab.
+ * The first operation connects. The user turns remote debugging on if it is off and allows the
+ * connection in their browser, which takes as long as it takes; only closing the session ends
+ * that wait. The operation's budget starts once the connection is open and covers opening and
+ * guarding the tab.
  *
  * The tab is `userBrowserTab`'s: guarded before it runs, and judged by the session's latest rules.
  * A tab that cannot be guarded fails the operation and ends the session.
@@ -29,7 +30,11 @@ import {
   type SessionRequest,
 } from './browserSession';
 import { KNOWN_BROWSERS } from './knownBrowsers';
-import type { UserBrowserConnection } from './userBrowserConnection';
+import type {
+  UserBrowserConnection,
+  UserBrowserWaitHook,
+  UserBrowserWaitKind,
+} from './userBrowserConnection';
 import {
   openGuardedTab,
   type GuardedTab,
@@ -39,8 +44,18 @@ import {
 
 export type { UserBrowserPage } from './userBrowserTab';
 
-/** What the request names of the user's browser: which one, and the hosts the tab may open. */
-export type UserBrowserTarget = { browser: UserBrowserId; read_hosts: string[] };
+/**
+ * What the request names of the user's browser: which one, the Action whose run asks for it, and
+ * the hosts the tab may open.
+ */
+export type UserBrowserTarget = { browser: UserBrowserId; action_id: string; read_hosts: string[] };
+
+/** An Action waiting for the user in their browser, and for what. */
+export type UserBrowserWait = {
+  actionId: string;
+  browser: UserBrowserId;
+  kind: UserBrowserWaitKind;
+};
 
 type LoggerLike = { error?: (name: string, payload?: unknown) => void };
 
@@ -94,8 +109,17 @@ function drain(session: UserSession): PageReport {
 export type UserBrowserSessions = ReturnType<typeof createUserBrowserSessions>;
 
 export function createUserBrowserSessions(params: {
-  /** Connects to the user's browser; rejects with `signal.reason` once `signal` aborts. */
-  connect: (browser: UserBrowserId, signal: AbortSignal) => Promise<UserBrowserConnection>;
+  /**
+   * Connects to the user's browser, calling `waitForUser` while it waits on the user; rejects
+   * with `signal.reason` once `signal` aborts.
+   */
+  connect: (
+    browser: UserBrowserId,
+    waitForUser: UserBrowserWaitHook,
+    signal: AbortSignal
+  ) => Promise<UserBrowserConnection>;
+  /** Shows the wait in the Action's chat; the returned closer takes it down. */
+  showWait: (wait: UserBrowserWait) => () => void;
   /** The backend's own port, which the tab may not reach under any host name. */
   getBackendPort: () => number;
   logger?: LoggerLike | null;
@@ -122,7 +146,7 @@ export function createUserBrowserSessions(params: {
     void slot.opening.then((tab) => tab.handle.close()).catch(() => undefined);
   }
 
-  function open(id: string, browser: UserBrowserId): UserSession {
+  function open(id: string, { browser, action_id: actionId }: UserBrowserTarget): UserSession {
     const abort = new AbortController();
     let stop: UserSession['stop'] = () => undefined;
     const endedPromise = new Promise<never>((_resolve, reject) => (stop = reject));
@@ -131,7 +155,11 @@ export function createUserBrowserSessions(params: {
       id,
       browser,
       abort,
-      connection: params.connect(browser, abort.signal),
+      connection: params.connect(
+        browser,
+        (kind) => params.showWait({ actionId, browser, kind }),
+        abort.signal
+      ),
       connected: null,
       tab: null,
       backendPort: params.getBackendPort(),
@@ -272,7 +300,7 @@ export function createUserBrowserSessions(params: {
       let session = sessions.get(id);
       if (session === undefined) {
         if (request.operation.action !== 'navigate') return refuse(noPage());
-        session = open(id, target.browser);
+        session = open(id, target);
       }
       const opened = session;
       const settled = opened.queue.then(() => execute(opened, request, target, budgetMs, work));

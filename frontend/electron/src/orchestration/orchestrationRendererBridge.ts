@@ -523,6 +523,7 @@ export function createOrchestrationRendererBridge(params: {
     refreshAndResumeActionConversation,
     whenRunEnds,
     handleApprovalDecisionSettled,
+    beginUserBrowserWait: actionLive.beginUserBrowserWait,
     handleDisconnect,
     resetActionLive,
   };

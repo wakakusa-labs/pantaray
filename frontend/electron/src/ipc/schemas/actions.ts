@@ -6,6 +6,7 @@ import {
   ActionWithdrawMessageRequestSchema,
   ActionStopRequestSchema,
 } from '../../actions/actionContracts';
+import { UserBrowserIdSchema } from '../../browser/browserContract';
 
 export const ACTION_CONVERSATION_MAX_PAGE_SIZE = 100;
 const ACTION_TOOL_OUTPUT_MIN_PAGE_BYTES = 4;
@@ -51,4 +52,8 @@ export const ActionToolOutputRequestSchema = z
       .min(ACTION_TOOL_OUTPUT_MIN_PAGE_BYTES)
       .max(ACTION_TOOL_OUTPUT_MAX_PAGE_BYTES),
   })
+  .strict();
+
+export const ActionOpenUserBrowserRequestSchema = z
+  .object({ browser: UserBrowserIdSchema, kind: z.enum(['debugging_off', 'allow']) })
   .strict();

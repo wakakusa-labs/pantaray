@@ -122,6 +122,7 @@ function createConversationUpdate(
       },
       transientToolSteps: [],
       approvalBlockers: [],
+      userBrowserWaits: [],
       lifecycle: null,
     },
   };
@@ -930,6 +931,7 @@ describe('AgentOverlay broader E2E', () => {
           page: null,
           transientToolSteps: [],
           approvalBlockers: [],
+          userBrowserWaits: [],
           lifecycle: null,
         },
       })
@@ -1042,6 +1044,33 @@ describe('AgentOverlay broader E2E', () => {
     await act(async () => finish(olderPage!));
     expect(screen.queryByRole('button', { name: 'Load older messages' })).toBeNull();
     expect(document.activeElement).toHaveTextContent('canonical final output');
+  });
+
+  // Catches: the panel not showing its Action's wait, naming the wrong browser, or a button that
+  // opens another browser than the one that asks.
+  it("shows its Action's wait for the user in their browser, with a button to open it", async () => {
+    const openUserBrowser = vi.fn().mockResolvedValue(undefined);
+    Object.assign(window.electron!.actions!, { openUserBrowser });
+    render(
+      <UiLanguageProvider initialLanguage="en">
+        <AgentOverlay />
+      </UiLanguageProvider>
+    );
+    await act(async () => snapshotListener?.(createPendingSnapshot()));
+    const running = createConversationUpdate(null, true);
+    await act(async () =>
+      conversationListener?.({
+        ...running,
+        snapshot: { ...running.snapshot, userBrowserWaits: [{ browser: 'edge', kind: 'allow' }] },
+      })
+    );
+
+    expect(screen.getByText('Waiting for you to allow Pantaray in Microsoft Edge')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Microsoft Edge' }));
+    expect(openUserBrowser).toHaveBeenCalledWith({ browser: 'edge', kind: 'allow' });
+
+    await act(async () => conversationListener?.(createConversationUpdate(null, true)));
+    expect(screen.queryByRole('button', { name: 'Open Microsoft Edge' })).toBeNull();
   });
 
   it('renders approval panel and resumes naturally after approval', async () => {

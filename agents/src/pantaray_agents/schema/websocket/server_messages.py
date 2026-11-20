@@ -348,6 +348,8 @@ class BrowserUserTarget(_BrowserModel):
     """The operation runs in a tab of the session's own in the user's browser."""
 
     browser: UserBrowserId
+    # The Action whose chat shows that the user is asked to allow the connection.
+    action_id: _BrowserId
     # Hosts the user approved this run to open in that tab.
     read_hosts: list[BrowserHost]
 

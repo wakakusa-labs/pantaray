@@ -1,5 +1,7 @@
 import type { ActionConversationPage } from './actionContracts';
 import type { ActionLatestPageRead, ActionLatestPages } from './actionLatestPageReader';
+import type { UserBrowserId } from '../browser/browserContract';
+import type { UserBrowserWaitKind } from '../browser/userBrowserConnection';
 import {
   isProcessCompletedActionEvent,
   isProcessStartedActionEvent,
@@ -32,6 +34,9 @@ export type ActionApprovalBlocker = {
   reviewReason: string | null;
 };
 
+/** What the Action waits on the user for in one of their browsers. */
+export type ActionUserBrowserWait = { browser: UserBrowserId; kind: UserBrowserWaitKind };
+
 export type ActionLiveSnapshot = {
   actionId: string;
   page: ActionConversationPage | null;
@@ -40,6 +45,8 @@ export type ActionLiveSnapshot = {
   pageVersion: number;
   transientToolSteps: readonly ActionTransientToolStep[];
   approvalBlockers: readonly ActionApprovalBlocker[];
+  // The user's browsers this Action waits on the user in, each once.
+  userBrowserWaits: readonly ActionUserBrowserWait[];
   // A lifecycle notification is authoritative while its canonical read is pending or failed.
   lifecycle: {
     processId: string;
@@ -274,6 +281,7 @@ export function reduceActionLiveSnapshot(
     pageVersion: current?.pageVersion ?? 0,
     transientToolSteps,
     approvalBlockers: current?.approvalBlockers ?? [],
+    userBrowserWaits: current?.userBrowserWaits ?? [],
     lifecycle: current?.lifecycle ?? null,
   };
 }
@@ -328,6 +336,8 @@ export function createActionLiveCoordinator(params: {
     kind: 'gap' | 'reconnect';
     actionId: string;
   }) => Promise<ActionLiveRefreshOutcome>;
+  // Shows that the Action waits for the user in their browser; the closer ends that wait.
+  beginUserBrowserWait: (wait: { actionId: string } & ActionUserBrowserWait) => () => void;
   getSnapshot: (actionId: string) => ActionLiveSnapshot | null;
   clearAll: () => void;
 } {
@@ -352,8 +362,30 @@ export function createActionLiveCoordinator(params: {
     observedAt.set(actionId, created);
     return created;
   };
+  // Each Action's waits by their closer's own token, so one ending keeps the others shown.
+  const userBrowserWaits = new Map<string, Map<symbol, ActionUserBrowserWait>>();
   let generation = 0;
   let pageVersion = 0;
+
+  const publishUserBrowserWaits = (actionId: string): void => {
+    const current = snapshots.get(actionId) ?? null;
+    const snapshot: ActionLiveSnapshot = {
+      actionId,
+      page: current?.page ?? null,
+      pageVersion: current?.pageVersion ?? 0,
+      transientToolSteps: current?.transientToolSteps ?? [],
+      approvalBlockers: current?.approvalBlockers ?? [],
+      // One per browser: the wait begun last, as a session moves from debugging off to allow.
+      userBrowserWaits: [
+        ...new Map(
+          [...(userBrowserWaits.get(actionId)?.values() ?? [])].map((wait) => [wait.browser, wait])
+        ).values(),
+      ],
+      lifecycle: current?.lifecycle ?? null,
+    };
+    snapshots.set(actionId, snapshot);
+    params.publish({ kind: 'action_updated', snapshot });
+  };
 
   const applyTransientEffect = (actionId: string, effect: ActionLiveTransientEffect): void => {
     const current = snapshots.get(actionId) ?? null;
@@ -411,6 +443,7 @@ export function createActionLiveCoordinator(params: {
           pageVersion: ++pageVersion,
           transientToolSteps,
           approvalBlockers: actionIsTerminal ? [] : (current?.approvalBlockers ?? []),
+          userBrowserWaits: actionIsTerminal ? [] : (current?.userBrowserWaits ?? []),
           lifecycle: lifecycleAfterRead,
         };
         snapshots.set(actionId, snapshot);
@@ -419,6 +452,8 @@ export function createActionLiveCoordinator(params: {
           snapshots.delete(actionId);
           observedAt.delete(actionId);
           rootProcessIds.delete(actionId);
+          // A wait that ends after this publishes nothing: the Action is no longer shown live.
+          userBrowserWaits.delete(actionId);
         }
         return 'refreshed';
       } catch (error) {
@@ -471,6 +506,7 @@ export function createActionLiveCoordinator(params: {
             pageVersion: current?.pageVersion ?? 0,
             transientToolSteps: current?.transientToolSteps ?? [],
             approvalBlockers,
+            userBrowserWaits: current?.userBrowserWaits ?? [],
             lifecycle,
           };
           snapshots.set(route.actionId, snapshot);
@@ -506,12 +542,26 @@ export function createActionLiveCoordinator(params: {
       return rootProcessId;
     },
     handleStreamBoundary: ({ actionId }) => refresh(actionId),
+    beginUserBrowserWait: ({ actionId, browser, kind }) => {
+      const token = Symbol(browser);
+      const waits = userBrowserWaits.get(actionId) ?? new Map<symbol, ActionUserBrowserWait>();
+      waits.set(token, { browser, kind });
+      userBrowserWaits.set(actionId, waits);
+      publishUserBrowserWaits(actionId);
+      return () => {
+        // Gone once the Action ended or every Action was reset.
+        if (userBrowserWaits.get(actionId) !== waits || !waits.delete(token)) return;
+        if (waits.size === 0) userBrowserWaits.delete(actionId);
+        publishUserBrowserWaits(actionId);
+      };
+    },
     getSnapshot: (actionId) => snapshots.get(actionId) ?? null,
     clearAll: () => {
       generation += 1;
       snapshots.clear();
       observedAt.clear();
       rootProcessIds.clear();
+      userBrowserWaits.clear();
       flights.clear();
       params.publish({ kind: 'reset' });
     },

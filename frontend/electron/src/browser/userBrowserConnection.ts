@@ -2,7 +2,8 @@
  * Connecting to the user's own browser (Chrome 144+ auto-connect): Electron main finds the
  * running browser through its user-data-dir, checks that what listens on its debugging port is
  * that browser by code signature, and opens one WebSocket to it, which the browser holds until
- * the user allows it. A refusal names the browser and tells the user only what they can act on.
+ * the user allows it. While remote debugging is off it waits for the user to turn it on. A
+ * refusal names the browser and tells the user only what they can act on.
  *
  * The socket reaches the whole browser, so it stays inside this module. Callers get only tabs
  * of their own: a tab handle sends page commands to its own sessions and hears only their
@@ -13,6 +14,7 @@ import type { ClientRequest } from 'node:http';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 
 import type { UserBrowserId } from './browserContract';
 import { BrowserOperationError, type BrowserFailureCode } from './browserSession';
@@ -48,6 +50,16 @@ export type CommandRunner = (
 
 /** lsof and codesign answer in well under a second; one stuck past this makes the browser unusable. */
 const CHECK_TIMEOUT_MS = 5_000;
+/** How often the browser is checked again while the user turns remote debugging on. */
+const DEBUGGING_POLL_MS = 1_000;
+
+/**
+ * What the user is asked to do in their browser: turn remote debugging on, or allow Pantaray in
+ * once it is on.
+ */
+export type UserBrowserWaitKind = 'debugging_off' | 'allow';
+/** Told when a wait for the user starts; the closer it returns runs once that wait ends. */
+export type UserBrowserWaitHook = (kind: UserBrowserWaitKind) => () => void;
 
 export const runCommand: CommandRunner = (file, args, signal) =>
   new Promise((resolve, reject) => {
@@ -167,10 +179,6 @@ const refusal = (browser: KnownBrowser) => {
     new BrowserOperationError(code, message);
   return {
     notRunning: as('BROWSER_USER_NOT_RUNNING', `${name} is not running.`),
-    debuggingOff: as(
-      'BROWSER_USER_DEBUGGING_OFF',
-      `${name} does not allow remote debugging; turn it on at ${browser.inspectUrl}.`
-    ),
     fileBlocked: as(
       'BROWSER_USER_FILE_BLOCKED',
       `macOS did not let Pantaray read ${name}'s files; allow it in System Settings › ` +
@@ -204,16 +212,19 @@ async function browserRunning(userDataDir: string, refuse: Refusal): Promise<boo
   }
 }
 
-/** The browser's WebSocket endpoint as it wrote it: the port on line 1, the path on line 2. */
+/**
+ * The browser's WebSocket endpoint as it wrote it: the port on line 1, the path on line 2. Null
+ * while remote debugging is off, when the browser writes no file.
+ */
 async function endpointOf(
   userDataDir: string,
   refuse: Refusal
-): Promise<{ port: number; path: string }> {
+): Promise<{ port: number; path: string } | null> {
   let text: string;
   try {
     text = await fs.promises.readFile(path.join(userDataDir, PORT_FILE), 'utf8');
   } catch (error) {
-    if (errnoOf(error) === 'ENOENT') throw refuse.debuggingOff();
+    if (errnoOf(error) === 'ENOENT') return null;
     throw BLOCKED_ERRNO.has(String(errnoOf(error))) ? refuse.fileBlocked() : refuse.unavailable();
   }
   const [portLine = '', pathLine = ''] = text.split('\n').map((line) => line.trim());
@@ -248,7 +259,8 @@ async function run(
 
 /**
  * Checks that the one process listening on the port is the browser or its helper, signed by its
- * team. A file left by a browser that quit can name a port another process took since.
+ * team; false when nothing listens. A file left by a browser that quit can name a port another
+ * process took since.
  *
  * Design limit: the process could change between this check and the connection; that needs the
  * browser to quit and another process to take its port within that moment.
@@ -259,7 +271,7 @@ async function verifyListener(
   runner: CommandRunner,
   signal: AbortSignal,
   refuse: Refusal
-): Promise<void> {
+): Promise<boolean> {
   const check = (file: string, args: string[]) => run(runner, file, args, signal, refuse);
   const listing = await check('/usr/sbin/lsof', [
     '-nP',
@@ -276,13 +288,51 @@ async function verifyListener(
       .map((line) => line.slice(1))
   );
   // Nothing listens once the user turned remote debugging off, though the file stays.
-  if (pids.size === 0) throw refuse.debuggingOff();
+  if (pids.size === 0) return false;
   if (pids.size > 1) throw refuse.unavailable();
   const requirement =
     `=anchor apple generic and certificate leaf[subject.OU] = "${browser.teamId}" and ` +
     `(identifier "${browser.bundleId}" or identifier "${browser.bundleId}.helper")`;
   const verified = await check('/usr/bin/codesign', ['--verify', '-R', requirement, [...pids][0]]);
   if (verified.exitCode !== 0) throw refuse.unavailable();
+  return true;
+}
+
+/**
+ * The endpoint once remote debugging is on: the browser's file names a port it listens on. Until
+ * then the debugging-off wait is up and the browser is checked again, with no time limit; `signal`
+ * ends the wait.
+ *
+ * Design limit: polling reads the file (and runs lsof once the file is there) every
+ * DEBUGGING_POLL_MS while the user turns debugging on; watch the file instead if that wait is
+ * seen to cost noticeable CPU.
+ */
+async function endpointWhenOn(
+  userDataDir: string,
+  browser: KnownBrowser,
+  runner: CommandRunner,
+  waitForUser: UserBrowserWaitHook,
+  signal: AbortSignal,
+  refuse: Refusal
+): Promise<{ port: number; path: string }> {
+  let endWait: (() => void) | null = null;
+  try {
+    for (;;) {
+      const endpoint = await endpointOf(userDataDir, refuse);
+      signal.throwIfAborted();
+      if (
+        endpoint !== null &&
+        (await verifyListener(endpoint.port, browser, runner, signal, refuse))
+      ) {
+        return endpoint;
+      }
+      endWait ??= waitForUser('debugging_off');
+      // The timer goes with the abort, which is the only way it rejects.
+      await sleep(DEBUGGING_POLL_MS, undefined, { signal }).catch(() => signal.throwIfAborted());
+    }
+  } finally {
+    endWait?.();
+  }
 }
 
 type CdpMessage = {
@@ -463,26 +513,27 @@ function browserOver(socket: WebSocketClient): UserBrowserConnection {
 
 /**
  * Opens the WebSocket and waits, with no time limit, for the user to allow it in the browser;
- * the notice is up for as long as that wait lasts. `signal` ends the wait.
+ * the allow wait is up for as long as that lasts. `signal` ends it.
  */
 function openSocket(
   url: string,
-  browser: KnownBrowser,
-  showNotice: (browser: KnownBrowser) => () => void,
+  waitForUser: UserBrowserWaitHook,
   signal: AbortSignal,
   refuse: Refusal
 ): Promise<UserBrowserConnection> {
   return new Promise((resolve, reject) => {
+    // A stop that came while the browser was checked never fires the listener below.
+    signal.throwIfAborted();
     // `ws` sends no Origin header, which the browser would refuse at once, and sets no handshake
     // timeout unless asked to.
     const socket = new WebSocket(url);
-    const closeNotice = showNotice(browser);
+    const endWait = waitForUser('allow');
     let settled = false;
     const settle = (finish: () => void) => {
       if (settled) return;
       settled = true;
       signal.removeEventListener('abort', onAbort);
-      closeNotice();
+      endWait();
       finish();
     };
     const fail = (error: unknown) => {
@@ -509,7 +560,8 @@ export async function connectUserBrowser(params: {
   /** `~/Library/Application Support`, where every known browser keeps its user-data-dir. */
   applicationSupportDir: string;
   runner: CommandRunner;
-  showNotice: (browser: KnownBrowser) => () => void;
+  /** Told while the user is asked to turn remote debugging on, then to allow Pantaray in. */
+  waitForUser: UserBrowserWaitHook;
   signal: AbortSignal;
 }): Promise<UserBrowserConnection> {
   const browser = KNOWN_BROWSERS[params.browser];
@@ -517,14 +569,17 @@ export async function connectUserBrowser(params: {
   const userDataDir = path.join(params.applicationSupportDir, browser.userDataDir);
   if (!(await browserRunning(userDataDir, refuse))) throw refuse.notRunning();
   params.signal.throwIfAborted();
-  const endpoint = await endpointOf(userDataDir, refuse);
-  params.signal.throwIfAborted();
-  await verifyListener(endpoint.port, browser, params.runner, params.signal, refuse);
-  params.signal.throwIfAborted();
+  const endpoint = await endpointWhenOn(
+    userDataDir,
+    browser,
+    params.runner,
+    params.waitForUser,
+    params.signal,
+    refuse
+  );
   return openSocket(
     `ws://127.0.0.1:${endpoint.port}${endpoint.path}`,
-    browser,
-    params.showNotice,
+    params.waitForUser,
     params.signal,
     refuse
   );

@@ -109,6 +109,8 @@ const BrowserOperationRequestSchema = strict({
   // A tab of the session's own in the user's browser; null for the app's hidden page.
   user_browser: strict({
     browser: UserBrowserIdSchema,
+    // The Action whose chat shows that the user is asked to allow the connection.
+    action_id: NonBlankSchema,
     // Hosts the user approved this run to open in that tab.
     read_hosts: z.array(HostSchema),
   }).nullable(),
@@ -204,7 +206,6 @@ export const BrowserOperationAnswerSchema = strict({
         'BROWSER_SESSION_GONE',
         'BROWSER_ACTION_FAILED',
         'BROWSER_USER_NOT_RUNNING',
-        'BROWSER_USER_DEBUGGING_OFF',
         'BROWSER_USER_FILE_BLOCKED',
         'BROWSER_USER_DENIED',
         'BROWSER_USER_UNAVAILABLE',

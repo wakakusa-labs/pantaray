@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+from pathlib import Path
 
 import pytest
 
@@ -70,17 +72,31 @@ async def _approved_open(runtime: Runtime, url: str, *, step: int) -> dict:
     return payload
 
 
-# Catches: a call on the user's browser sent with no browser chosen, or with
-# one guessed, when none has remote debugging on.
-async def test_no_browser_with_debugging_on_is_refused_with_the_inspect_page(
-    runtime: Runtime, debugging_on: list[UserBrowserId]
+# Catches: with remote debugging on in none, a run waiting on a browser the
+# user does not run while another one runs, or on one not installed; and a call
+# sent on with no browser at all.
+def test_with_debugging_off_the_run_waits_on_a_running_then_an_installed_browser(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, debugging_on: list[UserBrowserId]
 ) -> None:
     debugging_on.clear()
+    dirs = {
+        browser_id: tmp_path / browser_id
+        for browser_id in ("chrome", "chrome_beta", "edge", "brave")
+    }
+    monkeypatch.setattr(broker_user_browser, "user_browser_data_dirs", lambda: dirs)
+    pick = lambda: broker_user_browser.user_browser_for_run("unbound-run")  # noqa: E731
 
-    error = await _refused(runtime, {"action": "snapshot", "browser": "user"})
+    with pytest.raises(BrokerPolicyError) as refused:
+        pick()
+    assert refused.value.code == "BROWSER_USER_NOT_INSTALLED"
 
-    assert error.code == "BROWSER_USER_DEBUGGING_OFF"
-    assert "chrome://inspect/#remote-debugging" in str(error)
+    dirs["chrome_beta"].mkdir()
+    dirs["edge"].mkdir()
+    assert pick() == "chrome_beta"
+    # A lock left by a browser that quit does not count; a live one does.
+    (dirs["chrome_beta"] / "SingletonLock").symlink_to("host-999999999")
+    (dirs["edge"] / "SingletonLock").symlink_to(f"host-{os.getpid()}")
+    assert pick() == "edge"
 
 
 # Catches: an approval asked for, or Electron sent, a site the user's tab must
@@ -149,6 +165,7 @@ async def test_each_site_in_the_users_browser_is_approved_once_per_run(
     assert opened["operation"]["target"]["url"] == "https://Mail.example.com/inbox"  # type: ignore[index]
     assert opened["user_browser"] == {
         "browser": "edge",
+        "action_id": "action-1",
         "read_hosts": ["mail.example.com"],
     }
     debugging_on.remove("edge")

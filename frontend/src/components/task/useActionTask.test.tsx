@@ -32,6 +32,7 @@ function update(
       pageVersion,
       transientToolSteps: [],
       approvalBlockers: [],
+      userBrowserWaits: [],
       lifecycle: null,
       ...extra,
     },

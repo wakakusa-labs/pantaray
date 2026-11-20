@@ -29,6 +29,7 @@ function update(
       pageVersion,
       transientToolSteps: [],
       approvalBlockers: [],
+      userBrowserWaits: [],
       lifecycle: null,
       ...extra,
     },
@@ -273,6 +274,27 @@ describe('ActionTaskPane', () => {
       toolRequestId: 'tool-request-1',
       decision: 'approved_once',
     });
+  });
+
+  // Catches: the wait not reaching the pane, the line not following the wait from debugging off to
+  // allow, or a button that opens another browser, or the wrong page, than the one that asks.
+  it("follows the wait in the user's browser from debugging off to allow, then takes it down", async () => {
+    const openUserBrowser = vi.fn().mockResolvedValue(undefined);
+    Object.assign(window.electron!.actions!, { openUserBrowser });
+    await renderPane();
+    const page = createActionPage('act-1', 'processing');
+    emit(update(page, 1, { userBrowserWaits: [{ browser: 'edge', kind: 'debugging_off' }] }));
+    expect(screen.getByText('Turn on remote debugging in Microsoft Edge')).toBeTruthy();
+    await userEvent.click(primaryButton('Open settings'));
+    expect(openUserBrowser).toHaveBeenCalledWith({ browser: 'edge', kind: 'debugging_off' });
+
+    emit(update(page, 1, { userBrowserWaits: [{ browser: 'edge', kind: 'allow' }] }));
+    expect(screen.getByText('Waiting for you to allow Pantaray in Microsoft Edge')).toBeTruthy();
+    await userEvent.click(primaryButton('Open Microsoft Edge'));
+    expect(openUserBrowser).toHaveBeenLastCalledWith({ browser: 'edge', kind: 'allow' });
+
+    emit(update(page, 1));
+    expect(screen.queryByRole('button', { name: 'Open Microsoft Edge' })).toBeNull();
   });
 
   it('loads the older part of a long conversation', async () => {

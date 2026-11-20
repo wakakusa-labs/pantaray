@@ -97,6 +97,7 @@ async function publish(page: Page, version: number, conversationPage: ActionConv
       pageVersion: version,
       transientToolSteps: [],
       approvalBlockers: [],
+      userBrowserWaits: [],
       lifecycle: null,
     },
   };
@@ -430,6 +431,7 @@ for (const language of ['ja', 'en'] as const) {
             pageVersion: 1,
             transientToolSteps: [],
             approvalBlockers: [],
+            userBrowserWaits: [],
             lifecycle: null,
           },
         }
@@ -593,6 +595,7 @@ for (const language of ['ja', 'en'] as const) {
           },
         ],
         approvalBlockers: [],
+        userBrowserWaits: [],
         lifecycle: { processId: 'run-1', status: 'processing' },
       },
     };

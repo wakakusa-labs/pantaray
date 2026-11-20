@@ -552,6 +552,43 @@ test('Stopping a run rereads its page and live run, and rejects a Stop not accep
   assert.deepEqual(refused, ['action-1']);
 });
 
+// Catches: a browser id the renderer made up reaching `open -b`, and a failed open rejecting
+// into a window that has nothing to show for it.
+test("Opening the user browser takes a known browser only, and a failure is not the window's", async (t) => {
+  const opened = [];
+  const invoke = register({
+    openUserBrowser: async (browser, kind) => opened.push([browser, kind]),
+  });
+  assert.equal(
+    await invoke('action:openUserBrowser', { browser: 'chrome', kind: 'debugging_off' }),
+    undefined
+  );
+  for (const invalid of [
+    { browser: 'firefox', kind: 'allow' },
+    { browser: 'chrome', kind: 'chrome://settings' },
+    { browser: 'chrome', kind: 'allow', extra: 1 },
+    null,
+  ]) {
+    await assert.rejects(
+      async () => invoke('action:openUserBrowser', invalid),
+      (error) => error?.name === 'IpcValidationError'
+    );
+  }
+  assert.deepEqual(opened, [['chrome', 'debugging_off']]);
+
+  t.mock.method(console, 'error', () => undefined);
+  const failing = register({
+    openUserBrowser: async () => {
+      throw new Error('open failed');
+    },
+  });
+  assert.equal(
+    await failing('action:openUserBrowser', { browser: 'edge', kind: 'allow' }),
+    undefined
+  );
+  assert.equal(console.error.mock.callCount(), 1);
+});
+
 function validSubmit() {
   return {
     target: { kind: 'existing', action_id: 'action-1', expected_process_id: null },

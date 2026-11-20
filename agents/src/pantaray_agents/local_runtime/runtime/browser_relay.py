@@ -89,7 +89,6 @@ _SESSION_ENDING_CODES: frozenset[BrowserEngineFailureCode] = frozenset(
         "BROWSER_RENDERER_CRASHED",
         "BROWSER_SESSION_GONE",
         "BROWSER_USER_NOT_RUNNING",
-        "BROWSER_USER_DEBUGGING_OFF",
         "BROWSER_USER_FILE_BLOCKED",
         "BROWSER_USER_DENIED",
         "BROWSER_USER_UNAVAILABLE",
@@ -191,6 +190,7 @@ async def request_browser_operation(
     user_browser: None,
     operation: BrowserOperation,
     policy: BrowserPagePolicy,
+    action_id: None = None,
 ) -> BrowserOperationOutcome: ...
 
 
@@ -205,6 +205,7 @@ async def request_browser_operation(
     user_browser: UserBrowserId,
     operation: BrowserOperation,
     policy: BrowserPagePolicy,
+    action_id: str,
 ) -> BrowserOperationOutcome: ...
 
 
@@ -218,6 +219,7 @@ async def request_browser_operation(
     user_browser: UserBrowserId | None,
     operation: BrowserOperation,
     policy: BrowserPagePolicy,
+    action_id: str | None = None,
 ) -> BrowserOperationOutcome:
     """Run ``operation`` in the session of the owner's ``browser`` page, opening
     one if it has none.
@@ -227,6 +229,8 @@ async def request_browser_operation(
     hosts approved for it, whatever ``policy`` names. ``user_browser`` is the
     user's browser the ``"user"`` page runs in; naming another than the one the
     page is bound to (:func:`bound_user_browser`) raises ``ValueError``.
+    ``action_id`` is the run's Action, whose chat shows the wait while the user
+    is asked to allow the connection.
     """
 
     opened = _current_session(
@@ -244,8 +248,18 @@ async def request_browser_operation(
             network=(),
         )
     session = opened.session
-    # Until the user's browser answers once, the user is being asked to allow
-    # the connection, which takes as long as they take; stopping the run ends it.
+    user_target = None
+    if user_browser is not None:
+        # The overloads require it with the user's browser.
+        assert action_id is not None
+        user_target = BrowserUserTarget(
+            browser=user_browser,
+            action_id=action_id,
+            read_hosts=list(opened.read_hosts),
+        )
+    # Until the user's browser answers once, the user is being asked to turn
+    # remote debugging on and allow the connection, which takes as long as they
+    # take; stopping the run ends it.
     timeout_seconds = (
         None
         if browser == "user" and not opened.connected
@@ -264,13 +278,7 @@ async def request_browser_operation(
                 policy=policy.model_copy(
                     update={"write_hosts": list(opened.write_hosts)}
                 ),
-                user_browser=(
-                    None
-                    if user_browser is None
-                    else BrowserUserTarget(
-                        browser=user_browser, read_hosts=list(opened.read_hosts)
-                    )
-                ),
+                user_browser=user_target,
             ),
         )
         if not delivered and timeout_seconds is None:

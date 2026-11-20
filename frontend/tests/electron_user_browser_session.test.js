@@ -120,6 +120,7 @@ function harness(options = {}) {
   const browser = fakeUserBrowser(options);
   const userSessions = createUserBrowserSessions({
     connect: options.connect ?? (async () => browser.connection),
+    showWait: options.showWait ?? (() => () => undefined),
     getBackendPort: () => BACKEND_PORT,
   });
   const answers = [];
@@ -148,7 +149,9 @@ function harness(options = {}) {
         secret_paths: [],
         write_hosts: writeHosts,
       },
-      user_browser: app ? null : { browser: 'chrome', read_hosts: readHosts },
+      user_browser: app
+        ? null
+        : { browser: 'chrome', action_id: 'action-1', read_hosts: readHosts },
     });
     return answers.find((answer) => answer.operation_request_id === id).result;
   };
@@ -209,21 +212,37 @@ test("a user-browser request never touches the app's page", SETTLES, async () =>
 });
 
 // Catches: a close (the run stopped) that leaves the wait for the user's Allow running, so the
-// connection opens later with no run to close it, or a later operation served anyway.
+// connection opens later with no run to close it, or a later operation served anyway; and the
+// wait shown in another Action's chat, or left there after the close.
 test('closing the session aborts a connection still waiting for the user', SETTLES, async () => {
   let signal;
+  const waits = [];
   const h = harness({
-    connect: (_id, abortSignal) => {
+    // As the real connection does: the wait starts with the socket and ends on the abort.
+    connect: (_browser, waitForUser, abortSignal) => {
       signal = abortSignal;
+      const endWait = waitForUser('allow');
       return new Promise((_resolve, reject) =>
-        abortSignal.addEventListener('abort', () => reject(abortSignal.reason))
+        abortSignal.addEventListener('abort', () => {
+          endWait();
+          reject(abortSignal.reason);
+        })
       );
+    },
+    showWait: (wait) => {
+      const shown = { ...wait, ended: false };
+      waits.push(shown);
+      return () => (shown.ended = true);
     },
   });
   const pending = h.navigate('https://a.example/');
   await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(waits, [
+    { actionId: 'action-1', browser: 'chrome', kind: 'allow', ended: false },
+  ]);
   h.userSessions.close('session-1');
   assert.equal(signal.aborted, true);
+  assert.equal(waits[0].ended, true);
   assert.equal((await pending).code, 'BROWSER_SESSION_GONE');
   assert.equal((await h.navigate('https://a.example/')).code, 'BROWSER_SESSION_GONE');
   assert.equal(h.state.tabsOpened, 0);
@@ -258,7 +277,7 @@ test(
       operation: { action: 'navigate', target: { kind: 'web', url } },
       policy: { allow_network: true, write_hosts: [] },
     });
-    const target = { browser: 'chrome', read_hosts: ['a.example'] };
+    const target = { browser: 'chrome', action_id: 'action-1', read_hosts: ['a.example'] };
     const go = (page) => page.navigate('https://a.example/');
     assert.equal((await sessions.run(request('https://a.example/'), target, 50, go)).status, 'ok');
     stall = true;
@@ -347,7 +366,7 @@ test('an operation past its budget while the tab is guarded never runs', SETTLES
       operation: { action: 'navigate', target: { kind: 'web', url: 'https://a.example/' } },
       policy: { allow_network: true, write_hosts: [] },
     },
-    { browser: 'chrome', read_hosts: ['a.example'] },
+    { browser: 'chrome', action_id: 'action-1', read_hosts: ['a.example'] },
     20,
     async () => (worked = true)
   );

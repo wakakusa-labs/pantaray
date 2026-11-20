@@ -4,6 +4,7 @@ import overlayBackground from '@/assets/images/agentoverlay_back.png';
 import { useI18n } from '@/context/useI18n';
 import type { MessageKey } from '@/i18n/types';
 import { OpenWorkContext } from '@/components/action-conversation/sentMessageRefs';
+import { UserBrowserWaitLine } from '@/components/action-conversation/UserBrowserWaitLine';
 import type { WorkKey } from '@/components/chat/chatTimeline';
 import { splitWorkKey } from '@/history/historySelection';
 import { useCopyWorkLink } from '@/history/useCopyWorkLink';
@@ -38,7 +39,10 @@ import {
   Minus,
 } from 'lucide-react';
 import styled, { keyframes } from 'styled-components';
-import type { ActionApprovalBlocker } from '../../../electron/src/actions/actionLiveCore';
+import type {
+  ActionApprovalBlocker,
+  ActionUserBrowserWait,
+} from '../../../electron/src/actions/actionLiveCore';
 import { useCollapsedFocusBoundary } from './useCollapsedFocusBoundary';
 import type { ClipboardCopyStatus } from './useClipboardCopy';
 
@@ -167,6 +171,8 @@ type AgentOverlayShellProps = {
   isActionStreamFinished: boolean;
   approvalUiState: 'hidden' | 'approval_pending';
   approvalBlockers?: readonly ActionApprovalBlocker[];
+  /** What the run waits on the user for in their browsers. */
+  userBrowserWaits?: readonly ActionUserBrowserWait[];
   isSubmittingApproval?: boolean;
   approvalErrorMessage?: string | null;
   /**
@@ -248,6 +254,7 @@ const AgentOverlayShell = ({
   isActionStreamFinished,
   approvalUiState,
   approvalBlockers = [],
+  userBrowserWaits = [],
   isSubmittingApproval = false,
   approvalErrorMessage = null,
   showBusyIndicator,
@@ -499,6 +506,7 @@ const AgentOverlayShell = ({
       </ContentFade>
 
       <ComposerDock ref={composerRef}>
+        <UserBrowserWaitLine waits={userBrowserWaits} />
         {showApprovalPanel ? (
           <ApprovalDock>
             {approvalBlockers.map((blocker) => (

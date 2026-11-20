@@ -68,21 +68,28 @@ def read_todo_list(
     sort: TodoListSort,
     clock: TodoClock,
 ) -> TodoList:
-    """Every TODO not deleted; `sort` orders the open ones, by date added or
-    by due date with no due date last."""
+    """Every open TODO not deleted and those checked in the last 7 days;
+    `sort` orders the open ones, by date added or by due date with no due
+    date last."""
 
     scope_sql, scope_params = todo_scope_sql(scope)
     project_sql, project_params = todo_project_sql(project)
-    # Design limit: every checked TODO is read too; page the list when a
-    # project holds more than 1,000 TODOs.
+    # Design limit: every open TODO is read; page the list when a project
+    # holds more than 1,000 open TODOs.
     sql = (
         f"SELECT {TODO_SELECT} FROM todo_items AS todo "
         "WHERE todo.user_id = :user_id AND todo.deleted_at IS NULL "
+        "AND (todo.checked_at IS NULL OR todo.checked_at >= :checked_since) "
         f"AND {scope_sql} AND {project_sql} "
         "ORDER BY todo.checked_at IS NOT NULL, todo.checked_at DESC, "
         f"{_LIST_ORDER[sort]}todo.created_at, todo.todo_id"
     )
-    params = {"user_id": user_id, **scope_params, **project_params}
+    params = {
+        "user_id": user_id,
+        "checked_since": core.listed_checked_since(clock.now),
+        **scope_params,
+        **project_params,
+    }
     with todo_db_connection() as connection:
         todos = [todo_from_row(row) for row in connection.execute(sql, params)]
         conversations = resolve_todo_conversations(

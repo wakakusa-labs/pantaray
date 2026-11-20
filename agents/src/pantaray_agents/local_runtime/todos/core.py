@@ -25,9 +25,15 @@ from pantaray_agents.local_runtime.todos.model import (
     TodoOrigin,
 )
 from pantaray_agents.local_runtime.todos.week import local_date_at, shift_days
-from pantaray_agents.utils.timestamps import parse_iso8601_utc
+from pantaray_agents.utils.timestamps import (
+    format_iso8601_utc_z_milliseconds,
+    parse_iso8601_utc,
+)
 
 DELETED_TODO_RETENTION: Final = timedelta(days=30)
+# A checked TODO stays in the list this long; the progress calendar shows the
+# older ones.
+CHECKED_TODO_LISTED_FOR: Final = timedelta(days=7)
 
 _NAMESPACE_TODO_RECURRENCE: Final = uuid.uuid5(
     uuid.NAMESPACE_URL, "pantaray:todo_recurrence:v1"
@@ -217,6 +223,14 @@ def restore(todo: Todo, *, now: str) -> Todo | Rejected[RestoreRejection]:
     if purge_due(todo, now=now):
         return Rejected("expired")
     return replace(todo, deletion=None)
+
+
+def listed_checked_since(now: str) -> str:
+    """The earliest check time a TODO the list shows may have."""
+
+    return format_iso8601_utc_z_milliseconds(
+        parse_iso8601_utc(now) - CHECKED_TODO_LISTED_FOR
+    )
 
 
 def purge_due(todo: Todo, *, now: str) -> bool:

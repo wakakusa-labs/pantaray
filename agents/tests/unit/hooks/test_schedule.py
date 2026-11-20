@@ -163,3 +163,18 @@ def test_ambiguous_and_missing_wall_times_occur_at_the_first_reading() -> None:
     assert next_occurrence_after(half_past, _utc(2026, 10, 25, 0, 30), _BERLIN) == (
         _utc(2026, 10, 25, 2, 30)
     )
+
+
+def test_an_unaligned_interval_from_a_local_instant_steps_forward_in_utc() -> None:
+    # A local `now` in the repeated hour after clocks go back: adding the interval
+    # to its wall clock would land 45 minutes in the past and refire every tick.
+    trigger = Every(
+        every=timedelta(minutes=15), align=False, offset=timedelta(0), tz="local"
+    )
+    berlin = ZoneInfo("Europe/Berlin")
+    fired = datetime(2026, 10, 25, 2, 10, fold=1, tzinfo=berlin)
+
+    assert next_occurrence_after(trigger, fired, berlin) == fired.astimezone(
+        UTC
+    ) + timedelta(minutes=15)
+    assert latest_occurrence(trigger, fired, berlin) == fired.astimezone(UTC)

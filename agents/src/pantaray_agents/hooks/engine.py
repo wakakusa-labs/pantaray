@@ -52,6 +52,7 @@ def run_hook_tick(
     The state is written after ``enqueue`` returns, so a crash in between fires
     the same occurrence again: ``enqueue`` MUST be idempotent per occurrence.
     """
+    now = now.astimezone(UTC)
     next_fire_times = states.read_next_fire_times()
     for hook in hooks:
         try:

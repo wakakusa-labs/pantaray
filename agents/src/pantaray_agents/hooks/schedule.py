@@ -21,6 +21,9 @@ def latest_occurrence(trigger: Trigger, now: datetime, zone: tzinfo) -> datetime
     After missed occurrences (sleep, restart, a closed gate) only this latest
     one fires, once.
     """
+    # Instants are compared and added to in UTC: wall-clock arithmetic on a local
+    # `now` would step backwards across a clock set back.
+    now = now.astimezone(UTC)
     if isinstance(trigger, At):
         return trigger.at.astimezone(UTC)
     if not trigger.align:
@@ -34,6 +37,7 @@ def next_occurrence_after(
     """The first occurrence after ``moment``, or None when the trigger is spent."""
     if isinstance(trigger, At):
         return None
+    moment = moment.astimezone(UTC)
     if not trigger.align and isinstance(trigger.every, timedelta):
         return moment + trigger.every
     boundary = _step(_latest_boundary(trigger, moment, zone), trigger.every)

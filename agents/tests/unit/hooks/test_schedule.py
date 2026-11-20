@@ -113,3 +113,53 @@ def test_a_one_shot_trigger_is_spent_after_it_fires() -> None:
 
     assert latest_occurrence(At(at=at), _utc(2026, 9, 8), UTC) == _utc(2026, 9, 7, 0)
     assert next_occurrence_after(At(at=at), _utc(2026, 9, 8), UTC) is None
+
+
+_BERLIN = ZoneInfo("Europe/Berlin")
+# Berlin sets clocks forward at 01:00Z on 2026-03-29 (02:00 -> 03:00 local) and
+# back at 01:00Z on 2026-10-25 (03:00 -> 02:00 local).
+_TRANSITIONS = (_utc(2026, 3, 29, 1), _utc(2026, 10, 25, 1))
+_LOCAL_TRIGGERS = (
+    Every(every=timedelta(minutes=15), align=True, offset=timedelta(0), tz="local"),
+    Every(every="hour", align=True, offset=timedelta(minutes=30), tz="local"),
+    Every(every="day", align=True, offset=timedelta(hours=2, minutes=30), tz="local"),
+)
+
+
+@pytest.mark.parametrize("trigger", _LOCAL_TRIGGERS)
+@pytest.mark.parametrize("transition", _TRANSITIONS)
+def test_occurrences_bracket_every_instant_around_a_dst_change(
+    trigger: Every, transition: datetime
+) -> None:
+    # Catches a next occurrence in the past after clocks are set back (a hook
+    # would refire every tick) and a latest one in the future after they are
+    # set forward (it would fire early, then again at its time).
+    instant = transition - timedelta(hours=3)
+    while instant < transition + timedelta(hours=3):
+        latest = latest_occurrence(trigger, instant, _BERLIN)
+        following = next_occurrence_after(trigger, instant, _BERLIN)
+        assert following is not None
+        assert latest <= instant < following, instant
+        assert next_occurrence_after(trigger, latest, _BERLIN) == following, instant
+        instant += timedelta(seconds=150)
+
+
+def test_ambiguous_and_missing_wall_times_occur_at_the_first_reading() -> None:
+    # Pins the rule: a repeated wall time fires on its first pass, a skipped
+    # one when the clocks jump past it.
+    half_past = Every(
+        every="hour", align=True, offset=timedelta(minutes=30), tz="local"
+    )
+
+    assert next_occurrence_after(half_past, _utc(2026, 3, 29, 0, 45), _BERLIN) == (
+        _utc(2026, 3, 29, 1, 0)
+    )
+    assert next_occurrence_after(half_past, _utc(2026, 3, 29, 1, 0), _BERLIN) == (
+        _utc(2026, 3, 29, 1, 30)
+    )
+    assert next_occurrence_after(half_past, _utc(2026, 10, 25, 0, 0), _BERLIN) == (
+        _utc(2026, 10, 25, 0, 30)
+    )
+    assert next_occurrence_after(half_past, _utc(2026, 10, 25, 0, 30), _BERLIN) == (
+        _utc(2026, 10, 25, 2, 30)
+    )

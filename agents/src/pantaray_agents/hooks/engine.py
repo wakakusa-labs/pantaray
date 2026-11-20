@@ -61,12 +61,26 @@ def run_hook_tick(
                 if isinstance(hook.trigger, Every) and hook.trigger.tz == "local"
                 else UTC
             )
-            occurrence = latest_occurrence(hook.trigger, now, zone)
-            fire_at = next_fire_times.get(hook.id, occurrence)
+            first_fire = hook.id not in next_fire_times
+            fire_at = (
+                latest_occurrence(hook.trigger, now, zone)
+                if first_fire
+                else next_fire_times[hook.id]
+            )
             if fire_at is None or fire_at > now:
                 continue
             if not all(gate_is_open(gate) for gate in hook.requires):
                 continue
+            # An unaligned trigger has no grid: its occurrence is the due time,
+            # pinned before a first fire so a repeat after a failed state write
+            # stands for the same occurrence.
+            if first_fire:
+                states.write_next_fire_time(hook.id, fire_at)
+            occurrence = (
+                fire_at
+                if isinstance(hook.trigger, Every) and not hook.trigger.align
+                else latest_occurrence(hook.trigger, now, zone)
+            )
             if enqueue(Fire(hook=hook, occurrence=occurrence, now=now)) == "retry":
                 continue
             states.write_next_fire_time(

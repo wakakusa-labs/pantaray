@@ -55,5 +55,5 @@ export const ActionToolOutputRequestSchema = z
   .strict();
 
 export const ActionOpenUserBrowserRequestSchema = z
-  .object({ browser: UserBrowserIdSchema })
+  .object({ browser: UserBrowserIdSchema, kind: z.enum(['debugging_off', 'allow']) })
   .strict();

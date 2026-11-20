@@ -1067,7 +1067,7 @@ describe('AgentOverlay broader E2E', () => {
 
     expect(screen.getByText('Waiting for you to allow Pantaray in Microsoft Edge')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Open Microsoft Edge' }));
-    expect(openUserBrowser).toHaveBeenCalledWith({ browser: 'edge' });
+    expect(openUserBrowser).toHaveBeenCalledWith({ browser: 'edge', kind: 'allow' });
 
     await act(async () => conversationListener?.(createConversationUpdate(null, true)));
     expect(screen.queryByRole('button', { name: 'Open Microsoft Edge' })).toBeNull();

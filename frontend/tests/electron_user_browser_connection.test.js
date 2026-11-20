@@ -27,7 +27,7 @@ function load() {
   }
 }
 const { CdpCommandError, connectUserBrowser } = load();
-const { bringUserBrowserForward } = require(`${DIST}/userBrowserForward.js`);
+const { openUserBrowser } = require(`${DIST}/userBrowserForward.js`);
 
 /**
  * A stand-in for the browser's debugging endpoint: `mode` holds every handshake ('hold'),
@@ -458,17 +458,22 @@ test('stopping the run ends a check that never answers', async (t) => {
   assert.equal(signals[0], controller.signal);
 });
 
-// Catches: the button opening another app than the browser that asks, or a refused open passing
-// as done.
-test('bringing the browser forward opens its own app, and a refused open rejects', async () => {
+// Catches: the button opening another app than the browser that asks, the settings page missing
+// while debugging is off, or a refused open passing as done.
+test('opening the browser opens its own app, on its debugging settings while off', async () => {
   const calls = [];
-  await bringUserBrowserForward('chrome_beta', async (file, args) => {
+  const runner = async (file, args) => {
     calls.push([file, ...args]);
     return { exitCode: 0, stdout: '' };
-  });
-  assert.deepEqual(calls, [['/usr/bin/open', '-b', 'com.google.Chrome.beta']]);
+  };
+  await openUserBrowser('chrome_beta', 'allow', runner);
+  await openUserBrowser('chrome', 'debugging_off', runner);
+  assert.deepEqual(calls, [
+    ['/usr/bin/open', '-b', 'com.google.Chrome.beta'],
+    ['/usr/bin/open', '-b', 'com.google.Chrome', 'chrome://inspect/#remote-debugging'],
+  ]);
   await assert.rejects(
-    bringUserBrowserForward('edge', async () => ({ exitCode: 1, stdout: '' })),
+    openUserBrowser('edge', 'allow', async () => ({ exitCode: 1, stdout: '' })),
     /com\.microsoft\.edgemac/
   );
 });

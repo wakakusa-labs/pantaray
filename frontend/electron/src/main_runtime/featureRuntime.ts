@@ -22,7 +22,7 @@ import { createBrowserResponder } from '../browser/browserResponder';
 import { createBrowserSessions } from '../browser/browserSession';
 import { clearBrowserArtifacts } from '../browser/capture';
 import { connectUserBrowser, runCommand } from '../browser/userBrowserConnection';
-import { bringUserBrowserForward } from '../browser/userBrowserForward';
+import { openUserBrowser } from '../browser/userBrowserForward';
 import { createUserBrowserSessions } from '../browser/userBrowserSession';
 import { createHtmlPreviewPdfs } from '../render/htmlPreview';
 import { createActionFetcher } from '../actions/actionFetch';
@@ -458,7 +458,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
           refreshActionConversation: orchestration.refreshActionConversation,
           refreshAndResumeActionConversation: orchestration.refreshAndResumeActionConversation,
           whenRunEnds: orchestration.whenRunEnds,
-          openUserBrowser: (browser) => bringUserBrowserForward(browser, runCommand),
+          openUserBrowser: (browser, kind) => openUserBrowser(browser, kind, runCommand),
         },
         chat: {
           ...createChatFetcher({ requestJson, getUserId }),

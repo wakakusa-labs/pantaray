@@ -226,13 +226,13 @@ export function registerActionHandlers(ctx: MainContext, registrar: IpcRegistrar
   // The user asked, from either window, for the browser an Action waits on. A failure leaves them
   // nothing to act on, so it is logged, not shown.
   registrar.handle('action:openUserBrowser', async (_event, request) => {
-    const { browser } = parseInput(
+    const { browser, kind } = parseInput(
       ActionOpenUserBrowserRequestSchema,
       'action:openUserBrowser',
       request
     );
     try {
-      await ctx.actions.openUserBrowser(browser);
+      await ctx.actions.openUserBrowser(browser, kind);
     } catch (error) {
       console.error('Failed to bring the user browser forward:', error);
     }

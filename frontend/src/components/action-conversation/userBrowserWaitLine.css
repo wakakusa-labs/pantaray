@@ -18,29 +18,7 @@
   margin: 0;
 }
 
-/* With debugging off, the address and the open button share the row under the text. */
-.user-browser-wait__line--debugging_off p {
-  flex-basis: 100%;
-}
-
-/* Selectable, so the user can paste it into the browser's address bar. */
-.user-browser-wait__address {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  min-width: 0;
-  color: var(--text-primary);
-}
-
-.user-browser-wait__address code {
-  font-family: var(--font-mono);
-  -webkit-user-select: text;
-  user-select: text;
-  overflow-wrap: anywhere;
-}
-
-.user-browser-wait__open {
-  margin-left: auto;
+.user-browser-wait__line button {
   padding: var(--space-xs) var(--space-md);
   border: 1px solid transparent;
   border-radius: 8px;
@@ -52,35 +30,15 @@
   -webkit-app-region: no-drag;
 }
 
-.user-browser-wait__open:hover {
+.user-browser-wait__line button:hover {
   background: var(--button-fill-hover);
 }
 
-.user-browser-wait__open:active {
+.user-browser-wait__line button:active {
   background: var(--button-fill-active);
 }
 
 .user-browser-wait__line button:focus-visible {
   outline: 2px solid currentcolor;
   outline-offset: 2px;
-}
-
-.user-browser-wait__copy {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  border: none;
-  border-radius: 6px;
-  color: var(--text-secondary);
-  background: transparent;
-  cursor: pointer;
-  -webkit-app-region: no-drag;
-}
-
-.user-browser-wait__copy:hover {
-  color: var(--text-primary);
-  background: var(--button-fill-hover);
 }

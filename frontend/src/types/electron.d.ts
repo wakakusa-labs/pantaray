@@ -361,8 +361,14 @@ declare global {
         openConversation: (request: { actionId: string }) => Promise<void>;
         /** Stops the run the window shows; rejects when the Stop was not accepted. */
         stopAction: (request: ActionStopRequest) => Promise<void>;
-        /** Brings the browser the Action waits on to the front; a failure is only logged. */
-        openUserBrowser: (request: { browser: UserBrowserId }) => Promise<void>;
+        /**
+         * Brings the browser the Action waits on to the front, on its debugging settings while
+         * those are off; a failure is only logged.
+         */
+        openUserBrowser: (request: {
+          browser: UserBrowserId;
+          kind: 'debugging_off' | 'allow';
+        }) => Promise<void>;
         /**
          * Stops that run and, once it has ended, resumes it with the messages waiting for it.
          * Rejects when the Stop was not accepted.

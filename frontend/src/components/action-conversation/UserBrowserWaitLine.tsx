@@ -1,3 +1,5 @@
+import { Check, CircleAlert, Clipboard } from 'lucide-react';
+
 import { useClipboardCopy } from '@/components/agent-overlay/useClipboardCopy';
 import { useI18n } from '@/context/useI18n';
 import type { ActionUserBrowserWait } from '../../../electron/src/actions/actionLiveCore';
@@ -35,8 +37,9 @@ function WaitLine({ wait: { browser, kind } }: { wait: ActionUserBrowserWait }) 
       console.error('Failed to bring the user browser forward:', error);
     });
   };
+  const copyLabel = t(COPY_LABEL[status]);
   return (
-    <div className="user-browser-wait__line">
+    <div className={`user-browser-wait__line user-browser-wait__line--${kind}`}>
       <p>
         {t(
           kind === 'allow'
@@ -45,17 +48,29 @@ function WaitLine({ wait: { browser, kind } }: { wait: ActionUserBrowserWait }) 
           { browser: name }
         )}
       </p>
-      <button type="button" onClick={open}>
+      {kind === 'debugging_off' ? (
+        <span className="user-browser-wait__address">
+          <code>{inspectUrl}</code>
+          <button
+            type="button"
+            className="user-browser-wait__copy"
+            aria-label={copyLabel}
+            data-tooltip={copyLabel}
+            onClick={() => void copy(() => inspectUrl)}
+          >
+            {status === 'copied' ? (
+              <Check size={15} strokeWidth={1.8} aria-hidden />
+            ) : status === 'failed' ? (
+              <CircleAlert size={15} strokeWidth={1.8} aria-hidden />
+            ) : (
+              <Clipboard size={15} strokeWidth={1.8} aria-hidden />
+            )}
+          </button>
+        </span>
+      ) : null}
+      <button type="button" className="user-browser-wait__open" onClick={open}>
         {t('overlay.userBrowserWait.open', { browser: name })}
       </button>
-      {kind === 'debugging_off' ? (
-        <div className="user-browser-wait__address-row">
-          <code className="user-browser-wait__address">{inspectUrl}</code>
-          <button type="button" onClick={() => void copy(() => inspectUrl)}>
-            {t(COPY_LABEL[status])}
-          </button>
-        </div>
-      ) : null}
     </div>
   );
 }

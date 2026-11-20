@@ -323,6 +323,21 @@ def test_the_list_shows_open_todos_in_the_asked_order_then_the_last_checked_firs
     ]
 
 
+def test_a_checked_todo_leaves_the_list_7_days_after_it_was_checked(
+    db: Path,
+) -> None:
+    _create("c-1", text="Open")
+    checked = _create("c-2", text="Checked")
+    set_todo_check(
+        user_id=USER, todo_id=checked.todo_id, by="user", checked=True, clock=NOW
+    )
+    at_limit = replace(NOW, now="2026-11-11T03:00:00.000Z")
+    past_limit = replace(NOW, now="2026-11-11T03:00:00.001Z")
+
+    assert _listed(clock=at_limit) == [("Open", False), ("Checked", True)]
+    assert _listed(clock=past_limit) == [("Open", False)]
+
+
 def test_a_deleted_todo_is_listed_and_restorable_for_30_days_only(db: Path) -> None:
     kept = _create("client-1", text="Restored")
     expired = _create("client-2", text="Expired")

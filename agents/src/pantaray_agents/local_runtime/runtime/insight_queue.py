@@ -1,4 +1,7 @@
-"""Run identity and enqueue for the periodic short Insight over raw Zanei."""
+"""Run identity and enqueue for the periodic short Insight over raw Zanei.
+
+When a run is enqueued is the `builtin.insight` hook's; see `local_runtime.hooks`.
+"""
 
 from __future__ import annotations
 
@@ -10,11 +13,6 @@ from pathlib import Path
 from typing import Final
 
 from pantaray_agents.local_runtime.activity_summary_schedule import SummaryType, iso_z
-from pantaray_agents.local_runtime.context import store
-from pantaray_agents.local_runtime.context.source_control import context_source_control
-from pantaray_agents.local_runtime.memory_catalog.connection import (
-    open_memory_catalog_connection,
-)
 from pantaray_agents.tasks.types import InsightJobPayload
 
 from .job_enqueue import (
@@ -97,34 +95,12 @@ def build_local_insight_enqueue_request(
     }
 
 
-async def enqueue_due_short_insight_job(
-    *,
-    db_path: Path,
-    busy_timeout_ms: int,
-    user_id: str,
-    now: datetime | None = None,
-) -> LocalJobEnqueueResult | None:
-    """Enqueue this window's run while the user records with a current source.
-
-    Paused capture records nothing new, and this run is the only Suggestion
-    trigger (`suggestion_from_insight`), so skipping it is what stops suggestions
-    while recording is off: the tail recorded before the user turned it off must
-    not become a suggestion after.
-    """
-    async with context_source_control.gate.turn():
-        if context_source_control.gate.current(user_id) is None:
-            return None
-    with open_memory_catalog_connection(
-        db_path=db_path, busy_timeout_ms=busy_timeout_ms
-    ) as connection:
-        source = store.get_source(connection, user_id)
-    if source is None or source.kind != "ready" or source.capture_paused:
-        return None
+def enqueue_short_insight_job(
+    *, db_path: Path, busy_timeout_ms: int, user_id: str, moment: datetime
+) -> LocalJobEnqueueResult:
+    """Enqueue the run of the window ``moment`` falls in; a repeat is a no-op."""
     payload = build_short_insight_job_payload(
-        user_id=user_id,
-        window_start=short_insight_window_start(
-            datetime.now(UTC) if now is None else now
-        ),
+        user_id=user_id, window_start=short_insight_window_start(moment)
     )
     return enqueue_local_job_with_connection(
         db_path=str(db_path),

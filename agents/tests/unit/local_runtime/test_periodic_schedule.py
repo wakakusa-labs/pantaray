@@ -24,10 +24,9 @@ from pantaray_agents.local_runtime.runtime.periodic_schedule import (
 from pantaray_agents.local_runtime.runtime.session_store import mark_configured
 
 # Every task that takes the owner waits for `configure`; the autouse fixture in
-# `tests/conftest.py` puts the store back to unconfigured after each test.
+# `tests/conftest.py` puts the store back to unconfigured after each test. The
+# hooks task runs regardless: each hook waits on its own `owner_settled` gate.
 OWNER_SCOPED_TASK_NAMES = (
-    "activity_summary",
-    "short_insight",
     "memory_agent_dispatch",
     "memory_embedding_projection",
     "todo_pickup",
@@ -102,36 +101,34 @@ def test_reaper_task_runs_from_schedule(
     assert next_runs == {"reaper": 40.0}
 
 
-def test_activity_summary_task_runs_from_schedule(
+def test_hooks_task_runs_for_the_current_owner(
     monkeypatch: pytest.MonkeyPatch,
     context: PeriodicTaskContext,
-    configured: None,
     schedule_and_slot: tuple[tuple[PeriodicTask, ...], MemoryEmbeddingProjectionSlot],
 ) -> None:
+    # Catches the hooks tick binding jobs to a stale owner instead of the tick's.
     from pantaray_agents.local_runtime.runtime import periodic_schedule
 
-    calls: list[tuple[Path, int]] = []
-
-    async def run_activity_summary(*, db_path: Path, busy_timeout_ms: int) -> None:
-        calls.append((db_path, busy_timeout_ms))
-
+    calls: list[tuple[Path, int, str]] = []
     monkeypatch.setattr(
         periodic_schedule,
-        "run_activity_summary_scheduler_once",
-        run_activity_summary,
+        "run_builtin_hooks_once",
+        lambda *, db_path, busy_timeout_ms, user_id: calls.append(
+            (db_path, busy_timeout_ms, user_id)
+        ),
     )
     schedule, _slot = schedule_and_slot
-    tasks = tuple(task for task in schedule if task.name == "activity_summary")
+    tasks = tuple(task for task in schedule if task.name == "hooks")
 
     next_runs = run_due_periodic_tasks(
         tasks=tasks,
         context=context,
-        next_run_monotonic_by_task={"activity_summary": 0.0},
+        next_run_monotonic_by_task={"hooks": 0.0},
         now_monotonic=10.0,
     )
 
-    assert calls == [(context.db_path, context.busy_timeout_ms)]
-    assert next_runs == {"activity_summary": 40.0}
+    assert calls == [(context.db_path, context.busy_timeout_ms, "user-1")]
+    assert next_runs == {"hooks": 40.0}
 
 
 def test_memory_repair_task_runs_from_schedule(
@@ -450,18 +447,9 @@ def _record_every_periodic_runner(
     monkeypatch.setattr(
         periodic_schedule, "sweep_browser_sessions", record_async("browser_sessions")
     )
-    monkeypatch.setattr(
-        periodic_schedule,
-        "run_activity_summary_scheduler_once",
-        record_async("activity_summary"),
-    )
+    monkeypatch.setattr(periodic_schedule, "run_builtin_hooks_once", record("hooks"))
     monkeypatch.setattr(
         periodic_schedule, "run_memory_catalog_repair_once", record("memory_repair")
-    )
-    monkeypatch.setattr(
-        periodic_schedule,
-        "enqueue_due_short_insight_job",
-        record_async("short_insight"),
     )
     monkeypatch.setattr(
         periodic_schedule,
@@ -499,9 +487,10 @@ def test_owner_scoped_tasks_wait_for_configure_and_run_on_the_next_tick(
         next_run_monotonic_by_task={task.name: 0.0 for task in schedule},
         now_monotonic=10.0,
     )
-    # The reaper, the browser sweep and the catalog repair take no owner, so
+    # The reaper, the browser sweep and the catalog repair take no owner, and
+    # each hook holds its own owner gate, so
     # waiting to be told who the user is would only hold back recovery.
-    assert calls == ["reaper", "memory_repair", "browser_sessions"]
+    assert calls == ["reaper", "hooks", "memory_repair", "browser_sessions"]
     assert [unconfigured_next_runs[name] for name in OWNER_SCOPED_TASK_NAMES] == [
         0.0
     ] * len(OWNER_SCOPED_TASK_NAMES)
@@ -516,7 +505,7 @@ def test_owner_scoped_tasks_wait_for_configure_and_run_on_the_next_tick(
 
     # A withheld task keeps its deadline, so the tick right after `configure`
     # takes every window the first one would have.
-    assert calls[3:] == list(OWNER_SCOPED_TASK_NAMES)
+    assert calls[4:] == list(OWNER_SCOPED_TASK_NAMES)
 
 
 def test_owner_scoped_tasks_wait_while_an_identity_change_is_at_the_barrier(
@@ -537,7 +526,7 @@ def test_owner_scoped_tasks_wait_while_an_identity_change_is_at_the_barrier(
             now_monotonic=10.0,
         )
 
-    assert calls == ["reaper", "memory_repair", "browser_sessions"]
+    assert calls == ["reaper", "hooks", "memory_repair", "browser_sessions"]
 
 
 def test_first_tick_runs_every_ready_task_once(
@@ -670,9 +659,8 @@ def test_due_tasks_run_in_declaration_order(
 
     assert calls == [
         "reaper",
-        "activity_summary",
+        "hooks",
         "memory_repair",
-        "short_insight",
         "memory_agent_dispatch",
         "memory_embedding_projection",
         "todo_pickup",

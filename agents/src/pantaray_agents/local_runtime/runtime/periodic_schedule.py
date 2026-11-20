@@ -14,18 +14,11 @@ from typing import Final
 
 from pantaray_agents import todo_ux_feature
 
+from ..hooks.gates import owner_is_settled
+from ..hooks.runner import builtin_hooks, run_builtin_hooks_once
 from ..todos.pickup import pick_up_todos
 from ..todos.retention import purge_expired_todos
-from .activity_summary_scheduler import (
-    _SCHEDULER_INTERVAL_SECONDS,
-    run_activity_summary_scheduler_once,
-)
-from .admission import admission_is_open
 from .browser_relay import sweep_browser_sessions
-from .insight_queue import (
-    SHORT_INSIGHT_WINDOW_SECONDS,
-    enqueue_due_short_insight_job,
-)
 from .local_worker import background_requests_can_send
 from .memory_agent_dispatcher import (
     MEMORY_AGENT_DISPATCH_INTERVAL_SECONDS,
@@ -40,12 +33,14 @@ from .memory_repair_scheduler import (
     run_memory_catalog_repair_once,
 )
 from .reaper import run_local_periodic_reaper_once
-from .session_store import read_configured
 from .utc_timestamps import now_utc_iso
 
 logger = logging.getLogger(__name__)
 
 LOCAL_RUNTIME_PERIODIC_REAPER_INTERVAL_SECONDS: Final[float] = 30.0
+# How late after its time a hook fires, and how often a hook kept due by a
+# closed gate or a waiting summary window is looked at again.
+HOOKS_TICK_INTERVAL_SECONDS: Final[float] = 30.0
 MEMORY_EMBEDDING_IDLE_INTERVAL_SECONDS: Final[float] = 1.0
 # Nothing tells the worker that a TODO was written, so this interval is how long
 # a new TODO waits for its Action. A pass reads the open TODOs and looks up each
@@ -105,30 +100,7 @@ class MemoryEmbeddingProjectionSlot:
 
 
 def _owner_is_settled(_context: PeriodicTaskContext) -> bool:
-    """Whether ``owner_user_id`` already names the owner the work belongs to.
-
-    Until Electron main applies ``configure`` the helper has not been told about
-    the cloud session, so ``current_owner_id`` still answers the logged-out
-    owner; while an identity change is at the barrier that owner is being
-    replaced. Work created in either state is bound to an owner the worker stops
-    claiming for milliseconds later -- ``claim_next_pending_job`` selects by
-    ``user_id`` and nothing reclaims another owner's queue -- so the job stays
-    queued for good while what it recorded is spent all the same: the summary
-    cursor advanced past the window, the memory trigger marked dispatched. This
-    is the enqueue side of the gate ``claimable_specs`` already holds on the
-    claim side (design 6.2).
-    """
-    return admission_is_open() and read_configured()
-
-
-def _run_short_insight_enqueue(context: PeriodicTaskContext) -> None:
-    asyncio.run(
-        enqueue_due_short_insight_job(
-            db_path=context.db_path,
-            busy_timeout_ms=context.busy_timeout_ms,
-            user_id=context.owner_user_id,
-        )
-    )
+    return owner_is_settled()
 
 
 def _run_memory_agent_dispatch(context: PeriodicTaskContext) -> None:
@@ -148,6 +120,7 @@ def _todo_pickup_is_ready(context: PeriodicTaskContext) -> bool:
 def build_periodic_schedule(
     *, embedding_slot: MemoryEmbeddingProjectionSlot
 ) -> tuple[PeriodicTask, ...]:
+    builtin_hooks()  # A broken built-in definition fails the worker at start.
     return (
         PeriodicTask(
             name="reaper",
@@ -159,14 +132,14 @@ def build_periodic_schedule(
             ),
         ),
         PeriodicTask(
-            name="activity_summary",
-            interval_seconds=float(_SCHEDULER_INTERVAL_SECONDS),
-            is_ready=_owner_is_settled,
-            run=lambda context: asyncio.run(
-                run_activity_summary_scheduler_once(
-                    db_path=context.db_path,
-                    busy_timeout_ms=context.busy_timeout_ms,
-                )
+            name="hooks",
+            interval_seconds=HOOKS_TICK_INTERVAL_SECONDS,
+            # Each hook names its own gates.
+            is_ready=lambda _context: True,
+            run=lambda context: run_builtin_hooks_once(
+                db_path=context.db_path,
+                busy_timeout_ms=context.busy_timeout_ms,
+                user_id=context.owner_user_id,
             ),
         ),
         PeriodicTask(
@@ -178,12 +151,6 @@ def build_periodic_schedule(
                 busy_timeout_ms=context.busy_timeout_ms,
                 artifact_root=context.artifact_root,
             ),
-        ),
-        PeriodicTask(
-            name="short_insight",
-            interval_seconds=float(SHORT_INSIGHT_WINDOW_SECONDS),
-            is_ready=_owner_is_settled,
-            run=_run_short_insight_enqueue,
         ),
         PeriodicTask(
             name="memory_agent_dispatch",
@@ -267,6 +234,7 @@ def run_due_periodic_tasks(
 
 
 __all__ = [
+    "HOOKS_TICK_INTERVAL_SECONDS",
     "LOCAL_RUNTIME_PERIODIC_REAPER_INTERVAL_SECONDS",
     "MEMORY_EMBEDDING_IDLE_INTERVAL_SECONDS",
     "TODO_PICKUP_INTERVAL_SECONDS",

@@ -16,6 +16,7 @@ from pantaray_agents.local_runtime.context.source_gate import (
     SourceInvalidated,
 )
 from pantaray_agents.local_runtime.context.source_protocol import PageResponse
+from pantaray_agents.local_runtime.hooks.gates import _recording_is_ready
 from pantaray_agents.local_runtime.memory_catalog.connection import (
     open_memory_catalog_connection,
 )
@@ -27,7 +28,7 @@ from pantaray_agents.local_runtime.runtime.insight_queue import (
     SHORT_INSIGHT_WINDOW_SECONDS,
     build_local_insight_enqueue_request,
     build_short_insight_job_payload,
-    enqueue_due_short_insight_job,
+    enqueue_short_insight_job,
     short_insight_window_start,
 )
 from pantaray_agents.local_runtime.runtime.job_enqueue import (
@@ -162,13 +163,10 @@ def test_the_run_identity_is_stable_within_a_window() -> None:
     assert other_user["insight_id"] != early["insight_id"]
 
 
-async def test_enqueue_is_skipped_without_a_current_source(db_path: Path) -> None:
-    result = await enqueue_due_short_insight_job(
+async def test_recording_is_not_ready_without_a_current_source(db_path: Path) -> None:
+    assert not await _recording_is_ready(
         db_path=db_path, busy_timeout_ms=1_000, user_id=USER
     )
-
-    assert result is None
-    assert _jobs(db_path) == []
 
 
 async def test_paused_capture_enqueues_no_run(
@@ -178,12 +176,9 @@ async def test_paused_capture_enqueues_no_run(
     del active_source
     _persist_ready_source(db_path, capture_paused=True)
 
-    result = await enqueue_due_short_insight_job(
+    assert not await _recording_is_ready(
         db_path=db_path, busy_timeout_ms=1_000, user_id=USER
     )
-
-    assert result is None
-    assert _jobs(db_path) == []
 
 
 async def test_a_repeated_tick_in_one_window_enqueues_one_job(
@@ -191,15 +186,18 @@ async def test_a_repeated_tick_in_one_window_enqueues_one_job(
 ) -> None:
     del active_source
     now = datetime(2026, 9, 7, 10, 1, tzinfo=UTC)
-
-    first = await enqueue_due_short_insight_job(
-        db_path=db_path, busy_timeout_ms=1_000, user_id=USER, now=now
+    assert await _recording_is_ready(
+        db_path=db_path, busy_timeout_ms=1_000, user_id=USER
     )
-    second = await enqueue_due_short_insight_job(
+
+    first = enqueue_short_insight_job(
+        db_path=db_path, busy_timeout_ms=1_000, user_id=USER, moment=now
+    )
+    second = enqueue_short_insight_job(
         db_path=db_path,
         busy_timeout_ms=1_000,
         user_id=USER,
-        now=now + timedelta(seconds=90),
+        moment=now + timedelta(seconds=90),
     )
 
     assert first is not None and first["inserted_new"] is True
@@ -217,14 +215,14 @@ async def test_a_later_window_waits_for_the_active_run(
     del active_source
     now = datetime(2026, 9, 7, 10, 1, tzinfo=UTC)
 
-    first = await enqueue_due_short_insight_job(
-        db_path=db_path, busy_timeout_ms=1_000, user_id=USER, now=now
+    first = enqueue_short_insight_job(
+        db_path=db_path, busy_timeout_ms=1_000, user_id=USER, moment=now
     )
-    later = await enqueue_due_short_insight_job(
+    later = enqueue_short_insight_job(
         db_path=db_path,
         busy_timeout_ms=1_000,
         user_id=USER,
-        now=now + timedelta(seconds=SHORT_INSIGHT_WINDOW_SECONDS),
+        moment=now + timedelta(seconds=SHORT_INSIGHT_WINDOW_SECONDS),
     )
 
     assert first is not None
@@ -311,8 +309,8 @@ async def test_upgrade_can_enqueue_after_a_completed_four_minute_window(
             (old_job["job_id"],),
         )
 
-    new_job = await enqueue_due_short_insight_job(
-        db_path=db_path, busy_timeout_ms=1_000, user_id=USER, now=now
+    new_job = enqueue_short_insight_job(
+        db_path=db_path, busy_timeout_ms=1_000, user_id=USER, moment=now
     )
 
     assert new_job is not None and new_job["inserted_new"]
@@ -392,27 +390,27 @@ async def test_an_idle_window_runs_once_and_releases_the_next_window(
         )
 
     now = datetime(2026, 10, 23, 19, 1, tzinfo=UTC)
-    first = await enqueue_due_short_insight_job(
-        db_path=db_path, busy_timeout_ms=1_000, user_id=USER, now=now
+    first = enqueue_short_insight_job(
+        db_path=db_path, busy_timeout_ms=1_000, user_id=USER, moment=now
     )
     assert first is not None
     assert await asyncio.to_thread(_work)
 
-    repeat = await enqueue_due_short_insight_job(
+    repeat = enqueue_short_insight_job(
         db_path=db_path,
         busy_timeout_ms=1_000,
         user_id=USER,
-        now=now + timedelta(seconds=90),
+        moment=now + timedelta(seconds=90),
     )
     assert repeat is not None and repeat["inserted_new"] is False
     assert not await asyncio.to_thread(_work)
     assert timeline.reads == 1
 
-    later = await enqueue_due_short_insight_job(
+    later = enqueue_short_insight_job(
         db_path=db_path,
         busy_timeout_ms=1_000,
         user_id=USER,
-        now=now + timedelta(seconds=SHORT_INSIGHT_WINDOW_SECONDS),
+        moment=now + timedelta(seconds=SHORT_INSIGHT_WINDOW_SECONDS),
     )
     assert later is not None and later["inserted_new"] is True
     assert _jobs(db_path) == [

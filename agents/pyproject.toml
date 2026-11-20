@@ -135,6 +135,7 @@ files = [
     "src/pantaray_agents/agents/action_agent/runtime/steps/persistence.py",
     "src/pantaray_agents/agents/action_agent/runtime/state/coercion.py",
     "src/pantaray_agents/hooks",
+    "src/pantaray_agents/local_runtime/hooks",
     "src/pantaray_agents/local_runtime/memory_catalog",
     "src/pantaray_agents/local_runtime/embedding_local",
     # 文書の読み取り（documents パッケージ。read ツールの文書分岐は tools にある）。
@@ -196,6 +197,7 @@ include = ["pantaray_agents*"]
 [tool.setuptools.package-data]
 pantaray_agents = [
     "config_tunables.toml",
+    "local_runtime/hooks/*.toml",
     "local_runtime/migrations/*.sql",
     "local_runtime/tooling/seatbelt_profile_templates/*.sbpl",
     "prompts/*.yaml",

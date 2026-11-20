@@ -45,17 +45,17 @@ function WaitLine({ wait: { browser, kind } }: { wait: ActionUserBrowserWait }) 
           { browser: name }
         )}
       </p>
+      <button type="button" onClick={open}>
+        {t('overlay.userBrowserWait.open', { browser: name })}
+      </button>
       {kind === 'debugging_off' ? (
-        <>
+        <div className="user-browser-wait__address-row">
           <code className="user-browser-wait__address">{inspectUrl}</code>
           <button type="button" onClick={() => void copy(() => inspectUrl)}>
             {t(COPY_LABEL[status])}
           </button>
-        </>
+        </div>
       ) : null}
-      <button type="button" onClick={open}>
-        {t('overlay.userBrowserWait.open', { browser: name })}
-      </button>
     </div>
   );
 }

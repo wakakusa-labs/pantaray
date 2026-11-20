@@ -522,6 +522,8 @@ function openSocket(
   refuse: Refusal
 ): Promise<UserBrowserConnection> {
   return new Promise((resolve, reject) => {
+    // A stop that came while the browser was checked never fires the listener below.
+    signal.throwIfAborted();
     // `ws` sends no Origin header, which the browser would refuse at once, and sets no handshake
     // timeout unless asked to.
     const socket = new WebSocket(url);

@@ -411,6 +411,36 @@ test('stopping the run while debugging is off ends the wait and the polling', as
   assert.equal(calls.length, checks);
 });
 
+// Catches: a run stopped while the browser's signature was checked still asking the user to allow
+// Pantaray in.
+test(
+  'a stop during the last check opens no socket and asks nothing',
+  { timeout: 5_000 },
+  async (t) => {
+    const endpoint = await browserEndpoint(t, 'hold');
+    const { root } = applicationSupport(t, { port: endpoint.port });
+    const controller = new AbortController();
+    const reason = new Error('the run stopped');
+    const { runner: check } = fakeRunner();
+    // The stop lands once the signature check has answered, before the socket would open.
+    const runner = (file, args, signal) => {
+      const answer = check(file, args, signal);
+      if (file === '/usr/bin/codesign') {
+        queueMicrotask(() => answer.then(() => controller.abort(reason)));
+      }
+      return answer;
+    };
+    const wait = fakeWait();
+    await assert.rejects(
+      connect(root, { runner, wait, signal: controller.signal }),
+      (error) => error === reason
+    );
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(endpoint.upgrades.length, 0);
+    assert.deepEqual(wait.waits, []);
+  }
+);
+
 test('stopping the run ends a check that never answers', async (t) => {
   const { root } = applicationSupport(t, { port: 9222 });
   const signals = [];

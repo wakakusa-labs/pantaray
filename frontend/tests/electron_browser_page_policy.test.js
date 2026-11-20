@@ -324,6 +324,14 @@ test("the user's tab reaches nothing on this machine", () => {
   assert.deepEqual(decideUser('about:blank', 'GET', { mainFrame: true }), local);
 });
 
+// Catches: the user's installed extensions breaking in the tab and filling the model's blocked
+// list with their own files, or the tab itself opening an extension page.
+test("the user's extensions load their files in the tab, but the tab cannot open one", () => {
+  const file = 'chrome-extension://efaidnbmnnnibpcajpcglclefindmkaj/dist/button.js';
+  assert.deepEqual(decideUser(file, 'GET'), local);
+  assert.deepEqual(decideUser(file, 'GET', { mainFrame: true }), refused('not_allowed'));
+});
+
 // Catches: the tab's main frame opening a site the user did not approve this run, a frame or
 // subresource of an approved site refused, or a write to an unapproved host let through.
 test("the user's tab opens approved sites only, and writes only to approved hosts", () => {

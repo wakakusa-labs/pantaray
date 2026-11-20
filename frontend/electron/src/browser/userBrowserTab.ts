@@ -159,11 +159,12 @@ async function guardFrame(cdp: CdpSession, sessionId?: string): Promise<void> {
   ]);
 }
 
+/**
+ * Chrome has no Fetch domain on a dedicated worker: the worker's script, imports and fetches
+ * pause in its parent frame's session, which the frame's own guard already judges.
+ */
 async function guardWorker(cdp: CdpSession, sessionId: string): Promise<void> {
-  await Promise.all([
-    cdp.sendCommand('Fetch.enable', { patterns: FETCH_PATTERNS }, sessionId),
-    cdp.sendCommand('Runtime.evaluate', { expression: WORKER_GUARD_SCRIPT }, sessionId),
-  ]);
+  await cdp.sendCommand('Runtime.evaluate', { expression: WORKER_GUARD_SCRIPT }, sessionId);
 }
 
 /**

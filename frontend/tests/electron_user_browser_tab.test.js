@@ -214,8 +214,8 @@ const GUARDS = [
 ];
 
 // Catches: a page or one of its frames or workers running before its guards are in place (so it
-// can open a WebSocket or service worker Fetch never sees), or a frame resumed after its guard
-// failed.
+// can open a WebSocket or service worker Fetch never sees), a frame resumed after its guard
+// failed, or a worker left paused forever by a guard command Chrome lacks on workers.
 test(
   'the tab and every frame and worker it attaches are guarded before they run',
   SETTLES,
@@ -223,6 +223,10 @@ test(
     const h = await opened({
       command: (method, _params, sessionId) => {
         if (sessionId === 'frame-bad' && method === 'Fetch.enable') throw new Error('refused');
+        // As in Chrome: a dedicated worker has no Fetch domain.
+        if (sessionId === 'worker-1' && method.startsWith('Fetch.')) {
+          throw new Error("'Fetch.enable' wasn't found");
+        }
         return undefined;
       },
     });
@@ -249,7 +253,6 @@ test(
       script
     );
     const worker = h.commands.filter((c) => c.sessionId === 'worker-1');
-    assert.ok(worker.some((c) => c.method === 'Fetch.enable'));
     assert.match(
       worker.find((c) => c.method === 'Runtime.evaluate').params.expression,
       /WebSocket/

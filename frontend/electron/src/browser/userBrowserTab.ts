@@ -161,11 +161,16 @@ async function guardFrame(cdp: CdpSession, sessionId?: string): Promise<void> {
 
 /**
  * Keeps the site's installed service worker out of the target's requests: one would make its
- * own requests, which no Fetch here sees. Chrome ignores the bypass until Network is enabled.
+ * own requests, which no Fetch here sees. Chrome ignores the bypass until Network is enabled;
+ * no response bodies are kept, since nothing here reads them.
  */
 function bypassServiceWorkers(cdp: CdpSession, sessionId: string | undefined): Promise<unknown>[] {
   return [
-    cdp.sendCommand('Network.enable', {}, sessionId),
+    cdp.sendCommand(
+      'Network.enable',
+      { maxTotalBufferSize: 0, maxResourceBufferSize: 0 },
+      sessionId
+    ),
     cdp.sendCommand('Network.setBypassServiceWorker', { bypass: true }, sessionId),
   ];
 }

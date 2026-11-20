@@ -154,14 +154,35 @@ async function guardFrame(cdp: CdpSession, sessionId?: string): Promise<void> {
       { enabled: true, cancel: true },
       sessionId
     ),
-    cdp.sendCommand('Network.setBypassServiceWorker', { bypass: true }, sessionId),
+    ...bypassServiceWorkers(cdp, sessionId),
     cdp.sendCommand('Fetch.enable', { patterns: FETCH_PATTERNS }, sessionId),
   ]);
 }
 
+/**
+ * Keeps the site's installed service worker out of the target's requests: one would make its
+ * own requests, which no Fetch here sees. Chrome ignores the bypass until Network is enabled;
+ * no response bodies are kept, since nothing here reads them.
+ */
+function bypassServiceWorkers(cdp: CdpSession, sessionId: string | undefined): Promise<unknown>[] {
+  return [
+    cdp.sendCommand(
+      'Network.enable',
+      { maxTotalBufferSize: 0, maxResourceBufferSize: 0 },
+      sessionId
+    ),
+    cdp.sendCommand('Network.setBypassServiceWorker', { bypass: true }, sessionId),
+  ];
+}
+
+/**
+ * Chrome has no Fetch domain on a dedicated worker: the worker's script, imports and fetches
+ * pause in its parent frame's session, which the frame's own guard already judges. Only a worker
+ * started by another worker loads its script unseen: a same-origin read, which would be allowed.
+ */
 async function guardWorker(cdp: CdpSession, sessionId: string): Promise<void> {
   await Promise.all([
-    cdp.sendCommand('Fetch.enable', { patterns: FETCH_PATTERNS }, sessionId),
+    ...bypassServiceWorkers(cdp, sessionId),
     cdp.sendCommand('Runtime.evaluate', { expression: WORKER_GUARD_SCRIPT }, sessionId),
   ]);
 }
@@ -245,7 +266,10 @@ function watchTab(
       }
     );
     if (!decision.allowed) {
-      block(context, decision.reason, paused.request.url);
+      // The user's extensions load their own files into pages; refused, but no news to the model.
+      if (!paused.request.url.startsWith('chrome-extension:')) {
+        block(context, decision.reason, paused.request.url);
+      }
       return void refuse();
     }
     if (decision.reached !== null) reach(context, decision.reached);

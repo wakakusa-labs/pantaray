@@ -317,6 +317,7 @@ test("the user's tab reaches nothing on this machine", () => {
     'ws://localhost:5173/hmr',
     'file:///Users/me/notes.txt',
     'chrome://settings',
+    'chrome-extension://efaidnbmnnnibpcajpcglclefindmkaj/viewer.html',
   ]) {
     assert.deepEqual(decideUser(url, 'GET'), refused('not_allowed'), url);
     assert.deepEqual(decideUser(url, 'GET', { mainFrame: true }), refused('not_allowed'), url);

@@ -120,6 +120,7 @@ const TAB_COMMANDS = new Set([
   'Input.dispatchMouseEvent',
   'Input.insertText',
   'Log.enable',
+  'Network.enable',
   'Network.setBypassServiceWorker',
   'Page.addScriptToEvaluateOnNewDocument',
   'Page.captureScreenshot',

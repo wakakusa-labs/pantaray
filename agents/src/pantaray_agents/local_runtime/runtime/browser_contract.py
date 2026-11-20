@@ -32,9 +32,8 @@ BrowserEngineFailureCode = Literal[
     "BROWSER_SESSION_GONE",
     # A valid page or ref, but Chromium could not carry the operation out.
     "BROWSER_ACTION_FAILED",
-    # The user's browser could not be connected to; the message names it.
+    # The user's browser is not running; the message names it.
     "BROWSER_USER_NOT_RUNNING",
-    "BROWSER_USER_DEBUGGING_OFF",
     # macOS kept Pantaray from reading the browser's files.
     "BROWSER_USER_FILE_BLOCKED",
     # The user did not allow Pantaray to use the browser.

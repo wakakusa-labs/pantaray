@@ -221,7 +221,7 @@ test('closing the session aborts a connection still waiting for the user', SETTL
     // As the real connection does: the wait starts with the socket and ends on the abort.
     connect: (_browser, waitForUser, abortSignal) => {
       signal = abortSignal;
-      const endWait = waitForUser();
+      const endWait = waitForUser('allow');
       return new Promise((_resolve, reject) =>
         abortSignal.addEventListener('abort', () => {
           endWait();
@@ -237,7 +237,9 @@ test('closing the session aborts a connection still waiting for the user', SETTL
   });
   const pending = h.navigate('https://a.example/');
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(waits, [{ actionId: 'action-1', browser: 'chrome', ended: false }]);
+  assert.deepEqual(waits, [
+    { actionId: 'action-1', browser: 'chrome', kind: 'allow', ended: false },
+  ]);
   h.userSessions.close('session-1');
   assert.equal(signal.aborted, true);
   assert.equal(waits[0].ended, true);

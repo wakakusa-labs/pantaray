@@ -217,7 +217,7 @@ export function useActionTask(actionId: string) {
       loadOlder,
       reopen,
     },
-    /** The user's browsers the run waits on for the user to allow Pantaray in. */
+    /** What the run waits on the user for in their browsers. */
     userBrowserWaits,
     approval: {
       blockers: approval.approvalBlockers,

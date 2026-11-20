@@ -54,7 +54,11 @@ class _StrictModel(BaseModel):
 BrowserFailureCode = (
     BrowserRelayFailureCode
     | Literal[
-        "BROWSER_NETWORK_OFF", "BROWSER_OUTSIDE_READ_SCOPE", "BROWSER_USER_NOT_OFFERED"
+        "BROWSER_NETWORK_OFF",
+        "BROWSER_OUTSIDE_READ_SCOPE",
+        "BROWSER_USER_NOT_OFFERED",
+        # No browser Pantaray can use is installed.
+        "BROWSER_USER_NOT_INSTALLED",
     ]
 )
 
@@ -84,7 +88,6 @@ FIX_HINTS: Final[dict[BrowserFailureCode, str]] = {
         "Take a snapshot to see the page as it is now, then try another way."
     ),
     "BROWSER_USER_NOT_RUNNING": _USER_CAN_FIX,
-    "BROWSER_USER_DEBUGGING_OFF": _USER_CAN_FIX,
     "BROWSER_USER_FILE_BLOCKED": _USER_CAN_FIX,
     "BROWSER_USER_DENIED": (
         "The user declined. Use their browser again only if they ask you to."
@@ -97,6 +100,7 @@ FIX_HINTS: Final[dict[BrowserFailureCode, str]] = {
     "BROWSER_OUTSIDE_READ_SCOPE": (
         "Open a file read may open (see Workspace Path Rules), or an http(s) URL."
     ),
+    "BROWSER_USER_NOT_INSTALLED": _USER_CAN_FIX,
     "BROWSER_USER_NOT_OFFERED": (
         "Use the app's page (leave browser out) for local files, localhost and "
         "print; open only http(s) sites in the user's browser."

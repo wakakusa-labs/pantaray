@@ -89,7 +89,6 @@ _SESSION_ENDING_CODES: frozenset[BrowserEngineFailureCode] = frozenset(
         "BROWSER_RENDERER_CRASHED",
         "BROWSER_SESSION_GONE",
         "BROWSER_USER_NOT_RUNNING",
-        "BROWSER_USER_DEBUGGING_OFF",
         "BROWSER_USER_FILE_BLOCKED",
         "BROWSER_USER_DENIED",
         "BROWSER_USER_UNAVAILABLE",
@@ -258,8 +257,9 @@ async def request_browser_operation(
             action_id=action_id,
             read_hosts=list(opened.read_hosts),
         )
-    # Until the user's browser answers once, the user is being asked to allow
-    # the connection, which takes as long as they take; stopping the run ends it.
+    # Until the user's browser answers once, the user is being asked to turn
+    # remote debugging on and allow the connection, which takes as long as they
+    # take; stopping the run ends it.
     timeout_seconds = (
         None
         if browser == "user" and not opened.connected

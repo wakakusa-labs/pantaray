@@ -3,9 +3,10 @@
  * background tab of the session's own (`userBrowserConnection`), signed in to the user's real
  * accounts. The app's hidden page never serves these sessions, nor they the app's.
  *
- * The first operation connects. The user allows the connection in their browser, which takes as
- * long as it takes; only closing the session ends that wait. The operation's budget starts once
- * the connection is open and covers opening and guarding the tab.
+ * The first operation connects. The user turns remote debugging on if it is off and allows the
+ * connection in their browser, which takes as long as it takes; only closing the session ends
+ * that wait. The operation's budget starts once the connection is open and covers opening and
+ * guarding the tab.
  *
  * The tab is `userBrowserTab`'s: guarded before it runs, and judged by the session's latest rules.
  * A tab that cannot be guarded fails the operation and ends the session.
@@ -29,7 +30,11 @@ import {
   type SessionRequest,
 } from './browserSession';
 import { KNOWN_BROWSERS } from './knownBrowsers';
-import type { UserBrowserConnection } from './userBrowserConnection';
+import type {
+  UserBrowserConnection,
+  UserBrowserWaitHook,
+  UserBrowserWaitKind,
+} from './userBrowserConnection';
 import {
   openGuardedTab,
   type GuardedTab,
@@ -45,8 +50,12 @@ export type { UserBrowserPage } from './userBrowserTab';
  */
 export type UserBrowserTarget = { browser: UserBrowserId; action_id: string; read_hosts: string[] };
 
-/** An Action waiting for the user to allow Pantaray in their browser. */
-export type UserBrowserWait = { actionId: string; browser: UserBrowserId };
+/** An Action waiting for the user in their browser, and for what. */
+export type UserBrowserWait = {
+  actionId: string;
+  browser: UserBrowserId;
+  kind: UserBrowserWaitKind;
+};
 
 type LoggerLike = { error?: (name: string, payload?: unknown) => void };
 
@@ -101,12 +110,12 @@ export type UserBrowserSessions = ReturnType<typeof createUserBrowserSessions>;
 
 export function createUserBrowserSessions(params: {
   /**
-   * Connects to the user's browser, calling `waitForUser` while the user is asked to allow it;
-   * rejects with `signal.reason` once `signal` aborts.
+   * Connects to the user's browser, calling `waitForUser` while it waits on the user; rejects
+   * with `signal.reason` once `signal` aborts.
    */
   connect: (
     browser: UserBrowserId,
-    waitForUser: () => () => void,
+    waitForUser: UserBrowserWaitHook,
     signal: AbortSignal
   ) => Promise<UserBrowserConnection>;
   /** Shows the wait in the Action's chat; the returned closer takes it down. */
@@ -148,7 +157,7 @@ export function createUserBrowserSessions(params: {
       abort,
       connection: params.connect(
         browser,
-        () => params.showWait({ actionId, browser }),
+        (kind) => params.showWait({ actionId, browser, kind }),
         abort.signal
       ),
       connected: null,

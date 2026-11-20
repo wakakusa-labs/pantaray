@@ -39,8 +39,10 @@ import {
   Minus,
 } from 'lucide-react';
 import styled, { keyframes } from 'styled-components';
-import type { ActionApprovalBlocker } from '../../../electron/src/actions/actionLiveCore';
-import type { UserBrowserId } from '../../../electron/src/browser/browserContract';
+import type {
+  ActionApprovalBlocker,
+  ActionUserBrowserWait,
+} from '../../../electron/src/actions/actionLiveCore';
 import { useCollapsedFocusBoundary } from './useCollapsedFocusBoundary';
 import type { ClipboardCopyStatus } from './useClipboardCopy';
 
@@ -169,8 +171,8 @@ type AgentOverlayShellProps = {
   isActionStreamFinished: boolean;
   approvalUiState: 'hidden' | 'approval_pending';
   approvalBlockers?: readonly ActionApprovalBlocker[];
-  /** The user's browsers the run waits on for the user to allow Pantaray in. */
-  userBrowserWaits?: readonly UserBrowserId[];
+  /** What the run waits on the user for in their browsers. */
+  userBrowserWaits?: readonly ActionUserBrowserWait[];
   isSubmittingApproval?: boolean;
   approvalErrorMessage?: string | null;
   /**
@@ -504,7 +506,7 @@ const AgentOverlayShell = ({
       </ContentFade>
 
       <ComposerDock ref={composerRef}>
-        <UserBrowserWaitLine browsers={userBrowserWaits} />
+        <UserBrowserWaitLine waits={userBrowserWaits} />
         {showApprovalPanel ? (
           <ApprovalDock>
             {approvalBlockers.map((blocker) => (

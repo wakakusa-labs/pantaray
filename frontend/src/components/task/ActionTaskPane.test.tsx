@@ -276,22 +276,29 @@ describe('ActionTaskPane', () => {
     });
   });
 
-  // Catches: the wait not reaching the pane, naming the wrong browser, or a button that opens
-  // another browser than the one that asks.
-  it('shows the wait for the user in their browser until it ends, with a button to open it', async () => {
+  // Catches: the wait not reaching the pane, the guidance without the address to paste or with a
+  // copy that copies something else, the line not following the wait from debugging off to allow,
+  // or a button that opens another browser than the one that asks.
+  it("follows the wait in the user's browser from debugging off to allow, then takes it down", async () => {
     const openUserBrowser = vi.fn().mockResolvedValue(undefined);
     Object.assign(window.electron!.actions!, { openUserBrowser });
     await renderPane();
     const page = createActionPage('act-1', 'processing');
-    emit(update(page, 1, { userBrowserWaits: ['chrome_beta'] }));
-    expect(
-      screen.getByText('Waiting for you to allow Pantaray in Google Chrome Beta')
-    ).toBeTruthy();
-    await userEvent.click(primaryButton('Open Google Chrome Beta'));
-    expect(openUserBrowser).toHaveBeenCalledWith({ browser: 'chrome_beta' });
+    emit(update(page, 1, { userBrowserWaits: [{ browser: 'edge', kind: 'debugging_off' }] }));
+    expect(screen.getByText('Turn on remote debugging in Microsoft Edge')).toBeTruthy();
+    expect(screen.getByText('edge://inspect/#remote-debugging')).toBeTruthy();
+    await userEvent.click(primaryButton('Copy address'));
+    expect(writeText).toHaveBeenCalledWith('edge://inspect/#remote-debugging');
+    expect(await screen.findByRole('button', { name: 'Copied' })).toBeTruthy();
+    await userEvent.click(primaryButton('Open Microsoft Edge'));
+    expect(openUserBrowser).toHaveBeenCalledWith({ browser: 'edge' });
+
+    emit(update(page, 1, { userBrowserWaits: [{ browser: 'edge', kind: 'allow' }] }));
+    expect(screen.getByText('Waiting for you to allow Pantaray in Microsoft Edge')).toBeTruthy();
+    expect(screen.queryByText('edge://inspect/#remote-debugging')).toBeNull();
 
     emit(update(page, 1));
-    expect(screen.queryByRole('button', { name: 'Open Google Chrome Beta' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Open Microsoft Edge' })).toBeNull();
   });
 
   it('loads the older part of a long conversation', async () => {

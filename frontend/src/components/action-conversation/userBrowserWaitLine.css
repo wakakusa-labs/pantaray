@@ -8,11 +8,23 @@
   flex-wrap: wrap;
   gap: var(--space-xs) var(--space-md);
   align-items: center;
-  justify-content: space-between;
-  margin: 0;
   padding: var(--space-xs) 0;
   border-top: 1px solid var(--border-color);
   color: var(--text-secondary);
+}
+
+.user-browser-wait__line p {
+  flex: 1 1 auto;
+  margin: 0;
+}
+
+/* Selectable, so the user can paste it into the browser's address bar. */
+.user-browser-wait__address {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  -webkit-user-select: text;
+  user-select: text;
+  overflow-wrap: anywhere;
 }
 
 .user-browser-wait__line button {

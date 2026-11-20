@@ -1,6 +1,7 @@
 import type { ActionConversationPage } from './actionContracts';
 import type { ActionLatestPageRead, ActionLatestPages } from './actionLatestPageReader';
 import type { UserBrowserId } from '../browser/browserContract';
+import type { UserBrowserWaitKind } from '../browser/userBrowserConnection';
 import {
   isProcessCompletedActionEvent,
   isProcessStartedActionEvent,
@@ -33,6 +34,9 @@ export type ActionApprovalBlocker = {
   reviewReason: string | null;
 };
 
+/** What the Action waits on the user for in one of their browsers. */
+export type ActionUserBrowserWait = { browser: UserBrowserId; kind: UserBrowserWaitKind };
+
 export type ActionLiveSnapshot = {
   actionId: string;
   page: ActionConversationPage | null;
@@ -41,8 +45,8 @@ export type ActionLiveSnapshot = {
   pageVersion: number;
   transientToolSteps: readonly ActionTransientToolStep[];
   approvalBlockers: readonly ActionApprovalBlocker[];
-  // The user's browsers asking the user to allow Pantaray in for this Action, each once.
-  userBrowserWaits: readonly UserBrowserId[];
+  // The user's browsers this Action waits on the user in, each once.
+  userBrowserWaits: readonly ActionUserBrowserWait[];
   // A lifecycle notification is authoritative while its canonical read is pending or failed.
   lifecycle: {
     processId: string;
@@ -333,7 +337,7 @@ export function createActionLiveCoordinator(params: {
     actionId: string;
   }) => Promise<ActionLiveRefreshOutcome>;
   // Shows that the Action waits for the user in their browser; the closer ends that wait.
-  beginUserBrowserWait: (wait: { actionId: string; browser: UserBrowserId }) => () => void;
+  beginUserBrowserWait: (wait: { actionId: string } & ActionUserBrowserWait) => () => void;
   getSnapshot: (actionId: string) => ActionLiveSnapshot | null;
   clearAll: () => void;
 } {
@@ -359,7 +363,7 @@ export function createActionLiveCoordinator(params: {
     return created;
   };
   // Each Action's waits by their closer's own token, so one ending keeps the others shown.
-  const userBrowserWaits = new Map<string, Map<symbol, UserBrowserId>>();
+  const userBrowserWaits = new Map<string, Map<symbol, ActionUserBrowserWait>>();
   let generation = 0;
   let pageVersion = 0;
 
@@ -371,7 +375,12 @@ export function createActionLiveCoordinator(params: {
       pageVersion: current?.pageVersion ?? 0,
       transientToolSteps: current?.transientToolSteps ?? [],
       approvalBlockers: current?.approvalBlockers ?? [],
-      userBrowserWaits: [...new Set(userBrowserWaits.get(actionId)?.values())],
+      // One per browser: the wait begun last, as a session moves from debugging off to allow.
+      userBrowserWaits: [
+        ...new Map(
+          [...(userBrowserWaits.get(actionId)?.values() ?? [])].map((wait) => [wait.browser, wait])
+        ).values(),
+      ],
       lifecycle: current?.lifecycle ?? null,
     };
     snapshots.set(actionId, snapshot);
@@ -533,10 +542,10 @@ export function createActionLiveCoordinator(params: {
       return rootProcessId;
     },
     handleStreamBoundary: ({ actionId }) => refresh(actionId),
-    beginUserBrowserWait: ({ actionId, browser }) => {
+    beginUserBrowserWait: ({ actionId, browser, kind }) => {
       const token = Symbol(browser);
-      const waits = userBrowserWaits.get(actionId) ?? new Map<symbol, UserBrowserId>();
-      waits.set(token, browser);
+      const waits = userBrowserWaits.get(actionId) ?? new Map<symbol, ActionUserBrowserWait>();
+      waits.set(token, { browser, kind });
       userBrowserWaits.set(actionId, waits);
       publishUserBrowserWaits(actionId);
       return () => {

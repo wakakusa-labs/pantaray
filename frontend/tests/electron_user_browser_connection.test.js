@@ -26,7 +26,8 @@ function load() {
     Module._load = originalLoad;
   }
 }
-const { CdpCommandError, bringUserBrowserForward, connectUserBrowser } = load();
+const { CdpCommandError, connectUserBrowser } = load();
+const { bringUserBrowserForward } = require(`${DIST}/userBrowserForward.js`);
 
 /**
  * A stand-in for the browser's debugging endpoint: `mode` holds every handshake ('hold'),
@@ -74,23 +75,30 @@ function applicationSupport(t, { port, lockPid = process.pid, portFile, blocked 
   return { root, userDataDir };
 }
 
-/** lsof lists `lsof` (exiting 1 when it lists nothing); codesign exits `codesign`. */
+/**
+ * lsof lists `state.lsof` (exiting 1 when it lists nothing); codesign exits `state.codesign`.
+ * Both are read on each call, so a test can turn debugging on midway.
+ */
 function fakeRunner({ lsof = 'p4242\nf20\n', codesign = 0 } = {}) {
   const calls = [];
+  const state = { lsof, codesign };
   const runner = async (file, args) => {
     calls.push({ file, args });
-    if (file === '/usr/sbin/lsof') return { exitCode: lsof === '' ? 1 : 0, stdout: lsof };
-    return { exitCode: codesign, stdout: '' };
+    if (file === '/usr/sbin/lsof') {
+      return { exitCode: state.lsof === '' ? 1 : 0, stdout: state.lsof };
+    }
+    return { exitCode: state.codesign, stdout: '' };
   };
-  return { runner, calls };
+  return { runner, calls, state };
 }
 
-/** Counts the waits for the user that started and the ones whose closer ran. */
+/** Each wait for the user that started, by kind, and whether its closer ran. */
 function fakeWait() {
-  const wait = { started: 0, ended: 0 };
-  wait.begin = () => {
-    wait.started += 1;
-    return () => (wait.ended += 1);
+  const wait = { waits: [] };
+  wait.begin = (kind) => {
+    const begun = { kind, ended: false };
+    wait.waits.push(begun);
+    return () => (begun.ended = true);
   };
   return wait;
 }
@@ -130,13 +138,13 @@ test('the wait for Allow has no time limit, and stopping it closes the socket an
   assert.equal(request.headers.origin, undefined);
   await new Promise((r) => setTimeout(r, 300));
   assert.equal(settled, false);
-  assert.deepEqual([wait.started, wait.ended], [1, 0]);
+  assert.deepEqual(wait.waits, [{ kind: 'allow', ended: false }]);
 
   const reason = new Error('the run stopped');
   controller.abort(reason);
   await assert.rejects(connecting, (error) => error === reason);
   await closed;
-  assert.deepEqual([wait.started, wait.ended], [1, 1]);
+  assert.deepEqual(wait.waits, [{ kind: 'allow', ended: true }]);
 });
 
 test("the user's refusal is told apart from any other failed handshake", async (t) => {
@@ -148,7 +156,7 @@ test("the user's refusal is told apart from any other failed handshake", async (
     const { root } = applicationSupport(t, { port: endpoint.port });
     const wait = fakeWait();
     await assert.rejects(connect(root, { wait }), failsWith(code, /Google Chrome/));
-    assert.deepEqual([wait.started, wait.ended], [1, 1]);
+    assert.deepEqual(wait.waits, [{ kind: 'allow', ended: true }]);
   }
 });
 
@@ -157,9 +165,7 @@ test('each state of the browser and its files gets the code the user can act on'
   const cases = [
     ['no lock', { lockPid: null, port: 9222 }, {}, 'BROWSER_USER_NOT_RUNNING', /not running/],
     ['lock of a quit browser', { lockPid: deadPid, port: 9222 }, {}, 'BROWSER_USER_NOT_RUNNING'],
-    ['no port file', {}, {}, 'BROWSER_USER_DEBUGGING_OFF', /chrome:\/\/inspect\/#remote-debugging/],
     ['malformed port file', { portFile: 'x\n/elsewhere\n' }, {}, 'BROWSER_USER_UNAVAILABLE'],
-    ['debugging turned off, file left', { port: 9222 }, { lsof: '' }, 'BROWSER_USER_DEBUGGING_OFF'],
     ['two listeners', { port: 9222 }, { lsof: 'p1\nf3\np2\nf4\n' }, 'BROWSER_USER_UNAVAILABLE'],
     [
       'port file blocked',
@@ -187,7 +193,7 @@ test('a listener that is not the signed browser never gets the socket', async (t
   const wait = fakeWait();
   await assert.rejects(connect(root, { runner, wait }), failsWith('BROWSER_USER_UNAVAILABLE'));
   assert.equal(endpoint.upgrades.length, 0);
-  assert.equal(wait.started, 0);
+  assert.deepEqual(wait.waits, []);
   assert.ok(calls[0].args.includes(`-iTCP@127.0.0.1:${endpoint.port}`));
   const [flag, option, requirement, pid] = calls[1].args;
   assert.deepEqual([flag, option, pid], ['--verify', '-R', '4242']);
@@ -218,7 +224,7 @@ test('a tab reaches only its own sessions and frames, hears only them, and has i
   const wait = fakeWait();
   const connection = await connect(root, { wait });
   // Allowed: the wait ended as the socket opened.
-  assert.deepEqual([wait.started, wait.ended], [1, 1]);
+  assert.deepEqual(wait.waits, [{ kind: 'allow', ended: true }]);
   const popups = [];
   const tab = await connection.openTab((url) => popups.push(url), new AbortController().signal);
   const events = [];
@@ -361,6 +367,48 @@ test("once a tab's signal aborts, nothing more is sent for it but closing it", a
   await tab.close();
   assert.deepEqual(received, [['Target.closeTarget', undefined]]);
   connection.close();
+});
+
+// Catches: remote debugging off ending the run instead of waiting for the user, the line kept on
+// the guidance once it is on, or no Allow wait after it.
+test('with remote debugging off the wait lasts until it is on, then asks to allow', async (t) => {
+  const endpoint = await browserEndpoint(t, 'hold');
+  const { root } = applicationSupport(t, { port: endpoint.port });
+  // The file is left from before, but nothing listens until the user turns debugging on.
+  const { runner, state } = fakeRunner({ lsof: '' });
+  const wait = fakeWait();
+  const controller = new AbortController();
+  const connecting = connect(root, { runner, wait, signal: controller.signal });
+  connecting.catch(() => undefined);
+  while (wait.waits.length === 0) await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(wait.waits, [{ kind: 'debugging_off', ended: false }]);
+
+  state.lsof = 'p4242\nf20\n';
+  while (endpoint.upgrades.length === 0) await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(wait.waits, [
+    { kind: 'debugging_off', ended: true },
+    { kind: 'allow', ended: false },
+  ]);
+  controller.abort(new Error('the run stopped'));
+  await assert.rejects(connecting);
+});
+
+// Catches: a stop while debugging is off that leaves the guidance up, or a poll still reading
+// the browser's files and running lsof for a run that ended.
+test('stopping the run while debugging is off ends the wait and the polling', async (t) => {
+  const { root } = applicationSupport(t, { port: 9222 });
+  const { runner, calls } = fakeRunner({ lsof: '' });
+  const wait = fakeWait();
+  const controller = new AbortController();
+  const connecting = connect(root, { runner, wait, signal: controller.signal });
+  while (wait.waits.length === 0) await new Promise((r) => setTimeout(r, 10));
+  const reason = new Error('the run stopped');
+  controller.abort(reason);
+  await assert.rejects(connecting, (error) => error === reason);
+  assert.deepEqual(wait.waits, [{ kind: 'debugging_off', ended: true }]);
+  const checks = calls.length;
+  await new Promise((r) => setTimeout(r, 1_500));
+  assert.equal(calls.length, checks);
 });
 
 test('stopping the run ends a check that never answers', async (t) => {

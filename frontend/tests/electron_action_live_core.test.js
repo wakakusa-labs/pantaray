@@ -1064,22 +1064,28 @@ function userBrowserWaitHarness() {
   return { coordinator, updates, waitsOf, finish: () => (status = 'success') };
 }
 
-// Catches: the wait shown in another Action's chat, dropped by a mid-run page read, or taken
-// down by the first of two waits to end while the other still waits on the user.
+// Catches: the wait shown in another Action's chat, dropped by a mid-run page read, taken down
+// by the first of two waits to end while the other still waits on the user, or a browser shown
+// twice, or with the earlier step, as its session moves from debugging off to allow.
 test("a user-browser wait stays on its own Action's snapshot until its last closer runs", async () => {
   const { coordinator, waitsOf } = userBrowserWaitHarness();
   await coordinator.refresh('action-b');
-  const endFirst = coordinator.beginUserBrowserWait({ actionId: 'action-a', browser: 'chrome' });
-  const endSecond = coordinator.beginUserBrowserWait({ actionId: 'action-a', browser: 'chrome' });
-  assert.deepStrictEqual(waitsOf('action-a'), ['chrome']);
+  const begin = (kind) =>
+    coordinator.beginUserBrowserWait({ actionId: 'action-a', browser: 'chrome', kind });
+  const endOff = begin('debugging_off');
+  const endOther = begin('debugging_off');
+  assert.deepStrictEqual(waitsOf('action-a'), [{ browser: 'chrome', kind: 'debugging_off' }]);
   assert.deepStrictEqual(coordinator.getSnapshot('action-b').userBrowserWaits, []);
 
   await coordinator.refresh('action-a');
-  assert.deepStrictEqual(waitsOf('action-a'), ['chrome']);
-  endFirst();
-  endFirst();
-  assert.deepStrictEqual(waitsOf('action-a'), ['chrome']);
-  endSecond();
+  assert.deepStrictEqual(waitsOf('action-a'), [{ browser: 'chrome', kind: 'debugging_off' }]);
+  endOff();
+  const endAllow = begin('allow');
+  assert.deepStrictEqual(waitsOf('action-a'), [{ browser: 'chrome', kind: 'allow' }]);
+  endAllow();
+  endAllow();
+  assert.deepStrictEqual(waitsOf('action-a'), [{ browser: 'chrome', kind: 'debugging_off' }]);
+  endOther();
   assert.deepStrictEqual(waitsOf('action-a'), []);
 });
 
@@ -1087,7 +1093,8 @@ test("a user-browser wait stays on its own Action's snapshot until its last clos
 // publishing a fresh snapshot that a window's cache keeps as a live Action.
 test('the end of the Action clears its wait and a later closer publishes nothing', async () => {
   const { coordinator, updates, waitsOf, finish } = userBrowserWaitHarness();
-  const end = coordinator.beginUserBrowserWait({ actionId: 'action-a', browser: 'edge' });
+  const wait = { actionId: 'action-a', browser: 'edge', kind: 'allow' };
+  const end = coordinator.beginUserBrowserWait(wait);
   finish();
   await coordinator.refresh('action-a');
   assert.deepStrictEqual(waitsOf('action-a'), []);
@@ -1097,10 +1104,7 @@ test('the end of the Action clears its wait and a later closer publishes nothing
   assert.equal(updates.length, published);
   assert.equal(coordinator.getSnapshot('action-a'), null);
 
-  const endBeforeReset = coordinator.beginUserBrowserWait({
-    actionId: 'action-a',
-    browser: 'edge',
-  });
+  const endBeforeReset = coordinator.beginUserBrowserWait(wait);
   coordinator.clearAll();
   const afterReset = updates.length;
   endBeforeReset();

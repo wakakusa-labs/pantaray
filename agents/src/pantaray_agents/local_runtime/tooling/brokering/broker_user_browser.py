@@ -4,8 +4,10 @@ decides before Electron is asked.
 The run's tab there is signed in to the user's real accounts, so it opens only
 sites the user approved for the run, one host at a time, and never a local
 file, a loopback host or a print. The browser is the one the run's tab is bound
-to, or else the first known browser with remote debugging on; it is chosen as
-the call is validated and the call runs with it. The host Python reads from a
+to, or else the first known browser with remote debugging on, or else the first
+running one, or else the first installed one, for which the run waits until the
+user turns remote debugging on; it is chosen as the call is validated and the
+call runs with it. The host Python reads from a
 URL is only what the user is asked about: Electron parses the URL as Chromium
 does and refuses a host the run was not allowed to open.
 """
@@ -13,6 +15,8 @@ does and refuses a host the run was not allowed to open.
 from __future__ import annotations
 
 import ipaddress
+import os
+from pathlib import Path
 from typing import Final, NoReturn
 from urllib.parse import urlsplit
 
@@ -26,6 +30,7 @@ from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.schema.user_browser import KNOWN_USER_BROWSERS, UserBrowserId
 from pantaray_agents.schema.websocket.server_messages import BrowserHost
 from pantaray_agents.tools.contract import BrokerPolicyError
+from pantaray_agents.tools.files.secret_paths import user_browser_data_dirs
 
 from ..sandbox.browser_debugging_ports import browsers_with_debugging_on
 from .broker_browser import web_target
@@ -41,28 +46,57 @@ from .browser_protocol import (
 
 # urlsplit gives the host lowercase, as the user's browser compares hosts.
 _HOST: Final[TypeAdapter[str]] = TypeAdapter(BrowserHost)
-_DEBUGGING_OFF_MESSAGE: Final = (
-    "None of the user's browsers has remote debugging on, so Pantaray cannot "
-    "use it. Turn it on in Google Chrome at chrome://inspect/#remote-debugging "
-    "(Microsoft Edge: edge://inspect, Brave: brave://inspect)."
-)
+# Chromium's lock is a symlink to ``<hostname>-<pid>``.
+_LOCK_FILE: Final = "SingletonLock"
 
 
 def user_browser_for_run(owner_process_id: str) -> UserBrowserId:
     """The browser the run's tab is bound to, or else the first known one with
-    remote debugging on."""
+    remote debugging on, or else the first running one, or else the first
+    installed one."""
 
     bound = bound_user_browser(owner_process_id)
     if bound is not None:
         return bound
     debugging_on = browsers_with_debugging_on()
-    if not debugging_on:
-        raise BrokerPolicyError(
-            _DEBUGGING_OFF_MESSAGE,
-            code="BROWSER_USER_DEBUGGING_OFF",
-            fix_hint=FIX_HINTS["BROWSER_USER_DEBUGGING_OFF"],
-        )
-    return debugging_on[0]
+    if debugging_on:
+        return debugging_on[0]
+    installed = {
+        browser_id: user_data_dir
+        for browser_id, user_data_dir in user_browser_data_dirs().items()
+        if user_data_dir.is_dir()
+    }
+    running = [browser_id for browser_id, path in installed.items() if _running(path)]
+    if running:
+        return running[0]
+    if installed:
+        return next(iter(installed))
+    names = ", ".join(browser.display_name for browser in KNOWN_USER_BROWSERS.values())
+    raise BrokerPolicyError(
+        f"None of the browsers Pantaray can use is on this Mac: {names}.",
+        code="BROWSER_USER_NOT_INSTALLED",
+        fix_hint=FIX_HINTS["BROWSER_USER_NOT_INSTALLED"],
+    )
+
+
+def _running(user_data_dir: Path) -> bool:
+    """Whether a browser holds the user-data-dir now: its lock names a live
+    process."""
+
+    try:
+        pid = os.readlink(user_data_dir / _LOCK_FILE).rpartition("-")[2]
+    except OSError:
+        return False
+    if not pid.isdigit() or int(pid) <= 0:
+        return False
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # The process exists but is not ours to signal.
+        return True
+    return True
 
 
 def refuse_printing(call: BrowserToolArgs) -> None:

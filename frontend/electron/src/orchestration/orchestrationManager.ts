@@ -11,8 +11,7 @@
 import type { BrowserWindow } from 'electron';
 
 import type { ActionLatestPages } from '../actions/actionLatestPageReader';
-import type { ActionLiveRefreshOutcome } from '../actions/actionLiveCore';
-import type { UserBrowserId } from '../browser/browserContract';
+import type { ActionLiveRefreshOutcome, ActionUserBrowserWait } from '../actions/actionLiveCore';
 import { parseChatItem, parseChatTurnState, type ChatTurnState } from '../chat/chatContracts';
 import type { LocalRuntimeState } from '../auth/localRuntimeState';
 import type { ScreenCaptureRequest } from '../capture/screenCapture';
@@ -91,7 +90,7 @@ export type OrchestrationManager = {
     toolRequestId: string;
   }) => string | null;
   /** Shows in the Action's chat that it waits for the user in their browser, until the closer runs. */
-  beginUserBrowserWait: (wait: { actionId: string; browser: UserBrowserId }) => () => void;
+  beginUserBrowserWait: (wait: { actionId: string } & ActionUserBrowserWait) => () => void;
   resetActionLive: () => void;
   /** What the live session last said about the chat's turn; null until it says, or after it ends. */
   getChatTurnState: () => ChatTurnState | null;

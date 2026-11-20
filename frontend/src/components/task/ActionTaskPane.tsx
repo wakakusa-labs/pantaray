@@ -285,7 +285,7 @@ export function ActionTaskPane({
         </div>
       </div>
       <div className="action-task__dock">
-        <UserBrowserWaitLine browsers={task.userBrowserWaits} />
+        <UserBrowserWaitLine waits={task.userBrowserWaits} />
         {status.kind === 'approval_pending' && approval.blockers.length > 0 ? (
           <div className="action-task__approvals">
             {approval.blockers.map((blocker) => (

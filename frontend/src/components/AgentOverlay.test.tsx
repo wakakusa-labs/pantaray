@@ -1061,7 +1061,7 @@ describe('AgentOverlay broader E2E', () => {
     await act(async () =>
       conversationListener?.({
         ...running,
-        snapshot: { ...running.snapshot, userBrowserWaits: ['edge'] },
+        snapshot: { ...running.snapshot, userBrowserWaits: [{ browser: 'edge', kind: 'allow' }] },
       })
     );
 

@@ -21,11 +21,8 @@ import { createScreenCaptureResponder } from '../capture/screenCaptureRuntime';
 import { createBrowserResponder } from '../browser/browserResponder';
 import { createBrowserSessions } from '../browser/browserSession';
 import { clearBrowserArtifacts } from '../browser/capture';
-import {
-  bringUserBrowserForward,
-  connectUserBrowser,
-  runCommand,
-} from '../browser/userBrowserConnection';
+import { connectUserBrowser, runCommand } from '../browser/userBrowserConnection';
+import { bringUserBrowserForward } from '../browser/userBrowserForward';
 import { createUserBrowserSessions } from '../browser/userBrowserSession';
 import { createHtmlPreviewPdfs } from '../render/htmlPreview';
 import { createActionFetcher } from '../actions/actionFetch';

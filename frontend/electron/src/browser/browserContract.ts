@@ -206,7 +206,6 @@ export const BrowserOperationAnswerSchema = strict({
         'BROWSER_SESSION_GONE',
         'BROWSER_ACTION_FAILED',
         'BROWSER_USER_NOT_RUNNING',
-        'BROWSER_USER_DEBUGGING_OFF',
         'BROWSER_USER_FILE_BLOCKED',
         'BROWSER_USER_DENIED',
         'BROWSER_USER_UNAVAILABLE',

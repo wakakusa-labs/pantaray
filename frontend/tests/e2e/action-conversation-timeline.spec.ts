@@ -177,7 +177,7 @@ for (const language of ['ja', 'en'] as const) {
     await page.goto(`${baseUrl}notification.html?mode=standalone&actionId=action-1`);
     await expect(page.locator('html')).toHaveAttribute('data-conversation-ready', 'true');
     await publish(page, 1, conversation(false, false));
-    const work = page.locator('.action-conversation__work > button');
+    const work = page.locator('.action-conversation__work-header > .action-conversation__disclosure');
     await expect(work).toHaveCount(2);
     await work.nth(0).click();
     await work.nth(1).click();

@@ -94,7 +94,8 @@ function harness({ cdp } = {}) {
     cdpOf(session)
       .commands.filter(({ method }) => /screencast/i.test(method))
       .map(({ method, params }) => (params === undefined ? method : [method, params]));
-  const frame = (session, sessionId, frameTarget) =>
+  // Electron names the page's own events by an empty session id.
+  const frame = (session, sessionId, frameTarget = '') =>
     cdpOf(session).emit(
       'message',
       {},
@@ -123,7 +124,8 @@ function harness({ cdp } = {}) {
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
 // Catches: the stream started on another of the Action's pages or another Action's, frames
-// broadcast to every window or a frame target's mistaken for the page's, a stream that stalls
+// broadcast to every window or a frame target's mistaken for the page's, the page's own frames
+// (Electron's empty session id) dropped as a frame target's, a stream that stalls
 // because frames are not acknowledged one by one, a screencast that changes the page's viewport
 // or emulation, and a page update sent before the window can know its watch id.
 test("a watch streams the Action's last-touched page to the asking window only", async () => {
@@ -261,6 +263,25 @@ test('a watch ends with the window, on unwatch, on a crash and at the end of the
   });
   h.frame('s3', 1);
   assert.deepEqual(main.of('frame'), []);
+});
+
+// Catches: a window that asks for an Action with nothing to show still fed, and its screencast
+// left running, by the Action it watched before.
+test("a watch for an Action with no page still ends the window's earlier watch", async () => {
+  const h = harness();
+  await h.navigate('s1', 'action-a');
+  const main = viewerWindow(1);
+  h.viewer.watch('action-a', main);
+  await settle();
+  const listeners = h.cdpOf('s1').listenerCount('message');
+
+  assert.deepEqual(h.viewer.watch('action-b', main), { kind: 'not_live' });
+  assert.equal(h.screencastCalls('s1').at(-1), 'Page.stopScreencast');
+  assert.equal(h.cdpOf('s1').listenerCount('message'), listeners - 1);
+  h.frame('s1', 1);
+  h.contentsOf('s1').emit('did-navigate');
+  assert.deepEqual(main.of('frame'), []);
+  assert.equal(main.of('page').length, 1);
 });
 
 // Catches: another Action's page, a page no Action owns (a Suggestion's, the HTML preview's) or

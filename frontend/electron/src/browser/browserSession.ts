@@ -43,7 +43,7 @@ import {
   type BrowserPageData,
   type BrowserPagePolicy,
 } from './browserContract';
-import type { CdpPage } from './cdpSession';
+import { childSession, type CdpPage } from './cdpSession';
 import {
   decideBrowserRequest,
   serveFile,
@@ -194,7 +194,8 @@ function drain(page: PageSession): PageReport {
 
 /** The CDP events that report what the page tried; `sessionId` names the frame target. */
 function watchPage(page: PageSession, logger: LoggerLike | null | undefined): void {
-  page.cdp.on('message', (_event, method, params, sessionId) => {
+  page.cdp.on('message', (_event, method, params, eventSession) => {
+    const sessionId = childSession(eventSession);
     if (method === 'Target.attachedToTarget') {
       void guardChild(page.cdp, params.sessionId, params.targetInfo.type, logger);
     } else if (method === 'Page.javascriptDialogOpening') {

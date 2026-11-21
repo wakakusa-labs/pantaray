@@ -18,6 +18,7 @@ import { randomUUID } from 'node:crypto';
 
 import type { Debugger, WebContents } from 'electron';
 
+import { childSession } from './cdpSession';
 import { PAGE_VIEWPORT } from './pageWindowOptions';
 
 export type BrowserViewEndReason = 'work_ended' | 'page_crashed';
@@ -137,9 +138,9 @@ export function createAppPageViewer(params: {
       params.logger?.error?.('BROWSER_VIEW_SCREENCAST_ERR', { error: errorName(error) });
       end(watch, 'work_ended', true);
     };
-    const onMessage = (_event: unknown, method: string, data: unknown, cdpSession?: string) => {
+    const onMessage = (_event: unknown, method: string, data: unknown, eventSession: string) => {
       // A frame target's events name it; the screencast is the page's own.
-      if (method !== 'Page.screencastFrame' || cdpSession !== undefined) return;
+      if (method !== 'Page.screencastFrame' || childSession(eventSession) !== undefined) return;
       const frame = data as ScreencastFrame;
       send(watch, {
         kind: 'frame',
@@ -224,10 +225,11 @@ export function createAppPageViewer(params: {
     pageEvents: events,
     /** Starts showing the Action's page in `viewer`, in place of what it watched before. */
     watch(actionId: string, viewer: BrowserViewer): BrowserViewWatchResult {
-      const current = currentPage(actionId);
-      if (current === null) return { kind: 'not_live' };
+      // The window asked for another view, whether or not this Action has a page to show.
       const previous = watches.get(viewer.id);
       if (previous !== undefined) end(previous, null, true);
+      const current = currentPage(actionId);
+      if (current === null) return { kind: 'not_live' };
       const watch: Watch = {
         id: randomUUID(),
         actionId,

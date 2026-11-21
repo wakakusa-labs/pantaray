@@ -128,16 +128,13 @@ def test_worker_daemon_polls_memory_agent_triggers_for_active_user(
         assert kwargs["user_id"] == "user-daemon"
         dispatched.set()
 
-    async def _run_activity_summary(**_kwargs: object) -> None:
-        return None
-
     monkeypatch.setattr(
         "pantaray_agents.local_runtime.runtime.periodic_schedule.dispatch_memory_agent_triggers_once",
         _dispatch,
     )
     monkeypatch.setattr(
-        "pantaray_agents.local_runtime.runtime.periodic_schedule.run_activity_summary_scheduler_once",
-        _run_activity_summary,
+        "pantaray_agents.local_runtime.runtime.periodic_schedule.run_builtin_hooks_once",
+        lambda **_kwargs: None,
     )
     monkeypatch.setattr(
         "pantaray_agents.local_runtime.runtime.periodic_schedule.run_memory_catalog_repair_once",
@@ -164,7 +161,6 @@ def test_worker_daemon_withholds_owner_scoped_periodic_work_until_configure(
     again -- while the summary cursor it advanced is spent all the same.
     """
     from pantaray_agents.local_runtime.runtime import periodic_schedule
-    from pantaray_agents.local_runtime.runtime.identity import current_owner_id
 
     db_path = tmp_path / "runtime.db"
     prepare_test_database(db_path, 1_000, load_default_migrations())
@@ -187,9 +183,6 @@ def test_worker_daemon_withholds_owner_scoped_periodic_work_until_configure(
             ticked_twice.set()
         return 0
 
-    async def _run_activity_summary(**_kwargs: object) -> None:
-        owner_scoped_calls.append(("activity_summary", current_owner_id()))
-
     def _dispatch(*, user_id: str, **_kwargs: object) -> None:
         owner_scoped_calls.append(("memory_agent_dispatch", user_id))
         dispatched.set()
@@ -200,10 +193,9 @@ def test_worker_daemon_withholds_owner_scoped_periodic_work_until_configure(
         0.0,
     )
     monkeypatch.setattr(periodic_schedule, "run_local_periodic_reaper_once", _reaper)
+    # Each hook holds its own owner gate (tests/unit/local_runtime/hooks).
     monkeypatch.setattr(
-        periodic_schedule,
-        "run_activity_summary_scheduler_once",
-        _run_activity_summary,
+        periodic_schedule, "run_builtin_hooks_once", lambda **_kwargs: None
     )
     monkeypatch.setattr(
         periodic_schedule, "dispatch_memory_agent_triggers_once", _dispatch
@@ -229,8 +221,7 @@ def test_worker_daemon_withholds_owner_scoped_periodic_work_until_configure(
         _activate_session(db_path, user_id="user-daemon")
 
         assert dispatched.wait(timeout=2.0) is True
-        assert owner_scoped_calls[0] == ("activity_summary", "user-daemon")
-        assert ("memory_agent_dispatch", "user-daemon") in owner_scoped_calls
+        assert owner_scoped_calls[0] == ("memory_agent_dispatch", "user-daemon")
     finally:
         stop_local_action_worker_daemon()
 
@@ -422,9 +413,6 @@ def test_worker_drain_does_not_run_periodic_tasks_after_stop(
         periodic_ran.set()
         return 0
 
-    async def run_activity_summary(**_kwargs: object) -> None:
-        return None
-
     def run_action(_payload: object) -> None:
         action_started.set()
         assert release_action.wait(timeout=5.0) is True
@@ -441,8 +429,8 @@ def test_worker_drain_does_not_run_periodic_tasks_after_stop(
     )
     monkeypatch.setattr(
         periodic_schedule,
-        "run_activity_summary_scheduler_once",
-        run_activity_summary,
+        "run_builtin_hooks_once",
+        lambda **_kwargs: None,
     )
     monkeypatch.setattr(
         periodic_schedule,

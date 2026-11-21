@@ -1,0 +1,42 @@
+# Built-in hooks, parsed by pantaray_agents.hooks.definitions at worker start.
+#
+# The short Insight window must stay 15 minutes: `insight_queue` aligns its run
+# identity to that window so the 1h summary neither drops nor double counts it.
+[[hooks]]
+id = "builtin.insight"
+trigger = { every = "15m", align = true, tz = "utc" }
+requires = ["owner_settled", "recording_ready"]
+run = { job = "generate_insight" }
+
+# Summaries, shortest first: each longer one waits for the shorter ones of its
+# window. The offset is the grace after the period ends that lets the last
+# short runs of the period finish.
+[[hooks]]
+id = "builtin.summary_1h"
+trigger = { every = "hour", offset = "5m", tz = "utc" }
+requires = ["owner_settled"]
+run = { job = "summarize_activity", args = { summary_type = "1h" } }
+
+[[hooks]]
+id = "builtin.summary_24h"
+trigger = { every = "day", offset = "10m", tz = "utc" }
+requires = ["owner_settled"]
+run = { job = "summarize_activity", args = { summary_type = "24h" } }
+
+[[hooks]]
+id = "builtin.summary_1w"
+trigger = { every = "week", offset = "15m", tz = "utc" }
+requires = ["owner_settled"]
+run = { job = "summarize_activity", args = { summary_type = "1w" } }
+
+[[hooks]]
+id = "builtin.summary_1m"
+trigger = { every = "month", offset = "20m", tz = "utc" }
+requires = ["owner_settled"]
+run = { job = "summarize_activity", args = { summary_type = "1m" } }
+
+[[hooks]]
+id = "builtin.summary_3m"
+trigger = { every = "quarter", offset = "30m", tz = "utc" }
+requires = ["owner_settled"]
+run = { job = "summarize_activity", args = { summary_type = "3m" } }

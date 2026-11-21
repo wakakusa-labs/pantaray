@@ -6,7 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from pantaray_agents.local_runtime.activity_summary_schedule import SummaryType, iso_z
+from pantaray_agents.hooks.engine import FireOutcome
+from pantaray_agents.local_runtime.activity_summary_schedule import (
+    ACTIVITY_SUMMARY_SCHEDULE_SPECS,
+    SummaryType,
+    iso_z,
+)
 from pantaray_agents.local_runtime.runtime.activity_queue import (
     enqueue_local_activity_summary_job,
 )
@@ -14,7 +19,7 @@ from pantaray_agents.local_runtime.runtime.activity_summary_recovery import (
     recover_interrupted_activity_summary_scheduler_runs,
 )
 from pantaray_agents.local_runtime.runtime.activity_summary_scheduler import (
-    run_activity_summary_scheduler_once,
+    enqueue_scheduled_activity_summary,
 )
 from pantaray_agents.local_runtime.runtime.identity import (
     register_logged_out_owner,
@@ -36,6 +41,19 @@ from pantaray_agents.local_runtime.storage.migrations import (
 )
 
 from .migrated_db import prepare_test_database
+
+
+async def _run_scheduler(db_path: Path, *, now: datetime) -> dict[str, FireOutcome]:
+    """Fire every summary hook once, shortest first, as one hooks tick does."""
+    return {
+        spec.summary_type: await enqueue_scheduled_activity_summary(
+            db_path=db_path,
+            busy_timeout_ms=1_000,
+            summary_type=spec.summary_type,
+            now=now,
+        )
+        for spec in ACTIVITY_SUMMARY_SCHEDULE_SPECS
+    }
 
 
 def _insert_user_row(db_path: Path, *, user_id: str, updated_at: str) -> None:
@@ -191,11 +209,7 @@ async def test_activity_summary_scheduler_enqueues_latest_window_once(
     )
 
     now = datetime(2026, 4, 15, 10, 35, tzinfo=UTC)
-    await run_activity_summary_scheduler_once(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        now=now,
-    )
+    await _run_scheduler(db_path, now=now)
 
     assert len(enqueue_calls) == 5
     assert {str(call["summary_type"]) for call in enqueue_calls} == {
@@ -210,11 +224,7 @@ async def test_activity_summary_scheduler_enqueues_latest_window_once(
     )
 
     first_cursor_values = _read_scheduler_job_cursor_values(db_path)
-    await run_activity_summary_scheduler_once(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        now=now,
-    )
+    await _run_scheduler(db_path, now=now)
     second_cursor_values = _read_scheduler_job_cursor_values(db_path)
 
     assert len(enqueue_calls) == 5
@@ -256,18 +266,11 @@ async def test_activity_summary_scheduler_retries_failed_window(
     )
 
     now = datetime(2026, 4, 15, 10, 35, tzinfo=UTC)
-    await run_activity_summary_scheduler_once(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        now=now,
-    )
+    # A failed enqueue keeps the hook due rather than skipping the hour.
+    assert (await _run_scheduler(db_path, now=now))["1h"] == "retry"
     assert "1h" not in calls
 
-    await run_activity_summary_scheduler_once(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        now=now,
-    )
+    await _run_scheduler(db_path, now=now)
     assert calls.count("1h") == 1
 
 
@@ -303,22 +306,16 @@ async def test_activity_summary_scheduler_backfills_from_cursor_without_skipping
 
     now = datetime(2026, 4, 15, 10, 35, tzinfo=UTC)
 
-    await run_activity_summary_scheduler_once(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        now=now,
-    )
+    # A remaining backlog keeps the hook due, so it drains one window per tick
+    # instead of one per hour.
+    assert (await _run_scheduler(db_path, now=now))["1h"] == "retry"
     assert [
         str(call["period_start"])
         for call in enqueue_calls
         if str(call["summary_type"]) == "1h"
     ] == ["2026-04-15T08:00:00Z"]
 
-    await run_activity_summary_scheduler_once(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        now=now,
-    )
+    assert (await _run_scheduler(db_path, now=now))["1h"] == "done"
     assert [
         str(call["period_start"])
         for call in enqueue_calls
@@ -363,11 +360,7 @@ async def test_activity_summary_scheduler_runs_for_the_logged_out_owner(
         _fake_enqueue_activity_summary_job,
     )
 
-    await run_activity_summary_scheduler_once(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        now=datetime(2026, 4, 15, 10, 35, tzinfo=UTC),
-    )
+    await _run_scheduler(db_path, now=datetime(2026, 4, 15, 10, 35, tzinfo=UTC))
 
     assert {str(call["user_id"]) for call in enqueue_calls} == {"local-owner"}
 
@@ -405,11 +398,7 @@ async def test_activity_summary_scheduler_ignores_historical_user_rows_and_uses_
         _fake_enqueue_activity_summary_job,
     )
 
-    await run_activity_summary_scheduler_once(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        now=datetime(2026, 4, 15, 10, 35, tzinfo=UTC),
-    )
+    await _run_scheduler(db_path, now=datetime(2026, 4, 15, 10, 35, tzinfo=UTC))
 
     assert enqueue_calls
     assert {str(call["user_id"]) for call in enqueue_calls} == {"active-user"}
@@ -471,18 +460,15 @@ async def test_activity_summary_scheduler_waits_for_the_hours_short_insight_runs
     )
     now = datetime(2026, 4, 15, 10, 35, tzinfo=UTC)
 
-    await run_activity_summary_scheduler_once(
-        db_path=db_path, busy_timeout_ms=1_000, now=now
-    )
+    # "retry" keeps the hook due; "done" would hold the hour back until 11:05.
+    assert (await _run_scheduler(db_path, now=now))["1h"] == "retry"
 
     assert [call for call in enqueue_calls if call["summary_type"] == "1h"] == []
     assert _read_scheduler_job_cursor_values(db_path)["activity_summary_1h"] is None
     assert _read_scheduler_job_runs(db_path, "activity_summary_1h") == []
 
     _finalize_job(db_path, job_id)
-    await run_activity_summary_scheduler_once(
-        db_path=db_path, busy_timeout_ms=1_000, now=now
-    )
+    assert (await _run_scheduler(db_path, now=now))["1h"] == "done"
 
     assert [
         str(call["period_start"])
@@ -503,11 +489,7 @@ async def test_activity_summary_scheduler_ignores_a_run_from_another_hour(
     db_path, enqueue_calls = _scheduler_fixture(monkeypatch, tmp_path)
     _enqueue_short_insight_job(db_path, datetime(2026, 4, 15, 10, 15, tzinfo=UTC))
 
-    await run_activity_summary_scheduler_once(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        now=datetime(2026, 4, 15, 10, 35, tzinfo=UTC),
-    )
+    await _run_scheduler(db_path, now=datetime(2026, 4, 15, 10, 35, tzinfo=UTC))
 
     assert [
         str(call["period_start"])
@@ -555,18 +537,14 @@ async def test_daily_summary_waits_for_the_days_hourly_summary_jobs(
     )
     now = datetime(2026, 4, 15, 10, 35, tzinfo=UTC)
 
-    await run_activity_summary_scheduler_once(
-        db_path=db_path, busy_timeout_ms=1_000, now=now
-    )
+    await _run_scheduler(db_path, now=now)
 
     assert [call for call in enqueue_calls if call["summary_type"] == "24h"] == []
     assert _read_scheduler_job_cursor_values(db_path)["activity_summary_24h"] is None
     assert _read_scheduler_job_runs(db_path, "activity_summary_24h") == []
 
     _finalize_job(db_path, job_id)
-    await run_activity_summary_scheduler_once(
-        db_path=db_path, busy_timeout_ms=1_000, now=now
-    )
+    await _run_scheduler(db_path, now=now)
 
     assert [
         str(call["period_start"])
@@ -592,11 +570,7 @@ async def test_daily_summary_ignores_an_hourly_job_from_another_day(
         period_end=datetime(2026, 4, 15, 9, 0, tzinfo=UTC),
     )
 
-    await run_activity_summary_scheduler_once(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        now=datetime(2026, 4, 15, 10, 35, tzinfo=UTC),
-    )
+    await _run_scheduler(db_path, now=datetime(2026, 4, 15, 10, 35, tzinfo=UTC))
 
     assert [
         str(call["period_start"])
@@ -614,11 +588,7 @@ async def test_daily_summary_waits_for_a_short_insight_run_inside_the_day(
     db_path, enqueue_calls = _scheduler_fixture(monkeypatch, tmp_path)
     _enqueue_short_insight_job(db_path, datetime(2026, 4, 14, 9, 56, tzinfo=UTC))
 
-    await run_activity_summary_scheduler_once(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        now=datetime(2026, 4, 15, 10, 35, tzinfo=UTC),
-    )
+    await _run_scheduler(db_path, now=datetime(2026, 4, 15, 10, 35, tzinfo=UTC))
 
     assert [call for call in enqueue_calls if call["summary_type"] == "24h"] == []
     assert _read_scheduler_job_cursor_values(db_path)["activity_summary_24h"] is None
@@ -640,18 +610,14 @@ async def test_weekly_summary_waits_for_a_daily_summary_job_inside_the_week(
     )
     now = datetime(2026, 4, 15, 10, 35, tzinfo=UTC)
 
-    await run_activity_summary_scheduler_once(
-        db_path=db_path, busy_timeout_ms=1_000, now=now
-    )
+    await _run_scheduler(db_path, now=now)
 
     assert [call for call in enqueue_calls if call["summary_type"] == "1w"] == []
     assert _read_scheduler_job_cursor_values(db_path)["activity_summary_1w"] is None
     assert _read_scheduler_job_runs(db_path, "activity_summary_1w") == []
 
     _finalize_job(db_path, job_id)
-    await run_activity_summary_scheduler_once(
-        db_path=db_path, busy_timeout_ms=1_000, now=now
-    )
+    await _run_scheduler(db_path, now=now)
 
     assert [
         str(call["period_start"])
@@ -674,11 +640,7 @@ async def test_weekly_summary_waits_for_an_hourly_summary_job_inside_the_week(
         period_end=datetime(2026, 4, 8, 10, tzinfo=UTC),
     )
 
-    await run_activity_summary_scheduler_once(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        now=datetime(2026, 4, 15, 10, 35, tzinfo=UTC),
-    )
+    await _run_scheduler(db_path, now=datetime(2026, 4, 15, 10, 35, tzinfo=UTC))
 
     assert [call for call in enqueue_calls if call["summary_type"] == "1w"] == []
     assert _read_scheduler_job_cursor_values(db_path)["activity_summary_1w"] is None
@@ -697,11 +659,7 @@ async def test_weekly_summary_ignores_a_daily_summary_job_from_another_week(
         period_end=datetime(2026, 4, 15, tzinfo=UTC),
     )
 
-    await run_activity_summary_scheduler_once(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        now=datetime(2026, 4, 15, 10, 35, tzinfo=UTC),
-    )
+    await _run_scheduler(db_path, now=datetime(2026, 4, 15, 10, 35, tzinfo=UTC))
 
     assert [
         str(call["period_start"])
@@ -732,9 +690,7 @@ async def test_scheduler_skips_the_backlog_older_than_the_cap(
         _seed_scheduler_cursor(db_path, job_name, cursor_value)
     now = datetime(2026, 4, 15, 10, 35, tzinfo=UTC)
 
-    await run_activity_summary_scheduler_once(
-        db_path=db_path, busy_timeout_ms=1_000, now=now
-    )
+    await _run_scheduler(db_path, now=now)
 
     assert [
         (str(call["summary_type"]), str(call["period_start"])) for call in enqueue_calls
@@ -746,9 +702,7 @@ async def test_scheduler_skips_the_backlog_older_than_the_cap(
         ("3m", "2026-01-01T00:00:00Z"),
     ]
 
-    await run_activity_summary_scheduler_once(
-        db_path=db_path, busy_timeout_ms=1_000, now=now
-    )
+    await _run_scheduler(db_path, now=now)
 
     assert [
         str(call["period_start"])
@@ -772,11 +726,7 @@ async def test_scheduler_leaves_behind_a_short_insight_run_older_than_the_cap(
     _seed_scheduler_cursor(db_path, "activity_summary_1h", "2026-03-15T09:00:00Z")
     _enqueue_short_insight_job(db_path, datetime(2026, 3, 15, 10, 15, tzinfo=UTC))
 
-    await run_activity_summary_scheduler_once(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        now=datetime(2026, 4, 15, 10, 35, tzinfo=UTC),
-    )
+    await _run_scheduler(db_path, now=datetime(2026, 4, 15, 10, 35, tzinfo=UTC))
 
     assert [
         str(call["period_start"])
@@ -800,11 +750,7 @@ async def test_daily_summary_leaves_behind_an_hourly_job_older_than_the_cap(
         period_end=datetime(2026, 3, 15, 10, tzinfo=UTC),
     )
 
-    await run_activity_summary_scheduler_once(
-        db_path=db_path,
-        busy_timeout_ms=1_000,
-        now=datetime(2026, 4, 15, 10, 35, tzinfo=UTC),
-    )
+    await _run_scheduler(db_path, now=datetime(2026, 4, 15, 10, 35, tzinfo=UTC))
 
     assert [
         str(call["period_start"])

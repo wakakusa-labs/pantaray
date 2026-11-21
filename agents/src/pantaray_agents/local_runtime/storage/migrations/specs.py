@@ -162,6 +162,7 @@ def load_default_migrations() -> tuple[MigrationSpec, ...]:
         "0144_approval_review_question_reason.sql",
         "0145_run_owned_tool_runtime_resources.sql",
         "0146_running_command_invocation_audits.sql",
+        "0147_hook_states.sql",
     )
     return tuple(
         MigrationSpec(

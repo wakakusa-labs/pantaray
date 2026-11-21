@@ -5,9 +5,11 @@ import logging
 import sqlite3
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
+from pantaray_agents.hooks.engine import FireOutcome
 from pantaray_agents.local_runtime.activity_summary_schedule import (
     ACTIVITY_SUMMARY_SCHEDULE_SPECS,
     ActivitySummaryScheduleSpec,
@@ -51,7 +53,6 @@ _SCHEDULER_JOB_STATUS_ACTIVE = "active"
 _SCHEDULER_RUN_STATUS_RUNNING = "running"
 _SCHEDULER_RUN_STATUS_COMPLETED = "completed"
 _SCHEDULER_RUN_STATUS_FAILED = "failed"
-_SCHEDULER_INTERVAL_SECONDS = 30.0
 
 
 @dataclass(frozen=True)
@@ -188,12 +189,11 @@ def _ensure_scheduler_job(
             job_kind,
             status,
             cursor_value,
-            next_run_after,
             last_started_at,
             last_completed_at,
             last_success_at,
             consecutive_failures
-        ) VALUES (?, ?, ?, NULL, NULL, NULL, NULL, NULL, 0)
+        ) VALUES (?, ?, ?, NULL, NULL, NULL, NULL, 0)
         ON CONFLICT(job_name) DO NOTHING
         """,
         (spec.job_name, "activity_summary", _SCHEDULER_JOB_STATUS_ACTIVE),
@@ -218,7 +218,8 @@ def _claim_due_scheduler_run(
     user_id: str,
     spec: ActivitySummaryScheduleSpec,
     now: datetime,
-) -> SchedulerRunClaim | None:
+) -> SchedulerRunClaim | Literal["waiting"] | None:
+    """Claim the window after the cursor, "waiting" while its sources are open."""
     if busy_timeout_ms <= 0:
         raise MigrationError("LOCAL_DB_BUSY_TIMEOUT_MS must be a positive integer")
 
@@ -233,7 +234,7 @@ def _claim_due_scheduler_run(
 
             cursor_row = connection.execute(
                 """
-                SELECT cursor_value, next_run_after
+                SELECT cursor_value
                 FROM scheduler_jobs
                 WHERE job_name = ?
                 """,
@@ -242,9 +243,6 @@ def _claim_due_scheduler_run(
             if cursor_row is None:
                 raise MigrationError(f"scheduler_job cursor missing: {spec.job_name}")
             cursor_value = str(cursor_row[0]) if cursor_row[0] is not None else None
-            next_run_after = str(cursor_row[1]) if cursor_row[1] is not None else None
-            if next_run_after is not None and now < parse_iso_z(next_run_after):
-                return None
 
             window = _select_candidate_window(
                 spec=spec,
@@ -255,8 +253,8 @@ def _claim_due_scheduler_run(
                 return None
             window_start_iso = iso_z(window.period_start)
             window_end_iso = iso_z(window.period_end)
-            # Leave the cursor where it is: the next tick re-evaluates this
-            # window once the work that owns its source rows has terminated.
+            # Leave the cursor where it is: the hook stays due and re-evaluates
+            # this window once the work that owns its source rows has terminated.
             # Every type waits on the short Insight runs of its window, not only
             # the 1h one: a shorter summary's job is itself withheld while a run
             # is open, so an absent shorter job does not yet mean the period is
@@ -273,7 +271,7 @@ def _claim_due_scheduler_run(
                 window_start=window_start_iso,
                 window_end=window_end_iso,
             ):
-                return None
+                return "waiting"
 
             existing_row = connection.execute(
                 """
@@ -358,13 +356,9 @@ def _complete_scheduler_run(
     *,
     db_path: Path | str,
     busy_timeout_ms: int,
-    spec: ActivitySummaryScheduleSpec,
     claim: SchedulerRunClaim,
 ) -> None:
     completed_at = iso_z(_utc_now())
-    next_due = next_period_end(claim.window.period_end, spec.summary_type) + timedelta(
-        seconds=spec.grace_seconds
-    )
     with sqlite3.connect(str(db_path)) as connection:
         configure_connection(connection, busy_timeout_ms)
         with connection:
@@ -381,7 +375,6 @@ def _complete_scheduler_run(
                 UPDATE scheduler_jobs
                 SET
                     cursor_value = ?,
-                    next_run_after = ?,
                     last_completed_at = ?,
                     last_success_at = ?,
                     consecutive_failures = 0
@@ -389,10 +382,9 @@ def _complete_scheduler_run(
                 """,
                 (
                     iso_z(claim.window.period_start),
-                    iso_z(next_due),
                     completed_at,
                     completed_at,
-                    spec.job_name,
+                    claim.job_name,
                 ),
             )
 
@@ -440,60 +432,74 @@ def _fail_scheduler_run(
             )
 
 
-async def run_activity_summary_scheduler_once(
+async def enqueue_scheduled_activity_summary(
     *,
     db_path: Path | str,
     busy_timeout_ms: int,
+    summary_type: SummaryType,
     now: datetime | None = None,
-) -> None:
+) -> FireOutcome:
+    """Enqueue the next window of ``summary_type`` its hook fired for.
+
+    "retry" keeps the hook due: the window waits for its sources, the enqueue
+    failed, or a backlog remains, which then drains one window per tick.
+    """
     current = _utc_now() if now is None else now.astimezone(UTC)
     owner_user_id = current_owner_id()
-    for spec in ACTIVITY_SUMMARY_SCHEDULE_SPECS:
-        claim = _claim_due_scheduler_run(
+    spec = next(
+        spec
+        for spec in ACTIVITY_SUMMARY_SCHEDULE_SPECS
+        if spec.summary_type == summary_type
+    )
+    claim = _claim_due_scheduler_run(
+        db_path=db_path,
+        busy_timeout_ms=busy_timeout_ms,
+        user_id=owner_user_id,
+        spec=spec,
+        now=current,
+    )
+    if claim is None:
+        return "done"
+    if claim == "waiting":
+        return "retry"
+    try:
+        result = await run_summary_generation(
+            spec.summary_type,
+            user_id=owner_user_id,
+            now=claim.window.period_end,
+        )
+        if result["failed"] > 0:
+            raise RuntimeError(
+                "activity summary scheduler enqueue failed for one or more users"
+            )
+        logger.info(
+            "Activity summary scheduler completed: job_name=%s total=%d enqueued=%d failed=%d",
+            spec.job_name,
+            result["total"],
+            result["enqueued"],
+            result["failed"],
+        )
+        _complete_scheduler_run(
             db_path=db_path,
             busy_timeout_ms=busy_timeout_ms,
-            user_id=owner_user_id,
-            spec=spec,
-            now=current,
+            claim=claim,
         )
-        if claim is None:
-            continue
-        try:
-            result = await run_summary_generation(
-                spec.summary_type,
-                user_id=owner_user_id,
-                now=claim.window.period_end,
-            )
-            if result["failed"] > 0:
-                raise RuntimeError(
-                    "activity summary scheduler enqueue failed for one or more users"
-                )
-            logger.info(
-                "Activity summary scheduler completed: job_name=%s total=%d enqueued=%d failed=%d",
-                spec.job_name,
-                result["total"],
-                result["enqueued"],
-                result["failed"],
-            )
-            _complete_scheduler_run(
-                db_path=db_path,
-                busy_timeout_ms=busy_timeout_ms,
-                spec=spec,
-                claim=claim,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.exception(
-                "Activity summary scheduler failed: job_name=%s error=%s",
-                spec.job_name,
-                exc,
-            )
-            _fail_scheduler_run(
-                db_path=db_path,
-                busy_timeout_ms=busy_timeout_ms,
-                claim=claim,
-                error_code="ACTIVITY_SUMMARY_SCHEDULER_FAILED",
-                error_message=str(exc),
-            )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            "Activity summary scheduler failed: job_name=%s error=%s",
+            spec.job_name,
+            exc,
+        )
+        _fail_scheduler_run(
+            db_path=db_path,
+            busy_timeout_ms=busy_timeout_ms,
+            claim=claim,
+            error_code="ACTIVITY_SUMMARY_SCHEDULER_FAILED",
+            error_message=str(exc),
+        )
+        return "retry"
+    latest = latest_eligible_window(spec=spec, now=current)
+    return "retry" if claim.window.period_start < latest.period_start else "done"
 
 
 __all__ = [
@@ -501,8 +507,7 @@ __all__ = [
     "ActivitySummaryScheduleSpec",
     "ActivitySummaryWindow",
     "SummaryType",
-    "_SCHEDULER_INTERVAL_SECONDS",
     "calculate_summary_window",
-    "run_activity_summary_scheduler_once",
+    "enqueue_scheduled_activity_summary",
     "run_summary_generation",
 ]

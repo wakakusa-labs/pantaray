@@ -47,7 +47,11 @@ function previewHarness({ linked, load }) {
   const fake = fakeBrowserElectron({ load });
   const { createBrowserSessions, createHtmlPreviewPdfs } = loadOnElectron(fake.electron);
   const userDataDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-user-')));
-  const sessions = createBrowserSessions({ getBackendPort: () => 49152 });
+  const pageOwners = [];
+  const sessions = createBrowserSessions({
+    getBackendPort: () => 49152,
+    pages: { opened: (_id, actionId) => pageOwners.push(actionId), touched() {}, closed() {} },
+  });
   const pdfs = createHtmlPreviewPdfs({ userDataDir, sessions });
   const finalOutput = linked.map((file) => `[f](pantaray-file://${encodeURI(file)})`).join('\n');
   const sources = {
@@ -77,6 +81,7 @@ function previewHarness({ linked, load }) {
   });
   return {
     ...fake,
+    pageOwners,
     read: (file) =>
       handlers.get('actionFile:read')({}, { target: { kind: 'action', id: 'act-1' }, path: file }),
     fetch: (url) => protocol({ url }),
@@ -86,7 +91,8 @@ function previewHarness({ linked, load }) {
 const DEAD_PROXY = { proxyRules: 'http://127.0.0.1:9', proxyBypassRules: '<-loopback>' };
 
 // Catches: the preview reaching the network, loading outside its folder, printing twice for
-// one view, serving a PDF for another file or owner, or leaving its session open.
+// one view, serving a PDF for another file or owner, leaving its session open, or its page
+// offered to an Action's chat as that Action's browser.
 test('an owned HTML file previews as its PDF, loading its own folder and no network', async () => {
   const work = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-html-preview-')));
   const deck = path.join(work, 'deck', 'deck.html');
@@ -125,6 +131,7 @@ test('an owned HTML file previews as its PDF, loading its own folder and no netw
     ['http://127.0.0.1:5173/', { cancel: true }],
   ]);
   assert.equal(h.windows.length, 1);
+  assert.deepEqual(h.pageOwners, [null]);
   assert.equal(h.windows[0].destroyed, true);
   assert.equal(h.windows[0].shown, false);
 

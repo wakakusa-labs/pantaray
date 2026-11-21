@@ -57,3 +57,12 @@ export const ActionToolOutputRequestSchema = z
 export const ActionOpenUserBrowserRequestSchema = z
   .object({ browser: UserBrowserIdSchema, kind: z.enum(['debugging_off', 'allow']) })
   .strict();
+
+// The window names only the Action; main picks the page it shows.
+export const BrowserViewWatchRequestSchema = z
+  .object({ actionId: CanonicalIdentitySchema })
+  .strict();
+
+export const BrowserViewUnwatchRequestSchema = z
+  .object({ watchId: CanonicalIdentitySchema })
+  .strict();

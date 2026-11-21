@@ -85,7 +85,10 @@ function harness() {
   }
   const answers = [];
   const respond = loaded.createBrowserResponder({
-    sessions: loaded.createBrowserSessions({ getBackendPort: () => 49152 }),
+    sessions: loaded.createBrowserSessions({
+      getBackendPort: () => 49152,
+      pages: { opened() {}, touched() {}, closed() {} },
+    }),
     localArtifactRoot: fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-browser-')),
     postAnswer: async (body) => answers.push(body),
   });

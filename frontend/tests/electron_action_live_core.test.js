@@ -1110,3 +1110,35 @@ test('the end of the Action clears its wait and a later closer publishes nothing
   endBeforeReset();
   assert.equal(updates.length, afterReset);
 });
+
+// Catches: the view button offered for another Action, dropped by a mid-run page read or by the
+// first of two pages to close while a subagent's page lives on, kept on a finished Action, or a
+// closer after the end publishing a snapshot a window's cache keeps as a live Action.
+test("an Action's app browser is live from its first page until its last one closes", async () => {
+  const { coordinator, updates, finish } = userBrowserWaitHarness();
+  const liveOf = (actionId) =>
+    updates.filter((update) => update.snapshot?.actionId === actionId).at(-1)?.snapshot
+      .appBrowserLive;
+  await coordinator.refresh('action-b');
+  assert.equal(liveOf('action-a'), undefined);
+  const endMain = coordinator.beginAppBrowserPage('action-a');
+  const endSubagent = coordinator.beginAppBrowserPage('action-a');
+  assert.equal(liveOf('action-a'), true);
+  assert.equal(coordinator.getSnapshot('action-b').appBrowserLive, false);
+  await coordinator.refresh('action-a');
+  assert.equal(liveOf('action-a'), true);
+  endMain();
+  endMain();
+  assert.equal(liveOf('action-a'), true);
+  endSubagent();
+  assert.equal(liveOf('action-a'), false);
+
+  const endAtFinish = coordinator.beginAppBrowserPage('action-a');
+  assert.equal(liveOf('action-a'), true);
+  finish();
+  await coordinator.refresh('action-a');
+  assert.equal(liveOf('action-a'), false);
+  const published = updates.length;
+  endAtFinish();
+  assert.equal(updates.length, published);
+});

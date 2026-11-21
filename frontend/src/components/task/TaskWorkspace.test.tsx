@@ -37,6 +37,7 @@ function emitPage(page: ReturnType<typeof createActionPage>, pageVersion: number
           transientToolSteps: [],
           approvalBlockers: [],
           userBrowserWaits: [],
+          appBrowserLive: false,
           lifecycle: null,
         },
       })

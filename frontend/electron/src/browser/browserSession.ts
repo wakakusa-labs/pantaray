@@ -24,6 +24,7 @@
  * close, on a renderer crash, past an operation's budget, when its window is closed (the app
  * quits), or when the backend generation that opened it ends. A closed or crashed id is refused
  * from then on; after a timeout the next `navigate` opens a new session under the same id.
+ * `pageViewer` hears of each page's opening, operations and end, to show it to the user.
  */
 
 import {
@@ -51,6 +52,7 @@ import {
   type FileAccessScope,
 } from './pagePolicy';
 import { GUARDED_APIS, removeGuardedApis } from './pageGuardPreload';
+import type { AppPageEvents } from './pageViewer';
 import { PAGE_VIEWPORT, pageWindowOptions } from './pageWindowOptions';
 
 type OkResult = Extract<BrowserOperationAnswer['result'], { status: 'ok' }>;
@@ -360,6 +362,7 @@ export type BrowserSessions = ReturnType<typeof createBrowserSessions>;
 export function createBrowserSessions(params: {
   /** The backend's own port, which no page may reach under any host name. */
   getBackendPort: () => number;
+  pages: AppPageEvents;
   logger?: LoggerLike | null;
 }) {
   const sessions = new Map<string, PageSession>();
@@ -373,6 +376,7 @@ export function createBrowserSessions(params: {
     page.end = reason;
     if (!reopenable) ended.add(page.id);
     sessions.delete(page.id);
+    params.pages.closed(page.id, reason.code === 'BROWSER_RENDERER_CRASHED');
     page.stop(reason);
     if (!page.window.isDestroyed()) page.window.destroy();
     page.ses.protocol.unhandle('file');
@@ -387,7 +391,7 @@ export function createBrowserSessions(params: {
     );
   }
 
-  function open(id: string, policy: BrowserPagePolicy): PageSession {
+  function open(id: string, { action_id: actionId, policy }: SessionRequest): PageSession {
     // No `persist:` prefix: the partition lives in memory only, and no other session, nor a
     // later one under the same id, shares it.
     partitions += 1;
@@ -445,6 +449,7 @@ export function createBrowserSessions(params: {
     page.ready = attachDebugger(contents, page.cdp);
     page.ready.catch(() => undefined);
     sessions.set(id, page);
+    params.pages.opened(id, actionId, { contents, cdp: page.cdp, ready: page.ready });
     return page;
   }
 
@@ -546,8 +551,9 @@ export function createBrowserSessions(params: {
             new BrowserOperationError('BROWSER_NO_PAGE', 'No page is open in this session.')
           );
         }
-        page = open(id, request.policy);
+        page = open(id, request);
       }
+      params.pages.touched(id);
       const opened = page;
       const settled = opened.queue.then(() => execute(opened, request, budgetMs, work));
       // Waits for the turn only; holding the result would keep it as long as the session.

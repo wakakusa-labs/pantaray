@@ -119,6 +119,7 @@ function harness(scripts = {}) {
   const logged = [];
   const sessions = createBrowserSessions({
     getBackendPort: () => BACKEND_PORT,
+    pages: { opened() {}, touched() {}, closed() {} },
     logger: { error: (name, payload) => logged.push({ name, payload }) },
   });
   const ses = (index = 0) =>

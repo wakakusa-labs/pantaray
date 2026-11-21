@@ -55,6 +55,8 @@ export const validReceiveChannels = [
   'ui:languageChanged',
   // A downloaded update became ready: re-read the notice
   'update:readyNoticeChanged',
+  // Main window only: the app's page an Action works on, to the window that watches it
+  'browserView:update',
 ] as const;
 
 export const validInvokeChannels = [
@@ -125,6 +127,9 @@ export const validInvokeChannels = [
   'action:openUserBrowser',
   // Both windows: stop the run and resume it with the messages waiting for it
   'action:sendNow',
+  // Main window only: watch, view only, the app's page an Action works on, and stop watching
+  'browserView:watch',
+  'browserView:unwatch',
   // Composer image attachments (write) and "reveal in Finder" for a stored image
   'action:attachImage',
   'actionImage:reveal',

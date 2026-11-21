@@ -18,13 +18,10 @@ import type { LocalOwner } from '../auth/localRuntimeState';
 import type { createSupabaseWiring } from '../auth/supabaseWiring';
 import { saveUserState } from '../auth/userState';
 import { createScreenCaptureResponder } from '../capture/screenCaptureRuntime';
-import { createBrowserResponder } from '../browser/browserResponder';
-import { createBrowserSessions } from '../browser/browserSession';
 import { clearBrowserArtifacts } from '../browser/capture';
-import { connectUserBrowser, runCommand } from '../browser/userBrowserConnection';
+import { createDesktopBrowsers } from './desktopBrowsers';
+import { runCommand } from '../browser/userBrowserConnection';
 import { openUserBrowser } from '../browser/userBrowserForward';
-import { createUserBrowserSessions } from '../browser/userBrowserSession';
-import { createHtmlPreviewPdfs } from '../render/htmlPreview';
 import { createActionFetcher } from '../actions/actionFetch';
 import { createChatFetcher } from '../chat/chatFetch';
 import { createTodoFetcher } from '../todos/todoFetch';
@@ -198,27 +195,16 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     if (backendUrl === null) throw new Error('The local backend has no address yet.');
     return Number(new URL(backendUrl).port);
   };
-  const browserSessions = createBrowserSessions({ getBackendPort, logger: params.logger });
-  const userBrowserSessions = createUserBrowserSessions({
-    connect: (browser, waitForUser, signal) =>
-      connectUserBrowser({
-        browser,
-        applicationSupportDir: app.getPath('appData'),
-        runner: runCommand,
-        waitForUser,
-        signal,
-      }),
-    showWait: (wait) => orchestration.beginUserBrowserWait(wait),
+  const browsers = createDesktopBrowsers({
     getBackendPort,
-    logger: params.logger,
-  });
-  const closeAllBrowserSessions = () => {
-    browserSessions.closeAll();
-    userBrowserSessions.closeAll();
-  };
-  const htmlPreviewPdfs = createHtmlPreviewPdfs({
+    applicationSupportDir: app.getPath('appData'),
     userDataDir: app.getPath('userData'),
-    sessions: browserSessions,
+    localArtifactRoot: params.localArtifactRoot,
+    // `requestJson` is defined below; the responder calls it only once an operation arrives.
+    postAnswer: (body) => requestJson({ method: 'POST', path: '/local/action-browser', body }),
+    showUserBrowserWait: (wait) => orchestration.beginUserBrowserWait(wait),
+    beginAppBrowserPage: (actionId) => orchestration.beginAppBrowserPage(actionId),
+    logger: params.logger,
   });
   const orchestration = createOrchestrationManager({
     getRuntimeBackendUrl: params.desktopRuntime.getBackendUrl,
@@ -241,17 +227,8 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
         requestJson({ method: 'POST', path: '/local/action-screen-capture', body }),
       logger: params.logger,
     }),
-    respondToBrowserOperation: createBrowserResponder({
-      sessions: browserSessions,
-      userSessions: userBrowserSessions,
-      localArtifactRoot: params.localArtifactRoot,
-      postAnswer: (body) => requestJson({ method: 'POST', path: '/local/action-browser', body }),
-      logger: params.logger,
-    }),
-    closeBrowserSession: (sessionId) => {
-      browserSessions.close(sessionId);
-      userBrowserSessions.close(sessionId);
-    },
+    respondToBrowserOperation: browsers.respond,
+    closeBrowserSession: browsers.close,
     logger: params.logger,
   });
   const localBackendClient = createLocalBackendClient({
@@ -439,9 +416,10 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
           runFile: async (file, args, options) =>
             (await execFileAsync(file, [...args], { ...options, encoding: 'utf8' })).stdout,
           chooseApp,
-          renderHtml: htmlPreviewPdfs.render,
+          renderHtml: browsers.htmlPreviewPdfs.render,
         },
         clipboard: { writeText: (text) => clipboard.writeText(text) },
+        browserView: browsers.pageViewer,
         update: {
           getReadyNotice: params.updateUi.getReadyNotice,
           restartToUpdate: params.updateUi.restartToUpdate,
@@ -551,13 +529,13 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     applyLocalOwner,
     /** When the backend generation ends: everything the browser holds for it goes. */
     closeBrowserSessions: () => {
-      closeAllBrowserSessions();
+      browsers.closeAll();
       clearBrowserArtifacts(params.localArtifactRoot);
     },
     prepareOwnerChange: () => {
       // The helper keeps running, so no close for the old owner's sessions will arrive. Their
       // artifacts stay: the same backend may still be reading one.
-      closeAllBrowserSessions();
+      browsers.closeAll();
       params.notificationWindow.clearForOwnerChange();
       heldPanels.length = 0;
       conversationOverlay.onOwnerChanged(null);
@@ -583,7 +561,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     initializeGlobalShortcut: shortcutController.initialize,
     openNewConversationOverlay: conversationOverlay.openNewConversationOverlay,
     readActionConversationPage: actions.readConversationPage,
-    readRenderedPdf: htmlPreviewPdfs.readRendered,
+    readRenderedPdf: browsers.htmlPreviewPdfs.readRendered,
     resolveOverlayBootstrap,
     reconnectOrchestration: orchestration.reconnect,
     registerMainIpc,

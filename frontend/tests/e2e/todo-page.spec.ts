@@ -288,6 +288,7 @@ function actionFromSuggestion(actionId: string): ActionLiveUpdate {
       transientToolSteps: [],
       approvalBlockers: [],
       userBrowserWaits: [],
+      appBrowserLive: false,
       lifecycle: null,
     },
   };

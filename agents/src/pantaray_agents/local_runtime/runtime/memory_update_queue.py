@@ -117,10 +117,12 @@ def enqueue_memory_update_from_inbox(
         }
         chat = [event for event in events if event.name == ChatMessageRecorded.NAME]
         if chat:
+            sequences = [_int(event.payload, "sequence") for event in chat]
             pinned = chat_range(
                 connection,
                 user_id=user_id,
-                after=min(_int(event.payload, "sequence") for event in chat) - 1,
+                after=min(sequences) - 1,
+                through=max(sequences),
             )
             payload["chat"] = pinned
             consumed.extend(

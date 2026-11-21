@@ -14,12 +14,15 @@ from pantaray_agents.local_runtime.hooks.events import (
     ChatMessageRecorded,
     InsightRecorded,
 )
-from pantaray_agents.local_runtime.hooks.inbox import record_event
+from pantaray_agents.local_runtime.hooks.inbox import SqliteHookInbox, record_event
 from pantaray_agents.local_runtime.runtime.job_payload_models import (
     parse_memory_update_job_payload_json,
 )
 from pantaray_agents.local_runtime.runtime.memory_chat_range import (
     MEMORY_CHAT_MAX_CHARS,
+)
+from pantaray_agents.local_runtime.runtime.memory_update_queue import (
+    enqueue_memory_update_from_inbox,
 )
 from pantaray_agents.local_runtime.runtime.session_store import import_desktop_session
 from pantaray_agents.local_runtime.storage.chat_messages import (
@@ -184,6 +187,35 @@ def test_one_run_takes_the_chat_up_to_its_character_bound(
     assert _chat_ranges(db_path) == [
         {"after_sequence": 0, "through_sequence": second},
         {"after_sequence": second, "through_sequence": third},
+    ]
+
+
+def test_a_message_saved_after_the_inbox_was_read_goes_to_the_next_run(
+    tmp_path: Path, tick: Tick
+) -> None:
+    # Catches a range that reads past the handed events: the message saved in
+    # between would be in this run and, its event still pending, in the next.
+    db_path = _db(tmp_path)
+    first = _user("Ship it on Friday.", minutes_ago=20, db_path=db_path)
+    events = SqliteHookInbox(
+        db_path=db_path, busy_timeout_ms=1_000, user_id="user-1"
+    ).read("builtin.memory_update")
+    later = _user("And the notes.", minutes_ago=0, db_path=db_path)
+    enqueue_memory_update_from_inbox(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        user_id="user-1",
+        hook_id="builtin.memory_update",
+        events=events,
+        superseded=(),
+        enqueued_at="2026-10-09T03:00:00.000Z",
+    )
+    finish_memory_jobs(db_path)
+    tick(db_path, NOW + timedelta(hours=1))
+
+    assert _chat_ranges(db_path) == [
+        {"after_sequence": 0, "through_sequence": first},
+        {"after_sequence": first, "through_sequence": later},
     ]
 
 

@@ -24,29 +24,32 @@ MEMORY_CHAT_MAX_CHARS: Final[int] = 60_000
 
 
 def chat_range(
-    connection: sqlite3.Connection, *, user_id: str, after: int
+    connection: sqlite3.Connection, *, user_id: str, after: int, through: int
 ) -> MemoryUpdateChatRange:
-    """The messages after ``after`` that fit one run.
+    """The messages in (``after``, ``through``] that fit one run.
 
-    A message longer than the character bound still goes alone, so the
-    backlog always moves. Chat messages are never deleted, so a pending
-    message event always finds its message.
+    ``through`` is the newest handed message: one saved since the inbox was
+    read has an event still pending, and goes to the next run. A message
+    longer than the character bound still goes alone, so the backlog always
+    moves. Chat messages are never deleted, so a pending message event always
+    finds its message.
     """
 
     messages = read_chat_messages(
         connection,
         user_id=user_id,
         after=after,
+        through=through,
         limit=MEMORY_UPDATE_SOURCE_MAX_ITEMS,
     )
-    through = messages[0].sequence
+    fits = messages[0].sequence
     total = 0
     for message in messages:
         total += len(message.content.text)
         if total > MEMORY_CHAT_MAX_CHARS and message is not messages[0]:
             break
-        through = message.sequence
-    return {"after_sequence": after, "through_sequence": through}
+        fits = message.sequence
+    return {"after_sequence": after, "through_sequence": fits}
 
 
 __all__ = ["MEMORY_CHAT_MAX_CHARS", "chat_range"]

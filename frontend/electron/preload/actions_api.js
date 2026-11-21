@@ -74,6 +74,16 @@ function createActionsApi({ ipcRenderer }) {
         return () => subscribers.delete(callback);
       },
     },
+    // Main window only: watch, view only, the app's page an Action works on.
+    browserView: {
+      watch: (request) => ipcRenderer.invoke('browserView:watch', request),
+      unwatch: (request) => ipcRenderer.invoke('browserView:unwatch', request),
+      onUpdate: (callback) => {
+        const listener = (_event, update) => callback(update);
+        ipcRenderer.on('browserView:update', listener);
+        return () => ipcRenderer.removeListener('browserView:update', listener);
+      },
+    },
   };
 }
 

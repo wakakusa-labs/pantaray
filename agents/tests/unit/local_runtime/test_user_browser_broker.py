@@ -165,9 +165,9 @@ async def test_each_site_in_the_users_browser_is_approved_once_per_run(
     assert opened["operation"]["target"]["url"] == "https://Mail.example.com/inbox"  # type: ignore[index]
     assert opened["user_browser"] == {
         "browser": "edge",
-        "action_id": "action-1",
         "read_hosts": ["mail.example.com"],
     }
+    assert opened["action_id"] == "action-1"
     debugging_on.remove("edge")
     _, again = await asyncio.gather(
         _call(runtime, _open("https://mail.example.com/2", justification=None), step=2),

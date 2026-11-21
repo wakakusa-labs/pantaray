@@ -59,6 +59,7 @@ export function buildMainContext(params: {
   historyReadItem: MainContext['history']['readItem'];
   actionFiles: MainContext['actionFiles'];
   clipboard: MainContext['clipboard'];
+  browserView: MainContext['browserView'];
   update: MainContext['update'];
   actions: MainContext['actions'];
   chat: MainContext['chat'];
@@ -288,6 +289,7 @@ export function buildMainContext(params: {
 
     actionFiles: params.actionFiles,
     clipboard: params.clipboard,
+    browserView: params.browserView,
     update: params.update,
 
     actions: params.actions,

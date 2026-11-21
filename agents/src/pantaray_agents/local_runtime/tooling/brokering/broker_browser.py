@@ -282,6 +282,7 @@ async def run_browser_executor(
             user_browser=None,
             operation=operation,
             policy=browser_page_policy(scope, allow_network=_network_enabled(context)),
+            action_id=context.execution_session.action_id,
         )
     else:
         outcome = await request_browser_operation(

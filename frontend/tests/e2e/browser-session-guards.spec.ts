@@ -225,12 +225,17 @@ function run(
         const nodeModule = process.getBuiltinModule('node:module');
         const sessionModule = nodeModule.createRequire(args.modulePath)(args.modulePath);
         // No page in these specs reaches this port.
-        g.e2eBrowserSessions = sessionModule.createBrowserSessions({ getBackendPort: () => 9 });
+        // No window in these specs watches a page.
+        g.e2eBrowserSessions = sessionModule.createBrowserSessions({
+          getBackendPort: () => 9,
+          pages: { opened() {}, touched() {}, closed() {} },
+        });
       }
       const sessions = g.e2eBrowserSessions as Sessions;
       const request = {
         operation_request_id: 'op-e2e',
         session_id: args.session,
+        action_id: null,
         operation: args.url
           ? { action: 'navigate', target: { kind: 'web', url: args.url } }
           : { action: 'console' },

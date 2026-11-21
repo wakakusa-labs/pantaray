@@ -47,6 +47,8 @@ export type ActionLiveSnapshot = {
   approvalBlockers: readonly ActionApprovalBlocker[];
   // The user's browsers this Action waits on the user in, each once.
   userBrowserWaits: readonly ActionUserBrowserWait[];
+  // True while the Action has a live page in the app's own hidden browser, which it can show.
+  appBrowserLive: boolean;
   // A lifecycle notification is authoritative while its canonical read is pending or failed.
   lifecycle: {
     processId: string;
@@ -282,6 +284,7 @@ export function reduceActionLiveSnapshot(
     transientToolSteps,
     approvalBlockers: current?.approvalBlockers ?? [],
     userBrowserWaits: current?.userBrowserWaits ?? [],
+    appBrowserLive: current?.appBrowserLive ?? false,
     lifecycle: current?.lifecycle ?? null,
   };
 }
@@ -338,6 +341,8 @@ export function createActionLiveCoordinator(params: {
   }) => Promise<ActionLiveRefreshOutcome>;
   // Shows that the Action waits for the user in their browser; the closer ends that wait.
   beginUserBrowserWait: (wait: { actionId: string } & ActionUserBrowserWait) => () => void;
+  // Counts one live app page of the Action; the closer ends it.
+  beginAppBrowserPage: (actionId: string) => () => void;
   getSnapshot: (actionId: string) => ActionLiveSnapshot | null;
   clearAll: () => void;
 } {
@@ -364,10 +369,12 @@ export function createActionLiveCoordinator(params: {
   };
   // Each Action's waits by their closer's own token, so one ending keeps the others shown.
   const userBrowserWaits = new Map<string, Map<symbol, ActionUserBrowserWait>>();
+  // Each Action's live app pages by their closer's own token.
+  const appBrowserPages = new Map<string, Set<symbol>>();
   let generation = 0;
   let pageVersion = 0;
 
-  const publishUserBrowserWaits = (actionId: string): void => {
+  const publishBrowserState = (actionId: string): void => {
     const current = snapshots.get(actionId) ?? null;
     const snapshot: ActionLiveSnapshot = {
       actionId,
@@ -381,6 +388,7 @@ export function createActionLiveCoordinator(params: {
           [...(userBrowserWaits.get(actionId)?.values() ?? [])].map((wait) => [wait.browser, wait])
         ).values(),
       ],
+      appBrowserLive: appBrowserPages.has(actionId),
       lifecycle: current?.lifecycle ?? null,
     };
     snapshots.set(actionId, snapshot);
@@ -444,6 +452,7 @@ export function createActionLiveCoordinator(params: {
           transientToolSteps,
           approvalBlockers: actionIsTerminal ? [] : (current?.approvalBlockers ?? []),
           userBrowserWaits: actionIsTerminal ? [] : (current?.userBrowserWaits ?? []),
+          appBrowserLive: !actionIsTerminal && (current?.appBrowserLive ?? false),
           lifecycle: lifecycleAfterRead,
         };
         snapshots.set(actionId, snapshot);
@@ -452,8 +461,9 @@ export function createActionLiveCoordinator(params: {
           snapshots.delete(actionId);
           observedAt.delete(actionId);
           rootProcessIds.delete(actionId);
-          // A wait that ends after this publishes nothing: the Action is no longer shown live.
+          // A wait or page that ends after this publishes nothing: the Action is no longer live.
           userBrowserWaits.delete(actionId);
+          appBrowserPages.delete(actionId);
         }
         return 'refreshed';
       } catch (error) {
@@ -507,6 +517,7 @@ export function createActionLiveCoordinator(params: {
             transientToolSteps: current?.transientToolSteps ?? [],
             approvalBlockers,
             userBrowserWaits: current?.userBrowserWaits ?? [],
+            appBrowserLive: current?.appBrowserLive ?? false,
             lifecycle,
           };
           snapshots.set(route.actionId, snapshot);
@@ -547,12 +558,25 @@ export function createActionLiveCoordinator(params: {
       const waits = userBrowserWaits.get(actionId) ?? new Map<symbol, ActionUserBrowserWait>();
       waits.set(token, { browser, kind });
       userBrowserWaits.set(actionId, waits);
-      publishUserBrowserWaits(actionId);
+      publishBrowserState(actionId);
       return () => {
         // Gone once the Action ended or every Action was reset.
         if (userBrowserWaits.get(actionId) !== waits || !waits.delete(token)) return;
         if (waits.size === 0) userBrowserWaits.delete(actionId);
-        publishUserBrowserWaits(actionId);
+        publishBrowserState(actionId);
+      };
+    },
+    beginAppBrowserPage: (actionId) => {
+      const token = Symbol(actionId);
+      const live = appBrowserPages.get(actionId) ?? new Set<symbol>();
+      live.add(token);
+      appBrowserPages.set(actionId, live);
+      if (live.size === 1) publishBrowserState(actionId);
+      return () => {
+        // Gone once the Action ended or every Action was reset.
+        if (appBrowserPages.get(actionId) !== live || !live.delete(token) || live.size > 0) return;
+        appBrowserPages.delete(actionId);
+        publishBrowserState(actionId);
       };
     },
     getSnapshot: (actionId) => snapshots.get(actionId) ?? null,
@@ -562,6 +586,7 @@ export function createActionLiveCoordinator(params: {
       observedAt.clear();
       rootProcessIds.clear();
       userBrowserWaits.clear();
+      appBrowserPages.clear();
       flights.clear();
       params.publish({ kind: 'reset' });
     },

@@ -49,6 +49,10 @@ import type {
   ActionToolOutputRequest,
 } from '../../electron/src/actions/actionFetch';
 import type { UserBrowserId } from '../../electron/src/browser/browserContract';
+import type {
+  BrowserViewUpdate,
+  BrowserViewWatchResult,
+} from '../../electron/src/browser/pageViewer';
 import type { ActionLiveUpdate } from '../../electron/src/actions/actionLiveCore';
 import type { TaskDraftChange } from '../../electron/src/actions/taskDraftStore';
 import type { TaskDraft, TaskDraftWork } from '../../electron/src/ipc/schemas/taskDrafts';
@@ -396,6 +400,15 @@ declare global {
         ) => Promise<ActionConversationPageReadResult>;
         readToolOutputPage: (request: ActionToolOutputRequest) => Promise<ActionToolOutputDetail>;
         onConversationUpdated: (callback: (update: ActionLiveUpdate) => void) => () => void;
+      };
+      /**
+       * Main window only: the app's page an Action works on, view only. A watch shows the page the
+       * Action touched last and follows it; a new watch replaces the window's earlier one.
+       */
+      browserView?: {
+        watch: (request: { actionId: string }) => Promise<BrowserViewWatchResult>;
+        unwatch: (request: { watchId: string }) => Promise<void>;
+        onUpdate: (callback: (update: BrowserViewUpdate) => void) => () => void;
       };
       ui?: {
         initialLanguage: UiLanguage | null;

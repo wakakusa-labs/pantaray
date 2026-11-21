@@ -524,6 +524,7 @@ export function createOrchestrationRendererBridge(params: {
     whenRunEnds,
     handleApprovalDecisionSettled,
     beginUserBrowserWait: actionLive.beginUserBrowserWait,
+    beginAppBrowserPage: actionLive.beginAppBrowserPage,
     handleDisconnect,
     resetActionLive,
   };

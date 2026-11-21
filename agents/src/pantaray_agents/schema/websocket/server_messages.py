@@ -348,8 +348,6 @@ class BrowserUserTarget(_BrowserModel):
     """The operation runs in a tab of the session's own in the user's browser."""
 
     browser: UserBrowserId
-    # The Action whose chat shows that the user is asked to allow the connection.
-    action_id: _BrowserId
     # Hosts the user approved this run to open in that tab.
     read_hosts: list[BrowserHost]
 
@@ -360,6 +358,12 @@ class BrowserOperationRequestedMessage(_BrowserModel):
 
     operation_request_id: _BrowserId = Field(description="Consumed once")
     session_id: _BrowserId = Field(description="Browser session the operation runs in")
+    action_id: _BrowserId | None = Field(
+        description=(
+            "The Action whose run asks: its chat shows the page, and the user's "
+            "browser waits there for the user; null for a run with no Action"
+        )
+    )
     operation: BrowserOperation = Field(
         description="The validated action, local paths resolved to real paths"
     )
@@ -371,9 +375,11 @@ class BrowserOperationRequestedMessage(_BrowserModel):
     @model_validator(mode="after")
     def _user_browser_is_web_only(self) -> Self:
         # The user's browser opens no local file and prints nothing, and it is
-        # never used with the command network off.
+        # never used with the command network off or for a run with no Action.
         if self.user_browser is None:
             return self
+        if self.action_id is None:
+            raise ValueError("the user's browser needs its Action")
         if not self.policy.allow_network:
             raise ValueError("the user's browser needs the network on")
         if isinstance(self.operation, BrowserPrintOperation):

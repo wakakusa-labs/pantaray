@@ -60,6 +60,7 @@ import type {
 import type { ActionFileOpenInput } from './schemas/actionFiles';
 import type { RunFile } from '../actions/actionDocumentHtml';
 import type { HtmlPreviewPdfs } from '../render/htmlPreview';
+import type { AppPageViewer } from '../browser/pageViewer';
 import type { createActionFetcher } from '../actions/actionFetch';
 import type { ActionLiveRefreshOutcome } from '../actions/actionLiveCore';
 import type { UserBrowserId } from '../browser/browserContract';
@@ -192,6 +193,9 @@ export type MainContext = {
 
   /** Each task's unsent draft, shared by the windows whose composers show it. */
   taskDrafts: TaskDraftStore;
+
+  /** The app's page an Action works on, shown view only in the window that watches it. */
+  browserView: Pick<AppPageViewer, 'watch' | 'unwatch'>;
 
   actionImages: {
     /** `LOCAL_ARTIFACT_ROOT`; images live under `{root}/generated/images`. */

@@ -125,7 +125,10 @@ function harness(options = {}) {
   });
   const answers = [];
   const respond = createBrowserResponder({
-    sessions: createBrowserSessions({ getBackendPort: () => BACKEND_PORT }),
+    sessions: createBrowserSessions({
+      getBackendPort: () => BACKEND_PORT,
+      pages: { opened() {}, touched() {}, closed() {} },
+    }),
     userSessions,
     localArtifactRoot: fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-user-browser-')),
     postAnswer: async (body) => answers.push(body),
@@ -140,6 +143,7 @@ function harness(options = {}) {
     await respond({
       operation_request_id: id,
       session_id: 'session-1',
+      action_id: app ? null : 'action-1',
       operation,
       policy: {
         allow_network: true,
@@ -149,9 +153,7 @@ function harness(options = {}) {
         secret_paths: [],
         write_hosts: writeHosts,
       },
-      user_browser: app
-        ? null
-        : { browser: 'chrome', action_id: 'action-1', read_hosts: readHosts },
+      user_browser: app ? null : { browser: 'chrome', read_hosts: readHosts },
     });
     return answers.find((answer) => answer.operation_request_id === id).result;
   };
@@ -274,10 +276,11 @@ test(
     });
     const request = (url) => ({
       session_id: 's',
+      action_id: 'action-1',
       operation: { action: 'navigate', target: { kind: 'web', url } },
       policy: { allow_network: true, write_hosts: [] },
     });
-    const target = { browser: 'chrome', action_id: 'action-1', read_hosts: ['a.example'] };
+    const target = { browser: 'chrome', read_hosts: ['a.example'] };
     const go = (page) => page.navigate('https://a.example/');
     assert.equal((await sessions.run(request('https://a.example/'), target, 50, go)).status, 'ok');
     stall = true;
@@ -363,10 +366,11 @@ test('an operation past its budget while the tab is guarded never runs', SETTLES
   const settled = await sessions.run(
     {
       session_id: 's',
+      action_id: 'action-1',
       operation: { action: 'navigate', target: { kind: 'web', url: 'https://a.example/' } },
       policy: { allow_network: true, write_hosts: [] },
     },
-    { browser: 'chrome', action_id: 'action-1', read_hosts: ['a.example'] },
+    { browser: 'chrome', read_hosts: ['a.example'] },
     20,
     async () => (worked = true)
   );

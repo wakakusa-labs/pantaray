@@ -119,6 +119,7 @@ function harness(scripts = {}) {
   const logged = [];
   const sessions = createBrowserSessions({
     getBackendPort: () => BACKEND_PORT,
+    pages: { opened() {}, touched() {}, closed() {} },
     logger: { error: (name, payload) => logged.push({ name, payload }) },
   });
   const ses = (index = 0) =>
@@ -336,13 +337,16 @@ test('local files are served only inside the policy read scope', async () => {
 });
 
 // Catches: a dialog, print, file chooser or worker the page asked for left unreported, a popup
-// opened (or sent to the user's browser), a download saved, or a permission granted.
+// opened (or sent to the user's browser), a download saved, a permission granted, or the page's
+// own dialog answered under the empty session id Electron names the page's events by.
 test('refused dialogs, prints, choosers, workers, popups and downloads are reported', async () => {
   const h = harness({
     load: async (_url, { ses, contents }) => {
-      const emit = (method, params, sessionId) =>
+      // Electron names the page's own events by an empty session id.
+      const emit = (method, params, sessionId = '') =>
         contents.debugger.emit('message', {}, method, params, sessionId);
       emit('Page.javascriptDialogOpening', {}, 'frame-1');
+      emit('Page.javascriptDialogOpening', {});
       emit('Log.entryAdded', { entry: { source: 'security', text: "Ignored call to 'print()'." } });
       emit('Page.fileChooserOpened', {});
       const csp = { violatedDirective: 'worker-src', blockedURL: 'https://a.example/w.js' };
@@ -359,11 +363,14 @@ test('refused dialogs, prints, choosers, workers, popups and downloads are repor
     network: [],
   });
   const contents = h.windows[0].webContents;
-  assert.ok(
-    contents.debugger.commands.some(
-      ({ method, params, sessionId }) =>
-        method === 'Page.handleJavaScriptDialog' && !params.accept && sessionId === 'frame-1'
-    )
+  assert.deepEqual(
+    contents.debugger.commands
+      .filter(({ method }) => method === 'Page.handleJavaScriptDialog')
+      .map(({ params, sessionId }) => [params.accept, sessionId]),
+    [
+      [false, 'frame-1'],
+      [false, undefined],
+    ]
   );
   assert.deepEqual(contents.openHandler({ url: 'https://x.example/' }), { action: 'deny' });
   assert.equal(h.ses().downloadPrevented, true);

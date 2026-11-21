@@ -44,11 +44,11 @@ import {
 
 export type { UserBrowserPage } from './userBrowserTab';
 
-/**
- * What the request names of the user's browser: which one, the Action whose run asks for it, and
- * the hosts the tab may open.
- */
-export type UserBrowserTarget = { browser: UserBrowserId; action_id: string; read_hosts: string[] };
+/** What the request names of the user's browser: which one, and the hosts the tab may open. */
+export type UserBrowserTarget = { browser: UserBrowserId; read_hosts: string[] };
+
+/** A request for the user's browser always names the Action whose chat shows its wait. */
+type UserSessionRequest = SessionRequest & { action_id: string };
 
 /** An Action waiting for the user in their browser, and for what. */
 export type UserBrowserWait = {
@@ -146,7 +146,7 @@ export function createUserBrowserSessions(params: {
     void slot.opening.then((tab) => tab.handle.close()).catch(() => undefined);
   }
 
-  function open(id: string, { browser, action_id: actionId }: UserBrowserTarget): UserSession {
+  function open(id: string, actionId: string, browser: UserBrowserId): UserSession {
     const abort = new AbortController();
     let stop: UserSession['stop'] = () => undefined;
     const endedPromise = new Promise<never>((_resolve, reject) => (stop = reject));
@@ -283,7 +283,7 @@ export function createUserBrowserSessions(params: {
      * `navigate` naming a new id connects to `target.browser`.
      */
     run<T>(
-      request: SessionRequest,
+      request: UserSessionRequest,
       target: UserBrowserTarget,
       budgetMs: number,
       work: (page: UserBrowserPage) => Promise<T>
@@ -300,7 +300,7 @@ export function createUserBrowserSessions(params: {
       let session = sessions.get(id);
       if (session === undefined) {
         if (request.operation.action !== 'navigate') return refuse(noPage());
-        session = open(id, target);
+        session = open(id, request.action_id, target.browser);
       }
       const opened = session;
       const settled = opened.queue.then(() => execute(opened, request, target, budgetMs, work));

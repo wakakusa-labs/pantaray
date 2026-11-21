@@ -221,7 +221,7 @@ test('continuation: list floats above, filters, closes, and sends the reference'
   const update: ActionLiveUpdate = {
     kind: 'action_updated',
     // prettier-ignore
-    snapshot: { actionId: 'action-1', page: conversation, pageVersion: 1, transientToolSteps: [], approvalBlockers: [], userBrowserWaits: [], lifecycle: null },
+    snapshot: { actionId: 'action-1', page: conversation, pageVersion: 1, transientToolSteps: [], approvalBlockers: [], userBrowserWaits: [], appBrowserLive: false, lifecycle: null },
   };
   await page.evaluate((detail) => {
     window.dispatchEvent(new CustomEvent('test:conversation', { detail }));
@@ -361,7 +361,7 @@ for (const language of ['ja', 'en'] as const) {
       next_cursor: null,
     });
     // prettier-ignore
-    const update: ActionLiveUpdate = { kind: 'action_updated', snapshot: { actionId: 'action-1', page: conversation, pageVersion: 1, transientToolSteps: [], approvalBlockers: [], userBrowserWaits: [], lifecycle: null } };
+    const update: ActionLiveUpdate = { kind: 'action_updated', snapshot: { actionId: 'action-1', page: conversation, pageVersion: 1, transientToolSteps: [], approvalBlockers: [], userBrowserWaits: [], appBrowserLive: false, lifecycle: null } };
     await page.evaluate((detail) => {
       window.dispatchEvent(new CustomEvent('test:conversation', { detail }));
     }, update);

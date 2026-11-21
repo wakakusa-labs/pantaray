@@ -123,6 +123,7 @@ function createConversationUpdate(
       transientToolSteps: [],
       approvalBlockers: [],
       userBrowserWaits: [],
+      appBrowserLive: false,
       lifecycle: null,
     },
   };
@@ -932,6 +933,7 @@ describe('AgentOverlay broader E2E', () => {
           transientToolSteps: [],
           approvalBlockers: [],
           userBrowserWaits: [],
+          appBrowserLive: false,
           lifecycle: null,
         },
       })

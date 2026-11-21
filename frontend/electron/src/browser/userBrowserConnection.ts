@@ -78,7 +78,7 @@ export const runCommand: CommandRunner = (file, args, signal) =>
 /**
  * One hidden background tab of the caller's own. `cdp` sends to the tab's own session when no
  * `sessionId` is given, or to a frame or worker session the tab reported, and hears only those
- * sessions' events; the tab's own come without a `sessionId`, as from Electron's `Debugger`.
+ * sessions' events; the tab's own come without a `sessionId`.
  */
 export type UserBrowserTab = { cdp: CdpSession; close(): Promise<void> };
 

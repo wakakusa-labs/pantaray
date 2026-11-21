@@ -17,7 +17,7 @@
 
 import { BROWSER_MAX_BLOCKED_REQUESTS, type BrowserPageData } from './browserContract';
 import { BrowserOperationError, type PageReport } from './browserSession';
-import type { CdpPage, CdpSession } from './cdpSession';
+import { childSession, type CdpPage, type CdpSession } from './cdpSession';
 import { GUARDED_APIS, removeGuardedApis } from './pageGuardPreload';
 import { PAGE_VIEWPORT } from './pageWindowOptions';
 import {
@@ -302,7 +302,8 @@ function watchTab(
     }
   }
 
-  cdp.on('message', (_event, method, params, sessionId) => {
+  cdp.on('message', (_event, method, params, eventSession) => {
+    const sessionId = childSession(eventSession);
     if (method === 'Fetch.requestPaused') {
       onPaused(params as RequestPaused, sessionId);
     } else if (method === 'Target.attachedToTarget') {

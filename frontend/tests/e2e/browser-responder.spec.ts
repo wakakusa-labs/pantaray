@@ -69,7 +69,11 @@ test('the browser responder answers each operation with the artifact it claims',
             );
             const { LocalBackendRequestError } = load(`${args.dist}/localBackend/client.js`);
             // No page here reaches this port.
-            const sessions = createBrowserSessions({ getBackendPort: () => 9 });
+            // No window here watches the page.
+            const sessions = createBrowserSessions({
+              getBackendPort: () => 9,
+              pages: { opened() {}, touched() {}, closed() {} },
+            });
             // Every request here is for the app's page; none connects to a browser.
             const userSessions = createUserBrowserSessions({
               connect: () => Promise.reject(new Error('not used')),
@@ -95,6 +99,7 @@ test('the browser responder answers each operation with the artifact it claims',
           await browser.respond(args.gone)({
             operation_request_id: args.id,
             session_id: 'responder-e2e',
+            action_id: null,
             operation: args.operation,
             policy: {
               allow_network: true,

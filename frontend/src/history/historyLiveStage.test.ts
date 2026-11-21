@@ -62,6 +62,7 @@ const snapshot = (overrides: Partial<ActionLiveSnapshot>): ActionLiveSnapshot =>
   transientToolSteps: [],
   approvalBlockers: [],
   userBrowserWaits: [],
+  appBrowserLive: false,
   lifecycle: null,
   ...overrides,
 });

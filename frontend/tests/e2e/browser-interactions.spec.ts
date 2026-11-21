@@ -99,7 +99,11 @@ test('the browser acts on a real page through snapshot refs', async ({}, testInf
             const answers: unknown[] = [];
             const respond = createBrowserResponder({
               // No page here reaches this port.
-              sessions: createBrowserSessions({ getBackendPort: () => 9 }),
+              // No window here watches the page.
+              sessions: createBrowserSessions({
+                getBackendPort: () => 9,
+                pages: { opened() {}, touched() {}, closed() {} },
+              }),
               // Every request here is for the app's page; none connects to a browser.
               userSessions: createUserBrowserSessions({
                 connect: () => Promise.reject(new Error('not used')),
@@ -114,6 +118,7 @@ test('the browser acts on a real page through snapshot refs', async ({}, testInf
           await g.e2eInteractions.respond({
             operation_request_id: id,
             session_id: 'interactions-e2e',
+            action_id: null,
             operation: args.operation,
             policy: {
               allow_network: true,

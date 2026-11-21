@@ -39,7 +39,10 @@ function harness(scripts = {}, postAnswer = async () => ({})) {
   const fake = fakeBrowserElectron(scripts);
   const { createBrowserSessions, createBrowserResponder } = loadOnElectron(fake.electron);
   const artifactRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-browser-'));
-  const sessions = createBrowserSessions({ getBackendPort: () => BACKEND_PORT });
+  const sessions = createBrowserSessions({
+    getBackendPort: () => BACKEND_PORT,
+    pages: { opened() {}, touched() {}, closed() {} },
+  });
   const answers = [];
   const logged = [];
   const respond = createBrowserResponder({

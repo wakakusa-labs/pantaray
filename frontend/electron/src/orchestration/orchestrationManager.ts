@@ -91,6 +91,8 @@ export type OrchestrationManager = {
   }) => string | null;
   /** Shows in the Action's chat that it waits for the user in their browser, until the closer runs. */
   beginUserBrowserWait: (wait: { actionId: string } & ActionUserBrowserWait) => () => void;
+  /** Shows in the Action's live state that it has a live app page, until the closer runs. */
+  beginAppBrowserPage: (actionId: string) => () => void;
   resetActionLive: () => void;
   /** What the live session last said about the chat's turn; null until it says, or after it ends. */
   getChatTurnState: () => ChatTurnState | null;
@@ -558,6 +560,7 @@ export function createOrchestrationManager(params: {
     whenRunEnds: rendererBridge.whenRunEnds,
     handleApprovalDecisionSettled: rendererBridge.handleApprovalDecisionSettled,
     beginUserBrowserWait: rendererBridge.beginUserBrowserWait,
+    beginAppBrowserPage: rendererBridge.beginAppBrowserPage,
     resetActionLive: () => {
       pendingResumeRequests = [];
       rendererBridge.resetActionLive();

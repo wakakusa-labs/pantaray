@@ -33,6 +33,7 @@ function update(
       transientToolSteps: [],
       approvalBlockers: [],
       userBrowserWaits: [],
+      appBrowserLive: false,
       lifecycle: null,
       ...extra,
     },

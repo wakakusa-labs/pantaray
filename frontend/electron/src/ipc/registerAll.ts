@@ -13,6 +13,7 @@ import { createIpcRegistrar } from './registrar';
 import { registerAgentsMdHandlers } from './handlers/agentsMd';
 import { registerAiConnectionHandlers } from './handlers/aiConnection';
 import { registerAuthHandlers } from './handlers/auth';
+import { registerBrowserViewHandlers } from './handlers/browserView';
 import { registerActionFileHandlers } from './handlers/actionFiles';
 import { registerActionHandlers } from './handlers/actions';
 import { registerActionImageHandlers } from './handlers/actionImages';
@@ -62,6 +63,7 @@ export function registerAllIpcHandlers(ctx: MainContext): RegisterAllResult {
   registerActionImageHandlers(ctx, registrar);
   registerActionAttachmentHandlers(ctx, registrar);
   registerTaskDraftHandlers(ctx, registrar);
+  registerBrowserViewHandlers(ctx, registrar);
   registerChatHandlers(ctx, registrar);
   registerTodoHandlers(ctx, registrar);
   registerTodoImportHandlers(ctx, registrar);

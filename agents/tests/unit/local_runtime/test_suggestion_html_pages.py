@@ -278,6 +278,8 @@ async def test_html_is_printed_offline_in_a_session_of_its_own(make_db: Path) ->
         }
         policy = navigate["policy"]
         assert (policy["allow_network"], policy["write_hosts"]) == (False, [])  # type: ignore[index]
+        # No Action's chat shows a Suggestion's page.
+        assert navigate["action_id"] is None
     assert save_sent[0][1]["session_id"] != render_sent[0][1]["session_id"]
 
 

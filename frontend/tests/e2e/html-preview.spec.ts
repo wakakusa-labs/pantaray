@@ -46,7 +46,11 @@ test('the task preview prints a local HTML file to a PDF and the page reaches no
         );
         const windowsBefore = BrowserWindow.getAllWindows().length;
         // No page here reaches this port.
-        const sessions = createBrowserSessions({ getBackendPort: () => 9 });
+        // No window here watches the page.
+        const sessions = createBrowserSessions({
+          getBackendPort: () => 9,
+          pages: { opened() {}, touched() {}, closed() {} },
+        });
         const pdfs = createHtmlPreviewPdfs({
           userDataDir: electronApp.getPath('userData'),
           sessions,

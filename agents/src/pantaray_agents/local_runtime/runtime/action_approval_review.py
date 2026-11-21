@@ -51,7 +51,7 @@ from pantaray_agents.schema.agent.action_message_codec import (
 )
 from pantaray_agents.schema.agent.base import JSONValue
 
-from .action_message_models import ACTION_HOST_STEP_NAMES
+from .action_message_models import ACTION_HOOK_STEP_NAME, ACTION_HOST_STEP_NAMES
 from .action_stop_signal import action_stop_requested_in_connection
 from .utc_timestamps import now_utc_iso
 
@@ -181,6 +181,13 @@ def action_request_words(
                     text=row.llm_response_text,
                     declined=row.suggestion_declined,
                 )
+            continue
+        if row.step_name == ACTION_HOOK_STEP_NAME and row.user_request_text:
+            # Pantaray sent a task's prompt; the user approved the task, not
+            # this turn.
+            not_by_user = RequestTextNotByUser(
+                source="hook", text=row.user_request_text, declined=False
+            )
             continue
         if row.step_name in ACTION_HOST_STEP_NAMES or row.user_request_text is None:
             continue

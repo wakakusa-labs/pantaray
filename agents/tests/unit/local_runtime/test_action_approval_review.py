@@ -17,12 +17,14 @@ from pantaray_agents.local_runtime.runtime.action_approval_review import (
     read_relayed_words,
 )
 from pantaray_agents.local_runtime.runtime.action_message_models import (
+    ACTION_HOOK_STEP_NAME,
     ACTION_RESUME_REQUEST_TEXT,
     ACTION_RESUME_STEP_NAME,
     ACTION_TODO_PICKUP_REQUEST_TEXT,
     ACTION_TODO_PICKUP_STEP_NAME,
     ACTION_USER_STEP_NAME,
     NewActionTarget,
+    action_hook_request_text,
 )
 from pantaray_agents.local_runtime.runtime.action_suggestion_reply import (
     insert_opening_assistant_message,
@@ -112,6 +114,21 @@ def test_only_the_users_own_words_are_the_users_messages() -> None:
         RequestTextNotByUser(
             source="todo", text="Draft the reply to the vendor.", declined=False
         ),
+    )
+
+
+def test_a_tasks_prompt_is_never_the_users_words() -> None:
+    # Catches a scheduled prompt read as the user asking for this turn now,
+    # which would let the review allow what only the old approval covered.
+    prompt = action_hook_request_text("Post the weekly numbers to the team.")
+    rows = (
+        _user("Every Monday, prepare the weekly numbers."),
+        _user(prompt, step_name=ACTION_HOOK_STEP_NAME),
+    )
+
+    assert action_request_words(rows, _no_chat, _no_chat) == (
+        (("t", UserMessage("Every Monday, prepare the weekly numbers.")),),
+        RequestTextNotByUser(source="hook", text=prompt, declined=False),
     )
 
 

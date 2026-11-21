@@ -86,7 +86,9 @@ def run_hook_tick(
     between fires the same occurrence again: ``enqueue`` MUST be idempotent per
     occurrence. For an on trigger, ``enqueue`` MUST consume the events it hands
     to the run in the transaction that enqueues it; the events it leaves (to fit
-    one run) stay pending for the next run.
+    one run) stay pending for the next run. Leftovers fire again only on a new
+    immediate event or max_wait, so a hook whose enqueue may leave events MUST
+    set max_wait.
     """
     now = now.astimezone(UTC)
     next_fire_times = states.read_next_fire_times()
@@ -170,10 +172,10 @@ def _fire_on(
             case None:
                 holds = True
         (held if holds else dropped_events).append(event)
-    if delivery.collapse == "latest":
-        dropped_events, held = dropped_events + held[:-1], held[-1:]
     if dropped_events:
         inbox.drop(hook.id, [event.delivery_id for event in dropped_events])
+    # Due over every held event: collapsing first would lose an older
+    # immediate event and restart max_wait with each newer one.
     if not held or not _is_due(trigger, held, now=now):
         return
     if delivery.min_interval is not None and anchors:
@@ -183,6 +185,11 @@ def _fire_on(
         return
     if run_is_active(hook.run):
         return
+    if delivery.collapse == "latest":
+        # Dropped before the enqueue: after a crash between the two, an older
+        # event left behind would be handed as the latest one.
+        inbox.drop(hook.id, [event.delivery_id for event in held[:-1]])
+        held = held[-1:]
     enqueue(Fire(hook=hook, occurrence=now, now=now, events=tuple(held)))
 
 

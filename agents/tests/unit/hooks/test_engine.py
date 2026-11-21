@@ -404,6 +404,33 @@ def test_an_event_whose_condition_fails_is_consumed_without_a_run() -> None:
     assert harness.handed == [(kept_turn, daily)]
 
 
+def test_collapse_latest_keeps_an_older_immediate_event_due() -> None:
+    # Catches collapsing before the due check: the ride-along that follows an
+    # immediate event would take its place and make the run wait.
+    harness = _Harness(_on_hook(collapse="latest"))
+    harness.inbox.add("on", "insight", _utc(10, 0))
+    turn = harness.inbox.add("on", "turn", _utc(10, 1))
+    harness.tick(_utc(10, 2))
+
+    assert harness.handed == [(turn,)]
+    assert harness.inbox.read("on") == ()
+
+
+def test_collapse_latest_waits_from_the_oldest_ride_along() -> None:
+    # Catches each newer ride-along restarting max_wait, so one arriving every
+    # 10 minutes would never be delivered.
+    harness = _Harness(_on_hook(collapse="latest"))
+    for minute in (0, 10):
+        harness.inbox.add("on", "turn", _utc(10, minute))
+        harness.tick(_utc(10, minute))
+    assert harness.handed == []
+    newest = harness.inbox.add("on", "turn", _utc(10, 14))
+    harness.tick(_utc(10, 15))
+
+    assert harness.handed == [(newest,)]
+    assert harness.inbox.read("on") == ()
+
+
 def test_collapse_latest_hands_only_the_newest_event() -> None:
     harness = _Harness(_on_hook(collapse="latest"))
     harness.inbox.add("on", "insight", _utc(10, 0))

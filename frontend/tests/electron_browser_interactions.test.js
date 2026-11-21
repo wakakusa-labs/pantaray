@@ -413,16 +413,79 @@ test('a drag the page starts goes on as drag events and drops only its own data'
   assert.equal(h.fake.windows[0].webContents.debugger.listenerCount('message'), 1);
 });
 
-// Catches: a drag whose handover never came left with interception on or its listener kept.
-test('interception is turned off when a started drag is not handed over', async () => {
-  const h = await dragPage();
-  h.page.onInput = (method, params) => {
-    if (params.type === 'mouseMoved' && params.buttons === 1) h.page.dragStarted = true;
+// Catches: a drag left open when it fails once the button is down (a move or a drag event the
+// browser refused, a hand-over that never came), so the page's next operation inherits a held
+// button or an open drag; a cancel that fails in turn hiding why the drag failed; interception
+// or its listener left behind.
+test('a drag that fails once the button is down is released or cancelled, and says why', async () => {
+  const debuggerOf = (h) => h.fake.windows[0].webContents.debugger;
+  const pointer = await dragPage();
+  pointer.page.onInput = (method, params) => {
+    if (params.type === 'mouseMoved' && params.x === MOVES[1][0]) throw new Error('refused');
   };
-  const failed = await h.run(DRAG);
-  assert.equal(failed.code, 'BROWSER_ACTION_FAILED');
-  assert.deepEqual(h.input().at(-1), ['intercept', false]);
-  assert.equal(h.fake.windows[0].webContents.debugger.listenerCount('message'), 1);
+  assert.equal((await pointer.run(DRAG)).code, 'BROWSER_ACTION_FAILED');
+  assert.deepEqual(pointer.input().slice(-3), [
+    ['MouseEvent', 'mouseMoved', 60, 40],
+    ['MouseEvent', 'mouseReleased', 60, 40],
+    ['intercept', false],
+  ]);
+
+  const over = await dragPage();
+  over.page.onInput = (method, params, debuggerApi) => {
+    if (params.type === 'dragOver') throw new Error('refused');
+    if (params.type !== 'mouseMoved' || params.buttons !== 1) return;
+    over.page.dragStarted = true;
+    debuggerApi.emit(
+      'message',
+      {},
+      'Input.dragIntercepted',
+      { data: { items: [], dragOperationsMask: 1 } },
+      ''
+    );
+  };
+  assert.equal((await over.run(DRAG)).code, 'BROWSER_ACTION_FAILED');
+  assert.deepEqual(over.input().slice(-2), [
+    ['DragEvent', 'dragCancel', ...MOVES[1]],
+    ['intercept', false],
+  ]);
+
+  const unhanded = await dragPage();
+  unhanded.page.onInput = (method, params) => {
+    if (params.type === 'mouseMoved' && params.buttons === 1) unhanded.page.dragStarted = true;
+    if (params.type === 'dragCancel') throw new Error('refused');
+  };
+  const failed = await unhanded.run(DRAG);
+  assert.match(failed.message, /did not hand over/);
+  assert.deepEqual(unhanded.input().slice(-2), [
+    ['DragEvent', 'dragCancel', ...MOVES[0]],
+    ['intercept', false],
+  ]);
+  for (const h of [pointer, over, unhanded])
+    assert.equal(debuggerOf(h).listenerCount('message'), 1);
+});
+
+// Catches: a drag the browser handed over finished as a pointer drag, reported done with no
+// drop, because a page capture listener stopped its dragstart before the engine's watch saw it.
+test('a handed-over drag is dropped even when the page hides its dragstart', async () => {
+  const h = await dragPage();
+  h.page.onInput = (method, params, debuggerApi) => {
+    if (params.type !== 'mouseMoved' || params.buttons !== 1 || h.page.handed) return;
+    h.page.handed = true;
+    debuggerApi.emit(
+      'message',
+      {},
+      'Input.dragIntercepted',
+      { data: { items: [], dragOperationsMask: 1 } },
+      ''
+    );
+  };
+  assert.equal((await h.run(DRAG)).status, 'ok');
+  const drags = h.input().filter(([kind]) => kind === 'DragEvent');
+  assert.deepEqual(
+    drags.map(([, type]) => type),
+    ['dragEnter', 'dragOver', 'dragOver', 'dragOver', 'dragOver', 'drop']
+  );
+  assert.ok(!h.input().some(([, type]) => type === 'mouseReleased'));
 });
 
 // Catches: a press on a covered source or a list box, a drag toward a covered target or one off

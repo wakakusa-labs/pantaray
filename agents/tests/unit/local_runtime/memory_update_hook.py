@@ -28,7 +28,7 @@ def tick(monkeypatch: pytest.MonkeyPatch) -> Tick:
     monkeypatch.setattr(gates, "owner_is_settled", lambda: True)
 
     def run(db_path: Path, now: datetime) -> None:
-        runner.run_builtin_hooks_once(
+        runner.run_hooks_once(
             db_path=db_path, busy_timeout_ms=1_000, user_id="user-1", now=now
         )
 

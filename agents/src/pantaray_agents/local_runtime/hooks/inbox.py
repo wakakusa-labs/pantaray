@@ -6,10 +6,14 @@ import json
 import sqlite3
 from collections.abc import Collection, Mapping, Sequence
 from contextlib import closing
-from functools import cache
+from datetime import UTC, datetime
 from pathlib import Path
 
-from pantaray_agents.hooks.definitions import EventValue, inbox_events
+from pantaray_agents.hooks.definitions import (
+    EventValue,
+    hook_has_ended,
+    inbox_events,
+)
 from pantaray_agents.hooks.engine import InboxEvent
 from pantaray_agents.local_runtime.activity_summary_schedule import parse_iso_z
 from pantaray_agents.local_runtime.storage.migrations.connection import (
@@ -17,16 +21,39 @@ from pantaray_agents.local_runtime.storage.migrations.connection import (
 )
 
 from .builtin import builtin_hooks
+from .controls import NO_CONVERSATION, active_hooks
 from .events import HookEvent
+from .tasks import TASK_EVENT_NAMES, read_task_files
 
 
-@cache
-def _listeners() -> Mapping[str, tuple[str, ...]]:
-    listeners: dict[str, list[str]] = {}
-    for hook in builtin_hooks():
-        for name in inbox_events(hook):
-            listeners.setdefault(name, []).append(hook.id)
-    return {name: tuple(hook_ids) for name, hook_ids in listeners.items()}
+def _listening_hooks(
+    connection: sqlite3.Connection, *, user_id: str, event: HookEvent
+) -> tuple[str, ...]:
+    """The hooks that may fire and listen to the event; a task hears only the
+    events of its own conversation."""
+
+    active = active_hooks(
+        connection,
+        user_id=user_id,
+        builtins=builtin_hooks(),
+        task_files=read_task_files() if event.name in TASK_EVENT_NAMES else (),
+    )
+    action_id = event.payload().get("action_id")
+    now = datetime.now(UTC)
+    return tuple(
+        hook.id
+        for hook in active.hooks
+        if event.name in inbox_events(hook)
+        and not hook_has_ended(hook, now)
+        and (
+            hook.id not in active.tasks
+            or (
+                action_id is not None
+                and active.conversations.get(hook.id, NO_CONVERSATION).action_id
+                == action_id
+            )
+        )
+    )
 
 
 def record_event(
@@ -39,9 +66,10 @@ def record_event(
     """Put the event in the inbox of each hook that listens to it.
 
     Called inside the caller's transaction, so the event commits or rolls back
-    with the write it records. An event no hook listens to is not kept.
+    with the write it records. An event no hook listens to is not kept, nor one
+    for a disabled hook.
     """
-    hook_ids = _listeners().get(event.name, ())
+    hook_ids = _listening_hooks(connection, user_id=user_id, event=event)
     if not hook_ids:
         return
     payload_json = json.dumps(event.payload(), ensure_ascii=False, sort_keys=True)

@@ -109,7 +109,7 @@ def test_hooks_task_runs_for_the_current_owner(
     calls: list[tuple[Path, int, str]] = []
     monkeypatch.setattr(
         periodic_schedule,
-        "run_builtin_hooks_once",
+        "run_hooks_once",
         lambda *, db_path, busy_timeout_ms, user_id: calls.append(
             (db_path, busy_timeout_ms, user_id)
         ),
@@ -360,7 +360,7 @@ def _record_every_periodic_runner(
     monkeypatch.setattr(
         periodic_schedule, "sweep_browser_sessions", record_async("browser_sessions")
     )
-    monkeypatch.setattr(periodic_schedule, "run_builtin_hooks_once", record("hooks"))
+    monkeypatch.setattr(periodic_schedule, "run_hooks_once", record("hooks"))
     monkeypatch.setattr(
         periodic_schedule, "run_memory_catalog_repair_once", record("memory_repair")
     )

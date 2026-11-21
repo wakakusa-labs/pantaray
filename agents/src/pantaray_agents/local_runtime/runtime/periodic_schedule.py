@@ -14,7 +14,7 @@ from typing import Final
 
 from ..hooks.builtin import builtin_hooks
 from ..hooks.gates import owner_is_settled
-from ..hooks.runner import run_builtin_hooks_once
+from ..hooks.runner import run_hooks_once
 from ..todos.retention import purge_expired_todos
 from .browser_relay import sweep_browser_sessions
 from .memory_embedding_scheduler import (
@@ -114,7 +114,7 @@ def build_periodic_schedule(
             interval_seconds=HOOKS_TICK_INTERVAL_SECONDS,
             # Each hook names its own gates.
             is_ready=lambda _context: True,
-            run=lambda context: run_builtin_hooks_once(
+            run=lambda context: run_hooks_once(
                 db_path=context.db_path,
                 busy_timeout_ms=context.busy_timeout_ms,
                 user_id=context.owner_user_id,

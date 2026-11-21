@@ -152,9 +152,7 @@ def test_worker_daemon_withholds_owner_scoped_periodic_work_until_configure(
     )
     monkeypatch.setattr(periodic_schedule, "run_local_periodic_reaper_once", _reaper)
     # Each hook holds its own owner gate (tests/unit/local_runtime/hooks).
-    monkeypatch.setattr(
-        periodic_schedule, "run_builtin_hooks_once", lambda **_kwargs: None
-    )
+    monkeypatch.setattr(periodic_schedule, "run_hooks_once", lambda **_kwargs: None)
     monkeypatch.setattr(periodic_schedule, "purge_expired_todos", _purge)
     monkeypatch.setattr(
         periodic_schedule, "run_memory_catalog_repair_once", lambda **_kwargs: None
@@ -385,7 +383,7 @@ def test_worker_drain_does_not_run_periodic_tasks_after_stop(
     )
     monkeypatch.setattr(
         periodic_schedule,
-        "run_builtin_hooks_once",
+        "run_hooks_once",
         lambda **_kwargs: None,
     )
     monkeypatch.setattr(

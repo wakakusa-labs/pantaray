@@ -42,7 +42,7 @@ def world(db: Path, monkeypatch: pytest.MonkeyPatch) -> _World:
         hook for hook in builtin_hooks() if hook.id.startswith("builtin.todo_pickup")
     )
     monkeypatch.setattr(runner, "builtin_hooks", lambda: hooks)
-    monkeypatch.setattr(runner, "_local_zone", lambda: TOKYO)
+    monkeypatch.setattr(runner, "local_zone", lambda: TOKYO)
     monkeypatch.setattr(gates, "owner_is_settled", lambda: world.owner_settled)
     monkeypatch.setattr(gates, "background_requests_can_send", lambda: world.can_send)
     monkeypatch.setattr(pickup, "read_todo_clock", lambda: _clock(world.now))
@@ -54,7 +54,7 @@ def _clock(now: datetime) -> TodoClock:
 
 
 def _tick(world: _World, db: Path, user_id: str = USER) -> None:
-    runner.run_builtin_hooks_once(
+    runner.run_hooks_once(
         db_path=db, busy_timeout_ms=1_000, user_id=user_id, now=world.now
     )
 

@@ -168,6 +168,11 @@ def _fire_on(
     for event in pending:
         if event.name == after:
             continue
+        # Written under an earlier definition (an event or anchor renamed
+        # since): it is no longer this hook's to hand.
+        if event.name not in trigger.events:
+            dropped_events.append(event)
+            continue
         match trigger.conditions.get(event.name):
             case FieldEquals(field=field, value=value):
                 holds = event.payload.get(field) == value

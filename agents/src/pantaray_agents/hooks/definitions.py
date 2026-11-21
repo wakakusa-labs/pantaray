@@ -282,7 +282,9 @@ def _parse_hook(
     validate_run: Callable[[RunJob], None],
 ) -> HookDefinition:
     _reject_unknown_keys(
-        table, {"id", "trigger", "requires", "if", "deliver", "run"}, where="hook"
+        table,
+        {"id", "trigger", "requires", "if", "deliver", "run", "until"},
+        where="hook",
     )
     hook_id = _string(table.get("id"), where="hook id")
     run = _parse_run(

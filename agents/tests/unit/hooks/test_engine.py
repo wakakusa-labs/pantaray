@@ -22,6 +22,7 @@ from pantaray_agents.hooks.definitions import (
     NamedPredicate,
     On,
     RunJob,
+    load_hook_definitions,
 )
 from pantaray_agents.hooks.engine import (
     Fire,
@@ -551,3 +552,31 @@ def test_a_hook_past_its_until_never_fires() -> None:
     harness.tick(_utc(10, 0))
 
     assert harness.fires == []
+
+
+def test_a_toml_hook_with_until_fires_up_to_it_and_never_after() -> None:
+    # Catches a TOML definition with until refused at load (only the Markdown
+    # loader took it), and a catch-up after a sleep that fires an occurrence
+    # at or past the deadline.
+    (hook,) = load_hook_definitions(
+        """
+        [[hooks]]
+        id = "h"
+        trigger = { every = "15m", align = true, tz = "utc" }
+        until = 2026-09-07T10:30:00Z
+        run = { job = "j" }
+        """,
+        gate_names=frozenset(),
+        event_names=frozenset(),
+        predicate_names=frozenset(),
+        validate_run=lambda _run: None,
+    )
+    assert hook.until == _utc(10, 30)
+    harness = _Harness(hook)
+
+    harness.tick(_utc(10, 1))
+    harness.tick(_utc(10, 29))  # After a sleep: the latest missed one, once.
+    harness.tick(_utc(10, 30))
+    harness.tick(_utc(11, 10))
+
+    assert harness.fires == [("h", _utc(10, 0)), ("h", _utc(10, 15))]

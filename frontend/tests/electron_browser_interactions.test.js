@@ -14,7 +14,9 @@ const ENGINE_WORLD = 77;
 /**
  * A page whose accessibility tree, document and nodes the test sets; CDP answers from it. Every
  * node is in the main frame, covered by nothing unless in `covered`, and `focused` names the
- * document's active element, whose description `described` may give shadow roots.
+ * document's active element, whose description `described` may give shadow roots. A node's box
+ * is in `boxes` (a default one otherwise); `onInput` sees each input event with the debugger,
+ * and `dragStarted` is whether the page let a drag start.
  */
 function harness() {
   const page = {
@@ -27,10 +29,13 @@ function harness() {
     described: new Map(),
     shadowFocus: new Map(),
     refusal: null,
+    boxes: new Map(),
+    onInput: () => undefined,
+    dragStarted: false,
   };
   let boxed = null;
   const fake = fakeBrowserElectron({
-    cdp: async (method, params) => {
+    cdp: async (method, params, { debuggerApi }) => {
       if (method === 'Page.getFrameTree')
         return { frameTree: { frame: { id: 'main', loaderId: page.loaderId } } };
       if (method === 'Page.createIsolatedWorld') return { executionContextId: ENGINE_WORLD };
@@ -57,17 +62,35 @@ function harness() {
           return { result: inner === undefined ? { value: null } : { objectId: String(inner) } };
         }
         if (fn.includes('this.options')) return { result: { value: page.refusal } };
+        if (fn.includes('defaultPrevented')) return { result: { value: page.dragStarted } };
         return { result: { value: true } };
       }
       if (method === 'DOM.getContentQuads') {
         boxed = params.backendNodeId;
-        return { quads: [[10, 20, 110, 20, 110, 60, 10, 60]] };
+        const [x, y, w, h] = page.boxes.get(boxed) ?? [10, 20, 100, 40];
+        return { quads: [[x, y, x + w, y, x + w, y + h, x, y + h]] };
       }
-      if (method === 'DOM.getNodeForLocation') return { backendNodeId: boxed, frameId: 'main' };
+      if (method === 'Page.getLayoutMetrics') {
+        return { cssLayoutViewport: { pageX: 0, pageY: 0, clientWidth: 1280, clientHeight: 800 } };
+      }
+      if (method.startsWith('Input.dispatch')) page.onInput(method, params, debuggerApi);
+      if (method === 'DOM.getNodeForLocation') {
+        const inside = ([x, y, w, h]) =>
+          params.x >= x && params.x < x + w && params.y >= y && params.y < y + h;
+        const hit = [...page.boxes].find(([, box]) => inside(box))?.[0] ?? boxed;
+        return { backendNodeId: hit, frameId: 'main' };
+      }
       return {};
     },
   });
-  const modules = ['browserSession', 'browserResponder', 'capture', 'snapshot', 'interactions'];
+  const modules = [
+    'browserSession',
+    'browserResponder',
+    'capture',
+    'snapshot',
+    'interactions',
+    'drag',
+  ];
   const fresh = () => modules.forEach((name) => delete require.cache[`${DIST}/${name}.js`]);
   fresh();
   const originalLoad = Module._load;
@@ -114,7 +137,16 @@ function harness() {
   const commands = () => fake.windows[0].webContents.debugger.commands;
   const mouse = () => commands().filter((command) => command.method === 'Input.dispatchMouseEvent');
   const keys = () => commands().filter((command) => command.method === 'Input.dispatchKeyEvent');
-  return { page, run, fake, commands, mouse, keys };
+  /** Each input event as [method's last word, type, x, y], and interception turning on or off. */
+  const input = () =>
+    commands()
+      .filter(({ method }) => method.startsWith('Input.'))
+      .map(({ method, params }) =>
+        method === 'Input.setInterceptDrags'
+          ? ['intercept', params.enabled]
+          : [method.slice('Input.dispatch'.length), params.type, params.x, params.y]
+      );
+  return { page, run, fake, commands, mouse, keys, input };
 }
 
 const ax = (nodeId, role, name, backendDOMNodeId, extra = {}) => ({
@@ -318,4 +350,190 @@ test('a focused picker field takes every key but those that open its picker', as
   for (const key of ['1', 'ArrowUp', 'ArrowDown', 'ArrowRight', 'Backspace', 'Tab']) {
     assert.equal((await h.run({ action: 'press', key })).status, 'ok', key);
   }
+});
+
+/** A page with a source (e1, centered at 60,40) and a target (e2, centered at 260,240). */
+const dragPage = async () => {
+  const h = await opened();
+  h.page.nodes = [root('s', 't'), ax('s', 'listitem', 'Card', 3), ax('t', 'list', 'Done', 4)];
+  h.page.boxes.set(3, [10, 20, 100, 40]);
+  h.page.boxes.set(4, [210, 220, 100, 40]);
+  await h.run({ action: 'snapshot', ref: null });
+  return h;
+};
+const DRAG = { action: 'drag', ref: 'e1', to_ref: 'e2' };
+const MOVES = [100, 140, 180, 220, 260].map((x) => [x, x - 20]);
+
+// Catches: a pointer drag that releases with no move between, moves without the button held,
+// or lets go anywhere but the target, and interception left on after it.
+test('a pointer drag presses at the source, moves with the button held and releases at the target', async () => {
+  const h = await dragPage();
+  assert.equal((await h.run(DRAG)).status, 'ok');
+  assert.deepEqual(h.input(), [
+    ['MouseEvent', 'mouseMoved', 60, 40],
+    ['intercept', true],
+    ['MouseEvent', 'mousePressed', 60, 40],
+    ...MOVES.map(([x, y]) => ['MouseEvent', 'mouseMoved', x, y]),
+    ['MouseEvent', 'mouseReleased', 260, 240],
+    ['intercept', false],
+  ]);
+  const held = h
+    .mouse()
+    .filter(({ params }) => params.type === 'mouseMoved')
+    .slice(1);
+  assert.ok(held.every(({ params }) => params.buttons === 1 && params.button === 'left'));
+});
+
+// Catches: an HTML drag finished with mouse events, which Chromium never drops; a drop that
+// carries file paths; a mouse release after the drop; interception left on.
+test('a drag the page starts goes on as drag events and drops only its own data', async () => {
+  const h = await dragPage();
+  const items = [{ mimeType: 'text/plain', data: 'card-1' }];
+  h.page.onInput = (method, params, debuggerApi) => {
+    if (method !== 'Input.dispatchMouseEvent' || params.buttons !== 1) return;
+    if (params.type !== 'mouseMoved' || h.page.dragStarted) return;
+    h.page.dragStarted = true;
+    const data = { items, files: ['/Users/someone/secret.txt'], dragOperationsMask: 1 };
+    setImmediate(() => debuggerApi.emit('message', {}, 'Input.dragIntercepted', { data }, ''));
+  };
+  assert.equal((await h.run(DRAG)).status, 'ok');
+  const [first, ...rest] = MOVES;
+  assert.deepEqual(h.input(), [
+    ['MouseEvent', 'mouseMoved', 60, 40],
+    ['intercept', true],
+    ['MouseEvent', 'mousePressed', 60, 40],
+    ['MouseEvent', 'mouseMoved', ...first],
+    ['DragEvent', 'dragEnter', ...first],
+    ...rest.map(([x, y]) => ['DragEvent', 'dragOver', x, y]),
+    ['DragEvent', 'drop', 260, 240],
+    ['intercept', false],
+  ]);
+  const drop = h.commands().find(({ params }) => params?.type === 'drop');
+  assert.deepEqual(drop.params.data, { items, dragOperationsMask: 1 });
+  assert.equal(h.fake.windows[0].webContents.debugger.listenerCount('message'), 1);
+});
+
+// Catches: a drag left open when it fails once the button is down (a move or a drag event the
+// browser refused, a hand-over that never came), so the page's next operation inherits a held
+// button or an open drag; a cancel that fails in turn hiding why the drag failed; interception
+// or its listener left behind.
+test('a drag that fails once the button is down is released or cancelled, and says why', async () => {
+  const debuggerOf = (h) => h.fake.windows[0].webContents.debugger;
+  const pointer = await dragPage();
+  pointer.page.onInput = (method, params) => {
+    if (params.type === 'mouseMoved' && params.x === MOVES[1][0]) throw new Error('refused');
+  };
+  assert.equal((await pointer.run(DRAG)).code, 'BROWSER_ACTION_FAILED');
+  assert.deepEqual(pointer.input().slice(-3), [
+    ['MouseEvent', 'mouseMoved', 60, 40],
+    ['MouseEvent', 'mouseReleased', 60, 40],
+    ['intercept', false],
+  ]);
+
+  const over = await dragPage();
+  over.page.onInput = (method, params, debuggerApi) => {
+    if (params.type === 'dragOver') throw new Error('refused');
+    if (params.type !== 'mouseMoved' || params.buttons !== 1) return;
+    over.page.dragStarted = true;
+    debuggerApi.emit(
+      'message',
+      {},
+      'Input.dragIntercepted',
+      { data: { items: [], dragOperationsMask: 1 } },
+      ''
+    );
+  };
+  assert.equal((await over.run(DRAG)).code, 'BROWSER_ACTION_FAILED');
+  assert.deepEqual(over.input().slice(-2), [
+    ['DragEvent', 'dragCancel', ...MOVES[1]],
+    ['intercept', false],
+  ]);
+
+  const unhanded = await dragPage();
+  unhanded.page.onInput = (method, params) => {
+    if (params.type === 'mouseMoved' && params.buttons === 1) unhanded.page.dragStarted = true;
+    if (params.type === 'dragCancel') throw new Error('refused');
+  };
+  const failed = await unhanded.run(DRAG);
+  assert.match(failed.message, /did not hand over/);
+  assert.deepEqual(unhanded.input().slice(-2), [
+    ['DragEvent', 'dragCancel', ...MOVES[0]],
+    ['intercept', false],
+  ]);
+  for (const h of [pointer, over, unhanded])
+    assert.equal(debuggerOf(h).listenerCount('message'), 1);
+});
+
+// Catches: a drag the browser handed over finished as a pointer drag, reported done with no
+// drop, because a page capture listener stopped its dragstart before the engine's watch saw it.
+test('a handed-over drag is dropped even when the page hides its dragstart', async () => {
+  const h = await dragPage();
+  h.page.onInput = (method, params, debuggerApi) => {
+    if (params.type !== 'mouseMoved' || params.buttons !== 1 || h.page.handed) return;
+    h.page.handed = true;
+    debuggerApi.emit(
+      'message',
+      {},
+      'Input.dragIntercepted',
+      { data: { items: [], dragOperationsMask: 1 } },
+      ''
+    );
+  };
+  assert.equal((await h.run(DRAG)).status, 'ok');
+  const drags = h.input().filter(([kind]) => kind === 'DragEvent');
+  assert.deepEqual(
+    drags.map(([, type]) => type),
+    ['dragEnter', 'dragOver', 'dragOver', 'dragOver', 'dragOver', 'drop']
+  );
+  assert.ok(!h.input().some(([, type]) => type === 'mouseReleased'));
+});
+
+// Catches: a press on a covered source or a list box, a drag toward a covered target or one off
+// the screen, each sending input before it is refused.
+test('a drag is refused before any input when it could not land where it aims', async () => {
+  const h = await dragPage();
+  for (const node of [3, 4]) {
+    h.page.covered = new Set([node]);
+    const refused = await h.run(DRAG);
+    assert.match(refused.message, /Another element covers this one/, `node ${node}`);
+  }
+  h.page.covered = new Set();
+  h.page.native.set(3, 'list box');
+  assert.equal((await h.run(DRAG)).code, 'BROWSER_ACTION_FAILED');
+  h.page.native.delete(3);
+  h.page.boxes.set(4, [210, 900, 100, 40]);
+  assert.match((await h.run(DRAG)).message, /do not fit on the screen together/);
+  assert.deepEqual(h.input(), []);
+});
+
+// Catches: a drag let go on whatever came to cover the target during it: a pointer drag must go
+// back and release where it began, an HTML drag must be cancelled, never dropped.
+test('a target covered during the drag gets no release or drop', async () => {
+  const h = await dragPage();
+  h.page.onInput = (method, params) => {
+    if (params.type === 'mousePressed') h.page.covered = new Set([3, 4]);
+  };
+  const pointer = await h.run(DRAG);
+  assert.match(pointer.message, /Another element covers this one/);
+  assert.deepEqual(h.input().slice(-3), [
+    ['MouseEvent', 'mouseMoved', 60, 40],
+    ['MouseEvent', 'mouseReleased', 60, 40],
+    ['intercept', false],
+  ]);
+
+  const html = await dragPage();
+  html.page.onInput = (method, params, debuggerApi) => {
+    if (params.type !== 'mouseMoved' || params.buttons !== 1 || html.page.dragStarted) return;
+    html.page.dragStarted = true;
+    html.page.covered = new Set([4]);
+    const data = { items: [], dragOperationsMask: 1 };
+    setImmediate(() => debuggerApi.emit('message', {}, 'Input.dragIntercepted', { data }, ''));
+  };
+  const cancelled = await html.run(DRAG);
+  assert.match(cancelled.message, /Another element covers this one/);
+  assert.deepEqual(html.input().slice(-2), [
+    ['DragEvent', 'dragCancel', 260, 240],
+    ['intercept', false],
+  ]);
+  assert.ok(!html.input().some(([, type]) => type === 'drop'));
 });

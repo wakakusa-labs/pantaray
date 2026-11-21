@@ -70,6 +70,8 @@ const BrowserOperationSchema = z.union([
   strict({ action: z.literal('snapshot'), ref: RefSchema.nullish() }),
   strict({ action: z.literal('click'), ref: RefSchema }),
   strict({ action: z.literal('hover'), ref: RefSchema }),
+  // Press on `ref`'s element, move to `to_ref`'s and let go there.
+  strict({ action: z.literal('drag'), ref: RefSchema, to_ref: RefSchema }),
   strict({
     action: z.literal('type'),
     ref: RefSchema,

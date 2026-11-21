@@ -36,6 +36,7 @@ BrowserOfferedAction = Literal[
     "snapshot",
     "click",
     "hover",
+    "drag",
     "type",
     "press",
     "select",
@@ -58,6 +59,7 @@ class _BrowserToolInput(BaseModel):
     browser: Literal["pantaray", "user"] | None = None
     url: str | None = None
     ref: str | None = None
+    to_ref: str | None = None
     text: str | None = None
     submit: bool | None = None
     key: str | None = None
@@ -92,8 +94,8 @@ def _fields(*, images: bool) -> tuple[BrokerToolFieldPresentation, ...]:
         BrokerToolFieldPresentation(
             name="ref",
             description=(
-                "A ref from the latest snapshot. Needed by click, hover, type and "
-                "select; for snapshot"
+                "A ref from the latest snapshot. Needed by click, hover, drag, type "
+                "and select; for snapshot"
                 + (", screenshot" if images else "")
                 + " and scroll, limits them to that element."
             ),
@@ -119,6 +121,14 @@ _FIELDS_BEFORE_REF = (
     ),
 )
 _FIELDS_AFTER_REF = (
+    BrokerToolFieldPresentation(
+        name="to_ref",
+        description=(
+            "drag: the ref of the element to drop on. The drag presses on ref's "
+            "element, moves to this one and lets go there; both must fit on the "
+            "screen together."
+        ),
+    ),
     BrokerToolFieldPresentation(
         name="text",
         description="type: the text that replaces the field's value. wait: text to wait for.",
@@ -216,8 +226,8 @@ def _browser_spec(*, images: bool) -> ToolSpec:
                 'app, with none of the user\'s logins; with browser "user", a tab of '
                 "this run's own in the user's browser, signed in as them (their "
                 "other tabs are never touched). snapshot gives the page as text "
-                "with element refs; click, hover, type, select, press, scroll and "
-                "wait act on it; "
+                "with element refs; click, hover, drag, type, select, press, scroll "
+                "and wait act on it; "
                 + (
                     "screenshot attaches an image, and with printed_pages the pages "
                     "as they look printed or as a PDF; "

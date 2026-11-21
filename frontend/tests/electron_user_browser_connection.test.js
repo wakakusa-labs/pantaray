@@ -229,6 +229,10 @@ test('a tab reaches only its own sessions and frames, hears only them, and has i
   const tab = await connection.openTab((url) => popups.push(url), new AbortController().signal);
   const events = [];
   tab.cdp.on('message', (_event, method, _params, sessionId) => events.push([method, sessionId]));
+  const unheard = [];
+  const removed = (_event, method) => unheard.push(method);
+  tab.cdp.on('message', removed);
+  tab.cdp.removeListener('message', removed);
   const refused = (method, params, sessionId) =>
     assert.rejects(tab.cdp.sendCommand(method, params, sessionId), CdpCommandError, method);
 
@@ -243,6 +247,9 @@ test('a tab reaches only its own sessions and frames, hears only them, and has i
   // chrome://inspect lists the browser's other targets and can close them.
   await refused('Page.navigate', { url: 'chrome://inspect/#pages' });
   await tab.cdp.sendCommand('Page.navigate', { url: 'https://example.com' });
+  // A drag: the page's own drags are intercepted and dropped as drag events.
+  await tab.cdp.sendCommand('Input.setInterceptDrags', { enabled: true });
+  await tab.cdp.sendCommand('Input.dispatchDragEvent', { type: 'drop', x: 1, y: 1, data: {} });
 
   const send = (method, params, sessionId) =>
     browserSide.send(JSON.stringify({ method, params, sessionId }));
@@ -272,6 +279,7 @@ test('a tab reaches only its own sessions and frames, hears only them, and has i
     ['Target.attachedToTarget', undefined],
     ['Page.frameNavigated', 'own-frame'],
   ]);
+  assert.deepEqual(unheard, []);
   assert.deepEqual(popups, ['https://popup.example/']);
   await refused('Runtime.evaluate', { expression: 'clients.matchAll()' }, 'sw-session');
   await tab.cdp.sendCommand('Runtime.runIfWaitingForDebugger', {}, 'own-frame');
@@ -285,6 +293,8 @@ test('a tab reaches only its own sessions and frames, hears only them, and has i
       ['Target.attachToTarget', 'own', undefined],
       ['Target.setAutoAttach', undefined, 'own-page'],
       ['Page.navigate', undefined, 'own-page'],
+      ['Input.setInterceptDrags', undefined, 'own-page'],
+      ['Input.dispatchDragEvent', undefined, 'own-page'],
       ['Target.closeTarget', 'popup', undefined],
       ['Target.detachFromTarget', 'sw-session', 'own-page'],
       ['Target.detachFromTarget', 'shared-session', 'own-page'],

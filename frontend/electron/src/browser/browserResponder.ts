@@ -31,6 +31,7 @@ import {
   writeArtifact,
   type CapturedArtifact,
 } from './capture';
+import { drag } from './drag';
 import { captureElement, interact } from './interactions';
 import { reachedHost } from './pagePolicy';
 import type { CdpPage } from './cdpSession';
@@ -180,6 +181,9 @@ async function perform(
         console: [...page.console.lines],
         truncated: page.console.cut ? 'console_too_long' : null,
       };
+    case 'drag':
+      await drag(page, operation);
+      return NOTHING;
     default:
       await interact(page, operation);
       return NOTHING;

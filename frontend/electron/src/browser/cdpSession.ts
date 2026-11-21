@@ -14,13 +14,18 @@ export function childSession(sessionId: string | undefined): string | undefined 
   return sessionId === '' ? undefined : sessionId;
 }
 
+/** `params` has the shape `method` defines; a listener narrows it by the methods it handles. */
+export type CdpListener = (
+  event: unknown,
+  method: string,
+  params: unknown,
+  sessionId?: string
+) => void;
+
 export type CdpSession = {
   sendCommand(method: string, params?: object, sessionId?: string): Promise<unknown>;
-  /** `params` has the shape `method` defines; a listener narrows it by the methods it handles. */
-  on(
-    event: 'message',
-    listener: (event: unknown, method: string, params: unknown, sessionId?: string) => void
-  ): unknown;
+  on(event: 'message', listener: CdpListener): unknown;
+  removeListener(event: 'message', listener: CdpListener): unknown;
 };
 
 /** The page an operation reads or acts on, with its console since the session opened. */

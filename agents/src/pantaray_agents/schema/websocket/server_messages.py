@@ -233,6 +233,13 @@ class BrowserHoverOperation(_BrowserModel):
     ref: BrowserRef
 
 
+class BrowserDragOperation(_BrowserModel):
+    # Press on ``ref``'s element, move to ``to_ref``'s and let go there.
+    action: Literal["drag"]
+    ref: BrowserRef
+    to_ref: BrowserRef
+
+
 class BrowserTypeOperation(_BrowserModel):
     action: Literal["type"]
     ref: BrowserRef
@@ -319,6 +326,7 @@ BrowserOperation = Annotated[
     | BrowserSnapshotOperation
     | BrowserClickOperation
     | BrowserHoverOperation
+    | BrowserDragOperation
     | BrowserTypeOperation
     | BrowserPressOperation
     | BrowserSelectOperation

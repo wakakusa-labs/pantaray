@@ -128,9 +128,11 @@ const TAB_COMMANDS = new Set([
   'Fetch.enable',
   'Fetch.failRequest',
   'Fetch.fulfillRequest',
+  'Input.dispatchDragEvent',
   'Input.dispatchKeyEvent',
   'Input.dispatchMouseEvent',
   'Input.insertText',
+  'Input.setInterceptDrags',
   'Log.enable',
   'Network.enable',
   'Network.setBypassServiceWorker',
@@ -495,6 +497,10 @@ function browserOver(socket: WebSocketClient): UserBrowserConnection {
       },
       on(_event, listener) {
         tab.listeners.push(listener);
+        return cdp;
+      },
+      removeListener(_event, listener) {
+        tab.listeners = tab.listeners.filter((kept) => kept !== listener);
         return cdp;
       },
     };

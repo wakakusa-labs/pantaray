@@ -1,4 +1,5 @@
-"""Hook definitions: the closed types and their parsing from a TOML document."""
+"""Hook definitions: the closed types, parsed from a TOML document of hooks or
+from one conversation hook's Markdown file."""
 
 from __future__ import annotations
 
@@ -36,6 +37,10 @@ _DURATION_UNITS: Final[Mapping[str, timedelta]] = {
     "d": timedelta(days=1),
 }
 _DAY: Final = timedelta(days=1)
+# TOML front matter between +++ lines, then the prompt.
+_FRONT_MATTER: Final = re.compile(
+    r"\+\+\+\n(?P<front>.*?)\n\+\+\+\n(?P<body>.*)", re.DOTALL
+)
 
 
 class HookDefinitionError(ValueError):
@@ -135,7 +140,22 @@ class RunJob:
     args: Mapping[str, str]
 
 
-Run = RunJob
+ConversationMode = Literal["continue", "new"]
+
+
+@dataclass(frozen=True, slots=True)
+class RunConversation:
+    """Send the prompt as a turn of a conversation the caller keeps for the hook.
+
+    continue: the next turn of the hook's conversation, which its first fire
+    starts; new: a new conversation on each fire.
+    """
+
+    conversation: ConversationMode
+    prompt: str
+
+
+Run = RunJob | RunConversation
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,6 +165,12 @@ class HookDefinition:
     # Every gate must be open for the hook to fire; a closed one makes it wait.
     requires: tuple[str, ...]
     run: Run
+    # From this instant on the hook never fires.
+    until: datetime | None = None
+
+
+def hook_has_ended(hook: HookDefinition, now: datetime) -> bool:
+    return hook.until is not None and now >= hook.until
 
 
 def inbox_events(hook: HookDefinition) -> frozenset[str]:
@@ -199,15 +225,78 @@ def load_hook_definitions(
     return hooks
 
 
+def load_conversation_hook(
+    hook_id: str,
+    text: str,
+    *,
+    gate_names: frozenset[str],
+    event_names: frozenset[str],
+    requires: tuple[str, ...],
+) -> HookDefinition:
+    """Parse one hook written as Markdown: TOML front matter between ``+++``
+    lines names its ``trigger``, an optional ``until`` and its ``conversation``
+    (continue or new); the body is the prompt.
+
+    An on trigger fires once for its newest event. ``requires`` are the gates the
+    caller imposes; the file names none.
+    """
+    where = f"hook {hook_id}"
+    parts = _FRONT_MATTER.fullmatch(text)
+    if parts is None:
+        raise HookDefinitionError(f"{where}: expected +++ front matter, then a prompt")
+    try:
+        front = tomllib.loads(parts["front"])
+    except tomllib.TOMLDecodeError as error:
+        raise HookDefinitionError(
+            f"{where}: front matter is not TOML: {error}"
+        ) from error
+    _reject_unknown_keys(front, {"trigger", "until", "conversation"}, where=where)
+    conversation: ConversationMode
+    match front.get("conversation"):
+        case "continue" | "new" as mode:
+            conversation = mode
+        case _:
+            raise HookDefinitionError(f"{where}: conversation must be continue or new")
+    prompt = parts["body"].strip()
+    if not prompt:
+        raise HookDefinitionError(
+            f"{where}: the prompt after the front matter is empty"
+        )
+    trigger = _table(front.get("trigger"), where=f"{where} trigger")
+    table: dict[str, object] = {"trigger": trigger, "requires": list(requires)}
+    if "until" in front:
+        table["until"] = front["until"]
+    if "on" in trigger:
+        table["deliver"] = {"immediate": trigger["on"], "collapse": "latest"}
+    return _hook(
+        hook_id,
+        table,
+        _Vocabulary(gates=gate_names, events=event_names, predicates=frozenset()),
+        RunConversation(conversation=conversation, prompt=prompt),
+    )
+
+
 def _parse_hook(
     table: Mapping[str, object],
     names: _Vocabulary,
     validate_run: Callable[[RunJob], None],
 ) -> HookDefinition:
     _reject_unknown_keys(
-        table, {"id", "trigger", "requires", "if", "deliver", "run"}, where="hook"
+        table,
+        {"id", "trigger", "requires", "if", "deliver", "run", "until"},
+        where="hook",
     )
     hook_id = _string(table.get("id"), where="hook id")
+    run = _parse_run(
+        _table(table.get("run"), where=f"hook {hook_id} run"), f"hook {hook_id}"
+    )
+    validate_run(run)
+    return _hook(hook_id, table, names, run)
+
+
+def _hook(
+    hook_id: str, table: Mapping[str, object], names: _Vocabulary, run: Run
+) -> HookDefinition:
     where = f"hook {hook_id}"
     requires = table.get("requires", [])
     if not isinstance(requires, list) or not all(
@@ -217,8 +306,9 @@ def _parse_hook(
     unknown_gates = sorted(set(requires) - names.gates)
     if unknown_gates:
         raise HookDefinitionError(f"{where}: unknown gates {unknown_gates}")
-    run = _parse_run(_table(table.get("run"), where=f"{where} run"), where)
-    validate_run(run)
+    until = None
+    if "until" in table:
+        until = _instant(table["until"], where=f"{where} until")
     trigger_table = _table(table.get("trigger"), where=f"{where} trigger")
     trigger: Trigger
     if "on" in trigger_table:
@@ -228,7 +318,7 @@ def _parse_hook(
             raise HookDefinitionError(f"{where}: if and deliver need an on trigger")
         trigger = _parse_time_trigger(trigger_table, where)
     return HookDefinition(
-        id=hook_id, trigger=trigger, requires=tuple(requires), run=run
+        id=hook_id, trigger=trigger, requires=tuple(requires), run=run, until=until
     )
 
 
@@ -330,10 +420,7 @@ def _event_names(value: object, names: _Vocabulary, *, where: str) -> tuple[str,
 def _parse_time_trigger(table: Mapping[str, object], where: str) -> At | Every:
     if "at" in table:
         _reject_unknown_keys(table, {"at"}, where=f"{where} trigger")
-        at = table["at"]
-        if not isinstance(at, datetime) or at.utcoffset() is None:
-            raise HookDefinitionError(f"{where}: at must be a datetime with an offset")
-        return At(at=at)
+        return At(at=_instant(table["at"], where=f"{where} at"))
     if "every" in table:
         return _parse_every(table, where)
     raise HookDefinitionError(f"{where}: trigger needs at, every or on")
@@ -386,6 +473,12 @@ def _parse_run(table: Mapping[str, object], where: str) -> RunJob:
         job=_string(table.get("job"), where=f"{where} job"),
         args={key: str(value) for key, value in args.items()},
     )
+
+
+def _instant(value: object, *, where: str) -> datetime:
+    if not isinstance(value, datetime) or value.utcoffset() is None:
+        raise HookDefinitionError(f"{where}: expected a datetime with an offset")
+    return value
 
 
 def _duration(value: object, *, where: str) -> timedelta:

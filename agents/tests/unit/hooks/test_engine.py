@@ -22,6 +22,7 @@ from pantaray_agents.hooks.definitions import (
     NamedPredicate,
     On,
     RunJob,
+    load_hook_definitions,
 )
 from pantaray_agents.hooks.engine import (
     Fire,
@@ -126,7 +127,9 @@ class _Harness:
             inbox=self.inbox,
             gate_is_open=lambda name: name in self.open_gates,
             predicate_holds=lambda name, _event: name in self.true_predicates,
-            run_is_active=lambda run: run.job in self.active_runs,
+            run_is_active=lambda hook: (
+                isinstance(hook.run, RunJob) and hook.run.job in self.active_runs
+            ),
             enqueue=self._enqueue,
         )
 
@@ -514,3 +517,66 @@ def test_a_closed_gate_holds_the_inbox() -> None:
     harness.tick(_utc(10, 2))
 
     assert harness.handed == [(insight,)]
+
+
+def test_a_hook_past_its_until_never_fires() -> None:
+    # Catches until ignored for a time trigger, or for events waiting in the
+    # inbox of an on trigger.
+    until = _utc(10, 0)
+    timed = HookDefinition(
+        id="timed",
+        trigger=Every(every="hour", align=True, offset=timedelta(0), tz="utc"),
+        requires=(),
+        run=RunJob(job="j", args={}),
+        until=until,
+    )
+    heard = HookDefinition(
+        id="heard",
+        trigger=On(
+            events=("a.done",),
+            conditions={},
+            delivery=Delivery(
+                immediate=frozenset({"a.done"}),
+                max_wait=None,
+                collapse="latest",
+                min_interval=None,
+            ),
+        ),
+        requires=(),
+        run=RunJob(job="k", args={}),
+        until=until,
+    )
+    harness = _Harness(timed, heard)
+    harness.inbox.add("heard", "a.done", _utc(9, 59))
+
+    harness.tick(_utc(10, 0))
+
+    assert harness.fires == []
+
+
+def test_a_toml_hook_with_until_fires_up_to_it_and_never_after() -> None:
+    # Catches a TOML definition with until refused at load (only the Markdown
+    # loader took it), and a catch-up after a sleep that fires an occurrence
+    # at or past the deadline.
+    (hook,) = load_hook_definitions(
+        """
+        [[hooks]]
+        id = "h"
+        trigger = { every = "15m", align = true, tz = "utc" }
+        until = 2026-09-07T10:30:00Z
+        run = { job = "j" }
+        """,
+        gate_names=frozenset(),
+        event_names=frozenset(),
+        predicate_names=frozenset(),
+        validate_run=lambda _run: None,
+    )
+    assert hook.until == _utc(10, 30)
+    harness = _Harness(hook)
+
+    harness.tick(_utc(10, 1))
+    harness.tick(_utc(10, 29))  # After a sleep: the latest missed one, once.
+    harness.tick(_utc(10, 30))
+    harness.tick(_utc(11, 10))
+
+    assert harness.fires == [("h", _utc(10, 0)), ("h", _utc(10, 15))]

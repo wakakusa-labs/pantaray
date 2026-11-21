@@ -273,7 +273,8 @@ async def test_activity_summary_job_older_than_the_cap_is_not_summarized(
             (summary_id,),
         ).fetchone()
         trigger_count = connection.execute(
-            "SELECT COUNT(*) FROM memory_agent_triggers WHERE source_id = ?",
+            "SELECT COUNT(*) FROM hook_inbox "
+            "WHERE json_extract(payload_json, '$.summary_id') = ?",
             (summary_id,),
         ).fetchone()
 

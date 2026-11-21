@@ -105,8 +105,9 @@ _DELETE_STATEMENTS = (
     # Fragments, FTS rows, embeddings and parents cascade from the revisions.
     f"DELETE FROM memory_revisions WHERE user_id = :user_id AND node_id IN ({_COPY_NODES})",
     f"DELETE FROM memory_nodes WHERE user_id = :user_id AND node_id IN ({_COPY_NODES})",
-    """DELETE FROM memory_agent_triggers
-       WHERE user_id = :user_id AND action_id = :action_id""",
+    """DELETE FROM hook_inbox WHERE user_id = :user_id
+         AND event_name = 'action.turn_ended'
+         AND json_extract(payload_json, '$.action_id') = :action_id""",
     # Audits RESTRICT the approval sessions that cascade from the Action.
     """DELETE FROM command_invocation_audits WHERE invocation_id IN (
          SELECT invocation_id FROM tool_invocations

@@ -21,6 +21,8 @@ from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from typing import Literal
 
+from pantaray_agents.local_runtime.hooks.events import ChatMessageRecorded
+from pantaray_agents.local_runtime.hooks.inbox import record_event
 from pantaray_agents.local_runtime.runtime.action_file_attachments import (
     ActionFileAttachmentUnavailableError,
     require_staged_attachments,
@@ -31,6 +33,7 @@ from pantaray_agents.local_runtime.runtime.runtime_env import (
     read_local_runtime_db_config,
 )
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
+from pantaray_agents.local_runtime.storage.chat_messages import CHAT_MESSAGE_KINDS
 from pantaray_agents.local_runtime.storage.migrations.connection import (
     configure_connection,
 )
@@ -123,7 +126,15 @@ def append_chat_item(
                 created_at,
             ),
         ).fetchone()
-        return _item(row)
+        item = _item(row)
+        if content.kind in CHAT_MESSAGE_KINDS:
+            record_event(
+                connection,
+                user_id=user_id,
+                event=ChatMessageRecorded(sequence=item.sequence),
+                occurred_at=created_at,
+            )
+        return item
 
 
 def read_chat_page(*, user_id: str, before: int | None, limit: int) -> ChatItemPage:

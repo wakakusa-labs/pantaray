@@ -16,12 +16,13 @@ from pantaray_agents.local_runtime.activity_summary_schedule import SummaryType
 from pantaray_agents.local_runtime.runtime.job_types import (
     LOCAL_ACTIVITY_SUMMARY_JOB_TYPE,
     LOCAL_INSIGHT_JOB_TYPE,
+    LOCAL_MEMORY_UPDATE_JOB_TYPE,
 )
 
 from .events import EVENT_NAMES
 
 GATE_NAMES: Final = frozenset({"owner_settled", "recording_ready"})
-PREDICATE_NAMES: Final[frozenset[str]] = frozenset()
+PREDICATE_NAMES: Final = frozenset({"still_dismissed_without_reply"})
 
 
 def summary_type(run: RunJob) -> SummaryType:
@@ -36,7 +37,10 @@ def summary_type(run: RunJob) -> SummaryType:
 def _validate_run(run: RunJob) -> None:
     if run.job == LOCAL_ACTIVITY_SUMMARY_JOB_TYPE:
         summary_type(run)
-    elif run.job != LOCAL_INSIGHT_JOB_TYPE or run.args:
+    elif (
+        run.job not in {LOCAL_INSIGHT_JOB_TYPE, LOCAL_MEMORY_UPDATE_JOB_TYPE}
+        or run.args
+    ):
         raise HookDefinitionError(f"a hook cannot run {run.job} with {run.args}")
 
 

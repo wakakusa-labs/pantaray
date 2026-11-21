@@ -40,3 +40,22 @@ id = "builtin.summary_3m"
 trigger = { every = "quarter", offset = "30m", tz = "utc" }
 requires = ["owner_settled"]
 run = { job = "summarize_activity", args = { summary_type = "3m" } }
+
+# Insights and daily summaries start a Memory update at once; finished Action
+# turns, chat messages and dismissals ride along with the next one, or start
+# one when the oldest has waited one Insight window (which matters when
+# recording is off and no Insight comes). A dismissal undone or answered
+# before the run is not handed: an answer reaches memory as an Action.
+[[hooks]]
+id = "builtin.memory_update"
+trigger = { on = [
+    "insight.recorded",
+    "activity_summary.recorded",
+    "action.turn_ended",
+    "chat.message_recorded",
+    "suggestion.dismissed",
+] }
+if = { "activity_summary.recorded" = { summary_type = "24h" }, "suggestion.dismissed" = "still_dismissed_without_reply" }
+deliver = { immediate = ["insight.recorded", "activity_summary.recorded"], max_wait = "15m", collapse = "all" }
+requires = ["owner_settled"]
+run = { job = "memory_update" }

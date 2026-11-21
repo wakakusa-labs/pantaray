@@ -18,7 +18,14 @@ from pantaray_agents.local_runtime.runtime.insight_queue import (
 from pantaray_agents.local_runtime.runtime.job_status import (
     ACTIVE_DEDUPE_JOB_STATUSES,
 )
-from pantaray_agents.local_runtime.runtime.job_types import LOCAL_INSIGHT_JOB_TYPE
+from pantaray_agents.local_runtime.runtime.job_types import (
+    LOCAL_INSIGHT_JOB_TYPE,
+    LOCAL_MEMORY_UPDATE_JOB_TYPE,
+)
+from pantaray_agents.local_runtime.runtime.memory_update_queue import (
+    enqueue_memory_update_from_inbox,
+)
+from pantaray_agents.local_runtime.runtime.utc_timestamps import format_utc_iso
 from pantaray_agents.local_runtime.storage.migrations.connection import (
     configure_connection,
 )
@@ -54,6 +61,17 @@ def enqueue_hook_job(
             busy_timeout_ms=busy_timeout_ms,
             user_id=user_id,
             moment=fire.occurrence,
+        )
+        return "done"
+    if run.job == LOCAL_MEMORY_UPDATE_JOB_TYPE:
+        enqueue_memory_update_from_inbox(
+            db_path=db_path,
+            busy_timeout_ms=busy_timeout_ms,
+            user_id=user_id,
+            hook_id=fire.hook.id,
+            events=fire.events,
+            superseded=fire.superseded,
+            enqueued_at=format_utc_iso(fire.now),
         )
         return "done"
     return asyncio.run(

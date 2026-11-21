@@ -164,6 +164,7 @@ def load_default_migrations() -> tuple[MigrationSpec, ...]:
         "0146_running_command_invocation_audits.sql",
         "0147_hook_states.sql",
         "0148_hook_inbox.sql",
+        "0149_memory_update_hook_inbox.sql",
     )
     return tuple(
         MigrationSpec(

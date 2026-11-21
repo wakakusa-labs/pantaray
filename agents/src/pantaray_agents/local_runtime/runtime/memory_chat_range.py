@@ -1,15 +1,15 @@
 """Which chat messages the next unified Memory run is handed.
 
-The chat is a source of its own: a run is handed the messages after the user's
-chat cursor, pinned in its job payload as a sequence range, and the cursor moves
-to the range's end when that job is enqueued, as a trigger is marked dispatched
-then. A failed run therefore loses its range as it loses its triggers.
+The chat is a source of its own: each message is an event in the Memory
+update hook's inbox, and a run is handed the messages from the oldest pending
+one, pinned in its job payload as a sequence range. The events of the range
+are consumed when that job is enqueued, so a failed run loses its range as it
+loses its other sources.
 """
 
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import dataclass
 from typing import Final
 
 from pantaray_agents.local_runtime.storage.chat_messages import read_chat_messages
@@ -23,68 +23,33 @@ from .job_payload_models import MEMORY_UPDATE_SOURCE_MAX_ITEMS
 MEMORY_CHAT_MAX_CHARS: Final[int] = 60_000
 
 
-@dataclass(frozen=True, slots=True)
-class PendingChat:
-    range: MemoryUpdateChatRange
-    # When the oldest message of the range was said.
-    oldest_created_at: str
+def chat_range(
+    connection: sqlite3.Connection, *, user_id: str, after: int, through: int
+) -> MemoryUpdateChatRange:
+    """The messages in (``after``, ``through``] that fit one run.
 
-
-def pending_chat(connection: sqlite3.Connection, *, user_id: str) -> PendingChat | None:
-    """The messages after the cursor that fit one run, or None when none wait.
-
-    A message longer than the character bound still goes alone, so the
-    cursor always moves.
+    ``through`` is the newest handed message: one saved since the inbox was
+    read has an event still pending, and goes to the next run. A message
+    longer than the character bound still goes alone, so the backlog always
+    moves. Chat messages are never deleted, so a pending message event always
+    finds its message.
     """
 
-    after = _cursor(connection, user_id=user_id)
     messages = read_chat_messages(
         connection,
         user_id=user_id,
         after=after,
+        through=through,
         limit=MEMORY_UPDATE_SOURCE_MAX_ITEMS,
     )
-    if not messages:
-        return None
-    through = messages[0].sequence
+    fits = messages[0].sequence
     total = 0
     for message in messages:
         total += len(message.content.text)
         if total > MEMORY_CHAT_MAX_CHARS and message is not messages[0]:
             break
-        through = message.sequence
-    return PendingChat(
-        range={"after_sequence": after, "through_sequence": through},
-        oldest_created_at=messages[0].created_at,
-    )
+        fits = message.sequence
+    return {"after_sequence": after, "through_sequence": fits}
 
 
-def advance_chat_cursor(
-    connection: sqlite3.Connection, *, user_id: str, through: int, at: str
-) -> None:
-    connection.execute(
-        """
-        INSERT INTO memory_chat_cursors(user_id, through_sequence, updated_at)
-        VALUES (?, ?, ?)
-        ON CONFLICT(user_id) DO UPDATE SET
-            through_sequence = excluded.through_sequence,
-            updated_at = excluded.updated_at
-        """,
-        (user_id, through, at),
-    )
-
-
-def _cursor(connection: sqlite3.Connection, *, user_id: str) -> int:
-    row = connection.execute(
-        "SELECT through_sequence FROM memory_chat_cursors WHERE user_id = ?",
-        (user_id,),
-    ).fetchone()
-    return 0 if row is None else int(row[0])
-
-
-__all__ = [
-    "MEMORY_CHAT_MAX_CHARS",
-    "PendingChat",
-    "advance_chat_cursor",
-    "pending_chat",
-]
+__all__ = ["MEMORY_CHAT_MAX_CHARS", "chat_range"]

@@ -3,21 +3,21 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from contextlib import closing
 from datetime import UTC, datetime, tzinfo
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from pantaray_agents.hooks.engine import InboxEvent, run_hook_tick
+from pantaray_agents.hooks.engine import run_hook_tick
 from pantaray_agents.local_runtime.activity_summary_schedule import iso_z, parse_iso_z
 from pantaray_agents.local_runtime.storage.migrations.connection import (
     configure_connection,
 )
 from pantaray_agents.utils.local_time import local_zone_name
 
-from .builtin import PREDICATE_NAMES, builtin_hooks
-from .gates import build_gates
+from .builtin import builtin_hooks
+from .gates import build_gates, build_predicates
 from .inbox import SqliteHookInbox
 from .jobs import enqueue_hook_job, run_is_active
 
@@ -68,8 +68,9 @@ def run_builtin_hooks_once(
     gates = build_gates(
         db_path=db_path, busy_timeout_ms=busy_timeout_ms, user_id=user_id
     )
-    predicates: Mapping[str, Callable[[InboxEvent], bool]] = {}
-    assert predicates.keys() == PREDICATE_NAMES
+    predicates = build_predicates(
+        db_path=db_path, busy_timeout_ms=busy_timeout_ms, user_id=user_id
+    )
     run_hook_tick(
         builtin_hooks(),
         now=datetime.now(UTC) if now is None else now,

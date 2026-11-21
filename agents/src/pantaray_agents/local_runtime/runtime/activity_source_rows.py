@@ -5,6 +5,8 @@ import sqlite3
 from pathlib import Path
 from typing import Final
 
+from pantaray_agents.local_runtime.hooks.events import ActivitySummaryRecorded
+from pantaray_agents.local_runtime.hooks.inbox import record_event
 from pantaray_agents.local_runtime.memory_catalog.domain_registration import (
     register_activity_summary_memory,
 )
@@ -14,11 +16,6 @@ from pantaray_agents.local_runtime.runtime.activity_source_db import (
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
 from pantaray_agents.local_runtime.storage.users import ensure_user_row
 from pantaray_agents.schema.agent.base import AgentError, ErrorSeverity, ErrorType
-
-from .activity_summary_triggers import (
-    create_activity_summary_trigger_if_eligible,
-    require_activity_summary_replay_trigger,
-)
 
 ACTIVITY_SOURCE_STATUS_PROCESSING: Final[str] = "processing"
 ACTIVITY_SOURCE_STATUS_SUCCESS: Final[str] = "success"
@@ -138,13 +135,6 @@ def persist_activity_summary_result(
                 raise MigrationError(
                     "activity_summary terminal row cannot be overwritten"
                 )
-            if status == ACTIVITY_SOURCE_STATUS_SUCCESS:
-                require_activity_summary_replay_trigger(
-                    connection=connection,
-                    user_id=user_id,
-                    summary_id=summary_id,
-                    summary_type=summary_type,
-                )
             return
 
         cursor = connection.execute(
@@ -194,12 +184,13 @@ def persist_activity_summary_result(
                 content=summary,
                 source_ids=tuple(source_ids),
             )
-            create_activity_summary_trigger_if_eligible(
-                connection=connection,
+            record_event(
+                connection,
                 user_id=user_id,
-                summary_id=summary_id,
-                summary_type=summary_type,
-                succeeded_at=updated_at,
+                event=ActivitySummaryRecorded(
+                    summary_id=summary_id, summary_type=summary_type
+                ),
+                occurred_at=updated_at,
             )
 
     with_activity_source_connection(

@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from pantaray_agents.action_status import FinalizeActionTerminalCommand
+from pantaray_agents.local_runtime.hooks.events import ActionTurnEnded
+from pantaray_agents.local_runtime.hooks.inbox import record_event
 from pantaray_agents.local_runtime.memory_catalog.models import MemoryRevision
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
 from pantaray_agents.local_runtime.storage.transactions import (
@@ -38,11 +40,6 @@ from .action_terminal_memory import (
     InvalidActionMemoryDraftError,
     load_completed_action_turn_binding_in_connection,
     publish_action_memory_in_connection,
-)
-from .memory_agent_triggers import (
-    ACTION_TERMINAL_MEMORY_TRIGGER_KIND,
-    ActionTerminalTriggerBinding,
-    insert_pending_memory_agent_trigger,
 )
 from .process_events import append_process_event_in_connection
 
@@ -219,13 +216,11 @@ def _trigger_memory_update_for_terminal(
     )
     if binding is None:
         return
-    insert_pending_memory_agent_trigger(
-        connection=connection,
+    record_event(
+        connection,
         user_id=command.user_id,
-        trigger_kind=ACTION_TERMINAL_MEMORY_TRIGGER_KIND,
-        source_id=f"{command.action_id}:{binding.turn_end_step_number}",
-        created_at=command.completed_at,
-        action_terminal=ActionTerminalTriggerBinding(
+        event=ActionTurnEnded(
+            source_id=f"{command.action_id}:{binding.turn_end_step_number}",
             action_id=command.action_id,
             action_completed_at=command.completed_at,
             source_action_revision_id=binding.source_action_revision_id,
@@ -235,6 +230,7 @@ def _trigger_memory_update_for_terminal(
             action_prompt_version=binding.action_prompt_version,
             suggestion_id=command.suggestion_id,
         ),
+        occurred_at=command.completed_at,
     )
 
 

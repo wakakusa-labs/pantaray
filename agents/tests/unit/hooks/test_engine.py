@@ -456,6 +456,23 @@ def test_collapse_latest_waits_from_the_oldest_ride_along() -> None:
     assert harness.inbox.read("on") == ()
 
 
+def test_an_event_the_hook_no_longer_listens_to_is_dropped() -> None:
+    # Catches events written under an earlier definition (a renamed event or
+    # min_interval anchor) handed to a run that cannot read them.
+    harness = _Harness(
+        _on_hook(
+            min_interval=MinInterval(after="started", duration=timedelta(minutes=15))
+        )
+    )
+    harness.inbox.add("on", "renamed", _utc(10, 0))
+    harness.inbox.add("on", "old_started", _utc(10, 0))
+    insight = harness.inbox.add("on", "insight", _utc(10, 1))
+    harness.tick(_utc(10, 2))
+
+    assert harness.handed == [(insight,)]
+    assert harness.inbox.read("on") == ()
+
+
 def test_collapse_latest_hands_only_the_newest_event() -> None:
     harness = _Harness(_on_hook(collapse="latest"))
     harness.inbox.add("on", "insight", _utc(10, 0))

@@ -211,6 +211,20 @@ async def test_mark_user_reaction_normalizes_dismiss_to_stored_rejected(
     assert result.data is not None
     assert result.data["user_reaction"] == "rejected"
     assert result.data["rejected_at"] == "2026-03-24T00:00:01Z"
+    # The dismissal reaches the Memory update inbox; taking it back does not.
+    await repo.mark_user_reaction(
+        user_id=USER_ID, suggestion_id=SUGGESTION_ID, user_reaction="accepted"
+    )
+    with sqlite3.connect(db_path) as connection:
+        assert connection.execute(
+            "SELECT event_name, payload_json, occurred_at FROM hook_inbox"
+        ).fetchall() == [
+            (
+                "suggestion.dismissed",
+                f'{{"suggestion_id": "{SUGGESTION_ID}"}}',
+                "2026-03-24T00:00:01Z",
+            )
+        ]
 
 
 @pytest.mark.asyncio

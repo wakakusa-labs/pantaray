@@ -168,22 +168,26 @@ def _reserved_daily_summary(tmp_path: Path) -> tuple[Path, dict[str, object]]:
     }
 
 
-def test_successful_daily_summary_creates_one_memory_trigger(
+def test_successful_daily_summary_records_one_event(
     tmp_path: Path,
 ) -> None:
+    # Catches a replayed terminal write recording the summary twice, which
+    # would hand it to two Memory runs.
     db_path, result = _reserved_daily_summary(tmp_path)
 
     persist_activity_summary_result(**result)
     persist_activity_summary_result(**result)
 
     with sqlite3.connect(db_path) as connection:
-        triggers = connection.execute(
-            """
-            SELECT trigger_kind, source_id, status
-            FROM memory_agent_triggers
-            """
+        events = connection.execute(
+            "SELECT event_name, payload_json FROM hook_inbox"
         ).fetchall()
-    assert triggers == [("memory_from_24h_summary", "summary-24h", "pending")]
+    assert events == [
+        (
+            "activity_summary.recorded",
+            '{"summary_id": "summary-24h", "summary_type": "24h"}',
+        )
+    ]
 
 
 def test_activity_summary_terminal_result_cannot_be_overwritten(tmp_path: Path) -> None:

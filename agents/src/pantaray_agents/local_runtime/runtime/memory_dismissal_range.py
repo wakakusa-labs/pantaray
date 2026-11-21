@@ -2,10 +2,10 @@
 
 A suggestion the user dismissed without replying reaches memory nowhere else:
 an accepted one, and a dismissal the user answered in words, become Actions.
-The dismissals are a source of their own, handed as the chat is: a run is
-handed the dismissals after the user's cursor, pinned in its job payload by
-suggestion id, and the cursor moves to the last of them when that job is
-enqueued. A failed run therefore loses its dismissals as it loses its triggers.
+The dismissals are a source of their own, handed as the chat is: each is an
+event in the Memory update hook's inbox, a run is handed those still
+dismissed without a reply, pinned in its job payload by suggestion id, and
+their events are consumed when that job is enqueued.
 """
 
 from __future__ import annotations
@@ -34,15 +34,6 @@ _DISMISSED_WITHOUT_REPLY_SQL: Final[str] = """
 
 
 @dataclass(frozen=True, slots=True)
-class PendingDismissals:
-    suggestion_ids: tuple[str, ...]
-    # When the oldest of them was dismissed.
-    oldest_rejected_at: str
-    through_rejected_at: str
-    through_suggestion_id: str
-
-
-@dataclass(frozen=True, slots=True)
 class DismissedSuggestion:
     suggestion_id: str
     rejected_at: str
@@ -50,78 +41,51 @@ class DismissedSuggestion:
     dismiss_reason: str | None
 
 
-def pending_dismissals(
-    connection: sqlite3.Connection, *, user_id: str
-) -> PendingDismissals | None:
-    """The dismissals after the cursor that fit one run, or None when none wait.
+def is_dismissed_without_reply(
+    connection: sqlite3.Connection, *, user_id: str, suggestion_id: str
+) -> bool:
+    row = connection.execute(
+        f"""
+        SELECT 1 FROM agent_suggestions AS suggestions
+        WHERE {_DISMISSED_WITHOUT_REPLY_SQL} AND suggestions.suggestion_id = ?
+        """,
+        (user_id, suggestion_id),
+    ).fetchone()
+    return row is not None
+
+
+def dismissals_for_one_run(
+    connection: sqlite3.Connection, *, user_id: str, suggestion_ids: tuple[str, ...]
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Of the pending dismissals still unanswered, those that fit one run and the
+    rest, oldest dismissal first.
 
     A dismissal longer than the character bound still goes alone, so the
-    cursor always moves.
+    backlog always moves.
     """
 
-    cursor = connection.execute(
-        """
-        SELECT through_rejected_at, through_suggestion_id
-        FROM memory_dismissal_cursors WHERE user_id = ?
-        """,
-        (user_id,),
-    ).fetchone()
-    after = ("", "") if cursor is None else (str(cursor[0]), str(cursor[1]))
+    placeholders = ",".join("?" for _ in suggestion_ids)
     rows = connection.execute(
         f"""
-        SELECT suggestions.suggestion_id, suggestions.rejected_at,
+        SELECT suggestions.suggestion_id,
                LENGTH(suggestions.answer)
                    + COALESCE(LENGTH(suggestions.dismiss_reason), 0)
         FROM agent_suggestions AS suggestions
         WHERE {_DISMISSED_WITHOUT_REPLY_SQL}
-          AND (suggestions.rejected_at, suggestions.suggestion_id) > (?, ?)
+          AND suggestions.suggestion_id IN ({placeholders})
         ORDER BY suggestions.rejected_at, suggestions.suggestion_id
-        LIMIT ?
         """,
-        (user_id, *after, MEMORY_UPDATE_SOURCE_MAX_ITEMS),
+        (user_id, *suggestion_ids),
     ).fetchall()
-    if not rows:
-        return None
-    handed = rows[:1]
-    total = int(rows[0][2])
-    for row in rows[1:]:
-        total += int(row[2])
+    handed = [str(row[0]) for row in rows[:1]]
+    total = sum(int(row[1]) for row in rows[:1])
+    for row in rows[1:MEMORY_UPDATE_SOURCE_MAX_ITEMS]:
+        total += int(row[1])
         if total > MEMORY_DISMISSAL_MAX_CHARS:
             break
-        handed.append(row)
-    return PendingDismissals(
-        suggestion_ids=tuple(str(row[0]) for row in handed),
-        oldest_rejected_at=str(handed[0][1]),
-        through_rejected_at=str(handed[-1][1]),
-        through_suggestion_id=str(handed[-1][0]),
-    )
-
-
-def advance_dismissal_cursor(
-    connection: sqlite3.Connection,
-    *,
-    user_id: str,
-    dismissals: PendingDismissals,
-    at: str,
-) -> None:
-    connection.execute(
-        """
-        INSERT INTO memory_dismissal_cursors(
-            user_id, through_rejected_at, through_suggestion_id, updated_at
-        )
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(user_id) DO UPDATE SET
-            through_rejected_at = excluded.through_rejected_at,
-            through_suggestion_id = excluded.through_suggestion_id,
-            updated_at = excluded.updated_at
-        """,
-        (
-            user_id,
-            dismissals.through_rejected_at,
-            dismissals.through_suggestion_id,
-            at,
-        ),
-    )
+        handed.append(str(row[0]))
+    rest = tuple(str(row[0]) for row in rows[len(handed) :])
+    return tuple(handed), rest
 
 
 def read_dismissed_suggestions(
@@ -155,8 +119,7 @@ def read_dismissed_suggestions(
 __all__ = [
     "MEMORY_DISMISSAL_MAX_CHARS",
     "DismissedSuggestion",
-    "PendingDismissals",
-    "advance_dismissal_cursor",
-    "pending_dismissals",
+    "dismissals_for_one_run",
+    "is_dismissed_without_reply",
     "read_dismissed_suggestions",
 ]

@@ -19,7 +19,7 @@ from pantaray_agents.local_runtime.storage.users import ensure_user_row
 from pantaray_agents.utils.local_time import local_zone_name
 
 from .builtin import builtin_hooks
-from .controls import NO_CONVERSATION, active_hooks
+from .controls import active_hooks
 from .conversations import fire_task, record_turn_results
 from .gates import build_gates, build_predicates
 from .inbox import SqliteHookInbox
@@ -85,8 +85,7 @@ def run_hooks_once(
     task_files = read_task_files()
     with closing(sqlite3.connect(db_path)) as connection:
         configure_connection(connection, busy_timeout_ms)
-        with connection:
-            record_turn_results(connection, user_id=user_id)
+        record_turn_results(connection, user_id=user_id)
         active = active_hooks(
             connection,
             user_id=user_id,
@@ -115,7 +114,6 @@ def run_hooks_once(
         return fire_task(
             fire,
             task,
-            active.conversations.get(task.hook.id, NO_CONVERSATION),
             db_path=db_path,
             busy_timeout_ms=busy_timeout_ms,
             user_id=user_id,

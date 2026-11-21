@@ -152,7 +152,18 @@ def set_enabled_in_connection(
 def approve_in_connection(
     connection: sqlite3.Connection, *, user_id: str, hook_id: str, content_hash: str
 ) -> None:
+    """Approve the task's content. New content starts its schedule afresh, so
+    a spent ``at`` moved later, or a trigger changed, fires on its own terms;
+    approving the same content again keeps it."""
+
     ensure_user_row(connection, user_id=user_id)
+    if control_of(
+        read_controls(connection, user_id=user_id), hook_id
+    ).approved_hash != (content_hash):
+        connection.execute(
+            "DELETE FROM hook_states WHERE user_id = ? AND hook_id = ?",
+            (user_id, hook_id),
+        )
     connection.execute(
         """INSERT INTO hook_settings(user_id, hook_id, enabled, approved_hash)
            VALUES (?, ?, 1, ?)

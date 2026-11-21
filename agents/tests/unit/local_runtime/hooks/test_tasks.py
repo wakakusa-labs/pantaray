@@ -277,6 +277,84 @@ def test_a_fire_repeated_after_a_crash_finds_its_turn(
     assert world.view().failure_count == 0
 
 
+def test_a_crash_before_binding_leaves_one_conversation(
+    world: _World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Catches a crash between sending a turn and binding its conversation
+    # that makes the next occurrence open a second conversation, or send while
+    # the first turn still runs.
+    world.write()
+    world.approve()
+    bind = conversations._bind
+
+    def crash_once(*args: object, **kwargs: object) -> None:
+        monkeypatch.setattr(conversations, "_bind", bind)
+        raise sqlite3.OperationalError("disk I/O error")
+
+    monkeypatch.setattr(conversations, "_bind", crash_once)
+    world.tick(NINE)
+    world.tick(NINE + timedelta(hours=1))
+    assert len(world.turns()) == 1
+
+    world.end_latest_turn("completed")
+    world.tick(NINE + timedelta(hours=1, seconds=3))
+    (first, _), (second, _) = world.turns()
+    assert first == second == world.view().action_id
+
+
+def test_a_turn_that_ends_during_a_tick_is_counted_before_the_next(
+    world: _World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Catches a turn that ends after the tick counted results but before the
+    # next turn is sent: its failure would never count, so the third failure
+    # in a row would not stop the task.
+    world.write()
+    world.approve()
+    for hour in range(2):
+        world.tick(NINE + timedelta(hours=hour))
+        world.end_latest_turn("failed")
+    world.tick(NINE + timedelta(hours=2))
+    count = runner.record_turn_results
+
+    def ends_after_counting(connection: sqlite3.Connection, *, user_id: str) -> None:
+        count(connection, user_id=user_id)
+        world.end_latest_turn("failed")
+
+    monkeypatch.setattr(runner, "record_turn_results", ends_after_counting)
+    world.tick(NINE + timedelta(hours=3))
+
+    assert len(world.turns()) == 3
+    assert (world.view().failure_count, world.view().stopped_reason) == (
+        3,
+        "turn_failed",
+    )
+
+
+def test_newly_approved_content_starts_its_schedule_afresh(world: _World) -> None:
+    # Catches a spent at task edited to a later time that never fires again,
+    # and an unchanged approval that fires a spent at once more.
+    at = """+++
+trigger = { at = 2026-11-21T09:00:00Z }
+conversation = "new"
++++
+Send the reminder.
+"""
+    world.write(at)
+    world.approve()
+    world.tick(NINE)
+    world.end_latest_turn("completed")
+    world.approve()
+    world.tick(NINE + timedelta(hours=1))
+    assert len(world.turns()) == 1
+
+    world.write(at.replace("09:00:00Z", "11:00:00Z"))
+    world.approve()
+    world.tick(NINE + timedelta(hours=1, seconds=3))
+    assert len(world.turns()) == 1
+    world.tick(NINE + timedelta(hours=2))
+    assert len(world.turns()) == 2
+
+
 def test_only_the_approved_content_fires(world: _World) -> None:
     # Catches a task that fires before approval, one that keeps firing after
     # its file was edited, and approval kept by name rather than by content.

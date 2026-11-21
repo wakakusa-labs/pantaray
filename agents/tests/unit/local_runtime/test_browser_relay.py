@@ -149,6 +149,7 @@ class Runtime:
                 user_browser=None,
                 operation=operation,
                 policy=POLICY,
+                action_id="action-1",
             )
         return await relay_module.request_browser_operation(
             db_path=self.db_path,
@@ -256,6 +257,7 @@ async def test_a_screenshot_is_verified_returned_and_removed(
     assert payload == {
         "operation_request_id": payload["operation_request_id"],
         "session_id": payload["session_id"],
+        "action_id": "action-1",
         "operation": {"action": "screenshot", "ref": None, "full_page": None},
         "policy": {**POLICY.model_dump(mode="json"), "write_hosts": []},
         "user_browser": None,
@@ -533,8 +535,10 @@ async def test_each_page_has_its_own_session_and_hosts(runtime: Runtime) -> None
     assert _hosts(app) == (["app.example"], None)
     assert _hosts(user) == (
         ["mail.example"],
-        {"browser": "chrome", "action_id": "action-1", "read_hosts": ["mail.example"]},
+        {"browser": "chrome", "read_hosts": ["mail.example"]},
     )
+    # Catches: a page whose Action Electron cannot tell, so its chat cannot show it.
+    assert (app["action_id"], user["action_id"]) == ("action-1", "action-1")
     await relay_module.close_browser_session(owner_process_id=OWNER, browser="user")
     assert runtime.closes() == [user["session_id"]]
     assert relay_module.browser_page_host(OWNER, "pantaray") == "localhost"

@@ -213,7 +213,8 @@ async def _refused(runtime: Runtime, args: dict) -> BrokerPolicyError:
 
 
 # Catches: a policy looser than read's (no private roots, a missing secret tier,
-# approved write hosts), or reached hosts left out of the output.
+# approved write hosts), reached hosts left out of the output, or the page sent
+# without its Action.
 async def test_navigate_reaches_electron_with_reads_policy(
     runtime: Runtime,
 ) -> None:
@@ -227,6 +228,8 @@ async def test_navigate_reaches_electron_with_reads_policy(
         "action": "navigate",
         "target": {"kind": "web", "url": "http://localhost:5173/"},
     }
+    # The run's Action, so its chat can show the page.
+    assert payload["action_id"] == "action-1"
     policy: dict = payload["policy"]  # type: ignore[assignment]
     assert policy["allow_network"] is True
     assert policy["write_hosts"] == []

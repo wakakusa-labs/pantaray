@@ -99,6 +99,8 @@ export function createHtmlPreviewPdfs(params: {
         settled = await params.sessions.run(
           {
             session_id: sessionId,
+            // The user's own preview, which no Action's chat shows.
+            action_id: null,
             operation,
             policy: {
               allow_network: false,

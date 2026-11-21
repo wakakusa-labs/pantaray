@@ -232,6 +232,8 @@ class SuggestionHtmlPages:
                 user_browser=None,
                 operation=operation,
                 policy=policy,
+                # A Suggestion has no Action whose chat could show the page.
+                action_id=None,
             )
             if isinstance(outcome, BrowserRelayFailed):
                 raise _print_failed(target, outcome)

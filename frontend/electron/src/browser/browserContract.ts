@@ -101,28 +101,38 @@ const BrowserPagePolicySchema = strict({
   write_hosts: z.array(HostSchema),
 });
 
-const BrowserOperationRequestSchema = strict({
+const BrowserRequestBase = {
   operation_request_id: NonBlankSchema,
   session_id: NonBlankSchema,
   operation: BrowserOperationSchema,
   policy: BrowserPagePolicySchema,
-  // A tab of the session's own in the user's browser; null for the app's hidden page.
-  user_browser: strict({
-    browser: UserBrowserIdSchema,
-    // The Action whose chat shows that the user is asked to allow the connection.
+};
+
+/**
+ * `action_id` is the Action whose run asks: its chat shows the app's page, and the user's browser
+ * waits there for the user. A run with no Action (a Suggestion) has none and runs only on the
+ * app's page; the two variants make that a type, so no reader checks for it.
+ */
+const BrowserOperationRequestSchema = z.union([
+  strict({ ...BrowserRequestBase, action_id: NonBlankSchema.nullable(), user_browser: z.null() }),
+  strict({
+    ...BrowserRequestBase,
     action_id: NonBlankSchema,
-    // Hosts the user approved this run to open in that tab.
-    read_hosts: z.array(HostSchema),
-  }).nullable(),
-}).refine(
-  // The user's browser opens no local file, prints nothing, and needs the network on.
-  ({ user_browser, operation, policy }) =>
-    user_browser === null ||
-    (policy.allow_network &&
+    // A tab of the session's own in the user's browser.
+    user_browser: strict({
+      browser: UserBrowserIdSchema,
+      // Hosts the user approved this run to open in that tab.
+      read_hosts: z.array(HostSchema),
+    }),
+  }).refine(
+    // The user's browser opens no local file, prints nothing, and needs the network on.
+    ({ operation, policy }) =>
+      policy.allow_network &&
       operation.action !== 'print' &&
-      !(operation.action === 'navigate' && operation.target.kind === 'file')),
-  { message: "the user's browser takes web pages only, with the network on" }
-);
+      !(operation.action === 'navigate' && operation.target.kind === 'file'),
+    { message: "the user's browser takes web pages only, with the network on" }
+  ),
+]);
 
 const BrowserSessionCloseRequestSchema = strict({ session_id: NonBlankSchema });
 

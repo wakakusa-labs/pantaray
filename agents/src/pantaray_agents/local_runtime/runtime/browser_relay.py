@@ -190,7 +190,7 @@ async def request_browser_operation(
     user_browser: None,
     operation: BrowserOperation,
     policy: BrowserPagePolicy,
-    action_id: None = None,
+    action_id: str | None,
 ) -> BrowserOperationOutcome: ...
 
 
@@ -219,7 +219,7 @@ async def request_browser_operation(
     user_browser: UserBrowserId | None,
     operation: BrowserOperation,
     policy: BrowserPagePolicy,
-    action_id: str | None = None,
+    action_id: str | None,
 ) -> BrowserOperationOutcome:
     """Run ``operation`` in the session of the owner's ``browser`` page, opening
     one if it has none.
@@ -229,8 +229,9 @@ async def request_browser_operation(
     hosts approved for it, whatever ``policy`` names. ``user_browser`` is the
     user's browser the ``"user"`` page runs in; naming another than the one the
     page is bound to (:func:`bound_user_browser`) raises ``ValueError``.
-    ``action_id`` is the run's Action, whose chat shows the wait while the user
-    is asked to allow the connection.
+    ``action_id`` is the run's Action, whose chat shows the app's page and the
+    wait while the user is asked to allow the connection; a run with no Action
+    passes None, which only the app's page takes.
     """
 
     opened = _current_session(
@@ -250,11 +251,8 @@ async def request_browser_operation(
     session = opened.session
     user_target = None
     if user_browser is not None:
-        # The overloads require it with the user's browser.
-        assert action_id is not None
         user_target = BrowserUserTarget(
             browser=user_browser,
-            action_id=action_id,
             read_hosts=list(opened.read_hosts),
         )
     # Until the user's browser answers once, the user is being asked to turn
@@ -274,6 +272,7 @@ async def request_browser_operation(
             BrowserOperationRequestedMessage(
                 operation_request_id=operation_request_id,
                 session_id=session.session_id,
+                action_id=action_id,
                 operation=operation,
                 policy=policy.model_copy(
                     update={"write_hosts": list(opened.write_hosts)}

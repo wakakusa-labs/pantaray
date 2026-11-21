@@ -149,7 +149,10 @@ type PageSession = BrowserPage & {
 type LoggerLike = { error?: (name: string, payload?: unknown) => void };
 
 /** What a session needs of a request: the runtime's, or the task preview's own print. */
-export type SessionRequest = Pick<BrowserOperationRequest, 'session_id' | 'operation' | 'policy'>;
+export type SessionRequest = Pick<
+  BrowserOperationRequest,
+  'session_id' | 'action_id' | 'operation' | 'policy'
+>;
 
 const sessionGone = () =>
   new BrowserOperationError('BROWSER_SESSION_GONE', 'This browser session was closed.');

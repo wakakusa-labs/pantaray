@@ -100,6 +100,7 @@ class RunEndProbe:
             user_browser=None,
             operation=_NAVIGATE,
             policy=_POLICY,
+            action_id=None,
         )
 
     async def _deliver(self, user_id: str, message: DesktopRequestMessage) -> bool:

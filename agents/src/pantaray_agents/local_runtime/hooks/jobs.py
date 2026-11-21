@@ -59,6 +59,8 @@ def enqueue_hook_job(
     fire: Fire, *, db_path: Path, busy_timeout_ms: int, user_id: str
 ) -> FireOutcome:
     run = fire.hook.run
+    # Only a built-in runs a job: a task's conversation hook goes to fire_task.
+    assert isinstance(run, RunJob)
     if run.job == LOCAL_INSIGHT_JOB_TYPE:
         # A later window while a run is active is dropped, not queued: the run
         # reads from the source cursor, so the next window covers it.

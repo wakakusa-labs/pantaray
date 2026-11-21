@@ -126,7 +126,9 @@ class _Harness:
             inbox=self.inbox,
             gate_is_open=lambda name: name in self.open_gates,
             predicate_holds=lambda name, _event: name in self.true_predicates,
-            run_is_active=lambda run: run.job in self.active_runs,
+            run_is_active=lambda hook: (
+                isinstance(hook.run, RunJob) and hook.run.job in self.active_runs
+            ),
             enqueue=self._enqueue,
         )
 
@@ -514,3 +516,38 @@ def test_a_closed_gate_holds_the_inbox() -> None:
     harness.tick(_utc(10, 2))
 
     assert harness.handed == [(insight,)]
+
+
+def test_a_hook_past_its_until_never_fires() -> None:
+    # Catches until ignored for a time trigger, or for events waiting in the
+    # inbox of an on trigger.
+    until = _utc(10, 0)
+    timed = HookDefinition(
+        id="timed",
+        trigger=Every(every="hour", align=True, offset=timedelta(0), tz="utc"),
+        requires=(),
+        run=RunJob(job="j", args={}),
+        until=until,
+    )
+    heard = HookDefinition(
+        id="heard",
+        trigger=On(
+            events=("a.done",),
+            conditions={},
+            delivery=Delivery(
+                immediate=frozenset({"a.done"}),
+                max_wait=None,
+                collapse="latest",
+                min_interval=None,
+            ),
+        ),
+        requires=(),
+        run=RunJob(job="k", args={}),
+        until=until,
+    )
+    harness = _Harness(timed, heard)
+    harness.inbox.add("heard", "a.done", _utc(9, 59))
+
+    harness.tick(_utc(10, 0))
+
+    assert harness.fires == []

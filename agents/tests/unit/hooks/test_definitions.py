@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -14,7 +14,9 @@ from pantaray_agents.hooks.definitions import (
     MinInterval,
     NamedPredicate,
     On,
+    RunConversation,
     RunJob,
+    load_conversation_hook,
     load_hook_definitions,
 )
 
@@ -144,3 +146,59 @@ _ON = 'id = "a"\ntrigger = { on = ["a.done"] }\nrun = { job = "j" }'
 def test_a_malformed_on_hook_is_rejected(extra: str) -> None:
     with pytest.raises(HookDefinitionError):
         _load(f"[[hooks]]\n{_ON}\n{extra}\n")
+
+
+def _conversation_hook(text: str) -> HookDefinition:
+    return load_conversation_hook(
+        "task.report",
+        text,
+        gate_names=frozenset({"open"}),
+        event_names=frozenset({"a.done"}),
+        requires=("open",),
+    )
+
+
+def test_a_conversation_hook_file_parses_with_the_callers_gates() -> None:
+    # Catches the prompt cut at a +++ inside it, the caller's gates dropped
+    # (the task would fire while the owner is unsettled), and an on trigger
+    # given no delivery, which the engine would never fire.
+    timed = _conversation_hook(
+        "+++\n"
+        'trigger = { every = "hour", tz = "utc" }\n'
+        "until = 2026-12-01T00:00:00+09:00\n"
+        'conversation = "continue"\n'
+        "+++\n"
+        "Report.\n+++\nKeep it short.\n"
+    )
+    assert timed.run == RunConversation(
+        conversation="continue", prompt="Report.\n+++\nKeep it short."
+    )
+    assert timed.requires == ("open",)
+    assert timed.until == datetime(2026, 11, 30, 15, tzinfo=UTC)
+
+    heard = _conversation_hook(
+        '+++\ntrigger = { on = ["a.done"] }\nconversation = "new"\n+++\nGo on.\n'
+    )
+    assert isinstance(heard.trigger, On)
+    assert heard.trigger.delivery.immediate == frozenset({"a.done"})
+    assert heard.trigger.delivery.collapse == "latest"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        'trigger = { every = "hour", tz = "utc" }\nconversation = "continue"\n',
+        '+++\ntrigger = { every = "hour", tz = "utc" }\n+++\nGo.\n',
+        '+++\ntrigger = { every = "hour", tz = "utc" }\nconversation = "new"\n+++\n \n',
+        '+++\ntrigger = { on = ["b.other"] }\nconversation = "new"\n+++\nGo.\n',
+        '+++\ntrigger = { at = 2026-12-01T00:00:00 }\nconversation = "new"\n+++\nGo.\n',
+        '+++\ntrigger = { every = "hour", tz = "utc" }\nconversation = "new"\n'
+        'requires = ["open"]\n+++\nGo.\n',
+    ],
+)
+def test_a_malformed_conversation_hook_file_is_rejected(text: str) -> None:
+    # Catches a file without front matter, conversation or prompt, an event
+    # the caller does not offer, a time with no zone, and gates the file
+    # chose for itself.
+    with pytest.raises(HookDefinitionError):
+        _conversation_hook(text)

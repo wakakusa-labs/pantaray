@@ -9,6 +9,7 @@ from datetime import UTC, datetime, tzinfo
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from pantaray_agents.hooks.definitions import RunJob
 from pantaray_agents.hooks.engine import run_hook_tick
 from pantaray_agents.local_runtime.activity_summary_schedule import iso_z, parse_iso_z
 from pantaray_agents.local_runtime.storage.migrations.connection import (
@@ -96,8 +97,14 @@ def run_builtin_hooks_once(
         ),
         gate_is_open=lambda name: gates[name](),
         predicate_holds=lambda name, event: predicates[name](event),
-        run_is_active=lambda run: run_is_active(
-            run, db_path=db_path, busy_timeout_ms=busy_timeout_ms, user_id=user_id
+        run_is_active=lambda hook: (
+            isinstance(hook.run, RunJob)
+            and run_is_active(
+                hook.run,
+                db_path=db_path,
+                busy_timeout_ms=busy_timeout_ms,
+                user_id=user_id,
+            )
         ),
         enqueue=lambda fire: enqueue_hook_job(
             fire, db_path=db_path, busy_timeout_ms=busy_timeout_ms, user_id=user_id

@@ -15,7 +15,7 @@ from .definitions import (
     HookDefinition,
     NamedPredicate,
     On,
-    RunJob,
+    hook_has_ended,
 )
 from .schedule import latest_occurrence, next_occurrence_after
 
@@ -81,10 +81,10 @@ def run_hook_tick(
     inbox: HookInbox,
     gate_is_open: Callable[[str], bool],
     predicate_holds: Callable[[str, InboxEvent], bool],
-    run_is_active: Callable[[RunJob], bool],
+    run_is_active: Callable[[HookDefinition], bool],
     enqueue: Callable[[Fire], FireOutcome],
 ) -> None:
-    """Fire each due hook at most once.
+    """Fire each due hook at most once; a hook past its ``until`` never fires.
 
     A time trigger's state is written after ``enqueue`` returns, so a crash in
     between fires the same occurrence again: ``enqueue`` MUST be idempotent per
@@ -97,6 +97,8 @@ def run_hook_tick(
     now = now.astimezone(UTC)
     next_fire_times = states.read_next_fire_times()
     for hook in hooks:
+        if hook_has_ended(hook, now):
+            continue
         try:
             if isinstance(hook.trigger, On):
                 _fire_on(
@@ -154,7 +156,7 @@ def _fire_on(
     inbox: HookInbox,
     gate_is_open: Callable[[str], bool],
     predicate_holds: Callable[[str, InboxEvent], bool],
-    run_is_active: Callable[[RunJob], bool],
+    run_is_active: Callable[[HookDefinition], bool],
     enqueue: Callable[[Fire], FireOutcome],
 ) -> None:
     delivery = trigger.delivery
@@ -192,7 +194,7 @@ def _fire_on(
             return
     if not all(gate_is_open(gate) for gate in hook.requires):
         return
-    if run_is_active(hook.run):
+    if run_is_active(hook):
         return
     superseded = held[:-1] if delivery.collapse == "latest" else []
     enqueue(

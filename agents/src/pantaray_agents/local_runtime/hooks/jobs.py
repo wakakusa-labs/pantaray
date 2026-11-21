@@ -21,16 +21,22 @@ from pantaray_agents.local_runtime.runtime.job_status import (
 from pantaray_agents.local_runtime.runtime.job_types import (
     LOCAL_INSIGHT_JOB_TYPE,
     LOCAL_MEMORY_UPDATE_JOB_TYPE,
+    LOCAL_SUGGESTION_JOB_TYPE,
 )
 from pantaray_agents.local_runtime.runtime.memory_update_queue import (
     enqueue_memory_update_from_inbox,
+)
+from pantaray_agents.local_runtime.runtime.suggestion_from_insight import (
+    enqueue_suggestion_from_inbox,
 )
 from pantaray_agents.local_runtime.runtime.utc_timestamps import format_utc_iso
 from pantaray_agents.local_runtime.storage.migrations.connection import (
     configure_connection,
 )
+from pantaray_agents.local_runtime.todos.pickup import pick_up_todos
 
-from .builtin import summary_type
+from .builtin import TODO_PICKUP_RUN, summary_type
+from .inbox import SqliteHookInbox
 
 
 def run_is_active(
@@ -72,6 +78,30 @@ def enqueue_hook_job(
             events=fire.events,
             superseded=fire.superseded,
             enqueued_at=format_utc_iso(fire.now),
+        )
+        return "done"
+    if run.job == LOCAL_SUGGESTION_JOB_TYPE:
+        (request,) = fire.events  # collapse = latest hands the newest alone.
+        enqueue_suggestion_from_inbox(
+            db_path=db_path,
+            busy_timeout_ms=busy_timeout_ms,
+            user_id=user_id,
+            hook_id=fire.hook.id,
+            request=request,
+            superseded=fire.superseded,
+            enqueued_at=format_utc_iso(fire.now),
+        )
+        return "done"
+    if run.job == TODO_PICKUP_RUN:
+        # A pass starts every TODO that is ready, so the events say only that
+        # one may be; one saved during the pass stays for the next.
+        if not pick_up_todos(user_id=user_id):
+            return "retry"
+        SqliteHookInbox(
+            db_path=db_path, busy_timeout_ms=busy_timeout_ms, user_id=user_id
+        ).drop(
+            fire.hook.id,
+            [*(event.delivery_id for event in fire.events), *fire.superseded],
         )
         return "done"
     return asyncio.run(

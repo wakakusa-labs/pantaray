@@ -12,15 +12,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-from pantaray_agents import todo_ux_feature
-
 from ..hooks.builtin import builtin_hooks
 from ..hooks.gates import owner_is_settled
 from ..hooks.runner import run_builtin_hooks_once
-from ..todos.pickup import pick_up_todos
 from ..todos.retention import purge_expired_todos
 from .browser_relay import sweep_browser_sessions
-from .local_worker import background_requests_can_send
 from .memory_embedding_scheduler import (
     MemoryEmbeddingProjectionResult,
     run_memory_embedding_projection,
@@ -35,14 +31,13 @@ from .utc_timestamps import now_utc_iso
 logger = logging.getLogger(__name__)
 
 LOCAL_RUNTIME_PERIODIC_REAPER_INTERVAL_SECONDS: Final[float] = 30.0
-# How late after its time a hook fires, and how often a hook kept due by a
-# closed gate or a waiting summary window is looked at again.
-HOOKS_TICK_INTERVAL_SECONDS: Final[float] = 30.0
+# How late after its time or its event a hook fires, and how often a hook kept
+# due by a closed gate, a waiting summary window or a failed TODO submit is
+# looked at again. A TODO saved with today's start waits this long for its
+# Action. A tick reads each on hook's inbox; a TODO pickup pass runs only on
+# a save or a new local day.
+HOOKS_TICK_INTERVAL_SECONDS: Final[float] = 3.0
 MEMORY_EMBEDDING_IDLE_INTERVAL_SECONDS: Final[float] = 1.0
-# Nothing tells the worker that a TODO was written, so this interval is how long
-# a new TODO waits for its Action. A pass reads the open TODOs and looks up each
-# one's conversation by key; `read_pickup_candidates` names its limit.
-TODO_PICKUP_INTERVAL_SECONDS: Final[float] = 3.0
 # Deleted TODOs are kept for 30 days, so an hour late is nothing.
 TODO_PURGE_INTERVAL_SECONDS: Final[float] = 3_600.0
 
@@ -100,12 +95,6 @@ def _owner_is_settled(_context: PeriodicTaskContext) -> bool:
     return owner_is_settled()
 
 
-def _todo_pickup_is_ready(context: PeriodicTaskContext) -> bool:
-    # Nobody waits on a pickup and its Action fails for good without a
-    # connection, so it starts only when a background job would be claimed.
-    return _owner_is_settled(context) and background_requests_can_send()
-
-
 def build_periodic_schedule(
     *, embedding_slot: MemoryEmbeddingProjectionSlot
 ) -> tuple[PeriodicTask, ...]:
@@ -154,19 +143,6 @@ def build_periodic_schedule(
                 and not embedding_slot.is_busy()
             ),
             run=embedding_slot.submit,
-        ),
-        # Off, no TODO turns into an Action, as before the TODO list.
-        *(
-            (
-                PeriodicTask(
-                    name="todo_pickup",
-                    interval_seconds=TODO_PICKUP_INTERVAL_SECONDS,
-                    is_ready=_todo_pickup_is_ready,
-                    run=lambda context: pick_up_todos(user_id=context.owner_user_id),
-                ),
-            )
-            if todo_ux_feature.TODO_UX_ENABLED
-            else ()
         ),
         PeriodicTask(
             name="todo_purge",
@@ -220,7 +196,6 @@ __all__ = [
     "HOOKS_TICK_INTERVAL_SECONDS",
     "LOCAL_RUNTIME_PERIODIC_REAPER_INTERVAL_SECONDS",
     "MEMORY_EMBEDDING_IDLE_INTERVAL_SECONDS",
-    "TODO_PICKUP_INTERVAL_SECONDS",
     "TODO_PURGE_INTERVAL_SECONDS",
     "MemoryEmbeddingProjectionSlot",
     "PeriodicTask",

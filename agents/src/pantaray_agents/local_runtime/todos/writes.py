@@ -1,5 +1,6 @@
 """Store the core's results: each write is one transaction over `todo_items`,
-except a Suggestion's TODO, which joins the Suggestion's save.
+except a Suggestion's TODO, which joins the Suggestion's save. Every row it
+writes records `todo.saved` in that transaction, for the pickup.
 
 A write that changes nothing writes nothing, so a replayed request leaves the
 row and the revision the live session follows as they were.
@@ -13,6 +14,8 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import Final, Literal
 
+from pantaray_agents.local_runtime.hooks.events import TodoSaved
+from pantaray_agents.local_runtime.hooks.inbox import record_event
 from pantaray_agents.local_runtime.runtime.action_file_attachments import (
     ActionFileAttachmentUnavailableError,
     require_staged_attachments,
@@ -21,6 +24,7 @@ from pantaray_agents.local_runtime.runtime.identity import verify_current_owner
 from pantaray_agents.local_runtime.runtime.runtime_env import (
     read_local_runtime_artifact_root,
 )
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
 from pantaray_agents.local_runtime.storage.users import ensure_user_row
 from pantaray_agents.local_runtime.todos import core
@@ -154,6 +158,7 @@ def insert_todo(
         _INSERT_SQL,
         {**todo_params(todo), "user_id": user_id, "client_todo_id": client_todo_id},
     )
+    _record_saved(connection, user_id=user_id)
 
 
 def suggestion_todo_id(suggestion_id: str) -> TodoId:
@@ -242,6 +247,7 @@ def set_todo_check(
         if result.todo != current:
             _update(connection, user_id=user_id, todo=result.todo)
         if result.next_todo is not None:
+            # The check above records the save that covers this instance too.
             connection.execute(
                 _INSERT_SQL + " ON CONFLICT(todo_id) DO NOTHING",
                 {
@@ -333,3 +339,10 @@ def _attachments_available(
 
 def _update(connection: sqlite3.Connection, *, user_id: str, todo: Todo) -> None:
     connection.execute(_UPDATE_SQL, {**todo_params(todo), "user_id": user_id})
+    _record_saved(connection, user_id=user_id)
+
+
+def _record_saved(connection: sqlite3.Connection, *, user_id: str) -> None:
+    record_event(
+        connection, user_id=user_id, event=TodoSaved(), occurred_at=now_utc_iso()
+    )

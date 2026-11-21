@@ -1,15 +1,27 @@
-"""Suggestion inputs queued after their unified Memory update completes."""
+"""The Suggestion a Memory update asks for: queued by `builtin.suggestion`
+from the request the update recorded, and started by its job."""
 
 from __future__ import annotations
 
 import sqlite3
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Final, Literal
 
+from pantaray_agents.hooks.engine import InboxEvent
 from pantaray_agents.local_runtime.context import store
+from pantaray_agents.local_runtime.hooks.events import (
+    SuggestionGenerationStarted,
+    SuggestionRequested,
+)
+from pantaray_agents.local_runtime.hooks.inbox import (
+    consume_in_connection,
+    has_pending_event,
+    record_event,
+)
 from pantaray_agents.local_runtime.memory_catalog.connection import (
     open_memory_catalog_connection,
 )
@@ -18,8 +30,6 @@ from pantaray_agents.tasks.types import SuggestionJobPayload
 
 from .insight_queue import SHORT_INSIGHT_WINDOW_SECONDS
 from .job_enqueue import LocalJobEnqueueResult, enqueue_local_job
-from .job_payload_models import parse_suggestion_job_payload_json
-from .job_types import LOCAL_SUGGESTION_JOB_TYPE
 from .process_events import append_process_event_in_connection
 from .suggestion_queue import build_local_suggestion_enqueue_request
 from .utc_timestamps import format_utc_iso, parse_utc_iso
@@ -60,29 +70,19 @@ def enqueue_suggestion_for_insight(
     insight_id: str,
     now: str,
 ) -> LocalJobEnqueueResult:
-    """Queue one Suggestion inside the caller's Memory completion transaction.
+    """Queue one Suggestion and its processing row in the caller's transaction.
 
-    Every identity is derived from `insight_id`, so a replayed Insight run
-    neither queues a second job nor creates a second Suggestion row.
+    Every identity is derived from `insight_id`, so one Insight never queues a
+    second job nor creates a second Suggestion row.
     """
     suggestion_id = suggestion_id_for_insight(insight_id)
-    job_id = _derived_id("job", insight_id=insight_id)
-    existing = connection.execute(
-        "SELECT payload_json FROM job_payloads WHERE job_id = ?", (job_id,)
-    ).fetchone()
-    # Replaying a completion retains the original immutable enqueue timestamp.
-    enqueued_at = (
-        parse_suggestion_job_payload_json(str(existing[0]))["enqueued_at"]
-        if existing is not None
-        else now
-    )
     payload: SuggestionJobPayload = {
-        "job_id": job_id,
+        "job_id": _derived_id("job", insight_id=insight_id),
         "process_id": _derived_id("process", insight_id=insight_id),
         "suggestion_id": suggestion_id,
         "user_id": user_id,
         "insight_id": insight_id,
-        "enqueued_at": enqueued_at,
+        "enqueued_at": now,
     }
     result = enqueue_local_job(
         connection=connection,
@@ -98,6 +98,56 @@ def enqueue_suggestion_for_insight(
         (suggestion_id, user_id, now, now),
     )
     return result
+
+
+def request_suggestion_in_connection(
+    connection: sqlite3.Connection,
+    *,
+    user_id: str,
+    insight_ids: Sequence[str],
+    requested_at: str,
+) -> None:
+    """Ask for a Suggestion from a finished Memory update, in its completion
+    transaction: from the newest Insight it took, unless it took none or
+    recording is off."""
+    if insight_ids and not store.is_capture_paused(connection, user_id):
+        record_event(
+            connection,
+            user_id=user_id,
+            event=SuggestionRequested(insight_id=insight_ids[-1]),
+            occurred_at=requested_at,
+        )
+
+
+def enqueue_suggestion_from_inbox(
+    *,
+    db_path: Path,
+    busy_timeout_ms: int,
+    user_id: str,
+    hook_id: str,
+    request: InboxEvent,
+    superseded: Sequence[int],
+    enqueued_at: str,
+) -> None:
+    """Queue the newest request's Suggestion and consume it with the older
+    ones it supersedes, in one transaction."""
+    with (
+        open_memory_catalog_connection(
+            db_path=db_path, busy_timeout_ms=busy_timeout_ms
+        ) as connection,
+        immediate_transaction(connection),
+    ):
+        enqueue_suggestion_for_insight(
+            connection=connection,
+            user_id=user_id,
+            insight_id=str(request.payload["insight_id"]),
+            now=enqueued_at,
+        )
+        consume_in_connection(
+            connection,
+            hook_id=hook_id,
+            delivery_ids=[request.delivery_id, *superseded],
+        )
 
 
 def capture_paused_for_user(
@@ -153,30 +203,26 @@ def reserve_suggestion_start(
     db_path: Path,
     busy_timeout_ms: int,
     user_id: str,
-    job_id: str,
     process_id: str,
     now: datetime,
 ) -> Literal["start", "superseded"] | datetime:
-    """Coalesce queued reviews and reserve one generation start per 15 minutes.
+    """Give way to a newer request, or reserve one generation start per window.
 
     A claim is not a generation: preflight can fail or drop the job. Record the
     start only when the worker is about to enter the agent, and count retries
-    too. The existing process event survives restarts and the transaction keeps
-    two workers from reserving the same interval.
+    too. `builtin.suggestion` waits out the interval before it queues a job, but
+    only this check sees a retry, and only this one sees a request recorded
+    while the job is queued or retrying: the hook queues it once this job ends.
+    The process event survives restarts and the transaction keeps two workers
+    from reserving the same interval.
     """
     with open_memory_catalog_connection(
         db_path=db_path, busy_timeout_ms=busy_timeout_ms
     ) as connection:
         with immediate_transaction(connection):
-            latest = connection.execute(
-                """
-                SELECT job_id FROM jobs
-                WHERE user_id = ? AND job_type = ?
-                ORDER BY rowid DESC LIMIT 1
-                """,
-                (user_id, LOCAL_SUGGESTION_JOB_TYPE),
-            ).fetchone()
-            if latest is not None and latest[0] != job_id:
+            if has_pending_event(
+                connection, user_id=user_id, event_name=SuggestionRequested.NAME
+            ):
                 return "superseded"
             last_start = connection.execute(
                 """
@@ -194,11 +240,18 @@ def reserve_suggestion_start(
                 )
                 if now < next_start:
                     return next_start
+            started_at = format_utc_iso(now)
             append_process_event_in_connection(
                 connection=connection,
                 process_id=process_id,
                 event_name="suggestion_generation_started",
                 payload={},
-                created_at=format_utc_iso(now),
+                created_at=started_at,
+            )
+            record_event(
+                connection,
+                user_id=user_id,
+                event=SuggestionGenerationStarted(),
+                occurred_at=started_at,
             )
     return "start"

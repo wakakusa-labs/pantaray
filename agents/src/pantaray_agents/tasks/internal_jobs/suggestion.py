@@ -350,7 +350,6 @@ async def _run_and_publish(
             db_path=db_path,
             busy_timeout_ms=timeout_ms,
             user_id=payload["user_id"],
-            job_id=payload["job_id"],
             process_id=payload["process_id"],
             now=datetime.now(UTC),
         )

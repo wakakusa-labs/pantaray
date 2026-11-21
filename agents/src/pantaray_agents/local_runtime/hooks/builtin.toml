@@ -59,3 +59,33 @@ if = { "activity_summary.recorded" = { summary_type = "24h" }, "suggestion.dismi
 deliver = { immediate = ["insight.recorded", "activity_summary.recorded"], max_wait = "15m", collapse = "all" }
 requires = ["owner_settled"]
 run = { job = "memory_update" }
+
+# A Memory update that took a short Insight asks for a Suggestion. One runs at
+# a time; requests that pile up meanwhile leave only the newest. A start comes
+# at most once per Insight window after the previous generation start, retries
+# included, and a request inside that interval waits for it. The Suggestion job
+# holds its own retries to the same interval (`reserve_suggestion_start`).
+[[hooks]]
+id = "builtin.suggestion"
+trigger = { on = ["suggestion.requested"] }
+deliver = { immediate = ["suggestion.requested"], collapse = "latest", min_interval = { after = "suggestion.generation_started", duration = "15m" } }
+requires = ["owner_settled"]
+run = { job = "generate_suggestion" }
+
+# A TODO starts its Action once its start date has come: when it is saved with
+# one, and when the local date reaches one. A pass starts every TODO that is
+# ready, so a submit that failed leaves the hook due for the next tick. Nobody
+# waits on a pickup and its Action fails for good without a connection, so it
+# runs only when background work could send.
+[[hooks]]
+id = "builtin.todo_pickup"
+trigger = { on = ["todo.saved"] }
+deliver = { immediate = ["todo.saved"], collapse = "latest" }
+requires = ["owner_settled", "background_can_send", "todo_ux_enabled"]
+run = { job = "todo_pickup" }
+
+[[hooks]]
+id = "builtin.todo_pickup_daily"
+trigger = { every = "day", tz = "local" }
+requires = ["owner_settled", "background_can_send", "todo_ux_enabled"]
+run = { job = "todo_pickup" }

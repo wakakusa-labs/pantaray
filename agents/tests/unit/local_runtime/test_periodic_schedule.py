@@ -9,7 +9,6 @@ from pathlib import Path
 
 import pytest
 
-from pantaray_agents import todo_ux_feature
 from pantaray_agents.local_runtime.runtime.admission import admission_closed
 from pantaray_agents.local_runtime.runtime.memory_embedding_scheduler import (
     MemoryEmbeddingProjectionResult,
@@ -28,7 +27,6 @@ from pantaray_agents.local_runtime.runtime.session_store import mark_configured
 # hooks task runs regardless: each hook waits on its own `owner_settled` gate.
 OWNER_SCOPED_TASK_NAMES = (
     "memory_embedding_projection",
-    "todo_pickup",
     "todo_purge",
 )
 
@@ -127,7 +125,7 @@ def test_hooks_task_runs_for_the_current_owner(
     )
 
     assert calls == [(context.db_path, context.busy_timeout_ms, "user-1")]
-    assert next_runs == {"hooks": 40.0}
+    assert next_runs == {"hooks": 13.0}
 
 
 def test_memory_repair_task_runs_from_schedule(
@@ -157,60 +155,6 @@ def test_memory_repair_task_runs_from_schedule(
 
     assert calls == [(context.db_path, context.busy_timeout_ms, context.artifact_root)]
     assert next_runs == {"memory_repair": 70.0}
-
-
-def test_todo_pickup_waits_for_a_connection_background_jobs_could_use(
-    monkeypatch: pytest.MonkeyPatch,
-    context: PeriodicTaskContext,
-    configured: None,
-    schedule_and_slot: tuple[tuple[PeriodicTask, ...], MemoryEmbeddingProjectionSlot],
-) -> None:
-    from pantaray_agents.local_runtime.runtime import periodic_schedule
-
-    owners: list[str] = []
-    can_send = False
-    monkeypatch.setattr(
-        periodic_schedule,
-        "pick_up_todos",
-        lambda *, user_id: owners.append(user_id),
-    )
-    monkeypatch.setattr(
-        periodic_schedule, "background_requests_can_send", lambda: can_send
-    )
-    schedule, _slot = schedule_and_slot
-    tasks = tuple(task for task in schedule if task.name == "todo_pickup")
-
-    waiting = run_due_periodic_tasks(
-        tasks=tasks,
-        context=context,
-        next_run_monotonic_by_task={"todo_pickup": 0.0},
-        now_monotonic=10.0,
-    )
-    # Without a connection its Actions would fail for good, so it waits and
-    # keeps its deadline for the next tick.
-    assert (waiting, owners) == ({"todo_pickup": 0.0}, [])
-
-    can_send = True
-    picked = run_due_periodic_tasks(
-        tasks=tasks,
-        context=context,
-        next_run_monotonic_by_task=waiting,
-        now_monotonic=10.1,
-    )
-    assert (picked, owners) == ({"todo_pickup": 13.1}, [context.owner_user_id])
-
-
-def test_no_todo_is_picked_up_while_the_todo_list_is_off(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(todo_ux_feature, "TODO_UX_ENABLED", False)
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        slot = MemoryEmbeddingProjectionSlot(executor, threading.Event())
-        names = [task.name for task in build_periodic_schedule(embedding_slot=slot)]
-
-    assert "todo_pickup" not in names
-    # Deleted TODOs still leave on time; nothing the user sees depends on it.
-    assert "todo_purge" in names
 
 
 def test_todo_purge_runs_for_the_current_owner_at_the_current_time(
@@ -423,10 +367,7 @@ def _record_every_periodic_runner(
     monkeypatch.setattr(
         periodic_schedule, "run_memory_embedding_projection", run_projection
     )
-    monkeypatch.setattr(periodic_schedule, "pick_up_todos", record("todo_pickup"))
     monkeypatch.setattr(periodic_schedule, "purge_expired_todos", record("todo_purge"))
-    # A live connection, so only the owner gate decides here.
-    monkeypatch.setattr(periodic_schedule, "background_requests_can_send", lambda: True)
 
 
 def test_owner_scoped_tasks_wait_for_configure_and_run_on_the_next_tick(
@@ -626,7 +567,6 @@ def test_due_tasks_run_in_declaration_order(
         "hooks",
         "memory_repair",
         "memory_embedding_projection",
-        "todo_pickup",
         "todo_purge",
         "browser_sessions",
     ]

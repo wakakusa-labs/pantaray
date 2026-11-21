@@ -7,6 +7,7 @@ import asyncio
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
+from pantaray_agents import todo_ux_feature
 from pantaray_agents.hooks.engine import InboxEvent
 from pantaray_agents.local_runtime.context import store
 from pantaray_agents.local_runtime.context.source_control import context_source_control
@@ -14,6 +15,9 @@ from pantaray_agents.local_runtime.memory_catalog.connection import (
     open_memory_catalog_connection,
 )
 from pantaray_agents.local_runtime.runtime.admission import admission_is_open
+from pantaray_agents.local_runtime.runtime.local_worker import (
+    background_requests_can_send,
+)
 from pantaray_agents.local_runtime.runtime.memory_dismissal_range import (
     is_dismissed_without_reply,
 )
@@ -69,6 +73,9 @@ def build_gates(
                 db_path=db_path, busy_timeout_ms=busy_timeout_ms, user_id=user_id
             )
         ),
+        "background_can_send": lambda: background_requests_can_send(),
+        # Off, no TODO turns into an Action, as before the TODO list.
+        "todo_ux_enabled": lambda: todo_ux_feature.TODO_UX_ENABLED,
     }
     assert gates.keys() == GATE_NAMES
     return gates

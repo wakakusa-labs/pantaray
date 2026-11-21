@@ -13,6 +13,7 @@ import { useI18n } from '@/context/useI18n';
 import { AttachedImages, type ImageGridCopy } from './AttachedImages';
 import { ToolDiffView } from './ToolDiffView';
 import { ToolOutputText } from './ToolOutputText';
+import { WatchBrowserButton } from './WatchBrowserButton';
 import { parseToolDiff } from './toolDiff';
 import type { ToolDisplay, ToolLine } from './toolDisplayName';
 
@@ -113,6 +114,7 @@ export function ToolRow({
   imagesCopy,
   outputKey,
   loader,
+  browserRow,
   onFocusedContentUnmount,
 }: {
   Icon: ToolDisplay['Icon'];
@@ -132,6 +134,8 @@ export function ToolRow({
   imagesCopy: ImageGridCopy;
   outputKey: ActionToolOutputKey | null;
   loader: ActionToolOutputLoader;
+  /** A browser row offers the app's page the Action works on, while that page is live. */
+  browserRow: boolean;
   onFocusedContentUnmount: () => void;
 }) {
   const { language } = useI18n();
@@ -262,6 +266,7 @@ export function ToolRow({
           <span className="action-conversation__tool-line-body">{content}</span>
         )}
         <ToolRowStatusLabel status={status} announce={announceStatus} />
+        {browserRow ? <WatchBrowserButton /> : null}
       </div>
       {networkHosts.length > 0 ? (
         <p className="action-conversation__tool-network">

@@ -17,6 +17,9 @@ const reveal = vi.fn<ActionFiles['reveal']>();
 const openWithApp = vi.fn<ActionFiles['openWithApp']>();
 const revealLink = vi.fn<ActionFiles['open']>();
 const writeText = vi.fn(async (_text: string) => {});
+type BrowserView = NonNullable<NonNullable<Window['electron']>['browserView']>;
+const watch = vi.fn<BrowserView['watch']>();
+const unwatch = vi.fn<BrowserView['unwatch']>();
 
 const ANSWER = [
   'Rebuilt the quote: [quote_v3.html](pantaray-file:///work/quote/quote_v3.html)',
@@ -25,7 +28,11 @@ const ANSWER = [
   'and the memo pantaray-file:///work/quote/memo.docx',
 ].join('\n');
 
-function emitPage(page: ReturnType<typeof createActionPage>, pageVersion: number) {
+function emitPage(
+  page: ReturnType<typeof createActionPage>,
+  pageVersion: number,
+  appBrowserLive = false
+) {
   act(() =>
     listeners.forEach((listener) =>
       listener({
@@ -37,7 +44,7 @@ function emitPage(page: ReturnType<typeof createActionPage>, pageVersion: number
           transientToolSteps: [],
           approvalBlockers: [],
           userBrowserWaits: [],
-          appBrowserLive: false,
+          appBrowserLive,
           lifecycle: null,
         },
       })
@@ -55,6 +62,21 @@ function followUpPage() {
   // A page lists its runs newest first.
   return { ...second, runs: [...second.runs, ...first.runs] };
 }
+
+const toolStep = (step_id: string, step_number: number, label: string) => ({
+  step_kind: 'tool' as const,
+  step_id,
+  step_number,
+  label,
+  status: 'success' as const,
+  outcome: 'completed' as const,
+  subject: null,
+  output_preview: null,
+  output_available: false,
+  images: [],
+  file_edit: null,
+  network_hosts: [],
+});
 
 async function renderFinishedTask() {
   const rendered = render(
@@ -90,6 +112,8 @@ beforeEach(() => {
   openWithApp.mockReset().mockResolvedValue({ kind: 'opened' });
   revealLink.mockReset().mockResolvedValue(undefined);
   writeText.mockReset();
+  watch.mockReset().mockResolvedValue({ kind: 'watching', watchId: 'w-1' });
+  unwatch.mockReset().mockResolvedValue(undefined);
   Object.defineProperty(window, 'electron', {
     configurable: true,
     value: {
@@ -109,6 +133,7 @@ beforeEach(() => {
       orchestration: { send: vi.fn() },
       actionFiles: { open: revealLink, read, openInApp, quickLook, reveal, openWithApp },
       clipboard: { writeText },
+      browserView: { watch, unwatch, onUpdate: () => () => {} },
     },
   });
 });
@@ -379,5 +404,72 @@ describe('TaskWorkspace', () => {
     expect(screen.queryByTitle('memo.docx')).toBeNull();
     openMenu();
     expect(menuItem('Quick Look で見る')).toBeTruthy();
+  });
+
+  it("offers the app's page on browser rows only while it is live, beside the conversation", async () => {
+    const { container } = render(
+      <UiLanguageProvider initialLanguage="ja">
+        <TaskWorkspace actionId="act-1" title="見積書を作り直す" onAddProject={() => {}} />
+      </UiLanguageProvider>
+    );
+    await screen.findByRole('textbox', { name: 'メッセージ' });
+    const running = createActionPage('act-1', 'processing');
+    running.runs[0].entries = [toolStep('read-1', 1, 'read'), toolStep('browser-1', 2, 'browser')];
+    emitPage(running, 1, false);
+    fireEvent.click(screen.getByRole('button', { name: /^Pantarayの作業 2/ }));
+    expect(screen.getByText('ブラウザで確認')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'ブラウザを見る' })).toBeNull();
+
+    emitPage(running, 1, true);
+    // Beside the section's toggle and on the browser row only, never inside either control.
+    const offers = screen.getAllByRole('button', { name: 'ブラウザを見る' });
+    expect(offers).toHaveLength(2);
+    for (const offer of offers) expect(offer.parentElement?.closest('button')).toBeNull();
+    const open = offers.find((offer) => offer.closest('.action-conversation__tool'));
+    expect(open?.closest('.action-conversation__tool')?.textContent).toContain('ブラウザで確認');
+    if (!open) throw new Error('No browser row offers the page.');
+    fireEvent.click(open);
+    expect(await screen.findByRole('region', { name: 'ブラウザ' })).toBeTruthy();
+    expect(container.querySelector('.action-task--split')).not.toBeNull();
+    expect(watch).toHaveBeenCalledWith({ actionId: 'act-1' });
+    await act(async () => {});
+
+    fireEvent.click(screen.getByRole('button', { name: 'ブラウザの表示を閉じる' }));
+    expect(screen.queryByRole('region', { name: 'ブラウザ' })).toBeNull();
+    expect(unwatch).toHaveBeenCalledWith({ watchId: 'w-1' });
+
+    emitPage(running, 1, false);
+    expect(screen.queryByRole('button', { name: 'ブラウザを見る' })).toBeNull();
+  });
+
+  it("offers the app's page beside the folded section in progress, not beside finished ones", async () => {
+    render(
+      <UiLanguageProvider initialLanguage="ja">
+        <TaskWorkspace actionId="act-1" title="見積書を作り直す" onAddProject={() => {}} />
+      </UiLanguageProvider>
+    );
+    await screen.findByRole('textbox', { name: 'メッセージ' });
+    const finished = createActionPage('act-1', 'success', 'run-1');
+    finished.runs[0].entries = [toolStep('browser-1', 1, 'browser')];
+    const running = createActionPage('act-1', 'processing', 'run-2');
+    running.runs[0].started_at = '2026-10-10T00:01:00.000000Z';
+    running.runs[0].entries = [toolStep('browser-2', 1, 'browser')];
+    // A page lists its runs newest first.
+    const page = { ...running, runs: [...running.runs, ...finished.runs] };
+    emitPage(page, 1, false);
+    expect(screen.getAllByRole('button', { name: /^Pantarayの作業 1/ })).toHaveLength(2);
+    expect(screen.queryByRole('button', { name: 'ブラウザを見る' })).toBeNull();
+
+    emitPage(page, 1, true);
+    // Both sections stay folded; only the one in progress offers the page, beside its toggle.
+    const [open] = screen.getAllByRole('button', { name: 'ブラウザを見る' });
+    expect(screen.getAllByRole('button', { name: 'ブラウザを見る' })).toHaveLength(1);
+    expect(open.parentElement?.closest('button')).toBeNull();
+    expect(
+      open.parentElement?.querySelector('[aria-expanded="false"]')?.getAttribute('aria-label')
+    ).toMatch(/実行 2/);
+    fireEvent.click(open);
+    expect(await screen.findByRole('region', { name: 'ブラウザ' })).toBeTruthy();
+    expect(watch).toHaveBeenCalledWith({ actionId: 'act-1' });
   });
 });

@@ -20,6 +20,7 @@ import { ToolRow, type ToolRowStatus } from './ToolRow';
 import { terminalOutcomeText } from './terminalOutcomeText';
 import { resolveToolDisplay, resolveToolLine } from './toolDisplayName';
 import { useUnadoptedMessages } from './useUnadoptedMessages';
+import { WatchBrowserButton } from './WatchBrowserButton';
 import {
   foldsCommentary,
   groupAgentWork,
@@ -233,6 +234,7 @@ export function StepItem({
         imagesCopy={copy.toolImages}
         outputKey={readableOutput && actionId !== null ? { actionId, stepId: entry.step_id } : null}
         loader={toolOutputLoader}
+        browserRow={display.key === 'browser'}
         onFocusedContentUnmount={handleFocusedUnmount}
       />
     );
@@ -350,13 +352,12 @@ function WorkSection({
   const [expansion, setExpansion] = useState({ key: expansionKey, expanded: false });
   const expanded = expansion.key === expansionKey && expansion.expanded;
   const count = section.lines.filter((line) => line.kind === 'tool').length;
-  // The section holding the run's latest Tool is live: it shimmers, the on-screen sign of progress.
-  const liveTool = awaitingApproval
-    ? undefined
-    : section.lines.find(
-        (line): line is ActionConversationToolItem =>
-          line.kind === 'tool' && line.key === liveToolKey
-      );
+  // The section holding the run's latest Tool is in progress, and while not waiting on an
+  // approval it is live: it shimmers, the on-screen sign of progress.
+  const currentTool = section.lines.find(
+    (line): line is ActionConversationToolItem => line.kind === 'tool' && line.key === liveToolKey
+  );
+  const liveTool = awaitingApproval ? undefined : currentTool;
   // While live, the label says what is happening now in the words the Tool's own row uses. The
   // accessible name stays fixed, so the label does not announce every step.
   const label =
@@ -379,25 +380,29 @@ function WorkSection({
   );
   return (
     <div ref={rootRef} className="action-conversation__work">
-      <button
-        ref={disclosureRef}
-        className="action-conversation__disclosure"
-        type="button"
-        aria-label={`${copy.agentWork}${count ? ` ${count}` : ''}, ${runLabel}, ${copy.section} ${position}`}
-        aria-expanded={expanded}
-        onClick={() => setExpansion({ key: expansionKey, expanded: !expanded })}
-      >
-        <span
-          className={`action-conversation__work-label${liveTool ? ' action-conversation__shimmer' : ''}`}
+      <div className="action-conversation__work-header">
+        <button
+          ref={disclosureRef}
+          className="action-conversation__disclosure"
+          type="button"
+          aria-label={`${copy.agentWork}${count ? ` ${count}` : ''}, ${runLabel}, ${copy.section} ${position}`}
+          aria-expanded={expanded}
+          onClick={() => setExpansion({ key: expansionKey, expanded: !expanded })}
         >
-          {label}
-        </span>
-        {count > 0 ? (
-          <span className="action-conversation__count" aria-hidden>
-            {count}
+          <span
+            className={`action-conversation__work-label${liveTool ? ' action-conversation__shimmer' : ''}`}
+          >
+            {label}
           </span>
-        ) : null}
-      </button>
+          {count > 0 ? (
+            <span className="action-conversation__count" aria-hidden>
+              {count}
+            </span>
+          ) : null}
+        </button>
+        {/* Reachable while the section stays folded; finished sections offer nothing. */}
+        {currentTool ? <WatchBrowserButton /> : null}
+      </div>
       {expanded
         ? (settled ? groupRunLines(section.lines, language) : section.lines).map((line) =>
             line.kind === 'tool_group' ? (

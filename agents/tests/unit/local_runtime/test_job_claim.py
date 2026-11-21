@@ -368,7 +368,11 @@ def test_a_job_writes_its_lifecycle_to_the_inboxes_that_listen(
     # Catches a lifecycle event missing for a hook that listens to it, and an
     # abandoned job that no failure hook hears of.
     listens = ("execute_action.started", "execute_action.failed")
-    monkeypatch.setattr(inbox, "_listeners", lambda: dict.fromkeys(listens, ("h",)))
+    monkeypatch.setattr(
+        inbox,
+        "_listening_hooks",
+        lambda _connection, *, user_id, event: ("h",) if event.name in listens else (),
+    )
     db_path = _bootstrap_db(tmp_path)
     _insert_job(
         db_path=db_path,

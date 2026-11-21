@@ -67,7 +67,7 @@ def _request(
 
 
 def _tick(db_path: Path, now: datetime, user_id: str = "user-1") -> None:
-    runner.run_builtin_hooks_once(
+    runner.run_hooks_once(
         db_path=db_path, busy_timeout_ms=1_000, user_id=user_id, now=now
     )
 

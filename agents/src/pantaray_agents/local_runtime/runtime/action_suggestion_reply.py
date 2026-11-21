@@ -37,11 +37,13 @@ def action_request_text_sql(*, action: str, request: str) -> str:
     """SQL for what the Action aliased ``action`` was asked, in words.
 
     That is the text of its initial USER row, aliased ``request``, unless
-    Pantaray wrote that row: then it is the TODO the Action opens with.
+    Pantaray wrote that row for a TODO: then it is the TODO the Action opens
+    with. A task's turn opens with no such message, and its row starts with the
+    task's prompt.
     """
 
     return f"""(CASE WHEN {request}.step_name IN {ACTION_HOST_STEP_NAMES_SQL}
-      THEN {opening_assistant_text_sql(action)}
+      THEN COALESCE({opening_assistant_text_sql(action)}, {request}.user_request_text)
       ELSE {request}.user_request_text END)"""
 
 

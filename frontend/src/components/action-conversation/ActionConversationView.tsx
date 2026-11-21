@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useLayoutEffect, useRef, useState } from 'react';
 
 import type {
   ActionConversationRunItem,
@@ -20,6 +20,7 @@ import { ToolRow, type ToolRowStatus } from './ToolRow';
 import { terminalOutcomeText } from './terminalOutcomeText';
 import { resolveToolDisplay, resolveToolLine } from './toolDisplayName';
 import { useUnadoptedMessages } from './useUnadoptedMessages';
+import { WatchBrowserContext } from './watchBrowserContext';
 import {
   foldsCommentary,
   groupAgentWork,
@@ -180,6 +181,7 @@ export function StepItem({
 }) {
   const { language, t } = useI18n();
   const copy = COPY[language];
+  const watchBrowser = useContext(WatchBrowserContext);
 
   const contentRef = useRef<HTMLElement>(null);
   const contentKey = 'key' in line ? line.key : `outcome:${line.runId}`;
@@ -233,6 +235,7 @@ export function StepItem({
         imagesCopy={copy.toolImages}
         outputKey={readableOutput && actionId !== null ? { actionId, stepId: entry.step_id } : null}
         loader={toolOutputLoader}
+        onWatchBrowser={display.key === 'browser' ? watchBrowser : null}
         onFocusedContentUnmount={handleFocusedUnmount}
       />
     );

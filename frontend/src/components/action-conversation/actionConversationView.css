@@ -338,6 +338,34 @@
   text-overflow: ellipsis;
 }
 
+/* At the row's end, with the face the other browser buttons have, kept small beside the row. */
+.action-conversation__watch-browser {
+  flex: none;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text-primary);
+  background: var(--button-fill);
+  box-shadow: var(--button-face-highlight);
+  font: inherit;
+  font-size: var(--text-meta-size);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.action-conversation__watch-browser:hover {
+  background: var(--button-fill-hover);
+}
+
+.action-conversation__watch-browser:active {
+  background: var(--button-fill-active);
+}
+
+.action-conversation__watch-browser:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.6);
+  outline-offset: -2px;
+}
+
 /*
  * Light sweeping across the running work's text. With the header's busy dots gone, this is
  * the on-screen sign that the Action is still running; reduced motion keeps the plain text.

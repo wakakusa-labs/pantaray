@@ -4,6 +4,7 @@ import { Check, CircleAlert, Clipboard, PictureInPicture2 } from 'lucide-react';
 import type { ActionConversationView as ActionConversationViewModel } from '../../../electron/src/actions/actionConversationModel';
 import { ActionConversationView } from '@/components/action-conversation/ActionConversationView';
 import { UserBrowserWaitLine } from '@/components/action-conversation/UserBrowserWaitLine';
+import { WatchBrowserContext } from '@/components/action-conversation/watchBrowserContext';
 import { ApprovalPanel } from '@/components/agent-overlay/ApprovalPanel';
 import { MarkdownBlock } from '@/components/agent-overlay/MarkdownRenderer';
 import {
@@ -33,6 +34,8 @@ type ActionTaskPaneProps = {
    * can follow the Action's later edits.
    */
   renderPreview?: (view: ActionConversationViewModel | null) => ReactNode;
+  /** Shows the app's page the Action works on in the preview; its browser rows offer it. */
+  onWatchBrowser?: () => void;
   /** Where projects are added: the composer's @-mention option and an approval's folder hint. */
   onAddProject: () => void;
   /** Content under the latest answer, such as the files it produced. */
@@ -55,6 +58,7 @@ export function ActionTaskPane({
   actionId,
   title,
   renderPreview,
+  onWatchBrowser,
   onAddProject,
   renderFileChips,
   renderUnderConversation,
@@ -237,11 +241,15 @@ export function ActionTaskPane({
               </p>
             ) : null}
             {view ? (
-              <ActionConversationView
-                view={view}
-                lifecycle={lifecycle}
-                toolOutputLoader={task.toolOutputLoader}
-              />
+              <WatchBrowserContext.Provider
+                value={task.appBrowserLive && onWatchBrowser ? onWatchBrowser : null}
+              >
+                <ActionConversationView
+                  view={view}
+                  lifecycle={lifecycle}
+                  toolOutputLoader={task.toolOutputLoader}
+                />
+              </WatchBrowserContext.Provider>
             ) : null}
             {status.thinking ? (
               // Screen readers already hear "Running" from the conversation.

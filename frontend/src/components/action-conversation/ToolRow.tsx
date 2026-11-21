@@ -113,6 +113,7 @@ export function ToolRow({
   imagesCopy,
   outputKey,
   loader,
+  onWatchBrowser,
   onFocusedContentUnmount,
 }: {
   Icon: ToolDisplay['Icon'];
@@ -132,9 +133,11 @@ export function ToolRow({
   imagesCopy: ImageGridCopy;
   outputKey: ActionToolOutputKey | null;
   loader: ActionToolOutputLoader;
+  /** Shows the app's page the Action works on; set on browser rows while that page is live. */
+  onWatchBrowser: (() => void) | null;
   onFocusedContentUnmount: () => void;
 }) {
-  const { language } = useI18n();
+  const { language, t } = useI18n();
   const copy = COPY[language];
   const rootRef = useRef<HTMLDivElement>(null);
   const disclosureRef = useRef<HTMLButtonElement>(null);
@@ -262,6 +265,16 @@ export function ToolRow({
           <span className="action-conversation__tool-line-body">{content}</span>
         )}
         <ToolRowStatusLabel status={status} announce={announceStatus} />
+        {/* Beside the row's own button, never inside it. */}
+        {onWatchBrowser ? (
+          <button
+            type="button"
+            className="action-conversation__watch-browser"
+            onClick={onWatchBrowser}
+          >
+            {t('overlay.browserView.open')}
+          </button>
+        ) : null}
       </div>
       {networkHosts.length > 0 ? (
         <p className="action-conversation__tool-network">

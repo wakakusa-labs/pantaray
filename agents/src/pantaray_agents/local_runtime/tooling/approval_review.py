@@ -51,9 +51,11 @@ class RequestTextNotByUser:
 
     ``suggestion_accepted``: a suggestion the user accepted. ``suggestion_reply``:
     one the user only replied to; ``declined`` says they had declined it.
+    ``todo``: a TODO the AI wrote. ``hook``: a task's prompt Pantaray sent as it
+    came due.
     """
 
-    source: Literal["suggestion_accepted", "suggestion_reply", "todo"]
+    source: Literal["suggestion_accepted", "suggestion_reply", "todo", "hook"]
     text: str
     declined: bool
 

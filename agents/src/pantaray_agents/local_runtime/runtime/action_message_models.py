@@ -26,27 +26,30 @@ from pantaray_agents.schema.agent.action_message import (
 
 # Every USER row carries ``step_type = 'user_request'``, so the run it opens is
 # found the same way whoever sent it. ``step_name`` is what separates the
-# origins: a resume is a button press with no message to show, and a TODO pickup
-# is Pantaray starting work the AI wrote down, so the conversation projection
-# drops both rows while the run itself stays ordinary.
+# origins: a resume is a button press with no message to show, a TODO pickup
+# is Pantaray starting work the AI wrote down, and a hook request is Pantaray
+# sending a task's prompt as it comes due, so the conversation projection drops
+# these rows while the run itself stays ordinary.
 ACTION_USER_STEP_NAME = "user_request"
 ACTION_RESUME_STEP_NAME = "resume_request"
 ACTION_TODO_PICKUP_STEP_NAME = "todo_pickup_request"
+ACTION_HOOK_STEP_NAME = "hook_request"
 # The USER rows Pantaray writes, never the user: nothing shows or reads them as
 # the user's words.
 ACTION_HOST_STEP_NAMES: Final = frozenset(
-    {ACTION_RESUME_STEP_NAME, ACTION_TODO_PICKUP_STEP_NAME}
+    {ACTION_RESUME_STEP_NAME, ACTION_TODO_PICKUP_STEP_NAME, ACTION_HOOK_STEP_NAME}
 )
 # The same names as an SQL list for ``step_name IN ...``; they are constants.
 ACTION_HOST_STEP_NAMES_SQL: Final = (
     f"({','.join(f"'{name}'" for name in sorted(ACTION_HOST_STEP_NAMES))})"
 )
 
-type ActionMessageOrigin = Literal["user", "resume", "todo_pickup"]
+type ActionMessageOrigin = Literal["user", "resume", "todo_pickup", "hook"]
 ACTION_STEP_NAME_BY_ORIGIN: Final[Mapping[ActionMessageOrigin, str]] = {
     "user": ACTION_USER_STEP_NAME,
     "resume": ACTION_RESUME_STEP_NAME,
     "todo_pickup": ACTION_TODO_PICKUP_STEP_NAME,
+    "hook": ACTION_HOOK_STEP_NAME,
 }
 
 # What the model reads at the top of a resumed turn. It is the whole message the
@@ -70,6 +73,22 @@ ACTION_TODO_PICKUP_REQUEST_TEXT = (
     "it describes. The user has not asked for it in their own words, so keep to "
     "what it says and ask the user before going beyond it."
 )
+
+
+# What the model reads after a task's prompt, which a ``hook`` turn sends as it
+# came due. The prompt comes first, so it is what the conversation is titled by.
+ACTION_HOOK_REQUEST_NOTE = (
+    "Pantaray started this turn, not the user: the message above is a task the "
+    "user set up and approved earlier, sent now because it came due. The user has "
+    "not asked for this turn in their own words, so keep to what the task says "
+    "and ask the user before going beyond it."
+)
+
+
+def action_hook_request_text(prompt: str) -> str:
+    """The content of a ``hook`` turn's USER row for a task's prompt."""
+
+    return f"{prompt}\n\n{ACTION_HOOK_REQUEST_NOTE}"
 
 
 class NewActionTarget(BaseModel):
@@ -122,6 +141,7 @@ class SubmitActionMessageCommand(BaseModel):
     # ordinary follow-up turn; only the step name and this guard differ.
     # ``todo_pickup`` is Pantaray starting an AI-written TODO: a new Action that
     # opens with ``todo_text`` and carries the fixed request as its USER row.
+    # ``hook`` is Pantaray sending a task's prompt (``action_hook_request_text``).
     origin: ActionMessageOrigin = "user"
 
     _validate_message = field_validator("message")(
@@ -218,6 +238,8 @@ class MessageWithdrawnError(ActionMessageConflictError):
 
 
 __all__ = [
+    "ACTION_HOOK_REQUEST_NOTE",
+    "ACTION_HOOK_STEP_NAME",
     "ACTION_HOST_STEP_NAMES",
     "ACTION_HOST_STEP_NAMES_SQL",
     "ACTION_RESUME_REQUEST_TEXT",
@@ -227,6 +249,7 @@ __all__ = [
     "ACTION_TODO_PICKUP_STEP_NAME",
     "ACTION_USER_STEP_NAME",
     "ActionMessageOrigin",
+    "action_hook_request_text",
     "ActionMessageConflictError",
     "ActionNotFoundError",
     "ActionMessageSubmissionError",

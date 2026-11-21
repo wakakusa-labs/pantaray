@@ -41,8 +41,12 @@ class Fire:
     hook: HookDefinition
     occurrence: datetime
     now: datetime
-    # An on hook's pending events, oldest first; empty for a time trigger.
+    # An on hook's pending events handed to the run, oldest first; empty for a
+    # time trigger.
     events: tuple[InboxEvent, ...] = ()
+    # Older events collapse = latest left out of the run; the enqueue consumes
+    # them with what it hands.
+    superseded: tuple[int, ...] = ()
 
 
 class HookStateStore(Protocol):
@@ -85,8 +89,8 @@ def run_hook_tick(
     A time trigger's state is written after ``enqueue`` returns, so a crash in
     between fires the same occurrence again: ``enqueue`` MUST be idempotent per
     occurrence. For an on trigger, ``enqueue`` MUST consume the events it hands
-    to the run in the transaction that enqueues it; the events it leaves (to fit
-    one run) stay pending for the next run. Leftovers fire again only on a new
+    to the run and the superseded ones in the transaction that enqueues it; the
+    events it leaves (to fit one run) stay pending for the next run. Leftovers fire again only on a new
     immediate event or max_wait, so a hook whose enqueue may leave events MUST
     set max_wait.
     """
@@ -185,12 +189,16 @@ def _fire_on(
         return
     if run_is_active(hook.run):
         return
-    if delivery.collapse == "latest":
-        # Dropped before the enqueue: after a crash between the two, an older
-        # event left behind would be handed as the latest one.
-        inbox.drop(hook.id, [event.delivery_id for event in held[:-1]])
-        held = held[-1:]
-    enqueue(Fire(hook=hook, occurrence=now, now=now, events=tuple(held)))
+    superseded = held[:-1] if delivery.collapse == "latest" else []
+    enqueue(
+        Fire(
+            hook=hook,
+            occurrence=now,
+            now=now,
+            events=tuple(held[len(superseded) :]),
+            superseded=tuple(event.delivery_id for event in superseded),
+        )
+    )
 
 
 def _is_due(trigger: On, held: Sequence[InboxEvent], *, now: datetime) -> bool:

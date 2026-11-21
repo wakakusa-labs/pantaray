@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Collection, Mapping, Sequence
 from datetime import UTC, datetime, timedelta, tzinfo
+from typing import Literal
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -96,7 +98,7 @@ class _Harness:
         self.open_gates: set[str] = set()
         self.true_predicates: set[str] = set()
         self.active_runs: set[str] = set()
-        self.outcome: FireOutcome = "done"
+        self.outcome: FireOutcome | Literal["raise"] = "done"
         # How many of the handed events the run takes, oldest first.
         self.takes: int | None = None
 
@@ -105,9 +107,14 @@ class _Harness:
         if isinstance(fire.hook.trigger, On):
             taken = fire.events[: self.takes]
             self.handed.append(tuple(event.delivery_id for event in taken))
+            if self.outcome == "raise":
+                raise sqlite3.OperationalError("disk I/O error")
             if self.outcome == "done":
-                self.inbox.drop(fire.hook.id, [event.delivery_id for event in taken])
-        return self.outcome
+                self.inbox.drop(
+                    fire.hook.id,
+                    [event.delivery_id for event in taken] + list(fire.superseded),
+                )
+        return "retry" if self.outcome == "raise" else self.outcome
 
     def tick(self, now: datetime) -> None:
         zone = self.zone
@@ -413,6 +420,24 @@ def test_collapse_latest_keeps_an_older_immediate_event_due() -> None:
     harness.tick(_utc(10, 2))
 
     assert harness.handed == [(turn,)]
+    assert harness.inbox.read("on") == ()
+
+
+@pytest.mark.parametrize("failure", ["retry", "raise"])
+def test_a_failed_collapsed_fire_leaves_the_inbox_due(
+    failure: FireOutcome | Literal["raise"],
+) -> None:
+    # Catches the older immediate event consumed apart from the enqueue: after a
+    # retry or a failure the remaining ride-along would never be due again.
+    harness = _Harness(_on_hook(collapse="latest"))
+    harness.inbox.add("on", "insight", _utc(10, 0))
+    turn = harness.inbox.add("on", "turn", _utc(10, 1))
+    harness.outcome = failure
+    harness.tick(_utc(10, 2))
+    harness.outcome = "done"
+    harness.tick(_utc(10, 3))
+
+    assert harness.handed == [(turn,), (turn,)]
     assert harness.inbox.read("on") == ()
 
 

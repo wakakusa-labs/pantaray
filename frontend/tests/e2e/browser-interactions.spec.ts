@@ -181,7 +181,8 @@ test('the browser acts on a real page through snapshot refs', async ({}, testInf
     const snapshot = async () =>
       (await act({ action: 'snapshot', ref: null })).page_data?.snapshot ?? '';
     const refOf = (text: string, line: string) => {
-      const ref = new RegExp(`${line} \\[ref=(e\\d+)\\]`).exec(text)?.[1];
+      // A line can carry attributes, such as a list item's [level=1], before its ref.
+      const ref = new RegExp(`${line}(?: \\[[^\\]]*\\])*? \\[ref=(e\\d+)\\]`).exec(text)?.[1];
       expect(ref, `${line} in\n${text}`).toBeTruthy();
       return ref as string;
     };

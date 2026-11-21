@@ -1,38 +1,49 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import timedelta
 
 import pytest
 
 from pantaray_agents.hooks.definitions import (
+    Delivery,
     Every,
+    FieldEquals,
+    HookDefinition,
     HookDefinitionError,
+    MinInterval,
+    NamedPredicate,
+    On,
     RunJob,
     load_hook_definitions,
 )
-
-_GATES = frozenset({"open"})
 
 
 def _accept(_run: RunJob) -> None:
     return None
 
 
-def _load(text: str) -> object:
-    return load_hook_definitions(text, gate_names=_GATES, validate_run=_accept)
+def _load(
+    text: str, validate_run: Callable[[RunJob], None] = _accept
+) -> tuple[HookDefinition, ...]:
+    return load_hook_definitions(
+        text,
+        gate_names=frozenset({"open"}),
+        event_names=frozenset({"a.done", "a.failed", "chat.said", "b.started"}),
+        predicate_names=frozenset({"still_true"}),
+        validate_run=validate_run,
+    )
 
 
 def test_a_definition_parses_into_its_closed_shape() -> None:
-    (hook,) = load_hook_definitions(
+    (hook,) = _load(
         """
         [[hooks]]
         id = "builtin.daily"
         trigger = { every = "day", offset = "10m", tz = "utc" }
         requires = ["open"]
         run = { job = "summarize", args = { kind = "24h" } }
-        """,
-        gate_names=_GATES,
-        validate_run=_accept,
+        """
     )
 
     assert hook.id == "builtin.daily"
@@ -79,8 +90,57 @@ def test_the_callers_run_check_rejects_at_load() -> None:
         raise HookDefinitionError(f"unknown job {run.job}")
 
     with pytest.raises(HookDefinitionError, match="unknown job j"):
-        load_hook_definitions(
+        _load(
             f'[[hooks]]\nid = "a"\ntrigger = {{ every = "day", tz = "utc" }}\n{_RUN}\n',
-            gate_names=_GATES,
-            validate_run=reject,
+            reject,
         )
+
+
+def test_an_on_hook_parses_its_conditions_and_delivery() -> None:
+    (hook,) = _load(
+        """
+        [[hooks]]
+        id = "builtin.memory"
+        trigger = { on = ["a.done", "chat.said", "a.failed"] }
+        if = { "a.done" = { kind = "24h" }, "chat.said" = "still_true" }
+        deliver = { immediate = ["a.done"], max_wait = "15m", collapse = "all", min_interval = { after = "b.started", duration = "15m" } }
+        run = { job = "j" }
+        """
+    )
+
+    assert hook.trigger == On(
+        events=("a.done", "chat.said", "a.failed"),
+        conditions={
+            "a.done": FieldEquals(field="kind", value="24h"),
+            "chat.said": NamedPredicate(name="still_true"),
+        },
+        delivery=Delivery(
+            immediate=frozenset({"a.done"}),
+            max_wait=timedelta(minutes=15),
+            collapse="all",
+            min_interval=MinInterval(after="b.started", duration=timedelta(minutes=15)),
+        ),
+    )
+
+
+_ON = 'id = "a"\ntrigger = { on = ["a.done"] }\nrun = { job = "j" }'
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        # Each would leave an on hook that silently never fires or never waits.
+        'deliver = { collapse = "all" }',
+        'deliver = { immediate = ["a.done"], collapse = "some" }',
+        'deliver = { immediate = ["chat.said"], collapse = "all" }',
+        'deliver = { immediate = ["a.done"], collapse = "all", min_interval = { after = "a.done", duration = "1m" } }',
+        'deliver = { immediate = ["a.done"], collapse = "all" }\nif = { "chat.said" = "still_true" }',
+        'deliver = { immediate = ["a.done"], collapse = "all" }\nif = { "a.done" = "unknown" }',
+        'deliver = { immediate = ["a.done"], collapse = "all" }\nif = { "a.done" = { x = 1, y = 2 } }',
+        # A misspelled event name is never written.
+        'deliver = { immediate = ["a.dnoe"], collapse = "all" }',
+    ],
+)
+def test_a_malformed_on_hook_is_rejected(extra: str) -> None:
+    with pytest.raises(HookDefinitionError):
+        _load(f"[[hooks]]\n{_ON}\n{extra}\n")

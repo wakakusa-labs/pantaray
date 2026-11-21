@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping, Sequence
 from datetime import UTC, datetime, timedelta, tzinfo
 from zoneinfo import ZoneInfo
 
@@ -9,11 +9,24 @@ import pytest
 from pantaray_agents.hooks.definitions import (
     At,
     CalendarUnit,
+    Collapse,
+    Condition,
+    Delivery,
+    EventValue,
     Every,
+    FieldEquals,
     HookDefinition,
+    MinInterval,
+    NamedPredicate,
+    On,
     RunJob,
 )
-from pantaray_agents.hooks.engine import Fire, FireOutcome, run_hook_tick
+from pantaray_agents.hooks.engine import (
+    Fire,
+    FireOutcome,
+    InboxEvent,
+    run_hook_tick,
+)
 
 
 class _Store:
@@ -46,17 +59,54 @@ def _no_local_zone() -> tzinfo:
     raise AssertionError("a UTC hook must not need the local zone")
 
 
+class _Inbox:
+    def __init__(self) -> None:
+        self.events: dict[str, list[InboxEvent]] = {}
+        self._next_id = 1
+
+    def add(self, hook_id: str, name: str, at: datetime, **payload: EventValue) -> int:
+        delivery_id = self._next_id
+        self._next_id += 1
+        self.events.setdefault(hook_id, []).append(
+            InboxEvent(
+                delivery_id=delivery_id, name=name, payload=payload, occurred_at=at
+            )
+        )
+        return delivery_id
+
+    def read(self, hook_id: str) -> Sequence[InboxEvent]:
+        return tuple(self.events.get(hook_id, ()))
+
+    def drop(self, hook_id: str, delivery_ids: Collection[int]) -> None:
+        self.events[hook_id] = [
+            event
+            for event in self.events.get(hook_id, [])
+            if event.delivery_id not in delivery_ids
+        ]
+
+
 class _Harness:
     def __init__(self, *hooks: HookDefinition, zone: tzinfo | None = None) -> None:
         self.zone = zone
         self.hooks = hooks
         self.store = _Store()
+        self.inbox = _Inbox()
         self.fires: list[tuple[str, datetime]] = []
+        self.handed: list[tuple[int, ...]] = []
         self.open_gates: set[str] = set()
+        self.true_predicates: set[str] = set()
+        self.active_runs: set[str] = set()
         self.outcome: FireOutcome = "done"
+        # How many of the handed events the run takes, oldest first.
+        self.takes: int | None = None
 
     def _enqueue(self, fire: Fire) -> FireOutcome:
         self.fires.append((fire.hook.id, fire.occurrence))
+        if isinstance(fire.hook.trigger, On):
+            taken = fire.events[: self.takes]
+            self.handed.append(tuple(event.delivery_id for event in taken))
+            if self.outcome == "done":
+                self.inbox.drop(fire.hook.id, [event.delivery_id for event in taken])
         return self.outcome
 
     def tick(self, now: datetime) -> None:
@@ -66,7 +116,10 @@ class _Harness:
             now=now,
             local_zone=_no_local_zone if zone is None else lambda: zone,
             states=self.store,
+            inbox=self.inbox,
             gate_is_open=lambda name: name in self.open_gates,
+            predicate_holds=lambda name, _event: name in self.true_predicates,
+            run_is_active=lambda run: run.job in self.active_runs,
             enqueue=self._enqueue,
         )
 
@@ -245,3 +298,150 @@ def test_an_unaligned_hook_refires_the_same_occurrence_after_a_lost_state_write(
     assert harness.fires == [("h", _utc(10, 0, 7)), ("h", _utc(10, 0, 7))]
     assert len(set(harness.fires)) == 1  # an idempotent enqueue runs it once
     assert harness.store.next_fire_times == {"h": _utc(12, 1, 3)}
+
+
+def _on_hook(
+    *,
+    events: tuple[str, ...] = ("insight", "turn"),
+    immediate: frozenset[str] = frozenset({"insight"}),
+    max_wait: timedelta | None = timedelta(minutes=15),
+    collapse: Collapse = "all",
+    conditions: Mapping[str, Condition] | None = None,
+    min_interval: MinInterval | None = None,
+    requires: tuple[str, ...] = (),
+) -> HookDefinition:
+    return HookDefinition(
+        id="on",
+        trigger=On(
+            events=events,
+            conditions={} if conditions is None else conditions,
+            delivery=Delivery(
+                immediate=immediate,
+                max_wait=max_wait,
+                collapse=collapse,
+                min_interval=min_interval,
+            ),
+        ),
+        requires=requires,
+        run=RunJob(job="memory", args={}),
+    )
+
+
+def test_an_immediate_event_fires_at_once_and_a_ride_along_waits() -> None:
+    # Catches a ride-along event starting a run of its own, one that never
+    # starts without an immediate event, and a wait counted from the newest
+    # event instead of the oldest.
+    harness = _Harness(_on_hook())
+    turn = harness.inbox.add("on", "turn", _utc(10, 0))
+    later_turn = harness.inbox.add("on", "turn", _utc(10, 10))
+
+    harness.tick(_utc(10, 14, 59))
+    assert harness.handed == []
+    harness.tick(_utc(10, 15))
+    assert harness.handed == [(turn, later_turn)]
+
+    insight = harness.inbox.add("on", "insight", _utc(10, 20))
+    harness.tick(_utc(10, 20))
+    assert harness.handed[-1] == (insight,)
+
+
+def test_events_during_an_active_run_go_to_the_next_single_run() -> None:
+    # Catches a second run started beside the active one, and events that
+    # arrive meanwhile split over several runs or lost.
+    harness = _Harness(_on_hook())
+    harness.active_runs.add("memory")
+    first = harness.inbox.add("on", "insight", _utc(10, 0))
+    second = harness.inbox.add("on", "turn", _utc(10, 1))
+    third = harness.inbox.add("on", "insight", _utc(10, 2))
+
+    harness.tick(_utc(10, 3))
+    assert harness.handed == []
+
+    harness.active_runs.clear()
+    harness.tick(_utc(10, 4))
+    harness.tick(_utc(10, 5))
+    assert harness.handed == [(first, second, third)]
+    assert harness.inbox.read("on") == ()
+
+
+def test_what_a_run_cannot_take_stays_for_the_next_run() -> None:
+    # Catches events beyond one run's capacity consumed with the rest, and a
+    # retried enqueue handing the same events twice or dropping them.
+    harness = _Harness(_on_hook())
+    ids = [harness.inbox.add("on", "insight", _utc(10, minute)) for minute in range(3)]
+    harness.outcome = "retry"
+    harness.tick(_utc(10, 5))
+    harness.outcome = "done"
+    harness.takes = 2
+    harness.tick(_utc(10, 6))
+    harness.tick(_utc(10, 7))
+
+    assert harness.handed == [tuple(ids), tuple(ids[:2]), (ids[2],)]
+    assert harness.inbox.read("on") == ()
+
+
+def test_an_event_whose_condition_fails_is_consumed_without_a_run() -> None:
+    # Catches a run started for an undone dismissal or a summary of another
+    # kind, and such an event handed along with the others.
+    harness = _Harness(
+        _on_hook(
+            conditions={
+                "insight": FieldEquals(field="kind", value="24h"),
+                "turn": NamedPredicate(name="still_dismissed"),
+            }
+        )
+    )
+    harness.inbox.add("on", "insight", _utc(10, 0), kind="1h")
+    harness.inbox.add("on", "turn", _utc(9, 0))
+    harness.tick(_utc(10, 1))
+    assert harness.fires == []
+    assert harness.inbox.read("on") == ()
+
+    harness.true_predicates.add("still_dismissed")
+    kept_turn = harness.inbox.add("on", "turn", _utc(10, 2))
+    daily = harness.inbox.add("on", "insight", _utc(10, 3), kind="24h")
+    harness.tick(_utc(10, 4))
+    assert harness.handed == [(kept_turn, daily)]
+
+
+def test_collapse_latest_hands_only_the_newest_event() -> None:
+    harness = _Harness(_on_hook(collapse="latest"))
+    harness.inbox.add("on", "insight", _utc(10, 0))
+    newest = harness.inbox.add("on", "insight", _utc(10, 1))
+    harness.active_runs.add("memory")
+    harness.tick(_utc(10, 2))
+    harness.active_runs.clear()
+    harness.tick(_utc(10, 3))
+
+    assert harness.handed == [(newest,)]
+    assert harness.inbox.read("on") == ()
+
+
+def test_min_interval_defers_the_run_instead_of_dropping_it() -> None:
+    # Catches a run started too soon after the anchor event, and one dropped
+    # when it is held back rather than started once the interval has passed.
+    harness = _Harness(
+        _on_hook(
+            min_interval=MinInterval(after="started", duration=timedelta(minutes=15))
+        )
+    )
+    harness.inbox.add("on", "started", _utc(9, 0))
+    anchor = harness.inbox.add("on", "started", _utc(10, 0))
+    insight = harness.inbox.add("on", "insight", _utc(10, 5))
+
+    harness.tick(_utc(10, 14, 59))
+    assert harness.handed == []
+    harness.tick(_utc(10, 15))
+
+    assert harness.handed == [(insight,)]
+    assert [event.delivery_id for event in harness.inbox.read("on")] == [anchor]
+
+
+def test_a_closed_gate_holds_the_inbox() -> None:
+    harness = _Harness(_on_hook(requires=("owner",)))
+    insight = harness.inbox.add("on", "insight", _utc(10, 0))
+    harness.tick(_utc(10, 1))
+    harness.open_gates.add("owner")
+    harness.tick(_utc(10, 2))
+
+    assert harness.handed == [(insight,)]

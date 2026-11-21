@@ -14,8 +14,9 @@ from typing import Final
 
 from pantaray_agents import todo_ux_feature
 
+from ..hooks.builtin import builtin_hooks
 from ..hooks.gates import owner_is_settled
-from ..hooks.runner import builtin_hooks, run_builtin_hooks_once
+from ..hooks.runner import run_builtin_hooks_once
 from ..todos.pickup import pick_up_todos
 from ..todos.retention import purge_expired_todos
 from .browser_relay import sweep_browser_sessions

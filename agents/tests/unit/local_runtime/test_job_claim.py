@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from pantaray_agents.local_runtime.hooks import inbox
 from pantaray_agents.local_runtime.runtime.job_claim import (
     claim_next_pending_job,
     finalize_local_job,
@@ -359,3 +360,40 @@ def test_finalize_without_a_failure_message_records_no_reason(tmp_path: Path) ->
 
     assert job == ("completed", None)
     assert attempt == ("completed", None, None)
+
+
+def test_a_job_writes_its_lifecycle_to_the_inboxes_that_listen(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Catches a lifecycle event missing for a hook that listens to it, and an
+    # abandoned job that no failure hook hears of.
+    listens = ("execute_action.started", "execute_action.failed")
+    monkeypatch.setattr(inbox, "_listeners", lambda: dict.fromkeys(listens, ("h",)))
+    db_path = _bootstrap_db(tmp_path)
+    _insert_job(
+        db_path=db_path,
+        job_id="job-1",
+        process_id="process-1",
+        scheduled_at="2026-03-22T00:00:00Z",
+    )
+    assert claim_next_pending_job(
+        db_path=str(db_path),
+        busy_timeout_ms=1_000,
+        job_type="execute_action",
+        owner_user_id="user-1",
+        claimed_by="worker-1",
+        process_running_status="running",
+        expected_process_pending_status="enqueued",
+    )
+    finalize_local_job(
+        db_path=str(db_path),
+        busy_timeout_ms=1_000,
+        job_id="job-1",
+        final_status="abandoned",
+        process_final_status="failed",
+    )
+
+    pending = inbox.SqliteHookInbox(
+        db_path=db_path, busy_timeout_ms=1_000, user_id="user-1"
+    ).read("h")
+    assert tuple(event.name for event in pending) == listens

@@ -64,7 +64,67 @@ class Every:
     tz: Zone
 
 
-Trigger = At | Every
+# A value an event carries: events are flat records of scalars.
+EventValue = str | int | bool | None
+Collapse = Literal["all", "latest"]
+
+
+@dataclass(frozen=True, slots=True)
+class FieldEquals:
+    """The event's field holds this value."""
+
+    field: str
+    value: str | int | bool
+
+
+@dataclass(frozen=True, slots=True)
+class NamedPredicate:
+    """A check of current state the caller supplies by name."""
+
+    name: str
+
+
+Condition = FieldEquals | NamedPredicate
+
+
+@dataclass(frozen=True, slots=True)
+class MinInterval:
+    """Fire no sooner than ``duration`` after the latest ``after`` event."""
+
+    after: str
+    duration: timedelta
+
+
+@dataclass(frozen=True, slots=True)
+class Delivery:
+    """When an inbox is handed to a run, and how much of it.
+
+    One run of a hook is active at a time: events arriving meanwhile wait in the
+    inbox for the next run.
+    """
+
+    # One of these in the inbox fires the hook at once; any other event rides
+    # along, waiting for one of these or, when set, until it is max_wait old.
+    immediate: frozenset[str]
+    max_wait: timedelta | None
+    # all: every pending event is handed; latest: only the newest one.
+    collapse: Collapse
+    min_interval: MinInterval | None
+
+
+@dataclass(frozen=True, slots=True)
+class On:
+    """Fire on events, collected in the hook's inbox until delivered.
+
+    An event whose condition fails is consumed without being handed.
+    """
+
+    events: tuple[str, ...]
+    conditions: Mapping[str, Condition]
+    delivery: Delivery
+
+
+Trigger = At | Every | On
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,10 +147,31 @@ class HookDefinition:
     run: Run
 
 
+def inbox_events(hook: HookDefinition) -> frozenset[str]:
+    """The events written to the hook's inbox: its own, and its interval anchor."""
+    if not isinstance(hook.trigger, On):
+        return frozenset()
+    min_interval = hook.trigger.delivery.min_interval
+    return frozenset(hook.trigger.events) | (
+        frozenset() if min_interval is None else {min_interval.after}
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _Vocabulary:
+    """The names the caller defines: its gates, events and predicates."""
+
+    gates: frozenset[str]
+    events: frozenset[str]
+    predicates: frozenset[str]
+
+
 def load_hook_definitions(
     text: str,
     *,
     gate_names: frozenset[str],
+    event_names: frozenset[str],
+    predicate_names: frozenset[str],
     validate_run: Callable[[RunJob], None],
 ) -> tuple[HookDefinition, ...]:
     """Parse a TOML document of ``[[hooks]]`` tables.
@@ -98,6 +179,9 @@ def load_hook_definitions(
     ``validate_run`` raises ``HookDefinitionError`` for a run the caller cannot
     start, so a bad definition fails here rather than on every tick.
     """
+    names = _Vocabulary(
+        gates=gate_names, events=event_names, predicates=predicate_names
+    )
     try:
         document = tomllib.loads(text)
     except tomllib.TOMLDecodeError as error:
@@ -107,8 +191,7 @@ def load_hook_definitions(
     if not isinstance(tables, list):
         raise HookDefinitionError("hook definitions need a [[hooks]] array")
     hooks = tuple(
-        _parse_hook(_table(raw, where="hooks"), gate_names, validate_run)
-        for raw in tables
+        _parse_hook(_table(raw, where="hooks"), names, validate_run) for raw in tables
     )
     ids = [hook.id for hook in hooks]
     if len(ids) != len(set(ids)):
@@ -118,10 +201,12 @@ def load_hook_definitions(
 
 def _parse_hook(
     table: Mapping[str, object],
-    gate_names: frozenset[str],
+    names: _Vocabulary,
     validate_run: Callable[[RunJob], None],
 ) -> HookDefinition:
-    _reject_unknown_keys(table, {"id", "trigger", "requires", "run"}, where="hook")
+    _reject_unknown_keys(
+        table, {"id", "trigger", "requires", "if", "deliver", "run"}, where="hook"
+    )
     hook_id = _string(table.get("id"), where="hook id")
     where = f"hook {hook_id}"
     requires = table.get("requires", [])
@@ -129,22 +214,120 @@ def _parse_hook(
         isinstance(name, str) for name in requires
     ):
         raise HookDefinitionError(f"{where}: requires must be a list of gate names")
-    unknown_gates = sorted(set(requires) - gate_names)
+    unknown_gates = sorted(set(requires) - names.gates)
     if unknown_gates:
         raise HookDefinitionError(f"{where}: unknown gates {unknown_gates}")
     run = _parse_run(_table(table.get("run"), where=f"{where} run"), where)
     validate_run(run)
+    trigger_table = _table(table.get("trigger"), where=f"{where} trigger")
+    trigger: Trigger
+    if "on" in trigger_table:
+        trigger = _parse_on(trigger_table, table, names, where)
+    else:
+        if "if" in table or "deliver" in table:
+            raise HookDefinitionError(f"{where}: if and deliver need an on trigger")
+        trigger = _parse_time_trigger(trigger_table, where)
     return HookDefinition(
-        id=hook_id,
-        trigger=_parse_trigger(
-            _table(table.get("trigger"), where=f"{where} trigger"), where
-        ),
-        requires=tuple(requires),
-        run=run,
+        id=hook_id, trigger=trigger, requires=tuple(requires), run=run
     )
 
 
-def _parse_trigger(table: Mapping[str, object], where: str) -> Trigger:
+def _parse_on(
+    trigger: Mapping[str, object],
+    hook: Mapping[str, object],
+    names: _Vocabulary,
+    where: str,
+) -> On:
+    _reject_unknown_keys(trigger, {"on"}, where=f"{where} trigger")
+    events = _event_names(trigger.get("on"), names, where=f"{where} on")
+    if not events:
+        raise HookDefinitionError(f"{where}: on needs at least one event")
+    conditions: dict[str, Condition] = {}
+    for event, raw in _table(hook.get("if", {}), where=f"{where} if").items():
+        if event not in events:
+            raise HookDefinitionError(f"{where}: if names {event}, not one of on")
+        conditions[event] = _parse_condition(raw, names, where=f"{where} if {event}")
+    return On(
+        events=events,
+        conditions=conditions,
+        delivery=_parse_delivery(
+            _table(hook.get("deliver"), where=f"{where} deliver"),
+            events,
+            names,
+            where,
+        ),
+    )
+
+
+def _parse_condition(value: object, names: _Vocabulary, *, where: str) -> Condition:
+    if isinstance(value, str):
+        if value not in names.predicates:
+            raise HookDefinitionError(f"{where}: unknown predicate {value}")
+        return NamedPredicate(name=value)
+    table = _table(value, where=where)
+    match list(table.items()):
+        case [(str() as field, str() | int() | bool() as expected)]:
+            return FieldEquals(field=field, value=expected)
+    raise HookDefinitionError(f"{where}: expected a predicate name or one field")
+
+
+def _parse_delivery(
+    table: Mapping[str, object],
+    events: tuple[str, ...],
+    names: _Vocabulary,
+    where: str,
+) -> Delivery:
+    _reject_unknown_keys(
+        table,
+        {"immediate", "max_wait", "collapse", "min_interval"},
+        where=f"{where} deliver",
+    )
+    immediate = _event_names(
+        table.get("immediate", []), names, where=f"{where} immediate"
+    )
+    if not set(immediate) <= set(events):
+        raise HookDefinitionError(f"{where}: immediate events must be among on")
+    max_wait = (
+        None
+        if "max_wait" not in table
+        else _duration(table["max_wait"], where=f"{where} max_wait")
+    )
+    if not immediate and max_wait is None:
+        raise HookDefinitionError(f"{where}: needs immediate events or a max_wait")
+    collapse: Collapse
+    match table.get("collapse"):
+        case "all" | "latest" as value:
+            collapse = value
+        case _:
+            raise HookDefinitionError(f"{where}: collapse must be all or latest")
+    min_interval = None
+    if "min_interval" in table:
+        raw = _table(table["min_interval"], where=f"{where} min_interval")
+        _reject_unknown_keys(raw, {"after", "duration"}, where=f"{where} min_interval")
+        (after,) = _event_names([raw.get("after")], names, where=f"{where} after")
+        if after in events:
+            raise HookDefinitionError(f"{where}: min_interval after must not be in on")
+        min_interval = MinInterval(
+            after=after, duration=_duration(raw.get("duration"), where=where)
+        )
+    return Delivery(
+        immediate=frozenset(immediate),
+        max_wait=max_wait,
+        collapse=collapse,
+        min_interval=min_interval,
+    )
+
+
+def _event_names(value: object, names: _Vocabulary, *, where: str) -> tuple[str, ...]:
+    if not isinstance(value, list) or not all(isinstance(name, str) for name in value):
+        raise HookDefinitionError(f"{where}: expected a list of event names")
+    unknown = sorted(set(value) - names.events)
+    if unknown or len(value) != len(set(value)):
+        raise HookDefinitionError(f"{where}: unknown or repeated events {value}")
+    return tuple(value)
+
+
+def _parse_time_trigger(table: Mapping[str, object], where: str) -> At | Every:
     if "at" in table:
         _reject_unknown_keys(table, {"at"}, where=f"{where} trigger")
         at = table["at"]
@@ -153,7 +336,7 @@ def _parse_trigger(table: Mapping[str, object], where: str) -> Trigger:
         return At(at=at)
     if "every" in table:
         return _parse_every(table, where)
-    raise HookDefinitionError(f"{where}: trigger needs at or every")
+    raise HookDefinitionError(f"{where}: trigger needs at, every or on")
 
 
 def _parse_every(table: Mapping[str, object], where: str) -> Every:

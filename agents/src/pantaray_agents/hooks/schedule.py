@@ -12,10 +12,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta, tzinfo
 
-from .definitions import At, CalendarUnit, Every, Trigger
+from .definitions import At, CalendarUnit, Every
 
 
-def latest_occurrence(trigger: Trigger, now: datetime, zone: tzinfo) -> datetime:
+def latest_occurrence(trigger: At | Every, now: datetime, zone: tzinfo) -> datetime:
     """The latest occurrence at or before ``now``; for an unaligned trigger, now.
 
     After missed occurrences (sleep, restart, a closed gate) only this latest
@@ -32,7 +32,7 @@ def latest_occurrence(trigger: Trigger, now: datetime, zone: tzinfo) -> datetime
 
 
 def next_occurrence_after(
-    trigger: Trigger, moment: datetime, zone: tzinfo
+    trigger: At | Every, moment: datetime, zone: tzinfo
 ) -> datetime | None:
     """The first occurrence after ``moment``, or None when the trigger is spent."""
     if isinstance(trigger, At):

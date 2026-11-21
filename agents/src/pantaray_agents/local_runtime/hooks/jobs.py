@@ -3,37 +3,43 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 
-from pantaray_agents.hooks.definitions import HookDefinitionError, RunJob
+from pantaray_agents.hooks.definitions import RunJob
 from pantaray_agents.hooks.engine import Fire, FireOutcome
-from pantaray_agents.local_runtime.activity_summary_schedule import SummaryType
 from pantaray_agents.local_runtime.runtime.activity_summary_scheduler import (
     enqueue_scheduled_activity_summary,
 )
 from pantaray_agents.local_runtime.runtime.insight_queue import (
     enqueue_short_insight_job,
 )
-from pantaray_agents.local_runtime.runtime.job_types import (
-    LOCAL_ACTIVITY_SUMMARY_JOB_TYPE,
-    LOCAL_INSIGHT_JOB_TYPE,
+from pantaray_agents.local_runtime.runtime.job_status import (
+    ACTIVE_DEDUPE_JOB_STATUSES,
+)
+from pantaray_agents.local_runtime.runtime.job_types import LOCAL_INSIGHT_JOB_TYPE
+from pantaray_agents.local_runtime.storage.migrations.connection import (
+    configure_connection,
 )
 
-
-def _summary_type(run: RunJob) -> SummaryType:
-    match dict(run.args):
-        case {"summary_type": "1h" | "24h" | "1w" | "1m" | "3m" as value, **rest} if (
-            not rest
-        ):
-            return value
-    raise HookDefinitionError(f"a summary hook needs one summary_type: {run.args}")
+from .builtin import summary_type
 
 
-def validate_run(run: RunJob) -> None:
-    if run.job == LOCAL_ACTIVITY_SUMMARY_JOB_TYPE:
-        _summary_type(run)
-    elif run.job != LOCAL_INSIGHT_JOB_TYPE or run.args:
-        raise HookDefinitionError(f"a hook cannot run {run.job} with {run.args}")
+def run_is_active(
+    run: RunJob, *, db_path: Path, busy_timeout_ms: int, user_id: str
+) -> bool:
+    """Whether a job of the run's type is queued or running for the user."""
+    placeholders = ",".join("?" for _ in ACTIVE_DEDUPE_JOB_STATUSES)
+    with closing(sqlite3.connect(db_path)) as connection:
+        configure_connection(connection, busy_timeout_ms)
+        row = connection.execute(
+            f"""SELECT 1 FROM jobs
+                WHERE user_id = ? AND job_type = ? AND status IN ({placeholders})
+                LIMIT 1""",
+            (user_id, run.job, *ACTIVE_DEDUPE_JOB_STATUSES),
+        ).fetchone()
+    return row is not None
 
 
 def enqueue_hook_job(
@@ -54,7 +60,7 @@ def enqueue_hook_job(
         enqueue_scheduled_activity_summary(
             db_path=db_path,
             busy_timeout_ms=busy_timeout_ms,
-            summary_type=_summary_type(run),
+            summary_type=summary_type(run),
             now=fire.now,
         )
     )

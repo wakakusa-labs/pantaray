@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Final
 
 from pantaray_agents.local_runtime.context import store
 from pantaray_agents.local_runtime.context.source_control import context_source_control
@@ -15,7 +14,7 @@ from pantaray_agents.local_runtime.memory_catalog.connection import (
 from pantaray_agents.local_runtime.runtime.admission import admission_is_open
 from pantaray_agents.local_runtime.runtime.session_store import read_configured
 
-GATE_NAMES: Final = frozenset({"owner_settled", "recording_ready"})
+from .builtin import GATE_NAMES
 
 
 def owner_is_settled() -> bool:

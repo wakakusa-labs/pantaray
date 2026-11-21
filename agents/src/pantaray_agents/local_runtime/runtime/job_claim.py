@@ -5,6 +5,8 @@ import uuid
 from collections.abc import Sequence
 from typing import Literal, TypedDict
 
+from pantaray_agents.local_runtime.hooks.events import JobLifecycleEvent, JobPhase
+from pantaray_agents.local_runtime.hooks.inbox import record_event
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
 from pantaray_agents.local_runtime.storage.migrations.connection import (
     configure_connection,
@@ -23,6 +25,7 @@ from .job_types import (
     LOCAL_ACTION_JOB_TYPE,
     LOCAL_ACTION_SUBAGENT_JOB_TYPE,
 )
+from .utc_timestamps import now_utc_iso
 
 FINAL_JOB_STATUS = Literal["completed", "failed", "abandoned", "canceled", "blocked"]
 PROCESS_RUNTIME_STATUS = Literal[
@@ -272,6 +275,12 @@ def finalize_local_job(
                     job_id,
                 ),
             )
+            _record_job_event(
+                connection,
+                user_id=envelope.job_user_id,
+                job_type=envelope.job_type,
+                phase=_TERMINAL_PHASE[final_status],
+            )
             connection.commit()
         except Exception:
             connection.rollback()
@@ -411,6 +420,12 @@ def _claim_row(
         """,
         (str(uuid.uuid4()), envelope.job_id, next_attempt),
     )
+    _record_job_event(
+        connection,
+        user_id=envelope.job_user_id,
+        job_type=envelope.job_type,
+        phase="started",
+    )
     return {
         "job_id": envelope.job_id,
         "job_type": envelope.job_type,
@@ -443,6 +458,27 @@ def block_invalid_local_job(*, connection: sqlite3.Connection, job_id: str) -> N
         WHERE job_id = ? AND status = 'running'
         """,
         (LOCAL_JOB_ENVELOPE_INTEGRITY_ERROR_CODE, job_id),
+    )
+
+
+# Abandoned and blocked jobs ended without their work done, as a failed one did.
+_TERMINAL_PHASE: dict[FINAL_JOB_STATUS, JobPhase] = {
+    "completed": "completed",
+    "failed": "failed",
+    "abandoned": "failed",
+    "blocked": "failed",
+    "canceled": "canceled",
+}
+
+
+def _record_job_event(
+    connection: sqlite3.Connection, *, user_id: str, job_type: str, phase: JobPhase
+) -> None:
+    record_event(
+        connection,
+        user_id=user_id,
+        event=JobLifecycleEvent(job_type=job_type, phase=phase),
+        occurred_at=now_utc_iso(),
     )
 
 

@@ -14,9 +14,9 @@ from pantaray_agents.local_runtime.activity_summary_schedule import (
     next_period_end,
 )
 from pantaray_agents.local_runtime.hooks import gates, jobs
+from pantaray_agents.local_runtime.hooks.builtin import builtin_hooks
 from pantaray_agents.local_runtime.hooks.runner import (
     SqliteHookStateStore,
-    builtin_hooks,
     run_builtin_hooks_once,
 )
 from pantaray_agents.local_runtime.runtime.identity import (

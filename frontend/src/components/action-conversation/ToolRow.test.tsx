@@ -73,7 +73,7 @@ function row(
         imagesCopy={TOOL_IMAGES_COPY}
         outputKey={OUTPUT_KEY}
         loader={loader}
-        onWatchBrowser={null}
+        browserRow={false}
         onFocusedContentUnmount={() => undefined}
         {...overrides}
       />

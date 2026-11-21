@@ -258,13 +258,21 @@
  * Start-aligned, the button sizes to its content, and the label's unwrapped width still counts
  * toward that size, so only a cap at the column's width lets the label shorten.
  */
-.action-conversation__work > .action-conversation__disclosure {
+/* The section's toggle, and beside it what the section offers while in progress. */
+.action-conversation__work-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.action-conversation__work-header > .action-conversation__disclosure {
   display: flex;
   align-items: baseline;
+  min-width: 0;
   max-width: 100%;
 }
 
-.action-conversation__work > .action-conversation__disclosure::before,
+.action-conversation__work-header > .action-conversation__disclosure::before,
 .action-conversation__work .action-conversation__count {
   flex: none;
 }

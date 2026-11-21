@@ -14,6 +14,7 @@ import pytest
 from pantaray_agents import todo_ux_feature
 from pantaray_agents.local_runtime.hooks import gates, runner
 from pantaray_agents.local_runtime.hooks.builtin import builtin_hooks
+from pantaray_agents.local_runtime.runtime.identity import register_logged_out_owner
 from pantaray_agents.local_runtime.runtime.utc_timestamps import format_utc_iso
 from pantaray_agents.local_runtime.todos import pickup
 from pantaray_agents.local_runtime.todos.clock import TodoClock
@@ -52,15 +53,15 @@ def _clock(now: datetime) -> TodoClock:
     return TodoClock(now=format_utc_iso(now), zone=TOKYO)
 
 
-def _tick(world: _World, db: Path) -> None:
+def _tick(world: _World, db: Path, user_id: str = USER) -> None:
     runner.run_builtin_hooks_once(
-        db_path=db, busy_timeout_ms=1_000, user_id=USER, now=world.now
+        db_path=db, busy_timeout_ms=1_000, user_id=user_id, now=world.now
     )
 
 
-def _write(world: _World, text: str, starts_on: str) -> Todo:
+def _write(world: _World, text: str, starts_on: str, user_id: str = USER) -> Todo:
     created = create_todo_item(
-        user_id=USER,
+        user_id=user_id,
         client_todo_id=text,
         project_id=None,
         organization_id=None,
@@ -113,6 +114,28 @@ def test_a_todo_starts_once_when_the_local_date_reaches_its_start(
     world.now += timedelta(seconds=3)
     _tick(world, db)
     assert _action_count(db) == 1
+
+
+def test_the_day_another_owner_spent_still_starts_this_owners_todos(
+    db: Path, world: _World
+) -> None:
+    # Catches the daily occurrence shared across owners: after an account
+    # switch, the new owner's TODO for today waited for the next day because
+    # the previous owner's pickup had already spent today.
+    other = "user-2"
+    register_logged_out_owner(other)
+    _write(world, "Starts tomorrow", "2026-11-05", user_id=other)
+    _tick(world, db, other)
+
+    register_logged_out_owner(USER)
+    world.now = THURSDAY
+    _tick(world, db)
+
+    register_logged_out_owner(other)
+    world.now += timedelta(seconds=3)
+    _tick(world, db, other)
+    assert _action_count(db) == 1
+    register_logged_out_owner(USER)
 
 
 @pytest.mark.parametrize("starts_on", ["2026-11-04", "2026-11-05"])

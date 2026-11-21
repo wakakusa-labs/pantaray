@@ -143,7 +143,9 @@ def test_insight_fires_once_per_window_and_waits_for_recording(
         _tick(db_path, now)
 
     assert recorder.insights == [_utc(2026, 9, 7, 10, 0), _utc(2026, 9, 7, 12, 30)]
-    states = SqliteHookStateStore(db_path=db_path, busy_timeout_ms=1_000)
+    states = SqliteHookStateStore(
+        db_path=db_path, busy_timeout_ms=1_000, user_id="local-owner"
+    )
     assert states.read_next_fire_times()["builtin.insight"] == _utc(2026, 9, 7, 12, 45)
 
 
@@ -165,7 +167,9 @@ def test_a_summary_backlog_after_a_sleep_drains_without_double_fires(
         "2026-04-15T12:00:00Z",
     ]
     assert [kind for kind, _start in recorder.summaries].count("24h") == 1
-    states = SqliteHookStateStore(db_path=db_path, busy_timeout_ms=1_000)
+    states = SqliteHookStateStore(
+        db_path=db_path, busy_timeout_ms=1_000, user_id="local-owner"
+    )
     assert states.read_next_fire_times()["builtin.summary_1h"] == _utc(
         2026, 4, 15, 14, 5
     )

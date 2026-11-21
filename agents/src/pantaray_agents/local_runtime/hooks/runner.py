@@ -14,6 +14,7 @@ from pantaray_agents.local_runtime.activity_summary_schedule import iso_z, parse
 from pantaray_agents.local_runtime.storage.migrations.connection import (
     configure_connection,
 )
+from pantaray_agents.local_runtime.storage.users import ensure_user_row
 from pantaray_agents.utils.local_time import local_zone_name
 
 from .builtin import builtin_hooks
@@ -27,9 +28,12 @@ class UnknownLocalZoneError(RuntimeError):
 
 
 class SqliteHookStateStore:
-    def __init__(self, *, db_path: Path, busy_timeout_ms: int) -> None:
+    """The hooks' next fire times for the owner the engine fires them for."""
+
+    def __init__(self, *, db_path: Path, busy_timeout_ms: int, user_id: str) -> None:
         self._db_path = db_path
         self._busy_timeout_ms = busy_timeout_ms
+        self._user_id = user_id
 
     def _connect(self) -> closing[sqlite3.Connection]:
         connection = sqlite3.connect(self._db_path)
@@ -39,7 +43,8 @@ class SqliteHookStateStore:
     def read_next_fire_times(self) -> Mapping[str, datetime | None]:
         with self._connect() as connection:
             rows = connection.execute(
-                "SELECT hook_id, next_fire_at FROM hook_states"
+                "SELECT hook_id, next_fire_at FROM hook_states WHERE user_id = ?",
+                (self._user_id,),
             ).fetchall()
         return {
             str(hook_id): None if next_fire_at is None else parse_iso_z(next_fire_at)
@@ -48,10 +53,18 @@ class SqliteHookStateStore:
 
     def write_next_fire_time(self, hook_id: str, next_fire_at: datetime | None) -> None:
         with self._connect() as connection, connection:
+            # A hook can fire before anything else wrote the owner's row.
+            ensure_user_row(connection, user_id=self._user_id)
             connection.execute(
-                """INSERT INTO hook_states(hook_id, next_fire_at) VALUES (?, ?)
-                   ON CONFLICT(hook_id) DO UPDATE SET next_fire_at = excluded.next_fire_at""",
-                (hook_id, None if next_fire_at is None else iso_z(next_fire_at)),
+                """INSERT INTO hook_states(user_id, hook_id, next_fire_at)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(user_id, hook_id)
+                   DO UPDATE SET next_fire_at = excluded.next_fire_at""",
+                (
+                    self._user_id,
+                    hook_id,
+                    None if next_fire_at is None else iso_z(next_fire_at),
+                ),
             )
 
 
@@ -75,7 +88,9 @@ def run_builtin_hooks_once(
         builtin_hooks(),
         now=datetime.now(UTC) if now is None else now,
         local_zone=_local_zone,
-        states=SqliteHookStateStore(db_path=db_path, busy_timeout_ms=busy_timeout_ms),
+        states=SqliteHookStateStore(
+            db_path=db_path, busy_timeout_ms=busy_timeout_ms, user_id=user_id
+        ),
         inbox=SqliteHookInbox(
             db_path=db_path, busy_timeout_ms=busy_timeout_ms, user_id=user_id
         ),

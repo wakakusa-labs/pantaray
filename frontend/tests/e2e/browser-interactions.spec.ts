@@ -48,10 +48,47 @@ const PICKERS = `<!doctype html><title>Pickers</title><body>
 <datalist id="fruits"><option value="Apple"><option value="Pear"></datalist>
 </body>`;
 
+// A list sorted by pointer events, whose dragged card follows the pointer, and an HTML drag and
+// drop of a box into a bin.
+const DRAG = `<!doctype html><title>Drag</title><body style="margin:0;user-select:none">
+<ul id="cards" style="list-style:none;margin:0;padding:0;width:200px">
+<li aria-label="First card" style="height:40px">First card</li>
+<li aria-label="Second card" style="height:40px">Second card</li>
+<li aria-label="Third card" style="height:40px">Third card</li>
+</ul>
+<p id="order">Order: First card, Second card, Third card</p>
+<div id="box" role="button" draggable="true" style="width:120px;height:40px">Box</div>
+<div id="bin" role="region" aria-label="Bin" style="margin-top:40px;width:200px;height:80px">Bin</div>
+<p id="dropped">Nothing dropped</p>
+<script>
+let dragging = null;
+let startY = 0;
+cards.onpointerdown = (e) => { dragging = e.target.closest('li'); startY = e.clientY; };
+onpointermove = (e) => {
+  if (dragging !== null) dragging.style.transform = 'translateY(' + (e.clientY - startY) + 'px)';
+};
+onpointerup = (e) => {
+  if (dragging === null) return;
+  dragging.style.transform = '';
+  const under = document.elementsFromPoint(e.clientX, e.clientY)
+    .find((el) => el.localName === 'li' && el !== dragging);
+  under?.after(dragging);
+  dragging = null;
+  order.textContent = 'Order: ' + [...cards.children].map((li) => li.ariaLabel).join(', ');
+};
+box.ondragstart = (e) => e.dataTransfer.setData('text/plain', 'box-1');
+bin.ondragover = (e) => e.preventDefault();
+bin.ondrop = (e) => {
+  e.preventDefault();
+  dropped.textContent = 'Dropped ' + e.dataTransfer.getData('text/plain');
+};
+</script></body>`;
+
 const PAGES: Record<string, string> = {
   '/form.html': FORM,
   '/overlay.html': OVERLAY,
   '/pickers.html': PICKERS,
+  '/drag.html': DRAG,
 };
 
 type Result = {
@@ -197,6 +234,26 @@ test('the browser acts on a real page through snapshot refs', async ({}, testInf
         expect(refused.message).toContain('Another element covers this one');
       }
       expect(await snapshot()).toContain('Nothing yet');
+    });
+
+    await test.step('drag moves a card of a pointer list and drops a box in a bin', async () => {
+      await act({ action: 'navigate', target: { kind: 'web', url: `${origin}/drag.html` } });
+      const board = await snapshot();
+      const sorted = await act({
+        action: 'drag',
+        ref: refOf(board, 'listitem "First card"'),
+        to_ref: refOf(board, 'listitem "Third card"'),
+      });
+      expect(sorted.status).toBe('ok');
+      const dropped = await act({
+        action: 'drag',
+        ref: refOf(board, 'button "Box"'),
+        to_ref: refOf(board, 'region "Bin"'),
+      });
+      expect(dropped.status).toBe('ok');
+      const after = await snapshot();
+      expect(after).toContain('Order: Second card, Third card, First card');
+      expect(after).toContain('Dropped box-1');
     });
 
     await test.step('no click, typing or opening key reaches a list or picker field', async () => {

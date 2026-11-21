@@ -31,6 +31,7 @@ from pantaray_agents.schema.websocket.server_messages import (
     BrowserBackOperation,
     BrowserClickOperation,
     BrowserConsoleOperation,
+    BrowserDragOperation,
     BrowserHost,
     BrowserHoverOperation,
     BrowserPressOperation,
@@ -161,6 +162,7 @@ class BrowserToolArgs(
             | BrowserSnapshotOperation
             | BrowserClickOperation
             | BrowserHoverOperation
+            | BrowserDragOperation
             | BrowserTypeOperation
             | BrowserPressOperation
             | BrowserSelectOperation
@@ -228,6 +230,7 @@ class BrowserPageOutput(_BrowserPageOutput):
         "snapshot",
         "click",
         "hover",
+        "drag",
         "type",
         "press",
         "select",

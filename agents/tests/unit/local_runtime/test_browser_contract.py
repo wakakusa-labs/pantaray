@@ -72,6 +72,7 @@ def test_event_names_match_the_fixture() -> None:
         {"action": "back"},
         {"action": "snapshot", "ref": "e4"},
         {"action": "click", "ref": "e12"},
+        {"action": "drag", "ref": "e12", "to_ref": "e13"},
         {"action": "type", "ref": "e2", "text": "hi", "submit": True},
         {"action": "press", "key": "Enter"},
         {"action": "select", "ref": "e3", "values": ["a"]},

@@ -97,7 +97,8 @@ const PAGE_HAS_TEXT = `function (text) {
   return document.body !== null && document.body.innerText.includes(text);
 }`;
 
-const failed = (message: string) => new BrowserOperationError('BROWSER_ACTION_FAILED', message);
+export const failed = (message: string) =>
+  new BrowserOperationError('BROWSER_ACTION_FAILED', message);
 const opensNativeUi = (where: string) =>
   failed(`${where} would open a list or picker outside the page; use select for a list box.`);
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -111,12 +112,16 @@ async function evaluate(cdp: CdpSession, expression: string): Promise<unknown> {
   return result.value;
 }
 
+type Box = { x: number; y: number; width: number; height: number };
+
 /** Scrolls the node into view and returns its box in viewport CSS pixels. */
-async function boxOf(
-  cdp: CdpSession,
-  backendNodeId: number
-): Promise<{ x: number; y: number; width: number; height: number }> {
+export async function boxOf(cdp: CdpSession, backendNodeId: number): Promise<Box> {
   await cdp.sendCommand('DOM.scrollIntoViewIfNeeded', { backendNodeId });
+  return currentBox(cdp, backendNodeId);
+}
+
+/** The node's box in viewport CSS pixels where it is now, scrolled into view or not. */
+export async function currentBox(cdp: CdpSession, backendNodeId: number): Promise<Box> {
   const { quads } = (await cdp.sendCommand('DOM.getContentQuads', { backendNodeId })) as {
     quads: number[][];
   };
@@ -132,11 +137,16 @@ async function boxOf(
 }
 
 /** The hidden window is never focused; this lets the page behave as if it were. */
-async function emulateFocus(cdp: CdpSession): Promise<void> {
+export async function emulateFocus(cdp: CdpSession): Promise<void> {
   await cdp.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true });
 }
 
-type Point = { x: number; y: number };
+export type Point = { x: number; y: number };
+
+export const centerOf = (box: Box): Point => ({
+  x: box.x + box.width / 2,
+  y: box.y + box.height / 2,
+});
 
 /** The node that holds a frame's document in the main frame, for each frame the page's process draws. */
 async function inMainFrame(cdp: CdpSession, node: number, frameId: string): Promise<number> {
@@ -160,12 +170,12 @@ async function inMainFrame(cdp: CdpSession, node: number, frameId: string): Prom
 }
 
 /**
- * Refuses unless input at the point reaches the node or something inside it, and with
+ * Refuses unless input at the point reaches one of the nodes or something inside it, and with
  * `refuseNativeUi`, also when it would open a list or picker there.
  */
-async function checkPoint(
+export async function checkPoint(
   cdp: CdpSession,
-  node: number,
+  nodes: readonly number[],
   point: Point,
   refuseNativeUi: boolean
 ): Promise<void> {
@@ -176,7 +186,11 @@ async function checkPoint(
     includeUserAgentShadowDOM: true,
   })) as { backendNodeId: number; frameId: string };
   const holder = await inMainFrame(cdp, hit.backendNodeId, hit.frameId);
-  if ((await callOn(cdp, node, HOLDS, [{ node: holder }])) !== true) {
+  let reached = false;
+  for (const node of nodes) {
+    reached ||= (await callOn(cdp, node, HOLDS, [{ node: holder }])) === true;
+  }
+  if (!reached) {
     throw failed(
       'Another element covers this one where the input would land; scroll, close what covers it, or take a snapshot.'
     );
@@ -192,9 +206,8 @@ async function checkPoint(
 async function click(page: CdpPage, ref: string, hoverOnly: boolean): Promise<void> {
   const { cdp } = page;
   const node = await resolveRef(page, ref);
-  const box = await boxOf(cdp, node);
-  const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-  await checkPoint(cdp, node, point, !hoverOnly);
+  const point = centerOf(await boxOf(cdp, node));
+  await checkPoint(cdp, [node], point, !hoverOnly);
   const move = { type: 'mouseMoved', ...point };
   if (hoverOnly) {
     await cdp.sendCommand('Input.dispatchMouseEvent', move);
@@ -203,7 +216,7 @@ async function click(page: CdpPage, ref: string, hoverOnly: boolean): Promise<vo
   await emulateFocus(cdp);
   await cdp.sendCommand('Input.dispatchMouseEvent', move);
   // The hover may have shown something over the element.
-  await checkPoint(cdp, node, point, true);
+  await checkPoint(cdp, [node], point, true);
   const button = { ...point, button: 'left', clickCount: 1 };
   await cdp.sendCommand('Input.dispatchMouseEvent', { ...button, type: 'mousePressed' });
   await cdp.sendCommand('Input.dispatchMouseEvent', { ...button, type: 'mouseReleased' });

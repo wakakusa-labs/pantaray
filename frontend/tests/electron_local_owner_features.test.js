@@ -77,6 +77,7 @@ test('desktop features bind guest and expired-account requests, preferences, rea
     data: {
       operation_request_id: id,
       session_id: 'owner-session',
+      action_id: null,
       operation: { action: 'navigate', target: { kind: 'web', url: 'https://a.example/' } },
       policy: {
         allow_network: true,

@@ -17,11 +17,17 @@ from pantaray_agents.local_runtime.runtime.job_types import (
     LOCAL_ACTIVITY_SUMMARY_JOB_TYPE,
     LOCAL_INSIGHT_JOB_TYPE,
     LOCAL_MEMORY_UPDATE_JOB_TYPE,
+    LOCAL_SUGGESTION_JOB_TYPE,
 )
 
 from .events import EVENT_NAMES
 
-GATE_NAMES: Final = frozenset({"owner_settled", "recording_ready"})
+GATE_NAMES: Final = frozenset(
+    {"owner_settled", "recording_ready", "background_can_send", "todo_ux_enabled"}
+)
+# Not a job: the pickup's own submits are idempotent per TODO, so the hook runs
+# it in place rather than through the queue.
+TODO_PICKUP_RUN: Final = "todo_pickup"
 PREDICATE_NAMES: Final = frozenset({"still_dismissed_without_reply"})
 
 
@@ -38,7 +44,13 @@ def _validate_run(run: RunJob) -> None:
     if run.job == LOCAL_ACTIVITY_SUMMARY_JOB_TYPE:
         summary_type(run)
     elif (
-        run.job not in {LOCAL_INSIGHT_JOB_TYPE, LOCAL_MEMORY_UPDATE_JOB_TYPE}
+        run.job
+        not in {
+            LOCAL_INSIGHT_JOB_TYPE,
+            LOCAL_MEMORY_UPDATE_JOB_TYPE,
+            LOCAL_SUGGESTION_JOB_TYPE,
+            TODO_PICKUP_RUN,
+        }
         or run.args
     ):
         raise HookDefinitionError(f"a hook cannot run {run.job} with {run.args}")

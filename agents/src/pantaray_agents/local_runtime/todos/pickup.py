@@ -3,7 +3,8 @@
 The TODO does not record its Action: the Action's first message id derives
 from the TODO id, so `UNIQUE (user_id, initial_user_message_id)` keeps one
 Action per TODO however often, or however concurrently, a pass runs. A submit
-that fails leaves the TODO without an Action, so the next pass tries it again.
+that fails leaves the TODO without an Action, and the pass says so, so that the
+hook that ran it runs the next pass.
 The only write on the TODO lets go of the attachments its Action took.
 """
 
@@ -57,8 +58,9 @@ from pantaray_agents.schema.agent.action_message import (
 logger = logging.getLogger(__name__)
 
 
-def pick_up_todos(*, user_id: str) -> None:
-    """Start an Action for each TODO `pickup_target` names."""
+def pick_up_todos(*, user_id: str) -> bool:
+    """Start an Action for each TODO `pickup_target` names; whether every
+    submit went through."""
 
     today = read_todo_clock().today
     targets = [
@@ -67,11 +69,12 @@ def pick_up_todos(*, user_id: str) -> None:
         if (target := pickup_target(entry.todo, entry.conversation, today)) is not None
     ]
     if not targets:
-        return
+        return True
     db_path, busy_timeout_ms = read_local_runtime_db_config()
     settings = list_workspace_settings(
         db_path=db_path, busy_timeout_ms=busy_timeout_ms, user_id=user_id
     )
+    submitted = True
     for todo, target in targets:
         try:
             command = _command(user_id, todo, target, _handoff(todo, settings))
@@ -84,10 +87,12 @@ def pick_up_todos(*, user_id: str) -> None:
                 todo.todo_id,
                 type(exc).__name__,
             )
+            submitted = False
             continue
         logger.info("TODO picked up: todo_id=%s target=%s", todo.todo_id, target.kind)
         if command.message.files or command.message.images:
             _release_attachments(user_id, todo)
+    return submitted
 
 
 def _release_attachments(user_id: str, todo: Todo) -> None:

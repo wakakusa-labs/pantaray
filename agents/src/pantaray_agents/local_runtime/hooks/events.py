@@ -101,6 +101,33 @@ class SuggestionDismissed(_DomainEvent):
     suggestion_id: str
 
 
+@dataclass(frozen=True, slots=True)
+class SuggestionRequested(_DomainEvent):
+    """A Memory update finished with a short Insight that asks to reconsider.
+
+    Written where the update completes, not at the job's terminal: a Memory
+    update without an Insight, or one finished while recording is off, asks
+    for nothing.
+    """
+
+    NAME: ClassVar[str] = "suggestion.requested"
+    insight_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class SuggestionGenerationStarted(_DomainEvent):
+    """A Suggestion run, or its retry, is about to enter the agent."""
+
+    NAME: ClassVar[str] = "suggestion.generation_started"
+
+
+@dataclass(frozen=True, slots=True)
+class TodoSaved(_DomainEvent):
+    """A TODO was stored or changed, by the user, an Action or the pickup."""
+
+    NAME: ClassVar[str] = "todo.saved"
+
+
 HookEvent = (
     JobLifecycleEvent
     | InsightRecorded
@@ -108,6 +135,9 @@ HookEvent = (
     | ActionTurnEnded
     | ChatMessageRecorded
     | SuggestionDismissed
+    | SuggestionRequested
+    | SuggestionGenerationStarted
+    | TodoSaved
 )
 
 # An Action run's terminal is written by the Action terminal repository, not
@@ -129,5 +159,8 @@ EVENT_NAMES: Final = frozenset(
         ActionTurnEnded,
         ChatMessageRecorded,
         SuggestionDismissed,
+        SuggestionRequested,
+        SuggestionGenerationStarted,
+        TodoSaved,
     )
 }

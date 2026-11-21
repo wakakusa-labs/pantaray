@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from pantaray_agents.hooks.definitions import Every
+from pantaray_agents.hooks.definitions import Every, On
 from pantaray_agents.hooks.schedule import next_occurrence_after
 from pantaray_agents.local_runtime.activity_summary_schedule import (
     ACTIVITY_SUMMARY_SCHEDULE_SPECS,
@@ -63,6 +63,18 @@ def test_the_insight_hook_fires_on_the_insight_window() -> None:
     assert isinstance(insight.trigger, Every)
     assert insight.trigger.every == timedelta(seconds=SHORT_INSIGHT_WINDOW_SECONDS)
     assert insight.trigger.align
+
+
+def test_the_suggestion_hook_waits_the_interval_its_job_holds_retries_to() -> None:
+    # Catches the hook's interval edited alone: a first start and a retry would
+    # then be spaced differently, and one of them more often than every window.
+    (suggestion,) = (
+        hook for hook in builtin_hooks() if hook.id == "builtin.suggestion"
+    )
+    assert isinstance(suggestion.trigger, On)
+    min_interval = suggestion.trigger.delivery.min_interval
+    assert min_interval is not None
+    assert min_interval.duration == timedelta(seconds=SHORT_INSIGHT_WINDOW_SECONDS)
 
 
 class _Recorder:

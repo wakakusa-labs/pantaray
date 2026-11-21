@@ -65,6 +65,19 @@ def consume_in_connection(
     )
 
 
+def has_pending_event(
+    connection: sqlite3.Connection, *, user_id: str, event_name: str
+) -> bool:
+    """Whether an event of this name waits in any hook's inbox for the user."""
+    return (
+        connection.execute(
+            "SELECT 1 FROM hook_inbox WHERE user_id = ? AND event_name = ? LIMIT 1",
+            (user_id, event_name),
+        ).fetchone()
+        is not None
+    )
+
+
 class SqliteHookInbox:
     def __init__(self, *, db_path: Path, busy_timeout_ms: int, user_id: str) -> None:
         self._db_path = db_path

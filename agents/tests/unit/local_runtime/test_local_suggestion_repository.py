@@ -218,6 +218,7 @@ async def test_mark_user_reaction_normalizes_dismiss_to_stored_rejected(
     with sqlite3.connect(db_path) as connection:
         assert connection.execute(
             "SELECT event_name, payload_json, occurred_at FROM hook_inbox"
+            " WHERE hook_id = 'builtin.memory_update'"
         ).fetchall() == [
             (
                 "suggestion.dismissed",

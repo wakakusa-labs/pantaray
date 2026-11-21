@@ -343,7 +343,8 @@ def test_a_failed_submit_skips_only_that_todo_and_is_retried_next_pass(
 
     monkeypatch.setattr(pickup, "submit_action_message", submit_failing_once)
     with caplog.at_level(logging.INFO, logger=pickup.__name__):
-        pickup.pick_up_todos(user_id=USER)
+        # Reported, so the hook that ran the pass stays due for the next one.
+        assert pickup.pick_up_todos(user_id=USER) is False
 
     assert [row["initial_user_message_id"] for row in _actions(db)] == [
         todo_message_id(other.todo_id)
@@ -352,7 +353,7 @@ def test_a_failed_submit_skips_only_that_todo_and_is_retried_next_pass(
     assert "Private failing text" not in caplog.text
 
     monkeypatch.setattr(pickup, "submit_action_message", real_submit)
-    pickup.pick_up_todos(user_id=USER)
+    assert pickup.pick_up_todos(user_id=USER) is True
     assert len(_actions(db)) == 2
 
 

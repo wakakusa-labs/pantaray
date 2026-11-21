@@ -68,10 +68,6 @@ from pantaray_agents.local_runtime.runtime.short_insight import (
     _source_record_id,
     run_short_insight,
 )
-from pantaray_agents.local_runtime.runtime.suggestion_from_insight import (
-    enqueue_suggestion_for_insight,
-    suggestion_id_for_insight,
-)
 from pantaray_agents.local_runtime.storage.migrations import (
     load_default_migrations,
 )
@@ -789,27 +785,6 @@ async def test_an_unchanged_insight_still_requests_memory_review(
     assert stored["triggers"] == [("insight.recorded", RUN)]
     assert stored["suggestions"] == []
     assert stored["jobs"] == []
-
-
-async def test_a_repeated_enqueue_for_one_insight_stays_a_single_suggestion(
-    db_path: Path,
-) -> None:
-    with open_memory_catalog_connection(
-        db_path=db_path, busy_timeout_ms=1_000
-    ) as connection:
-        with immediate_transaction(connection):
-            for enqueued_at in (PERIOD_END, "2026-09-07T12:00:00Z"):
-                enqueue_suggestion_for_insight(
-                    connection=connection,
-                    user_id=USER,
-                    insight_id=RUN,
-                    now=enqueued_at,
-                )
-
-    suggestion_id = suggestion_id_for_insight(RUN)
-    stored = _stored(db_path)
-    assert stored["suggestions"] == [(suggestion_id, "processing")]
-    assert stored["jobs"] == [("generate_suggestion", suggestion_id)]
 
 
 async def test_an_insight_produced_on_a_replaced_route_is_never_published(

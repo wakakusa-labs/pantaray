@@ -91,6 +91,9 @@ PROCESS_ID = "process-memory-1"
 NOW = "2026-01-05T00:00:00Z"
 PROMPT_NAME = "memory_update"
 PROMPT_VERSION = "1.0"
+_SUGGESTION_REQUESTS = (
+    "SELECT payload_json FROM hook_inbox WHERE event_name = 'suggestion.requested'"
+)
 
 
 def _payload(
@@ -821,7 +824,7 @@ async def test_plain_todos_persist_without_becoming_the_long_term_profile(
 
 
 @pytest.mark.asyncio
-async def test_memory_completion_queues_latest_insight_atomically_and_once(
+async def test_memory_completion_requests_latest_insight_atomically_and_once(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -839,10 +842,10 @@ async def test_memory_completion_queues_latest_insight_atomically_and_once(
             (USER_ID, NOW, NOW),
         )
     _claim(runtime, payload)
-    original_enqueue = completion.enqueue_suggestion_for_insight
+    original_request = completion.request_suggestion_in_connection
 
-    def interrupted_enqueue(**kwargs):
-        original_enqueue(**kwargs)
+    def interrupted_request(*args, **kwargs):
+        original_request(*args, **kwargs)
         raise OSError(errno.ENOSPC, "commit interrupted")
 
     with MemoryRunWorkspaceScope() as scope:
@@ -859,17 +862,17 @@ async def test_memory_completion_queues_latest_insight_atomically_and_once(
             ),
             content="# Direction\nGrow sustainably.\n",
         )
-        assert _rows(runtime, "SELECT suggestion_id FROM agent_suggestions") == []
+        assert _rows(runtime, _SUGGESTION_REQUESTS) == []
         with monkeypatch.context() as interruption:
             interruption.setattr(
-                completion, "enqueue_suggestion_for_insight", interrupted_enqueue
+                completion, "request_suggestion_in_connection", interrupted_request
             )
             with pytest.raises(OSError, match="commit interrupted"):
                 _publish(runtime, payload, prepared)
-    # The category is durable, but neither completion nor its Suggestion escaped
-    # the failed completion transaction. Restart can finish from this point.
+    # The category is durable, but neither completion nor its Suggestion request
+    # escaped the failed completion transaction. Restart can finish from here.
     assert _published_events(runtime) == ["long_term_insight"]
-    assert _rows(runtime, "SELECT suggestion_id FROM agent_suggestions") == []
+    assert _rows(runtime, _SUGGESTION_REQUESTS) == []
     assert (
         _rows(
             runtime,
@@ -881,12 +884,9 @@ async def test_memory_completion_queues_latest_insight_atomically_and_once(
         completion.complete_memory_update_run(
             runtime=runtime, payload=payload, applied_note_record_ids=()
         )
-    queued = _rows(
-        runtime,
-        "SELECT payload_json FROM job_payloads JOIN jobs USING(job_id) WHERE job_type='generate_suggestion'",
-    )
-    assert len(queued) == 1
-    assert json.loads(str(queued[0][0]))["insight_id"] == "insight-2"
+    requested = _rows(runtime, _SUGGESTION_REQUESTS)
+    assert len(requested) == 1
+    assert json.loads(str(requested[0][0]))["insight_id"] == "insight-2"
     assert (
         len(
             _rows(
@@ -940,4 +940,4 @@ async def test_recording_disabled_before_memory_completion_suppresses_suggestion
         )
         == 1
     )
-    assert _rows(runtime, "SELECT suggestion_id FROM agent_suggestions") == []
+    assert _rows(runtime, _SUGGESTION_REQUESTS) == []

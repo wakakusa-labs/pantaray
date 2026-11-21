@@ -11,7 +11,6 @@ from __future__ import annotations
 import logging
 import sqlite3
 
-from pantaray_agents.local_runtime.context import store
 from pantaray_agents.local_runtime.memory_catalog.agent_experience import (
     AgentExperiencePublication,
     publish_agent_experience_artifact,
@@ -50,7 +49,7 @@ from pantaray_agents.local_runtime.runtime.memory_update_progress import (
     memory_update_is_complete,
 )
 from pantaray_agents.local_runtime.runtime.suggestion_from_insight import (
-    enqueue_suggestion_for_insight,
+    request_suggestion_in_connection,
 )
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
@@ -263,15 +262,12 @@ def complete_memory_update_run(
                 user_id=payload["user_id"],
                 note_record_ids=applied_note_record_ids,
             )
-            if payload["short_insight_ids"] and not store.is_capture_paused(
-                connection, payload["user_id"]
-            ):
-                enqueue_suggestion_for_insight(
-                    connection=connection,
-                    user_id=payload["user_id"],
-                    insight_id=payload["short_insight_ids"][-1],
-                    now=completed_at,
-                )
+            request_suggestion_in_connection(
+                connection,
+                user_id=payload["user_id"],
+                insight_ids=payload["short_insight_ids"],
+                requested_at=completed_at,
+            )
 
 
 def _archive_applied_notes(

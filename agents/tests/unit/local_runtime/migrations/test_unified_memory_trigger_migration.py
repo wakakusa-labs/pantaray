@@ -113,56 +113,6 @@ def test_upgrade_keeps_existing_trigger_rows_and_their_job_binding(
             )
 
 
-def test_upgrade_requires_the_turn_binding_only_for_action_terminal_triggers(
-    tmp_path: Path,
-) -> None:
-    path = tmp_path / "runtime.sqlite3"
-    apply_migrations(path, 1000, load_default_migrations())
-
-    with closing(sqlite3.connect(path)) as connection:
-        configure_connection(connection, 1000)
-        _insert_user(connection, USER_ID)
-        with pytest.raises(sqlite3.IntegrityError):
-            connection.execute(
-                """
-                INSERT INTO memory_agent_triggers(
-                    user_id, trigger_kind, source_id, status, created_at
-                ) VALUES (?, 'memory_from_action_terminal', 'turn-1', 'pending', ?)
-                """,
-                (USER_ID, NOW),
-            )
-        with pytest.raises(sqlite3.IntegrityError):
-            connection.execute(
-                """
-                INSERT INTO memory_agent_triggers(
-                    user_id, trigger_kind, source_id, status, created_at, action_id
-                ) VALUES (?, 'memory_from_short_insight', 'insight-2', 'pending', ?,
-                          'action-1')
-                """,
-                (USER_ID, NOW),
-            )
-        connection.execute(
-            """
-            INSERT INTO memory_agent_triggers(
-                user_id, trigger_kind, source_id, status, created_at, action_id,
-                action_completed_at, turn_start_step_number, turn_end_step_number,
-                action_prompt_name, action_prompt_version
-            ) VALUES (?, 'memory_from_action_terminal', 'turn-1', 'pending', ?,
-                      'action-1', ?, 3, 7, 'action', '1.0')
-            """,
-            (USER_ID, NOW, NOW),
-        )
-        connection.commit()
-
-    with closing(sqlite3.connect(path)) as connection:
-        assert connection.execute(
-            """
-            SELECT turn_start_step_number, turn_end_step_number
-            FROM memory_agent_triggers WHERE source_id = 'turn-1'
-            """
-        ).fetchone() == (3, 7)
-
-
 def test_upgrade_admits_the_memory_process_kind(tmp_path: Path) -> None:
     path = tmp_path / "runtime.sqlite3"
     apply_migrations(path, 1000, load_default_migrations())

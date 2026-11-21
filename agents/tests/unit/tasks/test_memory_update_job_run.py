@@ -16,6 +16,8 @@ from pantaray_agents.conversation.loop import ConversationTurnsExhausted
 from pantaray_agents.local_runtime.action_conversation.history_deletion import (
     delete_history_item,
 )
+from pantaray_agents.local_runtime.hooks.events import ActivitySummaryRecorded
+from pantaray_agents.local_runtime.hooks.inbox import SqliteHookInbox, record_event
 from pantaray_agents.local_runtime.memory_catalog.agent_experience_content import (
     AgentExperienceContent,
     AgentExperienceScope,
@@ -53,8 +55,8 @@ from pantaray_agents.local_runtime.runtime.job_route_identity import (
 from pantaray_agents.local_runtime.runtime.job_types import (
     LOCAL_MEMORY_UPDATE_JOB_TYPE,
 )
-from pantaray_agents.local_runtime.runtime.memory_agent_dispatcher import (
-    dispatch_memory_agent_triggers_once,
+from pantaray_agents.local_runtime.runtime.memory_update_queue import (
+    enqueue_memory_update_from_inbox,
 )
 from pantaray_agents.local_runtime.runtime.session_store import (
     import_desktop_session,
@@ -197,23 +199,29 @@ def _bootstrap(tmp_path: Path) -> LocalMemoryFileEditorRuntime:
                 """,
                 (USER_ID, TRIGGER_AT, TRIGGER_AT, TRIGGER_AT),
             )
-            connection.execute(
-                """
-                INSERT INTO memory_agent_triggers(
-                    user_id, trigger_kind, source_id, status, created_at
-                ) VALUES (?, 'memory_from_24h_summary', 'summary-1', 'pending', ?)
-                """,
-                (USER_ID, TRIGGER_AT),
+            record_event(
+                connection,
+                user_id=USER_ID,
+                event=ActivitySummaryRecorded(
+                    summary_id="summary-1", summary_type="24h"
+                ),
+                occurred_at=TRIGGER_AT,
             )
     return runtime
 
 
 def _claimed_payload(runtime: LocalMemoryFileEditorRuntime) -> MemoryUpdateJobPayload:
-    dispatch_memory_agent_triggers_once(
+    inbox = SqliteHookInbox(
+        db_path=runtime.db_path, busy_timeout_ms=BUSY_TIMEOUT_MS, user_id=USER_ID
+    )
+    enqueue_memory_update_from_inbox(
         db_path=runtime.db_path,
         busy_timeout_ms=BUSY_TIMEOUT_MS,
         user_id=USER_ID,
-        now=DISPATCH_AT,
+        hook_id="builtin.memory_update",
+        events=inbox.read("builtin.memory_update"),
+        superseded=(),
+        enqueued_at=format_utc_iso(DISPATCH_AT),
     )
     claimed = claim_next_pending_job(
         db_path=str(runtime.db_path),

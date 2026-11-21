@@ -27,7 +27,6 @@ from pantaray_agents.local_runtime.runtime.session_store import mark_configured
 # `tests/conftest.py` puts the store back to unconfigured after each test. The
 # hooks task runs regardless: each hook waits on its own `owner_settled` gate.
 OWNER_SCOPED_TASK_NAMES = (
-    "memory_agent_dispatch",
     "memory_embedding_projection",
     "todo_pickup",
     "todo_purge",
@@ -158,36 +157,6 @@ def test_memory_repair_task_runs_from_schedule(
 
     assert calls == [(context.db_path, context.busy_timeout_ms, context.artifact_root)]
     assert next_runs == {"memory_repair": 70.0}
-
-
-def test_memory_agent_dispatch_task_runs_for_the_current_owner(
-    monkeypatch: pytest.MonkeyPatch,
-    context: PeriodicTaskContext,
-    configured: None,
-    schedule_and_slot: tuple[tuple[PeriodicTask, ...], MemoryEmbeddingProjectionSlot],
-) -> None:
-    from pantaray_agents.local_runtime.runtime import periodic_schedule
-
-    calls: list[tuple[Path, int, str]] = []
-    monkeypatch.setattr(
-        periodic_schedule,
-        "dispatch_memory_agent_triggers_once",
-        lambda *, db_path, busy_timeout_ms, user_id: calls.append(
-            (db_path, busy_timeout_ms, user_id)
-        ),
-    )
-    schedule, _slot = schedule_and_slot
-    tasks = tuple(task for task in schedule if task.name == "memory_agent_dispatch")
-
-    next_runs = run_due_periodic_tasks(
-        tasks=tasks,
-        context=context,
-        next_run_monotonic_by_task={"memory_agent_dispatch": 0.0},
-        now_monotonic=11.0,
-    )
-
-    assert calls == [(context.db_path, context.busy_timeout_ms, context.owner_user_id)]
-    assert next_runs == {"memory_agent_dispatch": 41.0}
 
 
 def test_todo_pickup_waits_for_a_connection_background_jobs_could_use(
@@ -452,11 +421,6 @@ def _record_every_periodic_runner(
         periodic_schedule, "run_memory_catalog_repair_once", record("memory_repair")
     )
     monkeypatch.setattr(
-        periodic_schedule,
-        "dispatch_memory_agent_triggers_once",
-        record("memory_agent_dispatch"),
-    )
-    monkeypatch.setattr(
         periodic_schedule, "run_memory_embedding_projection", run_projection
     )
     monkeypatch.setattr(periodic_schedule, "pick_up_todos", record("todo_pickup"))
@@ -661,7 +625,6 @@ def test_due_tasks_run_in_declaration_order(
         "reaper",
         "hooks",
         "memory_repair",
-        "memory_agent_dispatch",
         "memory_embedding_projection",
         "todo_pickup",
         "todo_purge",

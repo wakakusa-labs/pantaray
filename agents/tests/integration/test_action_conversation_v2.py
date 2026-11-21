@@ -626,7 +626,8 @@ async def test_success_then_followup_projects_two_runs_and_one_history_item(
     if reply:
         with sqlite3.connect(db_path) as connection:
             start, end = connection.execute(
-                "SELECT turn_start_step_number,turn_end_step_number FROM memory_agent_triggers WHERE action_id=?",
+                "SELECT json_extract(payload_json, '$.turn_start_step_number'), json_extract(payload_json, '$.turn_end_step_number') "
+                "FROM hook_inbox WHERE json_extract(payload_json, '$.action_id') = ?",
                 (first_result["action_id"],),
             ).fetchone()
         memory_tools = AgentExperienceActionHistoryTools(
@@ -781,7 +782,8 @@ async def test_success_then_followup_projects_two_runs_and_one_history_item(
         )
         with sqlite3.connect(db_path) as connection:
             starts = connection.execute(
-                "SELECT turn_start_step_number FROM memory_agent_triggers WHERE action_id=? ORDER BY turn_start_step_number",
+                "SELECT json_extract(payload_json, '$.turn_start_step_number') AS start FROM hook_inbox "
+                "WHERE json_extract(payload_json, '$.action_id') = ? ORDER BY start",
                 (first_result["action_id"],),
             ).fetchall()
         assert starts == [(1,), (second_preparation.context.user_step_number,)]
@@ -1213,8 +1215,8 @@ async def test_a_resumed_run_reaches_its_own_terminal(
         source_ids = [
             row[0]
             for row in connection.execute(
-                "SELECT source_id FROM memory_agent_triggers "
-                "WHERE action_id = ? ORDER BY created_at, source_id",
+                "SELECT json_extract(payload_json, '$.source_id') FROM hook_inbox "
+                "WHERE json_extract(payload_json, '$.action_id') = ? ORDER BY delivery_id",
                 (action_id,),
             )
         ]

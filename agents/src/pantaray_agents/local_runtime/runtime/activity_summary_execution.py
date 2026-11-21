@@ -10,10 +10,8 @@ from pantaray_agents.local_runtime.storage.migrations import MigrationError
 from .activity_source_db import with_activity_source_connection
 from .activity_source_rows import (
     ACTIVITY_SOURCE_STATUS_PROCESSING,
-    ACTIVITY_SOURCE_STATUS_SUCCESS,
     ACTIVITY_SOURCE_TERMINAL_STATUSES,
 )
-from .activity_summary_triggers import require_activity_summary_replay_trigger
 
 ActivitySummaryExecutionState = Literal[
     "processing",
@@ -93,13 +91,6 @@ def load_activity_summary_execution_state(
         if status not in valid_statuses:
             raise MigrationError(
                 f"activity_summary execution status is invalid: summary_id={summary_id}"
-            )
-        if status == ACTIVITY_SOURCE_STATUS_SUCCESS:
-            require_activity_summary_replay_trigger(
-                connection=connection,
-                user_id=user_id,
-                summary_id=summary_id,
-                summary_type=summary_type,
             )
         state = cast(ActivitySummaryExecutionState, status)
 

@@ -732,11 +732,13 @@ async def test_finalize_action_job_terminal_closes_runtime_state_and_enqueues_pi
         ).fetchone()
         trigger_row = connection.execute(
             """
-                SELECT trigger_kind, source_id, status, action_id,
-                       action_completed_at, source_action_revision_id,
-                       turn_start_step_number, turn_end_step_number,
-                       action_prompt_name, action_prompt_version, suggestion_id
-                FROM memory_agent_triggers
+                SELECT event_name, json_extract(payload_json, '$.source_id'), json_extract(payload_json, '$.action_id'),
+                       json_extract(payload_json, '$.action_completed_at'),
+                       json_extract(payload_json, '$.source_action_revision_id'),
+                       json_extract(payload_json, '$.turn_start_step_number'), json_extract(payload_json, '$.turn_end_step_number'),
+                       json_extract(payload_json, '$.action_prompt_name'), json_extract(payload_json, '$.action_prompt_version'),
+                       json_extract(payload_json, '$.suggestion_id')
+                FROM hook_inbox
             """
         ).fetchone()
         next_event_seq_row = connection.execute(
@@ -760,15 +762,14 @@ async def test_finalize_action_job_terminal_closes_runtime_state_and_enqueues_pi
     )
     assert pipeline_row is None
     assert trigger_row is not None
-    assert trigger_row[:5] == (
-        "memory_from_action_terminal",
+    assert trigger_row[:4] == (
+        "action.turn_ended",
         "action-1:1",
-        "pending",
         "action-1",
         command.completed_at,
     )
-    assert str(trigger_row[5]).startswith("rev_")
-    assert trigger_row[6:] == (1, 1, "action/executing", "1.0", "sug-1")
+    assert str(trigger_row[4]).startswith("rev_")
+    assert trigger_row[5:] == (1, 1, "action/executing", "1.0", "sug-1")
     assert next_event_seq_row == (2,)
 
 
@@ -924,10 +925,9 @@ async def test_terminal_handoff_projects_or_closes_two_pending_users_atomically(
         ).fetchall()
         trigger_row = connection.execute(
             """
-            SELECT source_action_revision_id, turn_start_step_number,
-                   turn_end_step_number
-            FROM memory_agent_triggers
-            WHERE trigger_kind = 'memory_from_action_terminal'
+            SELECT json_extract(payload_json, '$.source_action_revision_id'),
+                   json_extract(payload_json, '$.turn_start_step_number'), json_extract(payload_json, '$.turn_end_step_number')
+            FROM hook_inbox WHERE event_name = 'action.turn_ended'
             """
         ).fetchone()
         assert trigger_row is not None
@@ -1126,7 +1126,7 @@ async def test_finalize_action_job_terminal_is_idempotent_for_same_event(
             """,
         ).fetchone()
         trigger_count = connection.execute(
-            "SELECT COUNT(*) FROM memory_agent_triggers"
+            "SELECT COUNT(*) FROM hook_inbox WHERE event_name = 'action.turn_ended'"
         ).fetchone()
         successor_count = connection.execute(
             "SELECT COUNT(*) FROM jobs WHERE job_type='execute_action'"

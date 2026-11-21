@@ -1,4 +1,5 @@
-"""The named gates a hook can require, each a check of current runtime state."""
+"""The named gates a hook can require and the predicates its events can name,
+each a check of current runtime state."""
 
 from __future__ import annotations
 
@@ -6,15 +7,19 @@ import asyncio
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
+from pantaray_agents.hooks.engine import InboxEvent
 from pantaray_agents.local_runtime.context import store
 from pantaray_agents.local_runtime.context.source_control import context_source_control
 from pantaray_agents.local_runtime.memory_catalog.connection import (
     open_memory_catalog_connection,
 )
 from pantaray_agents.local_runtime.runtime.admission import admission_is_open
+from pantaray_agents.local_runtime.runtime.memory_dismissal_range import (
+    is_dismissed_without_reply,
+)
 from pantaray_agents.local_runtime.runtime.session_store import read_configured
 
-from .builtin import GATE_NAMES
+from .builtin import GATE_NAMES, PREDICATE_NAMES
 
 
 def owner_is_settled() -> bool:
@@ -67,3 +72,21 @@ def build_gates(
     }
     assert gates.keys() == GATE_NAMES
     return gates
+
+
+def build_predicates(
+    *, db_path: Path, busy_timeout_ms: int, user_id: str
+) -> Mapping[str, Callable[[InboxEvent], bool]]:
+    def still_dismissed_without_reply(event: InboxEvent) -> bool:
+        with open_memory_catalog_connection(
+            db_path=db_path, busy_timeout_ms=busy_timeout_ms
+        ) as connection:
+            return is_dismissed_without_reply(
+                connection,
+                user_id=user_id,
+                suggestion_id=str(event.payload["suggestion_id"]),
+            )
+
+    predicates = {"still_dismissed_without_reply": still_dismissed_without_reply}
+    assert predicates.keys() == PREDICATE_NAMES
+    return predicates

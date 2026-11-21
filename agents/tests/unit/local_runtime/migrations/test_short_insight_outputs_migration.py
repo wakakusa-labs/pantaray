@@ -9,7 +9,12 @@ from pantaray_agents.local_runtime.storage.migrations.connection import (
     configure_connection,
 )
 
-from .support import _insert_user, _migrations_before, apply_migrations
+from .support import (
+    _insert_user,
+    _migrations_before,
+    _migrations_through,
+    apply_migrations,
+)
 
 MIGRATION_NAME = "0098_short_insight_outputs.sql"
 
@@ -34,7 +39,7 @@ def test_upgrade_adds_the_reason_column_and_retires_hourly_insight_triggers(
         )
         connection.commit()
 
-    apply_migrations(path, 1000, migrations)
+    apply_migrations(path, 1000, _migrations_through(migrations, MIGRATION_NAME))
 
     with closing(sqlite3.connect(path)) as connection:
         configure_connection(connection, 1000)

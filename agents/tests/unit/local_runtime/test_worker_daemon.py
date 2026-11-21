@@ -106,48 +106,6 @@ def _activate_session(db_path: Path, *, user_id: str) -> None:
     mark_configured()
 
 
-def test_worker_daemon_polls_memory_agent_triggers_for_active_user(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    db_path = tmp_path / "runtime.db"
-    prepare_test_database(db_path, 1_000, load_default_migrations())
-    set_minimum_local_runtime_env(
-        monkeypatch=monkeypatch,
-        db_path=db_path,
-        tmp_path=tmp_path,
-    )
-    _activate_session(db_path, user_id="user-daemon")
-    dispatched = threading.Event()
-
-    def _repair(**_kwargs: object) -> None:
-        return None
-
-    def _dispatch(**kwargs: object) -> None:
-        assert kwargs["db_path"] == db_path
-        assert kwargs["user_id"] == "user-daemon"
-        dispatched.set()
-
-    monkeypatch.setattr(
-        "pantaray_agents.local_runtime.runtime.periodic_schedule.dispatch_memory_agent_triggers_once",
-        _dispatch,
-    )
-    monkeypatch.setattr(
-        "pantaray_agents.local_runtime.runtime.periodic_schedule.run_builtin_hooks_once",
-        lambda **_kwargs: None,
-    )
-    monkeypatch.setattr(
-        "pantaray_agents.local_runtime.runtime.periodic_schedule.run_memory_catalog_repair_once",
-        _repair,
-    )
-
-    start_worker()
-    try:
-        assert dispatched.wait(timeout=2.0) is True
-    finally:
-        stop_local_action_worker_daemon()
-
-
 def test_worker_daemon_withholds_owner_scoped_periodic_work_until_configure(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -183,8 +141,8 @@ def test_worker_daemon_withholds_owner_scoped_periodic_work_until_configure(
             ticked_twice.set()
         return 0
 
-    def _dispatch(*, user_id: str, **_kwargs: object) -> None:
-        owner_scoped_calls.append(("memory_agent_dispatch", user_id))
+    def _purge(*, user_id: str, **_kwargs: object) -> None:
+        owner_scoped_calls.append(("todo_purge", user_id))
         dispatched.set()
 
     monkeypatch.setattr(
@@ -197,9 +155,7 @@ def test_worker_daemon_withholds_owner_scoped_periodic_work_until_configure(
     monkeypatch.setattr(
         periodic_schedule, "run_builtin_hooks_once", lambda **_kwargs: None
     )
-    monkeypatch.setattr(
-        periodic_schedule, "dispatch_memory_agent_triggers_once", _dispatch
-    )
+    monkeypatch.setattr(periodic_schedule, "purge_expired_todos", _purge)
     monkeypatch.setattr(
         periodic_schedule, "run_memory_catalog_repair_once", lambda **_kwargs: None
     )
@@ -221,7 +177,7 @@ def test_worker_daemon_withholds_owner_scoped_periodic_work_until_configure(
         _activate_session(db_path, user_id="user-daemon")
 
         assert dispatched.wait(timeout=2.0) is True
-        assert owner_scoped_calls[0] == ("memory_agent_dispatch", "user-daemon")
+        assert owner_scoped_calls[0] == ("todo_purge", "user-daemon")
     finally:
         stop_local_action_worker_daemon()
 
@@ -435,11 +391,6 @@ def test_worker_drain_does_not_run_periodic_tasks_after_stop(
     monkeypatch.setattr(
         periodic_schedule,
         "run_memory_catalog_repair_once",
-        lambda **_kwargs: None,
-    )
-    monkeypatch.setattr(
-        periodic_schedule,
-        "dispatch_memory_agent_triggers_once",
         lambda **_kwargs: None,
     )
     monkeypatch.setattr(

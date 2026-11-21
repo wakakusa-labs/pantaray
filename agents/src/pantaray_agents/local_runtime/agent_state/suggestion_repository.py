@@ -7,6 +7,8 @@ from datetime import timedelta
 from pydantic import ValidationError
 
 from pantaray_agents import todo_ux_feature
+from pantaray_agents.local_runtime.hooks.events import SuggestionDismissed
+from pantaray_agents.local_runtime.hooks.inbox import record_event
 from pantaray_agents.local_runtime.memory_catalog.domain_registration import (
     register_inline_domain_memory,
 )
@@ -400,14 +402,22 @@ class LocalSuggestionRepository(
                 )
                 if mutation_guard is not None:
                     return RepositoryResult(error=mutation_guard)
-                connection.execute(
+                updated = connection.execute(
                     f"""
                     UPDATE agent_suggestions
                     SET {", ".join(update_columns)}
                     WHERE user_id = ? AND suggestion_id = ?
+                    RETURNING rejected_at
                     """,
                     (*params, user_id, suggestion_id),
-                )
+                ).fetchone()
+                if updated is not None and stored_user_reaction == "rejected":
+                    record_event(
+                        connection,
+                        user_id=user_id,
+                        event=SuggestionDismissed(suggestion_id=suggestion_id),
+                        occurred_at=str(updated[0]),
+                    )
         return await self.get_suggestion(user_id=user_id, suggestion_id=suggestion_id)
 
     async def update_action_status(

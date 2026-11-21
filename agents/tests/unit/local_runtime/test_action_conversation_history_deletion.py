@@ -156,10 +156,9 @@ def _action(
         '{a}','temp_dir','cleaned','{T}','{T}');
       INSERT INTO tool_runtime_resource_events(event_id,resource_id,action_id,event_type,
         message,created_at) VALUES ('event-{a}','resource-{a}','{a}','cleanup','done','{T}');
-      INSERT INTO memory_agent_triggers(user_id,trigger_kind,source_id,status,created_at,
-        action_id,action_completed_at,turn_start_step_number,turn_end_step_number,
-        action_prompt_name,action_prompt_version) VALUES ('{USER}',
-        'memory_from_action_terminal','{a}','pending','{T}','{a}','{T}',1,2,'p','1');"""
+      INSERT INTO hook_inbox(hook_id,user_id,event_name,payload_json,occurred_at)
+        VALUES ('builtin.memory_update','{USER}','action.turn_ended',
+        json_object('action_id','{a}'),'{T}');"""
 
 
 def _delete(db_path: Path, kind: HistoryItemKind, item_id: str) -> None:
@@ -189,7 +188,8 @@ def _counts(db_path: Path, action_id: str, suggestion_id: str) -> tuple[int, ...
                   (SELECT COUNT(*) FROM processes
                      WHERE action_id = :a OR suggestion_id = :s),
                   (SELECT COUNT(*) FROM jobs WHERE job_id LIKE 'job-%' || :a),
-                  (SELECT COUNT(*) FROM memory_agent_triggers WHERE action_id = :a),
+                  (SELECT COUNT(*) FROM hook_inbox
+                     WHERE json_extract(payload_json, '$.action_id') = :a),
                   (SELECT COUNT(*) FROM agent_suggestions WHERE suggestion_id = :s),
                   (SELECT COUNT(*) FROM pragma_foreign_key_check)""",
                 {"a": action_id, "s": suggestion_id},

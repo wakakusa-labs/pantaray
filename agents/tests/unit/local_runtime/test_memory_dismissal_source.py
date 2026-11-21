@@ -2,24 +2,21 @@
 
 from __future__ import annotations
 
-import json
 import sqlite3
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from pantaray_agents.local_runtime.hooks.events import (
+    InsightRecorded,
+    SuggestionDismissed,
+)
+from pantaray_agents.local_runtime.hooks.inbox import record_event
 from pantaray_agents.local_runtime.memory_catalog.run_workspace import (
     MemoryRunWorkspaceScope,
 )
 from pantaray_agents.local_runtime.runtime.job_payload_models import (
     parse_memory_update_job_payload_json,
-)
-from pantaray_agents.local_runtime.runtime.memory_agent_dispatcher import (
-    dispatch_memory_agent_triggers_once,
-)
-from pantaray_agents.local_runtime.runtime.memory_agent_triggers import (
-    SHORT_INSIGHT_MEMORY_TRIGGER_KIND,
-    insert_pending_memory_agent_trigger,
 )
 from pantaray_agents.local_runtime.runtime.memory_dismissal_range import (
     MEMORY_DISMISSAL_MAX_CHARS,
@@ -35,7 +32,10 @@ from pantaray_agents.local_runtime.tooling.memory_file_editor import (
 )
 from pantaray_agents.tasks.memory_update_context import prepare_memory_update_run
 
+from .memory_update_hook import Tick, finish_memory_jobs, memory_payloads, record, tick
 from .migrated_db import prepare_test_database
+
+__all__ = ["tick"]
 
 NOW = datetime(2026, 10, 9, 3, 0, tzinfo=UTC)
 
@@ -65,6 +65,7 @@ def _dismiss(
     *,
     minutes_ago: int,
     reason: str | None = None,
+    with_event: bool = True,
 ) -> None:
     at = _at(minutes_ago)
     with sqlite3.connect(db_path) as connection:
@@ -79,6 +80,13 @@ def _dismiss(
             """,
             (suggestion_id, answer, at, reason, at, at),
         )
+        if with_event:
+            record_event(
+                connection,
+                user_id="user-1",
+                event=SuggestionDismissed(suggestion_id=suggestion_id),
+                occurred_at=at,
+            )
 
 
 def _reply(db_path: Path, suggestion_id: str) -> None:
@@ -109,83 +117,59 @@ def _reply(db_path: Path, suggestion_id: str) -> None:
         )
 
 
-def _dispatch(db_path: Path, now: datetime = NOW) -> None:
-    dispatch_memory_agent_triggers_once(
-        db_path=db_path, busy_timeout_ms=1_000, user_id="user-1", now=now
-    )
-
-
 def _handed(db_path: Path) -> list[list[str] | None]:
-    with sqlite3.connect(db_path) as connection:
-        rows = connection.execute(
-            """
-            SELECT payloads.payload_json FROM jobs
-            JOIN job_payloads AS payloads ON payloads.job_id = jobs.job_id
-            WHERE jobs.job_type = 'memory_update' ORDER BY jobs.rowid
-            """
-        ).fetchall()
-    return [json.loads(row[0]).get("dismissed_suggestion_ids") for row in rows]
-
-
-def _finish_memory_jobs(db_path: Path) -> None:
-    with sqlite3.connect(db_path) as connection:
-        connection.execute(
-            "UPDATE jobs SET status = 'completed' WHERE job_type = 'memory_update'"
-        )
+    return [p.get("dismissed_suggestion_ids") for p in memory_payloads(db_path)]
 
 
 def _insight(db_path: Path) -> None:
-    with sqlite3.connect(db_path) as connection:
-        insert_pending_memory_agent_trigger(
-            connection=connection,
-            user_id="user-1",
-            trigger_kind=SHORT_INSIGHT_MEMORY_TRIGGER_KIND,
-            source_id=f"insight-{uuid.uuid4().hex[:8]}",
-            created_at=NOW.isoformat().replace("+00:00", "Z"),
-        )
+    record(
+        db_path,
+        InsightRecorded(insight_id=f"insight-{uuid.uuid4().hex[:8]}"),
+        at=NOW.isoformat().replace("+00:00", "Z"),
+    )
 
 
 def test_a_recent_dismissal_alone_waits_for_the_insight_window(
-    tmp_path: Path,
+    tmp_path: Path, tick: Tick
 ) -> None:
     db_path = _db(tmp_path)
     _dismiss(db_path, "s-1", "Shall I draft the notes?", minutes_ago=5)
 
-    _dispatch(db_path)
+    tick(db_path, NOW)
 
     assert _handed(db_path) == []
 
 
 def test_a_dismissal_older_than_the_window_starts_a_run_of_its_own(
-    tmp_path: Path,
+    tmp_path: Path, tick: Tick
 ) -> None:
     db_path = _db(tmp_path)
     _dismiss(db_path, "s-1", "Shall I draft the notes?", minutes_ago=20)
 
-    _dispatch(db_path)
+    tick(db_path, NOW)
 
     assert _handed(db_path) == [["s-1"]]
 
 
-def test_dismissals_ride_along_once_and_the_cursor_moves_on(tmp_path: Path) -> None:
+def test_dismissals_ride_along_once(tmp_path: Path, tick: Tick) -> None:
     db_path = _db(tmp_path)
     _dismiss(db_path, "s-1", "Shall I draft the notes?", minutes_ago=2)
     _insight(db_path)
 
-    _dispatch(db_path)
-    _finish_memory_jobs(db_path)
+    tick(db_path, NOW)
+    finish_memory_jobs(db_path)
     _dismiss(db_path, "s-2", "Shall I file the invoice?", minutes_ago=-30)
     _insight(db_path)
-    _dispatch(db_path, NOW + timedelta(hours=1))
-    _finish_memory_jobs(db_path)
+    tick(db_path, NOW + timedelta(hours=1))
+    finish_memory_jobs(db_path)
     _insight(db_path)
-    _dispatch(db_path, NOW + timedelta(hours=2))
+    tick(db_path, NOW + timedelta(hours=2))
 
     assert _handed(db_path) == [["s-1"], ["s-2"], None]
 
 
 def test_a_long_reason_backlog_is_split_across_runs_without_skipping(
-    tmp_path: Path,
+    tmp_path: Path, tick: Tick
 ) -> None:
     db_path = _db(tmp_path)
     half = "x" * (MEMORY_DISMISSAL_MAX_CHARS // 2)
@@ -197,21 +181,33 @@ def test_a_long_reason_backlog_is_split_across_runs_without_skipping(
     _dismiss(db_path, "s-5", "Plan it?", minutes_ago=36)
 
     for _ in range(5):
-        _dispatch(db_path)
-        _finish_memory_jobs(db_path)
+        tick(db_path, NOW)
+        finish_memory_jobs(db_path)
 
     # A dismissal over the bound on its own still goes, alone.
     assert _handed(db_path) == [["s-1"], ["s-2"], ["s-3"], ["s-4"], ["s-5"]]
 
 
-def test_a_dismissal_the_user_replied_to_is_not_handed(tmp_path: Path) -> None:
+def test_a_dismissal_replied_to_or_undone_before_the_run_is_not_handed(
+    tmp_path: Path, tick: Tick
+) -> None:
+    # Catches a dismissal handed after the user answered it (its Action carries
+    # it) or took it back, and such an event left pending to start runs.
     db_path = _db(tmp_path)
     _dismiss(db_path, "s-1", "Shall I draft the notes?", minutes_ago=20)
     _reply(db_path, "s-1")
+    _dismiss(db_path, "s-2", "Shall I file the invoice?", minutes_ago=20)
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "UPDATE agent_suggestions SET user_reaction = 'accepted' "
+            "WHERE suggestion_id = 's-2'"
+        )
 
-    _dispatch(db_path)
+    tick(db_path, NOW)
 
     assert _handed(db_path) == []
+    with sqlite3.connect(db_path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM hook_inbox").fetchone() == (0,)
     with sqlite3.connect(db_path) as connection:
         assert (
             read_dismissed_suggestions(
@@ -222,7 +218,7 @@ def test_a_dismissal_the_user_replied_to_is_not_handed(tmp_path: Path) -> None:
 
 
 def test_the_next_run_reads_each_unanswered_dismissal_with_its_reason(
-    tmp_path: Path,
+    tmp_path: Path, tick: Tick
 ) -> None:
     db_path = _db(tmp_path)
     _dismiss(
@@ -234,7 +230,7 @@ def test_the_next_run_reads_each_unanswered_dismissal_with_its_reason(
     )
     _dismiss(db_path, "s-2", "Shall I file the invoice?", minutes_ago=10)
     _dismiss(db_path, "s-3", "Shall I book the room?", minutes_ago=5)
-    _dispatch(db_path)
+    tick(db_path, NOW)
     # Answered after the run was queued, so its Action carries it instead.
     _reply(db_path, "s-3")
 
@@ -263,7 +259,7 @@ def test_the_next_run_reads_each_unanswered_dismissal_with_its_reason(
 
 
 def test_dismissals_recorded_before_the_cursor_existed_are_not_handed(
-    tmp_path: Path,
+    tmp_path: Path, tick: Tick
 ) -> None:
     db_path = tmp_path / "runtime.db"
     migrations = load_default_migrations()
@@ -278,10 +274,12 @@ def test_dismissals_recorded_before_the_cursor_existed_are_not_handed(
         expires_at="2099-08-16T00:00:00Z",
         session_version="1",
     )
-    _dismiss(db_path, "s-old", "Shall I draft the notes?", minutes_ago=60)
+    _dismiss(
+        db_path, "s-old", "Shall I draft the notes?", minutes_ago=60, with_event=False
+    )
     apply_migrations(db_path, 1_000, migrations)
     _dismiss(db_path, "s-new", "Shall I file the invoice?", minutes_ago=20)
 
-    _dispatch(db_path)
+    tick(db_path, NOW)
 
     assert _handed(db_path) == [["s-new"]]

@@ -21,10 +21,6 @@ from ..todos.pickup import pick_up_todos
 from ..todos.retention import purge_expired_todos
 from .browser_relay import sweep_browser_sessions
 from .local_worker import background_requests_can_send
-from .memory_agent_dispatcher import (
-    MEMORY_AGENT_DISPATCH_INTERVAL_SECONDS,
-    dispatch_memory_agent_triggers_once,
-)
 from .memory_embedding_scheduler import (
     MemoryEmbeddingProjectionResult,
     run_memory_embedding_projection,
@@ -104,14 +100,6 @@ def _owner_is_settled(_context: PeriodicTaskContext) -> bool:
     return owner_is_settled()
 
 
-def _run_memory_agent_dispatch(context: PeriodicTaskContext) -> None:
-    dispatch_memory_agent_triggers_once(
-        db_path=context.db_path,
-        busy_timeout_ms=context.busy_timeout_ms,
-        user_id=context.owner_user_id,
-    )
-
-
 def _todo_pickup_is_ready(context: PeriodicTaskContext) -> bool:
     # Nobody waits on a pickup and its Action fails for good without a
     # connection, so it starts only when a background job would be claimed.
@@ -152,12 +140,6 @@ def build_periodic_schedule(
                 busy_timeout_ms=context.busy_timeout_ms,
                 artifact_root=context.artifact_root,
             ),
-        ),
-        PeriodicTask(
-            name="memory_agent_dispatch",
-            interval_seconds=MEMORY_AGENT_DISPATCH_INTERVAL_SECONDS,
-            is_ready=_owner_is_settled,
-            run=_run_memory_agent_dispatch,
         ),
         PeriodicTask(
             name="memory_embedding_projection",

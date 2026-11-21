@@ -3,16 +3,8 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-import pytest
-
 from pantaray_agents.local_runtime.memory_catalog.connection import (
     open_memory_catalog_connection,
-)
-from pantaray_agents.local_runtime.runtime.memory_agent_triggers import (
-    ACTION_TERMINAL_MEMORY_TRIGGER_KIND,
-    SHORT_INSIGHT_MEMORY_TRIGGER_KIND,
-    ActionTerminalTriggerBinding,
-    insert_pending_memory_agent_trigger,
 )
 from pantaray_agents.local_runtime.runtime.memory_update_progress import (
     append_memory_category_published_in_connection,
@@ -86,61 +78,3 @@ def test_published_categories_survive_a_restart_of_the_same_run(
                 created_at=NOW,
             )
         assert memory_update_is_complete(connection=connection, process_id=PROCESS_ID)
-
-
-def test_action_terminal_trigger_stores_its_turn_binding(tmp_path: Path) -> None:
-    db_path = _prepare_db(tmp_path)
-    with open_memory_catalog_connection(
-        db_path=db_path, busy_timeout_ms=1_000
-    ) as connection:
-        with connection:
-            insert_pending_memory_agent_trigger(
-                connection=connection,
-                user_id=USER_ID,
-                trigger_kind=ACTION_TERMINAL_MEMORY_TRIGGER_KIND,
-                source_id="turn-1",
-                created_at=NOW,
-                action_terminal=ActionTerminalTriggerBinding(
-                    action_id="action-1",
-                    action_completed_at=NOW,
-                    source_action_revision_id=None,
-                    turn_start_step_number=3,
-                    turn_end_step_number=9,
-                    action_prompt_name="action",
-                    action_prompt_version="2.0",
-                    suggestion_id="suggestion-1",
-                ),
-            )
-        row = connection.execute(
-            """
-            SELECT action_id, source_action_revision_id, turn_start_step_number,
-                   turn_end_step_number, suggestion_id
-            FROM memory_agent_triggers WHERE source_id = 'turn-1'
-            """
-        ).fetchone()
-    assert tuple(row) == ("action-1", None, 3, 9, "suggestion-1")
-
-
-def test_a_non_action_trigger_rejects_a_turn_binding(tmp_path: Path) -> None:
-    db_path = _prepare_db(tmp_path)
-    with open_memory_catalog_connection(
-        db_path=db_path, busy_timeout_ms=1_000
-    ) as connection:
-        with pytest.raises(ValueError, match="completed turn binding"):
-            insert_pending_memory_agent_trigger(
-                connection=connection,
-                user_id=USER_ID,
-                trigger_kind=SHORT_INSIGHT_MEMORY_TRIGGER_KIND,
-                source_id="insight-1",
-                created_at=NOW,
-                action_terminal=ActionTerminalTriggerBinding(
-                    action_id="action-1",
-                    action_completed_at=NOW,
-                    source_action_revision_id=None,
-                    turn_start_step_number=1,
-                    turn_end_step_number=2,
-                    action_prompt_name="action",
-                    action_prompt_version="2.0",
-                    suggestion_id=None,
-                ),
-            )

@@ -318,7 +318,8 @@ def _stored(db_path: Path, *, run_id: str = RUN) -> dict[str, object]:
         ).fetchall()
         jobs = connection.execute("SELECT job_type, logical_key FROM jobs").fetchall()
         triggers = connection.execute(
-            "SELECT trigger_kind, source_id, status FROM memory_agent_triggers"
+            "SELECT event_name, json_extract(payload_json, '$.insight_id') "
+            "FROM hook_inbox"
         ).fetchall()
         records = connection.execute(
             "SELECT record_id, run_id, event_id, observed_at, app_name, bundle_id, "
@@ -418,7 +419,7 @@ async def test_a_read_that_does_not_prove_absence_runs_the_insight(
     assert agent.calls == 1
     stored = _stored(db_path)
     assert stored["cursor"] == cursor
-    assert stored["triggers"] == [("memory_from_short_insight", RUN, "pending")]
+    assert stored["triggers"] == [("insight.recorded", RUN)]
 
 
 async def test_an_unreadable_timeline_fails_the_run_instead_of_skipping_it(
@@ -471,7 +472,7 @@ async def test_successful_run_commits_outputs_catalog_and_cursor(
     assert stored["cursor"] == "cursor-2"
     assert stored["suggestions"] == []
     assert stored["jobs"] == []
-    assert stored["triggers"] == [("memory_from_short_insight", RUN, "pending")]
+    assert stored["triggers"] == [("insight.recorded", RUN)]
 
 
 async def test_catalog_failure_rolls_back_the_cursor_and_every_output(
@@ -652,7 +653,7 @@ async def test_recorder_changes_during_inference_preserve_range_and_publication(
     )
     assert stored["activity"][0] == "success"
     assert stored["catalog"] == ["activity_log", "short_term_insight"]
-    assert stored["triggers"] == [("memory_from_short_insight", RUN, "pending")]
+    assert stored["triggers"] == [("insight.recorded", RUN)]
 
 
 async def test_a_revoked_source_fails_the_run_without_publishing(db_path: Path) -> None:
@@ -785,7 +786,7 @@ async def test_an_unchanged_insight_still_requests_memory_review(
     stored = _stored(db_path)
     assert stored["cursor"] == "cursor-2"
     assert stored["catalog"] == ["activity_log", "short_term_insight"]
-    assert stored["triggers"] == [("memory_from_short_insight", RUN, "pending")]
+    assert stored["triggers"] == [("insight.recorded", RUN)]
     assert stored["suggestions"] == []
     assert stored["jobs"] == []
 
@@ -967,7 +968,7 @@ async def test_records_the_fetched_text_cannot_prove_never_reach_the_store(
     assert stored["cursor"] == "cursor-2"
     assert stored["activity"] is not None
     assert stored["insight"] is not None
-    assert stored["triggers"] == [("memory_from_short_insight", RUN, "pending")]
+    assert stored["triggers"] == [("insight.recorded", RUN)]
 
 
 def test_a_record_id_separates_fields_a_joined_string_would_blur() -> None:

@@ -99,6 +99,18 @@ def test_resending_a_message_id_returns_the_one_item(
     assert changed.status_code == 409
     assert changed.json() == {"type": "MessageIdentityConflict"}
     assert _row_count(db_path) == 1
+    # The Memory update hears of a message once, and not of a turn's failure.
+    append_chat_item(
+        user_id=USER,
+        message_id=chat_turn_end_message_id("a", "failure", 1),
+        content=TurnFailureContent(kind="turn_failure", reason="llm_connection"),
+    )
+    with closing(sqlite3.connect(db_path)) as connection:
+        assert connection.execute(
+            "SELECT event_name, payload_json FROM hook_inbox"
+        ).fetchall() == [
+            ("chat.message_recorded", f'{{"sequence": {first.json()["sequence"]}}}')
+        ]
 
 
 def test_a_message_starts_a_turn_and_a_retry_runs_the_last_failed_one(

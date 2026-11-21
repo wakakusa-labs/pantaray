@@ -9,7 +9,12 @@ from pantaray_agents.local_runtime.storage.migrations.connection import (
     configure_connection,
 )
 
-from .support import _insert_user, _migrations_before, apply_migrations
+from .support import (
+    _insert_user,
+    _migrations_before,
+    _migrations_through,
+    apply_migrations,
+)
 
 MIGRATION_NAME = "0101_legacy_memory_agent_cutover.sql"
 BUSY_TIMEOUT_MS = 1_000
@@ -96,7 +101,11 @@ def _apply_cutover(tmp_path: Path) -> Path:
         _seed_retired_runtime(connection)
         connection.commit()
 
-    apply_migrations(db_path, BUSY_TIMEOUT_MS, load_default_migrations())
+    apply_migrations(
+        db_path,
+        BUSY_TIMEOUT_MS,
+        _migrations_through(load_default_migrations(), MIGRATION_NAME),
+    )
     return db_path
 
 

@@ -27,6 +27,8 @@ from pantaray_agents.local_runtime.context.source_protocol import (
 )
 from pantaray_agents.local_runtime.context.source_reader import SourceReader
 from pantaray_agents.local_runtime.context.source_transport import source_scope
+from pantaray_agents.local_runtime.hooks.events import InsightRecorded
+from pantaray_agents.local_runtime.hooks.inbox import record_event
 from pantaray_agents.local_runtime.integrations.change_probe import (
     collect_external_changes,
 )
@@ -45,10 +47,6 @@ from pantaray_agents.local_runtime.runtime.insight_queue import (
 )
 from pantaray_agents.local_runtime.runtime.job_route_identity import (
     require_current_route_identity,
-)
-from pantaray_agents.local_runtime.runtime.memory_agent_triggers import (
-    SHORT_INSIGHT_MEMORY_TRIGGER_KIND,
-    insert_pending_memory_agent_trigger,
 )
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
 from pantaray_agents.local_runtime.tooling.repository.workspace_context import (
@@ -327,12 +325,11 @@ def _persist_short_insight(
                 source_record_id=run_id,
                 content=body,
             )
-        insert_pending_memory_agent_trigger(
-            connection=connection,
+        record_event(
+            connection,
             user_id=binding.user_id,
-            trigger_kind=SHORT_INSIGHT_MEMORY_TRIGGER_KIND,
-            source_id=run_id,
-            created_at=now,
+            event=InsightRecorded(insight_id=run_id),
+            occurred_at=now,
         )
 
 

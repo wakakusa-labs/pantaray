@@ -76,7 +76,7 @@ SCHEDULE_CONTINUATION_TOOL = ToolDefinition.from_spec(
                 "compare against or report. A turn runs only while no other turn "
                 "of this conversation runs or waits for the user; a missed time "
                 "runs once when it can. Three failed turns in a row stop the "
-                "schedule. It reaches only this conversation; for other work, ask "
+                "schedule; replacing it turns it back on once the user approves. It reaches only this conversation; for other work, ask "
                 "the user to start it there."
             ),
         ),
@@ -170,8 +170,9 @@ LIST_SCHEDULED_CONTINUATIONS_TOOL = ToolDefinition.from_spec(
                 "Schedules the user wrote themselves, and those of other "
                 "conversations, are not listed. approved false means the user "
                 "edited the file since, and it waits for their approval; "
-                "stopped_reason means failures stopped it until the user turns it "
-                "back on."
+                "stopped_reason means failures stopped it and enabled false that "
+                "it is switched off; replacing it, with the user's approval, turns "
+                "it back on."
             ),
         ),
         concurrency=ToolConcurrency("sequential"),

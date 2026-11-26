@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import itertools
+import sqlite3
 from collections.abc import Iterator
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -37,6 +39,8 @@ from pantaray_agents.agents.action_agent.tools.conversation_task_tools import (
     STOP_SCHEDULED_CONTINUATION_TOOL,
 )
 from pantaray_agents.local_runtime.hooks.agent_tasks import list_conversation_tasks
+from pantaray_agents.local_runtime.hooks.controls import active_hooks
+from pantaray_agents.local_runtime.hooks.tasks import read_task_files
 from pantaray_agents.local_runtime.runtime.action_approval_review import (
     pending_operation,
 )
@@ -321,3 +325,46 @@ async def test_list_and_stop_reach_this_conversations_tasks(
     }
     assert _tasks(env) == ()
     assert list(env.tasks.glob("*.md")) == []
+
+
+@pytest.mark.parametrize("paused", ["switched off", "stopped by failures"])
+async def test_an_approved_update_turns_a_paused_task_back_on(
+    env: SimpleNamespace, paused: str
+) -> None:
+    # Catches an update that approves the new content but leaves the task off
+    # or stopped, while the tool tells the model it is scheduled, and a yes
+    # asked without saying the task will run again.
+    task_id = await _schedule(env, DAILY)
+    with closing(sqlite3.connect(env.db_path)) as connection, connection:
+        if paused == "switched off":
+            connection.execute("UPDATE hook_settings SET enabled = 0")
+        else:
+            connection.execute(
+                "UPDATE hook_conversations SET failure_count = 3,"
+                " stopped_reason = 'turn_failed'"
+            )
+    changed = {**DAILY, "prompt": "Also check their pricing page.", "task_id": task_id}
+    asked = await _preflight(env, changed, f"request-{paused}")
+    assert isinstance(asked.control, ApprovalRequiredToolControl)
+    assert asked.control.command_summary["resumes"] is True
+    _decide(env, f"request-{paused}", "approved_once")
+    output = await _call(env, changed, f"request-{paused}")
+
+    assert "runs again" in str(output["message"])
+    with closing(sqlite3.connect(env.db_path)) as connection:
+        active = active_hooks(
+            connection, user_id="user-1", builtins=(), task_files=read_task_files()
+        )
+    assert list(active.tasks) == [task_id]
+    (view,) = _tasks(env)
+    assert (view.enabled, view.failure_count, view.stopped_reason) == (True, 0, None)
+
+
+async def test_an_update_of_a_running_task_does_not_say_it_resumes(
+    env: SimpleNamespace,
+) -> None:
+    # Catches a consent text that tells the user a running task will resume.
+    task_id = await _schedule(env, DAILY)
+    asked = await _preflight(env, {**DAILY, "task_id": task_id}, "request-on")
+    assert isinstance(asked.control, ApprovalRequiredToolControl)
+    assert asked.control.command_summary["resumes"] is False

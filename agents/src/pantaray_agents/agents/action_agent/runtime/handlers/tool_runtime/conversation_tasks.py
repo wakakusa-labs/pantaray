@@ -22,7 +22,7 @@ from pantaray_agents.agents.action_agent.tools.conversation_task_tools import (
 )
 from pantaray_agents.local_runtime.hooks.agent_tasks import (
     TaskSchedule,
-    is_conversation_task,
+    conversation_task_state,
     list_conversation_tasks,
     new_task_id,
     parse_task,
@@ -114,7 +114,8 @@ async def run_schedule_continuation_preflight(
         identity = _resolve_identity(state)
         request = _resolve_request(args, tool_request_id=tool_request_id)
         _check_times(request.schedule, now=datetime.now(UTC))
-        _check_replaced(identity, request)
+        if request.replaces is not None and _resumes(identity, request) is None:
+            raise ScheduleError(_NOT_FOUND_MESSAGE)
     except (ConversationTaskIdentityError, ScheduleError) as exc:
         return _failed_preparation(step_id, tool_def, requested_at, error=exc)
     try:
@@ -190,6 +191,7 @@ async def run_schedule_continuation_tool(
                 f"({type(exc).__name__}), so nothing was scheduled. Request it again."
             ),
         )
+    resumed = _resumes(identity, request) is True
     db_path, busy_timeout_ms = read_local_runtime_db_config()
     now = datetime.now(UTC)
     refusal = save_task(
@@ -233,8 +235,9 @@ async def run_schedule_continuation_tool(
             "task_id": request.task.hook_id,
             "next_run_at": next_run_at,
             "message": (
-                "The user approved it. Its first turn is due "
-                f"{next_run_at or 'never: it ends before then'}."
+                "The user approved it"
+                + (", and the schedule, which was off, runs again" if resumed else "")
+                + f". Its first turn is due {next_run_at or 'never: it ends before then'}."
             ),
         },
     )
@@ -320,18 +323,21 @@ def _check_times(schedule: TaskSchedule, *, now: datetime) -> None:
         raise ScheduleError("until is not in the future.")
 
 
-def _check_replaced(identity: _Identity, request: _Request) -> None:
+def _resumes(identity: _Identity, request: _Request) -> bool | None:
+    """Whether approving the call switches a paused task back on; None when
+    the task it replaces is not this conversation's."""
+
     if request.replaces is None:
-        return
+        return False
     db_path, busy_timeout_ms = read_local_runtime_db_config()
-    if not is_conversation_task(
+    state = conversation_task_state(
         db_path=db_path,
         busy_timeout_ms=busy_timeout_ms,
         user_id=identity.user_id,
         action_id=identity.action_id,
         hook_id=request.replaces,
-    ):
-        raise ScheduleError(_NOT_FOUND_MESSAGE)
+    )
+    return None if state is None else state == "paused"
 
 
 def _instant(args: ToolArgs, key: str) -> datetime | None:
@@ -347,15 +353,17 @@ def _instant(args: ToolArgs, key: str) -> datetime | None:
     return instant
 
 
-def _summary(request: _Request) -> dict[str, JSONValue]:
+def _summary(request: _Request, *, resumes: bool) -> dict[str, JSONValue]:
     """What the user approves: the schedule and the prompt, which name the
-    whole task file; the approval binds to it."""
+    whole task file, and whether the yes switches a paused task back on; the
+    approval binds to it."""
 
     schedule = request.schedule
     return {
         "summary_kind": _SUMMARY_KIND,
         "task_id": request.task.hook_id,
         "replaces": request.replaces is not None,
+        "resumes": resumes,
         "at": None if schedule.at is None else schedule.at.isoformat(),
         "every": schedule.every,
         "offset": schedule.offset,
@@ -381,7 +389,9 @@ def _authorize(
         ),
         tool_invocation_id=None,
         tool_request_id=tool_request_id,
-        command_summary=_summary(request),
+        # A task paused while the user was asked no longer matches, so the
+        # call is asked again with the resume said.
+        command_summary=_summary(request, resumes=_resumes(identity, request) is True),
         requested_at=requested_at,
         # A schedule sends turns with no one watching: the user says yes to
         # each one, and the approval review never answers for them.

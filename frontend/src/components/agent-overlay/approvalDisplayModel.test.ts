@@ -25,6 +25,68 @@ function blocker(
 }
 
 describe('buildApprovalDisplay', () => {
+  // A schedule that falls through to the generic line shows raw keys, so the user
+  // could not tell when it runs or what it sends before saying yes.
+  it('names when a schedule runs, when it ends, and the message it sends', () => {
+    const vars = (key: string, values?: Record<string, string | number>) =>
+      key.endsWith('weekdays')
+        ? 'Mon,Tue,Wed,Thu,Fri,Sat,Sun'
+        : `${key}${values ? JSON.stringify(values) : ''}`;
+    const schedule = (fields: Record<string, unknown>) =>
+      buildApprovalDisplay(
+        blocker('schedule_continuation', 'automation_control', {
+          summary_kind: 'conversation_task',
+          task_id: 'task.conversation-1',
+          replaces: false,
+          resumes: false,
+          at: null,
+          every: null,
+          offset: null,
+          until: null,
+          prompt: 'Look for news.',
+          ...fields,
+        }),
+        vars
+      );
+    const daily = schedule({ every: 'day', offset: '510m' });
+    expect(daily.operationKey).toBe('overlay.approvalRequired.operation.conversationTask');
+    expect(daily.primaryValue).toBe(
+      'overlay.approvalRequired.conversationTask.everyDay{"time":"8:30"}'
+    );
+    expect(daily.argumentFields).toEqual([
+      {
+        label: 'overlay.approvalRequired.conversationTask.prompt',
+        format: 'text',
+        value: 'Look for news.',
+      },
+    ]);
+    expect(daily.details).toEqual([]);
+    expect(schedule({ every: 'week', offset: '57h' }).primaryValue).toBe(
+      'overlay.approvalRequired.conversationTask.everyWeek{"weekday":"Wed","time":"9:00"}'
+    );
+    expect(schedule({ every: 'month', offset: '2d' }).primaryValue).toContain('"day":"3"');
+    expect(schedule({ every: 'quarter', offset: '27d' }).primaryValue).toContain('"day":"28"');
+    expect(schedule({ every: 'quarter', offset: '31d' }).primaryValue).toBe(
+      'overlay.approvalRequired.conversationTask.everyQuarterAfter{"days":"31","time":"0:00"}'
+    );
+    const changed = schedule({
+      replaces: true,
+      every: '2h',
+      until: '2026-12-01T00:00:00Z',
+    });
+    expect(changed.operationKey).toBe('overlay.approvalRequired.operation.conversationTaskUpdate');
+    expect(changed.primaryValue).toContain('everyDuration');
+    expect(schedule({ replaces: true, resumes: true, every: 'day' }).operationKey).toBe(
+      'overlay.approvalRequired.operation.conversationTaskResume'
+    );
+    expect(changed.details.map((detail) => detail.labelKey)).toEqual([
+      'overlay.approvalRequired.conversationTask.until',
+    ]);
+    expect(schedule({ at: '2026-11-22T09:00:00+09:00' }).primaryValue).toContain(
+      'conversationTask.once'
+    );
+  });
+
   // What is being consented to must be readable: a screen capture that falls through
   // to the generic line says only "run this operation" and hides the disclosure.
   it('names the window capture and its app, from the tool id and from a recovered summary alike', () => {

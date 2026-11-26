@@ -38,6 +38,7 @@ describe('buildApprovalDisplay', () => {
           summary_kind: 'conversation_task',
           task_id: 'task.conversation-1',
           replaces: false,
+          resumes: false,
           at: null,
           every: null,
           offset: null,

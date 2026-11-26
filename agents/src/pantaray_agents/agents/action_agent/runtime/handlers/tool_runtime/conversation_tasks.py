@@ -30,6 +30,7 @@ from pantaray_agents.local_runtime.hooks.agent_tasks import (
     stop_task,
     task_text,
 )
+from pantaray_agents.local_runtime.hooks.states import first_fire_after
 from pantaray_agents.local_runtime.hooks.tasks import InvalidTask, Task
 from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_db_config
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
@@ -113,7 +114,7 @@ async def run_schedule_continuation_preflight(
     try:
         identity = _resolve_identity(state)
         request = _resolve_request(args, tool_request_id=tool_request_id)
-        _check_times(request.schedule, now=datetime.now(UTC))
+        _check_times(request, now=datetime.now(UTC))
         if request.replaces is not None and _resumes(identity, request) is None:
             raise ScheduleError(_NOT_FOUND_MESSAGE)
     except (ConversationTaskIdentityError, ScheduleError) as exc:
@@ -316,11 +317,21 @@ def _resolve_request(args: ToolArgs, *, tool_request_id: str) -> _Request:
     return _Request(task=task, schedule=schedule, prompt=prompt, replaces=replaces)
 
 
-def _check_times(schedule: TaskSchedule, *, now: datetime) -> None:
+def _check_times(request: _Request, *, now: datetime) -> None:
+    schedule = request.schedule
     if schedule.at is not None and schedule.at <= now:
         raise ScheduleError("at is not in the future.")
-    if schedule.until is not None and schedule.until <= now:
+    if schedule.until is None:
+        return
+    if schedule.until <= now:
         raise ScheduleError("until is not in the future.")
+    # The first fire the approval would set: one at or after until never comes.
+    first = first_fire_after(request.task.hook, now)
+    if first is not None and first >= schedule.until:
+        raise ScheduleError(
+            f"The first run, {_describe(first)}, is not before until, so it "
+            "would never run. Move until later or the first run earlier."
+        )
 
 
 def _resumes(identity: _Identity, request: _Request) -> bool | None:

@@ -286,6 +286,18 @@ async def test_an_update_asks_again_and_keeps_the_old_task_until_yes(
         {"prompt": "x", "every": "2h", "offset": "1h"},
         {"prompt": "x", "every": "day", "offset": "25h"},
         {**DAILY, "until": "2020-01-01T00:00:00+00:00"},
+        # The first run is not before until: one at, and a repeat whose first
+        # run, two days after the approval, is after an until one day away.
+        {
+            "prompt": "x",
+            "at": "2030-01-03T09:00:00+09:00",
+            "until": "2030-01-02T00:00:00+09:00",
+        },
+        {
+            "prompt": "x",
+            "every": "2d",
+            "until": (datetime.now(UTC) + timedelta(days=1)).isoformat(),
+        },
     ],
 )
 async def test_a_schedule_that_cannot_run_is_refused_before_asking(

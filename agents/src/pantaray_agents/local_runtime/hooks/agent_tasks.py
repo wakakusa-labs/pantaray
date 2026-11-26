@@ -27,15 +27,25 @@ from pantaray_agents.local_runtime.storage.transactions import immediate_transac
 from pantaray_agents.local_runtime.storage.users import ensure_user_row
 from pantaray_agents.tools.files.pantaray_tasks import pantaray_tasks_dir
 
-from .controls import approve_in_connection
+from .controls import (
+    NO_CONVERSATION,
+    approve_in_connection,
+    control_of,
+    read_controls,
+    read_task_conversations,
+    set_enabled_in_connection,
+)
 from .listing import TaskView, list_hooks
 from .states import first_fire_after
 from .tasks import TASK_HOOK_PREFIX, Task, TaskFile, parse_task_file, task_file_path
 
 TaskChange = Literal["create", "update"]
 # not_found: no task of this conversation has the id; exists: a create that
-# already ran.
-TaskRefusal = Literal["not_found", "exists"]
+# already ran; ended: its first run would come at or after its until, so it
+# would never run.
+TaskRefusal = Literal["not_found", "exists", "ended"]
+# paused: switched off, or stopped by failures in a row.
+TaskState = Literal["on", "paused"]
 
 _NAMESPACE: Final = uuid.uuid5(uuid.NAMESPACE_URL, "pantaray:agent_task:v1")
 # The rows a task keeps besides its file, each keyed by (user_id, hook_id).
@@ -107,14 +117,24 @@ def _origin(
     return None if row is None else str(row[0])
 
 
-def is_conversation_task(
+def conversation_task_state(
     *, db_path: Path, busy_timeout_ms: int, user_id: str, action_id: str, hook_id: str
-) -> bool:
-    """Whether ``hook_id`` is a task this conversation wrote and still has."""
+) -> TaskState | None:
+    """Whether ``hook_id`` is a task this conversation wrote and still has, and
+    whether it is on, or paused: switched off, or stopped by failures."""
 
     with _connect(db_path, busy_timeout_ms) as connection:
-        owner = _origin(connection, user_id=user_id, hook_id=hook_id)
-    return owner == action_id and task_file_path(hook_id).is_file()
+        if _origin(connection, user_id=user_id, hook_id=hook_id) != action_id:
+            return None
+        control = control_of(read_controls(connection, user_id=user_id), hook_id)
+        stopped = (
+            read_task_conversations(connection, user_id=user_id)
+            .get(hook_id, NO_CONVERSATION)
+            .stopped_reason
+        )
+    if not task_file_path(hook_id).is_file():
+        return None
+    return "on" if control.enabled and stopped is None else "paused"
 
 
 def save_task(
@@ -130,6 +150,9 @@ def save_task(
     """Write the task the user said yes to, approved and bound to the
     conversation ``action_id``; an update replaces one of its own tasks.
 
+    The user's yes means they want it to run, so a paused task is switched
+    back on, its failures cleared, with the approval.
+
     The file is written inside the transaction, just before it commits: a
     failed write leaves no rows, and a failed commit leaves a file with no
     approval, which never fires.
@@ -137,6 +160,14 @@ def save_task(
 
     hook_id = task.hook_id
     path = task_file_path(hook_id)
+    # Computed once: the time checked against until is the time stored.
+    first_fire_at = first_fire_after(task.hook, now)
+    if (
+        first_fire_at is not None
+        and task.hook.until is not None
+        and first_fire_at >= task.hook.until
+    ):
+        return "ended"
     with _connect(db_path, busy_timeout_ms) as connection:
         with immediate_transaction(connection):
             owner = _origin(connection, user_id=user_id, hook_id=hook_id)
@@ -162,7 +193,10 @@ def save_task(
                 user_id=user_id,
                 hook_id=hook_id,
                 content_hash=task.content_hash,
-                first_fire_at=first_fire_after(task.hook, now),
+                first_fire_at=first_fire_at,
+            )
+            set_enabled_in_connection(
+                connection, user_id=user_id, hook_id=hook_id, enabled=True
             )
             _write_atomically(path, task.text)
     return None
@@ -249,7 +283,8 @@ __all__ = [
     "TaskRefusal",
     "TaskSchedule",
     "delete_conversation_tasks_in_connection",
-    "is_conversation_task",
+    "conversation_task_state",
+    "TaskState",
     "list_conversation_tasks",
     "new_task_id",
     "parse_task",

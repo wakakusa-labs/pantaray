@@ -105,6 +105,9 @@ EXPECTED_CONCURRENCY: dict[str, ToolConcurrency] = {
             "request_todo_deletion",
             "record_progress",
             "write_todo_draft",
+            "schedule_continuation",
+            "list_scheduled_continuations",
+            "stop_scheduled_continuation",
         )
     },
 }

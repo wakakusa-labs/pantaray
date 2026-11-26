@@ -352,7 +352,7 @@ async def test_reaching_85_percent_rebuilds_at_the_next_think_boundary(
     # The real tool definitions are part of the fixed input, so the
     # window leaves room for them plus one body inside the 50% target. It is a
     # fixture size: raise it when the tool text grows past it.
-    window_tokens = 44_000
+    window_tokens = 48_000
     monkeypatch.setattr(context_budget, "_window_tokens", lambda: window_tokens)
     for entry in state["history_by_scope"]["S"]:
         if entry["step_type"] == StepType.TOOL_EXECUTION:

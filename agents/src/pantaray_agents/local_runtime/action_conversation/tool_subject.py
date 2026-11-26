@@ -138,6 +138,8 @@ _TOOL_SUBJECTS: dict[str, _ArgsSubject] = {
     "integration_list_tools": _text("toolkit"),
     # A Composio slug names its toolkit and the action, as in GMAIL_SEND_EMAIL.
     "integration_run_tool": _text("slug"),
+    "schedule_continuation": _text("prompt"),
+    "stop_scheduled_continuation": _text("task_id"),
 }
 
 

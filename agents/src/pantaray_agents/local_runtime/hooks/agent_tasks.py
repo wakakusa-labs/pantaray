@@ -14,7 +14,6 @@ import os
 import sqlite3
 import tempfile
 import uuid
-from collections.abc import Iterable
 from contextlib import closing, suppress
 from dataclasses import dataclass
 from datetime import datetime
@@ -190,19 +189,15 @@ def stop_task(
         with immediate_transaction(connection):
             if _origin(connection, user_id=user_id, hook_id=hook_id) != action_id:
                 return "not_found"
-            _delete_rows(connection, user_id=user_id, hook_ids=(hook_id,))
-    remove_task_files((hook_id,))
+            _delete_tasks(connection, user_id=user_id, hook_ids=(hook_id,))
     return None
 
 
 def delete_conversation_tasks_in_connection(
     connection: sqlite3.Connection, *, user_id: str, action_id: str
 ) -> tuple[str, ...]:
-    """Delete the state of the tasks the conversation wrote, in the caller's
-    transaction; the caller removes their files once it commits.
-
-    Without the approval a left-behind file never fires.
-    """
+    """Delete the tasks the conversation wrote, files and state, in the
+    caller's transaction."""
 
     hook_ids = tuple(
         str(hook_id)
@@ -211,24 +206,26 @@ def delete_conversation_tasks_in_connection(
             (user_id, action_id),
         )
     )
-    _delete_rows(connection, user_id=user_id, hook_ids=hook_ids)
+    _delete_tasks(connection, user_id=user_id, hook_ids=hook_ids)
     return hook_ids
 
 
-def remove_task_files(hook_ids: Iterable[str]) -> None:
-    for hook_id in hook_ids:
-        with suppress(FileNotFoundError):
-            task_file_path(hook_id).unlink()
-
-
-def _delete_rows(
+def _delete_tasks(
     connection: sqlite3.Connection, *, user_id: str, hook_ids: tuple[str, ...]
 ) -> None:
+    """Delete the tasks' state, then their files, before the transaction
+    commits: an approval reads the file under the same write lock, so it
+    never sees a file whose task is gone. A failed removal rolls the deletion
+    back; a failed commit leaves state with no file, which never fires."""
+
     for table in _TASK_TABLES:
         connection.executemany(
             f"DELETE FROM {table} WHERE user_id = ? AND hook_id = ?",  # noqa: S608
             [(user_id, hook_id) for hook_id in hook_ids],
         )
+    for hook_id in hook_ids:
+        with suppress(FileNotFoundError):
+            task_file_path(hook_id).unlink()
 
 
 def _write_atomically(path: Path, text: str) -> None:
@@ -256,7 +253,6 @@ __all__ = [
     "list_conversation_tasks",
     "new_task_id",
     "parse_task",
-    "remove_task_files",
     "save_task",
     "stop_task",
     "task_text",

@@ -115,6 +115,18 @@ def read_task_origins(
     }
 
 
+def task_origin_in_connection(
+    connection: sqlite3.Connection, *, user_id: str, hook_id: str
+) -> str | None:
+    """The conversation an Action's task was written from; None for the user's."""
+
+    row = connection.execute(
+        "SELECT action_id FROM hook_task_origins WHERE user_id = ? AND hook_id = ?",
+        (user_id, hook_id),
+    ).fetchone()
+    return None if row is None else str(row[0])
+
+
 def control_of(controls: Mapping[str, HookControl], hook_id: str) -> HookControl:
     return controls.get(hook_id, _DEFAULT_CONTROL)
 
@@ -189,9 +201,9 @@ def approve_in_connection(
         )
         if first_fire_at is not None:
             connection.execute(
-                "INSERT INTO hook_states(user_id, hook_id, next_fire_at) "
-                "VALUES (?, ?, ?)",
-                (user_id, hook_id, iso_z(first_fire_at)),
+                "INSERT INTO hook_states(user_id, hook_id, next_fire_at, "
+                "content_hash) VALUES (?, ?, ?, ?)",
+                (user_id, hook_id, iso_z(first_fire_at), content_hash),
             )
     connection.execute(
         """INSERT INTO hook_settings(user_id, hook_id, enabled, approved_hash)

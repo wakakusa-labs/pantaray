@@ -16,7 +16,7 @@ from pantaray_agents.local_runtime.action_conversation.history_deletion import (
     delete_history_item,
 )
 from pantaray_agents.local_runtime.chat.work_list import read_chat_work_list
-from pantaray_agents.local_runtime.hooks import conversations, gates, runner
+from pantaray_agents.local_runtime.hooks import conversations, gates, listing, runner
 from pantaray_agents.local_runtime.hooks.agent_tasks import (
     TaskSchedule,
     list_conversation_tasks,
@@ -714,3 +714,81 @@ def test_the_listing_names_who_wrote_each_task(world: _World) -> None:
         new_task_id("request-1"): ("agent", action_id),
         "task.build-report": ("user", None),
     }
+
+
+def test_an_approval_racing_the_deletion_registers_nothing(
+    world: _World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Catches an approval that read the file before the conversation's
+    # deletion and then registered the deleted task again, which a later tick
+    # would send into a new conversation.
+    action_id = _conversation(world)
+    task = _task()
+    _save(world, action_id, task)
+    connect = listing.configure_connection
+
+    def deleted_first(connection: sqlite3.Connection, busy_timeout_ms: int) -> None:
+        monkeypatch.setattr(listing, "configure_connection", connect)
+        delete_history_item(
+            db_path=world.db,
+            busy_timeout_ms=1_000,
+            artifact_root=world.db.parent / "artifacts",
+            user_id=USER,
+            kind="conversation",
+            item_id=action_id,
+        )
+        connect(connection, busy_timeout_ms)
+
+    monkeypatch.setattr(listing, "configure_connection", deleted_first)
+    refusal = approve_task(
+        db_path=world.db,
+        busy_timeout_ms=1_000,
+        user_id=USER,
+        hook_id=task.hook_id,
+        content_hash=task.content_hash,
+    )
+    world.tick(NINE)
+
+    assert refusal == "not_found"
+    assert world.turns() == []
+    assert _conversations(world) == set()
+    with closing(sqlite3.connect(world.db)) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM hook_settings").fetchone() == (
+            0,
+        )
+
+
+def test_an_actions_task_never_opens_a_new_conversation(world: _World) -> None:
+    # Catches an agent's task whose binding was lost and that then starts a
+    # new conversation instead of continuing the one it was written from.
+    action_id = _conversation(world)
+    _save(world, action_id, _task())
+    with closing(sqlite3.connect(world.db)) as connection, connection:
+        connection.execute("DELETE FROM hook_conversations")
+    world.tick(NINE)
+
+    assert [conversation for conversation, _ in world.turns()] == [action_id]
+    assert _conversations(world) == {action_id}
+
+
+def test_a_tick_does_not_move_a_newer_approvals_time(
+    world: _World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Catches a tick that fired the old content and then wrote its next time
+    # over the time the user's new approval set, firing the new content early.
+    world.write()
+    world.approve()
+    fire = runner.fire_task
+
+    def approved_again_while_firing(*args: object, **kwargs: object) -> object:
+        outcome = fire(*args, **kwargs)  # type: ignore[arg-type]
+        world.write(
+            HOURLY.replace('"hour"', '"day"').replace("tz", 'offset = "8h", tz')
+        )
+        world.approve(now=NINE)
+        return outcome
+
+    monkeypatch.setattr(runner, "fire_task", approved_again_while_firing)
+    world.tick(NINE)
+
+    assert world.view().next_fire_at == datetime(2026, 11, 22, 8, 0, tzinfo=UTC)

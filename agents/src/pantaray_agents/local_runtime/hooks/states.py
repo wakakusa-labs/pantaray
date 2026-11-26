@@ -23,13 +23,29 @@ class UnknownLocalZoneError(RuntimeError):
     """A hook fires on local time, but the OS zone has no IANA name."""
 
 
-class SqliteHookStateStore:
-    """The hooks' next fire times for the owner the engine fires them for."""
+_NO_TASKS: Mapping[str, str] = {}
 
-    def __init__(self, *, db_path: Path, busy_timeout_ms: int, user_id: str) -> None:
+
+class SqliteHookStateStore:
+    """The hooks' next fire times for the owner the engine fires them for.
+
+    ``task_hashes`` names the content each task fires for. A task's time
+    belongs to the content it was approved for, so a write for content no
+    longer approved, or over a newer approval's time, changes nothing.
+    """
+
+    def __init__(
+        self,
+        *,
+        db_path: Path,
+        busy_timeout_ms: int,
+        user_id: str,
+        task_hashes: Mapping[str, str] = _NO_TASKS,
+    ) -> None:
         self._db_path = db_path
         self._busy_timeout_ms = busy_timeout_ms
         self._user_id = user_id
+        self._task_hashes = task_hashes
 
     def _connect(self) -> closing[sqlite3.Connection]:
         connection = sqlite3.connect(self._db_path)
@@ -48,19 +64,33 @@ class SqliteHookStateStore:
         }
 
     def write_next_fire_time(self, hook_id: str, next_fire_at: datetime | None) -> None:
+        at = None if next_fire_at is None else iso_z(next_fire_at)
+        content_hash = self._task_hashes.get(hook_id)
         with self._connect() as connection, connection:
             # A hook can fire before anything else wrote the owner's row.
             ensure_user_row(connection, user_id=self._user_id)
+            if content_hash is not None:
+                connection.execute(
+                    """INSERT INTO hook_states(user_id, hook_id, next_fire_at,
+                         content_hash)
+                       SELECT ?, ?, ?, ? WHERE EXISTS (
+                         SELECT 1 FROM hook_settings WHERE user_id = ?
+                           AND hook_id = ? AND approved_hash = ?)
+                       ON CONFLICT(user_id, hook_id)
+                       DO UPDATE SET next_fire_at = excluded.next_fire_at
+                       WHERE hook_states.content_hash IS excluded.content_hash""",
+                    (
+                        *(self._user_id, hook_id, at, content_hash),
+                        *(self._user_id, hook_id, content_hash),
+                    ),
+                )
+                return
             connection.execute(
                 """INSERT INTO hook_states(user_id, hook_id, next_fire_at)
                    VALUES (?, ?, ?)
                    ON CONFLICT(user_id, hook_id)
                    DO UPDATE SET next_fire_at = excluded.next_fire_at""",
-                (
-                    self._user_id,
-                    hook_id,
-                    None if next_fire_at is None else iso_z(next_fire_at),
-                ),
+                (self._user_id, hook_id, at),
             )
 
 

@@ -19,6 +19,7 @@ from pantaray_agents.hooks.schedule import latest_occurrence
 from pantaray_agents.local_runtime.storage.migrations.connection import (
     configure_connection,
 )
+from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
 
 from .builtin import builtin_hooks
 from .controls import (
@@ -33,7 +34,7 @@ from .controls import (
     set_enabled_in_connection,
 )
 from .states import SqliteHookStateStore, first_fire_after, local_zone
-from .tasks import InvalidTask, Task, read_task_files
+from .tasks import InvalidTask, Task, read_task_file, read_task_files
 
 HookChangeRefusal = Literal["not_found", "not_a_task", "invalid", "changed"]
 # user: a file the user wrote; agent: one an Action's task tools wrote.
@@ -137,20 +138,26 @@ def approve_task(
     content_hash: str,
     now: datetime | None = None,
 ) -> HookChangeRefusal | None:
-    """Approve the task's content the owner saw, named by its hash."""
+    """Approve the task's content the owner saw, named by its hash.
+
+    The file is read under the database write lock that task writes and
+    deletions hold while they change it, so an approval can only approve a
+    file that still holds that content: a task deleted meanwhile is not
+    registered again.
+    """
 
     if any(hook.id == hook_id for hook in builtin_hooks()):
         return "not_a_task"
-    task = next((t for t in read_task_files() if t.hook_id == hook_id), None)
-    if task is None:
-        return "not_found"
-    if task.content_hash != content_hash:
-        return "changed"
-    if isinstance(task, InvalidTask):
-        return "invalid"
     with closing(sqlite3.connect(db_path)) as connection:
         configure_connection(connection, busy_timeout_ms)
-        with connection:
+        with immediate_transaction(connection):
+            task = read_task_file(hook_id)
+            if task is None:
+                return "not_found"
+            if task.content_hash != content_hash:
+                return "changed"
+            if isinstance(task, InvalidTask):
+                return "invalid"
             approve_in_connection(
                 connection,
                 user_id=user_id,

@@ -51,6 +51,7 @@ from .controls import (
     TurnResult,
     control_of,
     read_controls,
+    task_origin_in_connection,
 )
 from .inbox import consume_in_connection
 from .tasks import Task
@@ -192,7 +193,11 @@ def _claim_turn(
         return "wait"
     if _turn_of_message(connection, user_id=user_id, message_id=message_id):
         return "sent"
-    bound = conversation.action_id
+    # An Action's task continues the conversation it was written from and no
+    # other: a lost binding never becomes a new conversation. The origin's
+    # reference keeps that conversation while the task exists.
+    origin = task_origin_in_connection(connection, user_id=user_id, hook_id=hook_id)
+    bound = conversation.action_id if origin is None else origin
     if bound is not None and _is_busy(connection, user_id=user_id, action_id=bound):
         return "wait"
     connection.execute(
@@ -202,7 +207,7 @@ def _claim_turn(
              last_message_id = excluded.last_message_id, last_result = NULL""",
         (user_id, hook_id, message_id),
     )
-    return _Send(action_id=bound if continues else None)
+    return _Send(action_id=bound if continues or origin is not None else None)
 
 
 def record_turn_results(connection: sqlite3.Connection, *, user_id: str) -> None:

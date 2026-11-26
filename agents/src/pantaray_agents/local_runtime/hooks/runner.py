@@ -68,7 +68,12 @@ def run_hooks_once(
         now=datetime.now(UTC) if now is None else now,
         local_zone=local_zone,
         states=SqliteHookStateStore(
-            db_path=db_path, busy_timeout_ms=busy_timeout_ms, user_id=user_id
+            db_path=db_path,
+            busy_timeout_ms=busy_timeout_ms,
+            user_id=user_id,
+            task_hashes={
+                hook_id: task.content_hash for hook_id, task in active.tasks.items()
+            },
         ),
         inbox=SqliteHookInbox(
             db_path=db_path, busy_timeout_ms=busy_timeout_ms, user_id=user_id

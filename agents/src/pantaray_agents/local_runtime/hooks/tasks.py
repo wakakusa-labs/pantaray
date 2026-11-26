@@ -69,22 +69,37 @@ def task_file_path(hook_id: str) -> Path:
     return pantaray_tasks_dir() / f"{hook_id.removeprefix(TASK_HOOK_PREFIX)}.md"
 
 
+def read_task_file(hook_id: str) -> TaskFile | None:
+    """The task file ``hook_id`` names as it is now; None when there is none."""
+
+    stem = hook_id.removeprefix(TASK_HOOK_PREFIX)
+    # An id from a request names a file in the folder, never a path out of it.
+    if stem == hook_id or _STEM.fullmatch(stem) is None:
+        return None
+    return _read(task_file_path(hook_id))
+
+
 def read_task_files() -> tuple[TaskFile, ...]:
     """Every task file, in file name order; none when the folder is missing."""
 
     # Design limit: every call reads each file; fine for tens of small files.
     # Cache by file mtime when a hooks tick or an event write exceeds 50 ms.
-    tasks: list[TaskFile] = []
-    for path in sorted(pantaray_tasks_dir().glob("*.md")):
-        try:
-            content = path.read_bytes()
-        except FileNotFoundError:
-            continue  # Removed since the listing.
-        except OSError as error:
-            tasks.append(_invalid(path.stem, b"", f"cannot be read: {error.strerror}"))
-            continue
-        tasks.append(parse_task_file(path.stem, content))
-    return tuple(tasks)
+    return tuple(
+        task
+        for task in map(_read, sorted(pantaray_tasks_dir().glob("*.md")))
+        # None: removed since the listing.
+        if task is not None
+    )
+
+
+def _read(path: Path) -> TaskFile | None:
+    try:
+        content = path.read_bytes()
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        return _invalid(path.stem, b"", f"cannot be read: {error.strerror}")
+    return parse_task_file(path.stem, content)
 
 
 def _invalid(stem: str, content: bytes, error: str) -> InvalidTask:

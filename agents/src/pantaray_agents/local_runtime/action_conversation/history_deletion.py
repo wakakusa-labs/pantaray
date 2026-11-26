@@ -22,7 +22,6 @@ from pantaray_agents.local_runtime.descriptor_access import (
 )
 from pantaray_agents.local_runtime.hooks.agent_tasks import (
     delete_conversation_tasks_in_connection,
-    remove_task_files,
 )
 from pantaray_agents.local_runtime.memory_catalog.connection import (
     open_memory_catalog_connection,
@@ -221,13 +220,10 @@ def delete_history_item(
             }
             # The conversation's tasks go with it: a task left without it
             # would continue a conversation that no longer exists.
-            task_ids = (
+            if conversation.action_id is not None:
                 delete_conversation_tasks_in_connection(
                     connection, user_id=user_id, action_id=conversation.action_id
                 )
-                if conversation.action_id is not None
-                else ()
-            )
             for statement in _DELETE_STATEMENTS:
                 connection.execute(statement, params)
             unreferenced = tuple(
@@ -249,9 +245,6 @@ def delete_history_item(
                     artifact_root=artifact_root,
                     image_paths=unreferenced,
                 ),
-            )
-            register_after_commit(
-                connection=connection, callback=partial(remove_task_files, task_ids)
             )
 
 

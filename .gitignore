@@ -174,7 +174,7 @@ cython_debug/
 #.idea/
 
 # Node.js
-node_modules/
+node_modules
 /.pnpm-store/
 npm-debug.log*
 yarn-debug.log*

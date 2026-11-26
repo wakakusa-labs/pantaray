@@ -16,6 +16,7 @@ from pantaray_agents.agents.action_agent.services.token_accounting_service impor
 )
 from pantaray_agents.agents.action_agent.tools import (
     CANCEL_SUBAGENT_TOOL_ID,
+    CONVERSATION_TASK_TOOL_IDS,
     DRAFT_FINAL_ANSWER_TOOL_ID,
     INTEGRATION_LIST_TOOLS_TOOL_ID,
     REMEMBER_TOOL_ID,
@@ -64,6 +65,7 @@ from .consent_gated import (
     run_consent_gated_preflight,
     run_consent_gated_tool,
 )
+from .conversation_tasks import run_conversation_task_tool
 from .draft_final_answer import run_draft_final_answer_tool
 from .external_tools import (
     run_history_fetch_wrapper,
@@ -330,6 +332,13 @@ async def run_validated_tool_impl(
         )
     elif tool_def.tool_id == INTEGRATION_LIST_TOOLS_TOOL_ID:
         result = await run_integration_list_tool(
+            step_id=resolved_step_id, tool_def=tool_def, args=args, state=state
+        )
+    elif (
+        tool_def.tool_id in CONVERSATION_TASK_TOOL_IDS
+        and tool_def.tool_id not in PREFLIGHT_APPROVAL_TOOL_IDS
+    ):
+        result = run_conversation_task_tool(
             step_id=resolved_step_id, tool_def=tool_def, args=args, state=state
         )
     elif tool_def.tool_id in PREFLIGHT_APPROVAL_TOOL_IDS:

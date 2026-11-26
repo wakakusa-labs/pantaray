@@ -20,7 +20,6 @@ from pantaray_agents.local_runtime.storage.migrations.connection import (
     configure_connection,
 )
 
-from . import runner
 from .builtin import builtin_hooks
 from .controls import (
     NO_CONVERSATION,
@@ -30,11 +29,15 @@ from .controls import (
     control_of,
     read_controls,
     read_task_conversations,
+    read_task_origins,
     set_enabled_in_connection,
 )
+from .states import SqliteHookStateStore, first_fire_after, local_zone
 from .tasks import InvalidTask, Task, read_task_files
 
 HookChangeRefusal = Literal["not_found", "not_a_task", "invalid", "changed"]
+# user: a file the user wrote; agent: one an Action's task tools wrote.
+TaskOrigin = Literal["user", "agent"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +59,9 @@ class TaskView:
     error: str | None
     next_fire_at: datetime | None
     action_id: str | None
+    origin: TaskOrigin
+    # The conversation an agent's task was written from, which it continues.
+    created_from_action_id: str | None
     last_result: TurnResult | None
     failure_count: int
     stopped_reason: StoppedReason | None
@@ -72,7 +78,8 @@ def list_hooks(
         configure_connection(connection, busy_timeout_ms)
         controls = read_controls(connection, user_id=user_id)
         conversations = read_task_conversations(connection, user_id=user_id)
-    fire_times = runner.SqliteHookStateStore(
+        origins = read_task_origins(connection, user_id=user_id)
+    fire_times = SqliteHookStateStore(
         db_path=db_path, busy_timeout_ms=busy_timeout_ms, user_id=user_id
     ).read_next_fire_times()
 
@@ -82,7 +89,7 @@ def list_hooks(
         if hook.id in fire_times:
             return fire_times[hook.id]
         zone: tzinfo = (
-            runner.local_zone()
+            local_zone()
             if isinstance(hook.trigger, Every) and hook.trigger.tz == "local"
             else UTC
         )
@@ -111,6 +118,8 @@ def list_hooks(
                 if isinstance(task, Task)
                 else None,
                 action_id=conversation.action_id,
+                origin="user" if task.hook_id not in origins else "agent",
+                created_from_action_id=origins.get(task.hook_id),
                 last_result=conversation.last_result,
                 failure_count=conversation.failure_count,
                 stopped_reason=conversation.stopped_reason,
@@ -126,6 +135,7 @@ def approve_task(
     user_id: str,
     hook_id: str,
     content_hash: str,
+    now: datetime | None = None,
 ) -> HookChangeRefusal | None:
     """Approve the task's content the owner saw, named by its hash."""
 
@@ -142,7 +152,13 @@ def approve_task(
         configure_connection(connection, busy_timeout_ms)
         with connection:
             approve_in_connection(
-                connection, user_id=user_id, hook_id=hook_id, content_hash=content_hash
+                connection,
+                user_id=user_id,
+                hook_id=hook_id,
+                content_hash=content_hash,
+                first_fire_at=first_fire_after(
+                    task.hook, datetime.now(UTC) if now is None else now
+                ),
             )
     return None
 

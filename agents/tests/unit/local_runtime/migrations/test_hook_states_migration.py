@@ -5,7 +5,7 @@ from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
-from pantaray_agents.local_runtime.hooks.runner import SqliteHookStateStore
+from pantaray_agents.local_runtime.hooks.states import SqliteHookStateStore
 from pantaray_agents.local_runtime.storage.migrations import load_default_migrations
 
 from .support import _migrations_before, apply_migrations

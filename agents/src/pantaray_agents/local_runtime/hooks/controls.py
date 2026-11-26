@@ -9,9 +9,11 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Literal
 
 from pantaray_agents.hooks.definitions import HookDefinition
+from pantaray_agents.local_runtime.activity_summary_schedule import iso_z
 from pantaray_agents.local_runtime.storage.users import ensure_user_row
 
 from .tasks import Task, TaskFile
@@ -99,6 +101,20 @@ def read_task_conversations(
     }
 
 
+def read_task_origins(
+    connection: sqlite3.Connection, *, user_id: str
+) -> Mapping[str, str]:
+    """Each task an Action wrote, and the conversation it was written from."""
+
+    return {
+        str(hook_id): str(action_id)
+        for hook_id, action_id in connection.execute(
+            "SELECT hook_id, action_id FROM hook_task_origins WHERE user_id = ?",
+            (user_id,),
+        )
+    }
+
+
 def control_of(controls: Mapping[str, HookControl], hook_id: str) -> HookControl:
     return controls.get(hook_id, _DEFAULT_CONTROL)
 
@@ -150,11 +166,18 @@ def set_enabled_in_connection(
 
 
 def approve_in_connection(
-    connection: sqlite3.Connection, *, user_id: str, hook_id: str, content_hash: str
+    connection: sqlite3.Connection,
+    *,
+    user_id: str,
+    hook_id: str,
+    content_hash: str,
+    first_fire_at: datetime | None,
 ) -> None:
-    """Approve the task's content. New content starts its schedule afresh, so
-    a spent ``at`` moved later, or a trigger changed, fires on its own terms;
-    approving the same content again keeps it."""
+    """Approve the task's content. New content starts its schedule afresh at
+    ``first_fire_at``, its first occurrence after the approval (None for an on
+    trigger), so a spent at moved later fires on its new time and an every
+    approved mid-period waits for its next occurrence instead of firing the
+    one already past; approving the same content again keeps the schedule."""
 
     ensure_user_row(connection, user_id=user_id)
     if control_of(
@@ -164,6 +187,12 @@ def approve_in_connection(
             "DELETE FROM hook_states WHERE user_id = ? AND hook_id = ?",
             (user_id, hook_id),
         )
+        if first_fire_at is not None:
+            connection.execute(
+                "INSERT INTO hook_states(user_id, hook_id, next_fire_at) "
+                "VALUES (?, ?, ?)",
+                (user_id, hook_id, iso_z(first_fire_at)),
+            )
     connection.execute(
         """INSERT INTO hook_settings(user_id, hook_id, enabled, approved_hash)
            VALUES (?, ?, 1, ?)

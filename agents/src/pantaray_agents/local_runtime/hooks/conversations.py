@@ -43,7 +43,15 @@ from pantaray_agents.local_runtime.storage.transactions import immediate_transac
 from pantaray_agents.local_runtime.storage.users import ensure_user_row
 from pantaray_agents.schema.agent.action_message import ActionUserMessageInput
 
-from .controls import NO_CONVERSATION, StoppedReason, TaskConversation, TurnResult
+from .controls import (
+    NO_CONVERSATION,
+    HookControl,
+    StoppedReason,
+    TaskConversation,
+    TurnResult,
+    control_of,
+    read_controls,
+)
 from .inbox import consume_in_connection
 from .tasks import Task
 
@@ -98,6 +106,7 @@ def fire_task(
                 connection,
                 user_id=user_id,
                 hook_id=task.hook.id,
+                content_hash=task.content_hash,
                 message_id=message_id,
                 continues=task.run.conversation == "continue",
             )
@@ -156,17 +165,26 @@ def _claim_turn(
     *,
     user_id: str,
     hook_id: str,
+    content_hash: str,
     message_id: str,
     continues: bool,
 ) -> Literal["wait", "sent"] | _Send:
     """Make ``message_id`` the task's latest turn, once the one before it has
-    ended and been counted; in the caller's immediate transaction.
+    ended and been counted, while the task is still on and approved as read;
+    in the caller's immediate transaction.
 
     The turn is recorded before it is sent, so a crash after the send leaves
-    durable data that binds its conversation before any later fire.
+    durable data that binds its conversation before any later fire. The
+    approval is read again here because the tick read it earlier: a task
+    stopped or deleted with its conversation since must not send a turn, least
+    of all to a new conversation.
     """
 
     ensure_user_row(connection, user_id=user_id)
+    if control_of(read_controls(connection, user_id=user_id), hook_id) != (
+        HookControl(enabled=True, approved_hash=content_hash)
+    ):
+        return "wait"
     conversation, unresolved = _settle_in_connection(
         connection, user_id=user_id, hook_id=hook_id
     )

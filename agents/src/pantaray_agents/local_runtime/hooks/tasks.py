@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Final
 
 from pantaray_agents.hooks.definitions import (
@@ -62,6 +63,12 @@ class InvalidTask:
 TaskFile = Task | InvalidTask
 
 
+def task_file_path(hook_id: str) -> Path:
+    """Where the task ``hook_id`` is written."""
+
+    return pantaray_tasks_dir() / f"{hook_id.removeprefix(TASK_HOOK_PREFIX)}.md"
+
+
 def read_task_files() -> tuple[TaskFile, ...]:
     """Every task file, in file name order; none when the folder is missing."""
 
@@ -76,7 +83,7 @@ def read_task_files() -> tuple[TaskFile, ...]:
         except OSError as error:
             tasks.append(_invalid(path.stem, b"", f"cannot be read: {error.strerror}"))
             continue
-        tasks.append(_task(path.stem, content))
+        tasks.append(parse_task_file(path.stem, content))
     return tuple(tasks)
 
 
@@ -89,7 +96,9 @@ def _invalid(stem: str, content: bytes, error: str) -> InvalidTask:
     )
 
 
-def _task(stem: str, content: bytes) -> TaskFile:
+def parse_task_file(stem: str, content: bytes) -> TaskFile:
+    """The task a file named ``<stem>.md`` holding ``content`` defines."""
+
     hook_id = f"{TASK_HOOK_PREFIX}{stem}"
     content_hash = hashlib.sha256(content).hexdigest()
     try:

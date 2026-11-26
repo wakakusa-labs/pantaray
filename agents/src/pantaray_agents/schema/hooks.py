@@ -8,6 +8,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from pantaray_agents.local_runtime.hooks.controls import StoppedReason, TurnResult
+from pantaray_agents.local_runtime.hooks.listing import TaskOrigin
 
 
 class _Request(BaseModel):
@@ -39,6 +40,10 @@ class TaskHookResponse(_View):
     next_fire_at: datetime | None
     # The conversation the task's turns go to.
     action_id: str | None
+    # user: a file the user wrote; agent: one an Action scheduled with the
+    # user's yes in that conversation, which it continues.
+    origin: TaskOrigin
+    created_from_action_id: str | None
     # None while the latest turn has not ended.
     last_result: TurnResult | None
     failure_count: int

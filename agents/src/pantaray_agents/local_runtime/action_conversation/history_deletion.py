@@ -20,6 +20,9 @@ from pantaray_agents.local_runtime.descriptor_access import (
     DescriptorPathMissingError,
     open_directory_descriptor,
 )
+from pantaray_agents.local_runtime.hooks.agent_tasks import (
+    delete_conversation_tasks_in_connection,
+)
 from pantaray_agents.local_runtime.memory_catalog.connection import (
     open_memory_catalog_connection,
 )
@@ -215,6 +218,12 @@ def delete_history_item(
                 if isinstance(row[0], str)
                 and is_valid_image_storage_path(user_id=user_id, storage_path=row[0])
             }
+            # The conversation's tasks go with it: a task left without it
+            # would continue a conversation that no longer exists.
+            if conversation.action_id is not None:
+                delete_conversation_tasks_in_connection(
+                    connection, user_id=user_id, action_id=conversation.action_id
+                )
             for statement in _DELETE_STATEMENTS:
                 connection.execute(statement, params)
             unreferenced = tuple(

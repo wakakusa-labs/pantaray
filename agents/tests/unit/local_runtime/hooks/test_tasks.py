@@ -1,4 +1,5 @@
-"""Tasks in ~/.pantaray/tasks: approved by content, sent as conversation turns."""
+"""Tasks in ~/.pantaray/tasks: approved by content, sent as conversation turns; an
+Action's own tasks continue its conversation and go with it."""
 
 from __future__ import annotations
 
@@ -11,8 +12,20 @@ from pathlib import Path
 
 import pytest
 
+from pantaray_agents.local_runtime.action_conversation.history_deletion import (
+    delete_history_item,
+)
 from pantaray_agents.local_runtime.chat.work_list import read_chat_work_list
-from pantaray_agents.local_runtime.hooks import conversations, gates, runner
+from pantaray_agents.local_runtime.hooks import conversations, gates, listing, runner
+from pantaray_agents.local_runtime.hooks.agent_tasks import (
+    TaskSchedule,
+    list_conversation_tasks,
+    new_task_id,
+    parse_task,
+    save_task,
+    stop_task,
+    task_text,
+)
 from pantaray_agents.local_runtime.hooks.events import ActionTurnEnded
 from pantaray_agents.local_runtime.hooks.inbox import record_event
 from pantaray_agents.local_runtime.hooks.listing import (
@@ -21,6 +34,7 @@ from pantaray_agents.local_runtime.hooks.listing import (
     list_hooks,
     set_hook_enabled,
 )
+from pantaray_agents.local_runtime.hooks.tasks import Task
 from pantaray_agents.local_runtime.runtime.action_approval_review import (
     action_request_rows,
     action_request_words,
@@ -28,18 +42,26 @@ from pantaray_agents.local_runtime.runtime.action_approval_review import (
 from pantaray_agents.local_runtime.runtime.action_message_models import (
     ACTION_HOOK_STEP_NAME,
     ActionMessageConflictError,
+    NewActionTarget,
+    SubmitActionMessageCommand,
+)
+from pantaray_agents.local_runtime.runtime.action_messages import (
+    submit_action_message,
 )
 from pantaray_agents.local_runtime.runtime.identity import (
     register_logged_out_owner,
     reset_logged_out_owner,
 )
 from pantaray_agents.local_runtime.storage.migrations import load_default_migrations
+from pantaray_agents.schema.agent.action_message import ActionUserMessageInput
 
 from ..migrated_db import prepare_test_database
 
 USER = "user-1"
 HOOK = "task.build-report"
 NINE = datetime(2026, 11, 21, 9, 0, 30, tzinfo=UTC)
+# Before the 09:00 occurrence, which an approval then waits for.
+APPROVED = datetime(2026, 11, 21, 8, 59, tzinfo=UTC)
 HOURLY = """+++
 trigger = { every = "hour", tz = "utc" }
 conversation = "continue"
@@ -66,13 +88,14 @@ class _World:
         assert isinstance(view, TaskView)
         return view
 
-    def approve(self, hook_id: str = HOOK) -> None:
+    def approve(self, hook_id: str = HOOK, now: datetime = APPROVED) -> None:
         refusal = approve_task(
             db_path=self.db,
             busy_timeout_ms=1_000,
             user_id=USER,
             hook_id=hook_id,
             content_hash=self.view(hook_id).content_hash,
+            now=now,
         )
         assert refusal is None
 
@@ -355,6 +378,19 @@ Send the reminder.
     assert len(world.turns()) == 2
 
 
+def test_an_approval_waits_for_the_next_occurrence(world: _World) -> None:
+    # Catches a just-approved every task that fires the occurrence already
+    # past: "every day at 08:00" approved at 14:00 must not run at 14:00.
+    world.write(HOURLY.replace('"hour"', '"day"').replace("tz", 'offset = "8h", tz'))
+    world.approve(now=datetime(2026, 11, 21, 14, 0, tzinfo=UTC))
+    world.tick(datetime(2026, 11, 21, 14, 0, 3, tzinfo=UTC))
+    assert world.turns() == []
+    assert world.view().next_fire_at == datetime(2026, 11, 22, 8, 0, tzinfo=UTC)
+
+    world.tick(datetime(2026, 11, 22, 8, 0, 3, tzinfo=UTC))
+    assert len(world.turns()) == 1
+
+
 def test_only_the_approved_content_fires(world: _World) -> None:
     # Catches a task that fires before approval, one that keeps firing after
     # its file was edited, and approval kept by name rather than by content.
@@ -471,3 +507,288 @@ def test_an_on_task_hears_only_its_own_conversations_turns(world: _World) -> Non
     world.tick(NINE + timedelta(minutes=2, seconds=3))
     world.tick(NINE + timedelta(minutes=2, seconds=6))
     assert [conversation for conversation, _ in world.turns()] == [action_id] * 2
+
+
+HOURLY_SCHEDULE = TaskSchedule(at=None, every="hour", offset=None, until=None)
+
+
+def _conversation(world: _World) -> str:
+    """A conversation the user started, its first turn ended."""
+
+    action_id = submit_action_message(
+        SubmitActionMessageCommand(
+            user_id=USER,
+            target=NewActionTarget(),
+            message=ActionUserMessageInput(
+                message_id="user-message-1", content="Watch the build for me."
+            ),
+        )
+    ).action_id
+    world.end_latest_turn("completed")
+    return action_id
+
+
+def _task(prompt: str = "Check the build.", request: str = "request-1") -> Task:
+    task = parse_task(new_task_id(request), task_text(HOURLY_SCHEDULE, prompt))
+    assert isinstance(task, Task)
+    return task
+
+
+def _save(world: _World, action_id: str, task: Task, change: str = "create") -> None:
+    assert (
+        save_task(
+            db_path=world.db,
+            busy_timeout_ms=1_000,
+            user_id=USER,
+            action_id=action_id,
+            change=change,  # type: ignore[arg-type]
+            task=task,
+            now=NINE - timedelta(minutes=1),
+        )
+        is None
+    )
+
+
+def _conversations(world: _World) -> set[str]:
+    with closing(sqlite3.connect(world.db)) as connection:
+        return {
+            str(row[0])
+            for row in connection.execute("SELECT action_id FROM agent_actions")
+        }
+
+
+def test_a_written_task_continues_the_conversation_that_wrote_it(
+    world: _World,
+) -> None:
+    # Catches an agent's task that opens a new conversation on its first fire
+    # instead of continuing the one the user said yes in, and one written
+    # without approval that never fires.
+    action_id = _conversation(world)
+    _save(world, action_id, _task())
+    world.tick(NINE)
+    world.end_latest_turn("completed")
+    world.tick(NINE + timedelta(hours=1))
+
+    assert [conversation for conversation, _ in world.turns()] == [action_id] * 2
+    assert _conversations(world) == {action_id}
+    (view,) = list_conversation_tasks(
+        db_path=world.db, busy_timeout_ms=1_000, user_id=USER, action_id=action_id
+    )
+    assert (view.origin, view.created_from_action_id) == ("agent", action_id)
+
+
+def test_an_update_replaces_the_prompt_the_next_turn_sends(world: _World) -> None:
+    # Catches an update that leaves the old content approved, so the turn
+    # keeps sending the prompt the user replaced.
+    action_id = _conversation(world)
+    task = _task()
+    _save(world, action_id, task)
+    replaced = parse_task(task.hook_id, task_text(HOURLY_SCHEDULE, "Check the deploy."))
+    assert isinstance(replaced, Task)
+    _save(world, action_id, replaced, change="update")
+    world.tick(NINE)
+
+    with closing(sqlite3.connect(world.db)) as connection:
+        (sent,) = connection.execute(
+            "SELECT user_request_text FROM agent_action_steps WHERE step_name = ?",
+            (ACTION_HOOK_STEP_NAME,),
+        ).fetchall()
+    assert str(sent[0]).startswith("Check the deploy.")
+
+
+def test_a_conversation_sees_and_stops_only_its_own_tasks(world: _World) -> None:
+    # Catches a list or stop that reaches another conversation's schedule or
+    # the user's own task file.
+    mine = _conversation(world)
+    theirs = submit_action_message(
+        SubmitActionMessageCommand(
+            user_id=USER,
+            target=NewActionTarget(),
+            message=ActionUserMessageInput(
+                message_id="user-message-2", content="Another thing."
+            ),
+        )
+    ).action_id
+    world.end_latest_turn("completed")
+    own, other = _task(request="request-1"), _task(request="request-2")
+    _save(world, mine, own)
+    _save(world, theirs, other)
+    world.write()  # The user's own task.
+
+    listed = list_conversation_tasks(
+        db_path=world.db, busy_timeout_ms=1_000, user_id=USER, action_id=mine
+    )
+    assert [view.hook_id for view in listed] == [own.hook_id]
+    for hook_id in (other.hook_id, "task.build-report"):
+        refusal = stop_task(
+            db_path=world.db,
+            busy_timeout_ms=1_000,
+            user_id=USER,
+            action_id=mine,
+            hook_id=hook_id,
+        )
+        assert refusal == "not_found"
+    assert (world.tasks / "build-report.md").is_file()
+
+    assert (
+        stop_task(
+            db_path=world.db,
+            busy_timeout_ms=1_000,
+            user_id=USER,
+            action_id=mine,
+            hook_id=own.hook_id,
+        )
+        is None
+    )
+    assert not (world.tasks / f"{own.hook_id.removeprefix('task.')}.md").exists()
+    world.tick(NINE)
+    assert [conversation for conversation, _ in world.turns()] == [theirs]
+
+
+def test_deleting_the_conversation_deletes_its_tasks(world: _World) -> None:
+    # Catches a deletion that only unbinds the task, so its next fire opens a
+    # new conversation the user deleted the work of.
+    action_id = _conversation(world)
+    task = _task()
+    _save(world, action_id, task)
+    delete_history_item(
+        db_path=world.db,
+        busy_timeout_ms=1_000,
+        artifact_root=world.db.parent / "artifacts",
+        user_id=USER,
+        kind="conversation",
+        item_id=action_id,
+    )
+    world.tick(NINE)
+    world.tick(NINE + timedelta(hours=1))
+
+    assert world.turns() == []
+    assert _conversations(world) == set()
+    assert not (world.tasks / f"{task.hook_id.removeprefix('task.')}.md").exists()
+    with closing(sqlite3.connect(world.db)) as connection:
+        for table in ("hook_settings", "hook_conversations", "hook_task_origins"):
+            assert connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone() == (
+                0,
+            )
+
+
+def test_a_task_deleted_during_a_tick_sends_no_turn(
+    world: _World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Catches a fire that read the task before its conversation was deleted
+    # and then sends its prompt to a new conversation.
+    action_id = _conversation(world)
+    task = _task()
+    _save(world, action_id, task)
+    read = runner.active_hooks
+
+    def deleted_after_reading(*args: object, **kwargs: object) -> object:
+        active = read(*args, **kwargs)  # type: ignore[arg-type]
+        delete_history_item(
+            db_path=world.db,
+            busy_timeout_ms=1_000,
+            artifact_root=world.db.parent / "artifacts",
+            user_id=USER,
+            kind="conversation",
+            item_id=action_id,
+        )
+        return active
+
+    monkeypatch.setattr(runner, "active_hooks", deleted_after_reading)
+    world.tick(NINE)
+    assert world.turns() == []
+    assert _conversations(world) == set()
+
+
+def test_the_listing_names_who_wrote_each_task(world: _World) -> None:
+    # Catches an agent's task listed as the user's, which the list could not
+    # tell apart or trace to its conversation.
+    action_id = _conversation(world)
+    _save(world, action_id, _task())
+    world.write()
+    origins = {
+        view.hook_id: (view.origin, view.created_from_action_id)
+        for view in (world.view(new_task_id("request-1")), world.view())
+    }
+    assert origins == {
+        new_task_id("request-1"): ("agent", action_id),
+        "task.build-report": ("user", None),
+    }
+
+
+def test_an_approval_racing_the_deletion_registers_nothing(
+    world: _World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Catches an approval that read the file before the conversation's
+    # deletion and then registered the deleted task again, which a later tick
+    # would send into a new conversation.
+    action_id = _conversation(world)
+    task = _task()
+    _save(world, action_id, task)
+    connect = listing.configure_connection
+
+    def deleted_first(connection: sqlite3.Connection, busy_timeout_ms: int) -> None:
+        monkeypatch.setattr(listing, "configure_connection", connect)
+        delete_history_item(
+            db_path=world.db,
+            busy_timeout_ms=1_000,
+            artifact_root=world.db.parent / "artifacts",
+            user_id=USER,
+            kind="conversation",
+            item_id=action_id,
+        )
+        connect(connection, busy_timeout_ms)
+
+    monkeypatch.setattr(listing, "configure_connection", deleted_first)
+    refusal = approve_task(
+        db_path=world.db,
+        busy_timeout_ms=1_000,
+        user_id=USER,
+        hook_id=task.hook_id,
+        content_hash=task.content_hash,
+    )
+    world.tick(NINE)
+
+    assert refusal == "not_found"
+    assert world.turns() == []
+    assert _conversations(world) == set()
+    with closing(sqlite3.connect(world.db)) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM hook_settings").fetchone() == (
+            0,
+        )
+
+
+def test_an_actions_task_never_opens_a_new_conversation(world: _World) -> None:
+    # Catches an agent's task whose binding was lost and that then starts a
+    # new conversation instead of continuing the one it was written from.
+    action_id = _conversation(world)
+    _save(world, action_id, _task())
+    with closing(sqlite3.connect(world.db)) as connection, connection:
+        connection.execute("DELETE FROM hook_conversations")
+    world.tick(NINE)
+
+    assert [conversation for conversation, _ in world.turns()] == [action_id]
+    assert _conversations(world) == {action_id}
+
+
+def test_a_tick_does_not_move_a_newer_approvals_time(
+    world: _World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Catches a tick that fired the old content and then wrote its next time
+    # over the time the user's new approval set, firing the new content early.
+    world.write()
+    world.approve()
+    fire = runner.fire_task
+
+    def approved_again_while_firing(*args: object, **kwargs: object) -> object:
+        outcome = fire(*args, **kwargs)  # type: ignore[arg-type]
+        world.write(
+            HOURLY.replace('"hour"', '"day"').replace("tz", 'offset = "8h", tz')
+        )
+        world.approve(now=NINE)
+        return outcome
+
+    monkeypatch.setattr(runner, "fire_task", approved_again_while_firing)
+    world.tick(NINE)
+
+    assert world.view().next_fire_at == datetime(2026, 11, 22, 8, 0, tzinfo=UTC)

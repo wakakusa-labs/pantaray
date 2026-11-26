@@ -5,7 +5,7 @@ from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
-from pantaray_agents.local_runtime.hooks.runner import SqliteHookStateStore
+from pantaray_agents.local_runtime.hooks.states import SqliteHookStateStore
 from pantaray_agents.local_runtime.storage.migrations import load_default_migrations
 
 from .support import _migrations_before, apply_migrations
@@ -96,3 +96,45 @@ def test_every_owner_continues_from_the_shared_state_across_the_upgrade(
             "builtin.insight": datetime(2026, 11, 21, 10, 15, tzinfo=UTC),
             "builtin.summary_1h": datetime(2026, 11, 21, 11, 5, tzinfo=UTC),
         }
+
+
+def test_an_approved_tasks_time_keeps_moving_after_the_upgrade(
+    tmp_path: Path,
+) -> None:
+    # Catches an upgrade that leaves an approved task's time without its
+    # content hash: no tick could move it, and the task would fire every tick.
+    db_path = tmp_path / "runtime.db"
+    migrations = load_default_migrations()
+    apply_migrations(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        migrations=_migrations_before(migrations, "0152_agent_tasks.sql"),
+    )
+    approved = "a" * 64
+    with closing(sqlite3.connect(db_path)) as connection, connection:
+        connection.execute(
+            "INSERT INTO users(user_id, ui_language, created_at, updated_at)"
+            " VALUES ('user-1', 'ja', '2026-11-01T00:00:00Z', '2026-11-01T00:00:00Z')"
+        )
+        connection.execute(
+            "INSERT INTO hook_settings(user_id, hook_id, enabled, approved_hash)"
+            " VALUES ('user-1', 'task.daily', 1, ?)",
+            (approved,),
+        )
+        connection.execute(
+            "INSERT INTO hook_states(user_id, hook_id, next_fire_at)"
+            " VALUES ('user-1', 'task.daily', '2026-11-22T08:00:00Z')"
+        )
+
+    apply_migrations(db_path=db_path, busy_timeout_ms=1_000, migrations=migrations)
+
+    states = SqliteHookStateStore(
+        db_path=db_path,
+        busy_timeout_ms=1_000,
+        user_id="user-1",
+        task_hashes={"task.daily": approved},
+    )
+    states.write_next_fire_time("task.daily", datetime(2026, 11, 23, 8, tzinfo=UTC))
+    assert states.read_next_fire_times() == {
+        "task.daily": datetime(2026, 11, 23, 8, tzinfo=UTC)
+    }

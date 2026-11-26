@@ -43,7 +43,16 @@ from pantaray_agents.local_runtime.storage.transactions import immediate_transac
 from pantaray_agents.local_runtime.storage.users import ensure_user_row
 from pantaray_agents.schema.agent.action_message import ActionUserMessageInput
 
-from .controls import NO_CONVERSATION, StoppedReason, TaskConversation, TurnResult
+from .controls import (
+    NO_CONVERSATION,
+    HookControl,
+    StoppedReason,
+    TaskConversation,
+    TurnResult,
+    control_of,
+    read_controls,
+    task_origin_in_connection,
+)
 from .inbox import consume_in_connection
 from .tasks import Task
 
@@ -98,6 +107,7 @@ def fire_task(
                 connection,
                 user_id=user_id,
                 hook_id=task.hook.id,
+                content_hash=task.content_hash,
                 message_id=message_id,
                 continues=task.run.conversation == "continue",
             )
@@ -156,17 +166,26 @@ def _claim_turn(
     *,
     user_id: str,
     hook_id: str,
+    content_hash: str,
     message_id: str,
     continues: bool,
 ) -> Literal["wait", "sent"] | _Send:
     """Make ``message_id`` the task's latest turn, once the one before it has
-    ended and been counted; in the caller's immediate transaction.
+    ended and been counted, while the task is still on and approved as read;
+    in the caller's immediate transaction.
 
     The turn is recorded before it is sent, so a crash after the send leaves
-    durable data that binds its conversation before any later fire.
+    durable data that binds its conversation before any later fire. The
+    approval is read again here because the tick read it earlier: a task
+    stopped or deleted with its conversation since must not send a turn, least
+    of all to a new conversation.
     """
 
     ensure_user_row(connection, user_id=user_id)
+    if control_of(read_controls(connection, user_id=user_id), hook_id) != (
+        HookControl(enabled=True, approved_hash=content_hash)
+    ):
+        return "wait"
     conversation, unresolved = _settle_in_connection(
         connection, user_id=user_id, hook_id=hook_id
     )
@@ -174,7 +193,11 @@ def _claim_turn(
         return "wait"
     if _turn_of_message(connection, user_id=user_id, message_id=message_id):
         return "sent"
-    bound = conversation.action_id
+    # An Action's task continues the conversation it was written from and no
+    # other: a lost binding never becomes a new conversation. The origin's
+    # reference keeps that conversation while the task exists.
+    origin = task_origin_in_connection(connection, user_id=user_id, hook_id=hook_id)
+    bound = conversation.action_id if origin is None else origin
     if bound is not None and _is_busy(connection, user_id=user_id, action_id=bound):
         return "wait"
     connection.execute(
@@ -184,7 +207,7 @@ def _claim_turn(
              last_message_id = excluded.last_message_id, last_result = NULL""",
         (user_id, hook_id, message_id),
     )
-    return _Send(action_id=bound if continues else None)
+    return _Send(action_id=bound if continues or origin is not None else None)
 
 
 def record_turn_results(connection: sqlite3.Connection, *, user_id: str) -> None:

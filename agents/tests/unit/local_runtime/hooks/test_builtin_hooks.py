@@ -20,10 +20,8 @@ from pantaray_agents.local_runtime.hooks.builtin import builtin_hooks
 from pantaray_agents.local_runtime.hooks.events import ChatMessageRecorded
 from pantaray_agents.local_runtime.hooks.inbox import record_event
 from pantaray_agents.local_runtime.hooks.listing import set_hook_enabled
-from pantaray_agents.local_runtime.hooks.runner import (
-    SqliteHookStateStore,
-    run_hooks_once,
-)
+from pantaray_agents.local_runtime.hooks.runner import run_hooks_once
+from pantaray_agents.local_runtime.hooks.states import SqliteHookStateStore
 from pantaray_agents.local_runtime.runtime.identity import (
     register_logged_out_owner,
     reset_logged_out_owner,

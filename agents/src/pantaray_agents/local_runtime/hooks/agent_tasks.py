@@ -41,8 +41,9 @@ from .tasks import TASK_HOOK_PREFIX, Task, TaskFile, parse_task_file, task_file_
 
 TaskChange = Literal["create", "update"]
 # not_found: no task of this conversation has the id; exists: a create that
-# already ran.
-TaskRefusal = Literal["not_found", "exists"]
+# already ran; ended: its first run would come at or after its until, so it
+# would never run.
+TaskRefusal = Literal["not_found", "exists", "ended"]
 # paused: switched off, or stopped by failures in a row.
 TaskState = Literal["on", "paused"]
 
@@ -159,6 +160,14 @@ def save_task(
 
     hook_id = task.hook_id
     path = task_file_path(hook_id)
+    # Computed once: the time checked against until is the time stored.
+    first_fire_at = first_fire_after(task.hook, now)
+    if (
+        first_fire_at is not None
+        and task.hook.until is not None
+        and first_fire_at >= task.hook.until
+    ):
+        return "ended"
     with _connect(db_path, busy_timeout_ms) as connection:
         with immediate_transaction(connection):
             owner = _origin(connection, user_id=user_id, hook_id=hook_id)
@@ -184,7 +193,7 @@ def save_task(
                 user_id=user_id,
                 hook_id=hook_id,
                 content_hash=task.content_hash,
-                first_fire_at=first_fire_after(task.hook, now),
+                first_fire_at=first_fire_at,
             )
             set_enabled_in_connection(
                 connection, user_id=user_id, hook_id=hook_id, enabled=True

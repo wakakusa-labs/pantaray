@@ -21,6 +21,7 @@ from pantaray_agents.agents.action_agent.tools.conversation_task_tools import (
     STOP_SCHEDULED_CONTINUATION_TOOL_ID,
 )
 from pantaray_agents.local_runtime.hooks.agent_tasks import (
+    TaskRefusal,
     TaskSchedule,
     conversation_task_state,
     list_conversation_tasks,
@@ -70,6 +71,17 @@ _NOT_FOUND_MESSAGE = (
     "This conversation has no schedule with that task_id; "
     "list_scheduled_continuations names its schedules."
 )
+
+
+_SAVE_REFUSALS: dict[TaskRefusal, str] = {
+    "not_found": _NOT_FOUND_MESSAGE,
+    "exists": "This schedule was already written.",
+    "ended": (
+        "While the user was being asked, the time passed when the first run "
+        "could still come before until, so it would never run. Nothing was "
+        "scheduled; propose a later until or an earlier first run."
+    ),
+}
 
 
 class ConversationTaskIdentityError(RuntimeError):
@@ -209,12 +221,8 @@ async def run_schedule_continuation_tool(
             step_id,
             tool_def,
             requested_at,
-            error_type=TASK_NOT_FOUND,
-            message=(
-                _NOT_FOUND_MESSAGE
-                if refusal == "not_found"
-                else "This schedule was already written."
-            ),
+            error_type=INVALID_SCHEDULE if refusal == "ended" else TASK_NOT_FOUND,
+            message=_SAVE_REFUSALS[refusal],
         )
     (view,) = (
         view

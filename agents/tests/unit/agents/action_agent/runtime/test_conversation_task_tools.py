@@ -380,3 +380,31 @@ async def test_an_update_of_a_running_task_does_not_say_it_resumes(
     asked = await _preflight(env, {**DAILY, "task_id": task_id}, "request-on")
     assert isinstance(asked.control, ApprovalRequiredToolControl)
     assert asked.control.command_summary["resumes"] is False
+
+
+async def test_a_schedule_whose_window_passed_during_the_approval_writes_nothing(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Catches a save that recomputes the first run after a slow yes, stores a
+    # time past until and reports a schedule that will never run.
+    args: dict[str, JSONValue] = {
+        "prompt": "x",
+        "every": "1h",
+        "until": (datetime.now(UTC) + timedelta(hours=1, minutes=1)).isoformat(),
+    }
+    asked = await _preflight(env, args, "request-slow")
+    assert isinstance(asked.control, ApprovalRequiredToolControl)
+    _decide(env, "request-slow", "approved_once")
+
+    class _FiveMinutesLater(datetime):
+        @classmethod
+        def now(cls, tz=None):  # type: ignore[no-untyped-def, override]
+            return datetime.now(tz) + timedelta(minutes=5)
+
+    monkeypatch.setattr(conversation_tasks, "datetime", _FiveMinutesLater)
+    output = await _call(env, args, "request-slow")
+
+    assert output["status"] == "error"
+    assert output["error"]["error_type"] == "invalid_schedule"  # type: ignore[index]
+    assert _tasks(env) == ()
+    assert list(env.tasks.glob("*.md")) == []

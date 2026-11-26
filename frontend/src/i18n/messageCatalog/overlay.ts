@@ -121,6 +121,8 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.approvalRequired.conversationTask.everyMonth': 'Every month on day {day} at {time}',
     'overlay.approvalRequired.conversationTask.everyQuarter':
       'Every January, April, July and October on day {day} at {time}',
+    'overlay.approvalRequired.conversationTask.everyQuarterAfter':
+      '{days} days after the start of each quarter (January, April, July and October) at {time}',
     'overlay.approvalRequired.conversationTask.everyDuration': 'Every {count} {unit}',
     'overlay.approvalRequired.conversationTask.units': 'seconds,minutes,hours,days',
     'overlay.approvalRequired.conversationTask.weekdays':
@@ -289,6 +291,8 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.approvalRequired.conversationTask.everyWeek': '毎週{weekday}曜 {time}',
     'overlay.approvalRequired.conversationTask.everyMonth': '毎月 {day} 日 {time}',
     'overlay.approvalRequired.conversationTask.everyQuarter': '1・4・7・10 月の {day} 日 {time}',
+    'overlay.approvalRequired.conversationTask.everyQuarterAfter':
+      '1・4・7・10 月の 1 日から {days} 日後 {time}',
     'overlay.approvalRequired.conversationTask.everyDuration': '{count} {unit}ごと',
     'overlay.approvalRequired.conversationTask.units': '秒,分,時間,日',
     'overlay.approvalRequired.conversationTask.weekdays': '月,火,水,木,金,土,日',

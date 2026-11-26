@@ -65,6 +65,10 @@ describe('buildApprovalDisplay', () => {
       'overlay.approvalRequired.conversationTask.everyWeek{"weekday":"Wed","time":"9:00"}'
     );
     expect(schedule({ every: 'month', offset: '2d' }).primaryValue).toContain('"day":"3"');
+    expect(schedule({ every: 'quarter', offset: '27d' }).primaryValue).toContain('"day":"28"');
+    expect(schedule({ every: 'quarter', offset: '31d' }).primaryValue).toBe(
+      'overlay.approvalRequired.conversationTask.everyQuarterAfter{"days":"31","time":"0:00"}'
+    );
     const changed = schedule({
       replaces: true,
       every: '2h',

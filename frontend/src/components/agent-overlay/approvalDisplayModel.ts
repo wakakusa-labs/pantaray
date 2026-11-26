@@ -245,11 +245,18 @@ function describeSchedule(summary: Record<string, unknown>, t: ApprovalDisplayTr
         day: String(days + 1),
         time,
       });
+    // A quarter's offset may run past its first month (up to 89 days), so only an
+    // offset inside the shortest month reads as a day of that month.
     case 'quarter':
-      return t('overlay.approvalRequired.conversationTask.everyQuarter', {
-        day: String(days + 1),
-        time,
-      });
+      return days < 28
+        ? t('overlay.approvalRequired.conversationTask.everyQuarter', {
+            day: String(days + 1),
+            time,
+          })
+        : t('overlay.approvalRequired.conversationTask.everyQuarterAfter', {
+            days: String(days),
+            time,
+          });
   }
   const match = /^(\d+)([smhd])$/.exec(every);
   if (!match) return every;

@@ -197,6 +197,71 @@ function readUsersBrowser(summary: Record<string, unknown>): string | null {
     : null;
 }
 
+const DURATION_UNIT_SECONDS: Record<string, number> = { s: 1, m: 60, h: 3600, d: 86400 };
+const DURATION_UNITS = ['s', 'm', 'h', 'd'];
+
+// The runtime writes every duration as one number and unit, such as 30m.
+function durationSeconds(text: string | null): number {
+  const match = text ? /^(\d+)([smhd])$/.exec(text) : null;
+  return match ? Number(match[1]) * DURATION_UNIT_SECONDS[match[2]] : 0;
+}
+
+function pad(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+// Local wall time, as the schedule fires on it.
+function formatInstant(text: string): string {
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) return text;
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(
+    date.getHours()
+  )}:${pad(date.getMinutes())}`;
+}
+
+// A calendar unit fires at its start on local time plus the offset: weeks start on
+// Monday and months on the 1st.
+function describeSchedule(summary: Record<string, unknown>, t: ApprovalDisplayTranslator): string {
+  const at = readStringValue(summary, 'at');
+  if (at) return t('overlay.approvalRequired.conversationTask.once', { time: formatInstant(at) });
+  const every = readStringValue(summary, 'every') ?? '';
+  const offset = durationSeconds(readStringValue(summary, 'offset'));
+  const days = Math.floor(offset / 86400);
+  const time = `${Math.floor((offset % 86400) / 3600)}:${pad(Math.floor((offset % 3600) / 60))}`;
+  switch (every) {
+    case 'hour':
+      return t('overlay.approvalRequired.conversationTask.everyHour', {
+        minute: pad(Math.floor(offset / 60)),
+      });
+    case 'day':
+      return t('overlay.approvalRequired.conversationTask.everyDay', { time });
+    case 'week':
+      return t('overlay.approvalRequired.conversationTask.everyWeek', {
+        weekday: t('overlay.approvalRequired.conversationTask.weekdays').split(',')[days % 7] ?? '',
+        time,
+      });
+    case 'month':
+      return t('overlay.approvalRequired.conversationTask.everyMonth', {
+        day: String(days + 1),
+        time,
+      });
+    case 'quarter':
+      return t('overlay.approvalRequired.conversationTask.everyQuarter', {
+        day: String(days + 1),
+        time,
+      });
+  }
+  const match = /^(\d+)([smhd])$/.exec(every);
+  if (!match) return every;
+  return t('overlay.approvalRequired.conversationTask.everyDuration', {
+    count: match[1],
+    unit:
+      t('overlay.approvalRequired.conversationTask.units').split(',')[
+        DURATION_UNITS.indexOf(match[2])
+      ] ?? match[2],
+  });
+}
+
 export function buildApprovalDisplay(
   approvalPanel: ActionApprovalBlocker,
   t: ApprovalDisplayTranslator
@@ -413,6 +478,36 @@ function buildToolApprovalDisplay(
         readStringValue(summary, 'app_name') ?? t('overlay.approvalRequired.unavailable'),
       details: [],
       argumentFields: [],
+    };
+  }
+
+  // A schedule sends turns later with no one watching, so the user approves when it
+  // runs and the exact message it sends.
+  if (summaryKind === 'conversation_task') {
+    const until = readStringValue(summary, 'until');
+    return {
+      operationKey:
+        summary.replaces === true
+          ? 'overlay.approvalRequired.operation.conversationTaskUpdate'
+          : 'overlay.approvalRequired.operation.conversationTask',
+      usesLoginEnvironment: false,
+      primaryLabelKey: 'overlay.approvalRequired.conversationTask.when',
+      primaryValue: describeSchedule(summary, t),
+      details: until
+        ? [
+            {
+              labelKey: 'overlay.approvalRequired.conversationTask.until',
+              value: formatInstant(until),
+            },
+          ]
+        : [],
+      argumentFields: [
+        {
+          label: t('overlay.approvalRequired.conversationTask.prompt'),
+          format: 'text',
+          value: readStringValue(summary, 'prompt') ?? t('overlay.approvalRequired.unavailable'),
+        },
+      ],
     };
   }
 

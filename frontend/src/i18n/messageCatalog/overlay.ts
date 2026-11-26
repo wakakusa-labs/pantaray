@@ -105,6 +105,24 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.approvalRequired.operation.userBrowserWrite':
       'Send data from your {browser}, signed in as you.',
     'overlay.approvalRequired.operation.generic': 'Run this operation.',
+    'overlay.approvalRequired.operation.conversationTask':
+      'Continue this conversation at a scheduled time.',
+    'overlay.approvalRequired.operation.conversationTaskUpdate':
+      "Change this conversation's schedule.",
+    'overlay.approvalRequired.conversationTask.when': 'When',
+    'overlay.approvalRequired.conversationTask.until': 'Ends',
+    'overlay.approvalRequired.conversationTask.prompt': 'Message it sends',
+    'overlay.approvalRequired.conversationTask.once': 'Once, {time}',
+    'overlay.approvalRequired.conversationTask.everyHour': 'Every hour at :{minute}',
+    'overlay.approvalRequired.conversationTask.everyDay': 'Every day at {time}',
+    'overlay.approvalRequired.conversationTask.everyWeek': 'Every {weekday} at {time}',
+    'overlay.approvalRequired.conversationTask.everyMonth': 'Every month on day {day} at {time}',
+    'overlay.approvalRequired.conversationTask.everyQuarter':
+      'Every January, April, July and October on day {day} at {time}',
+    'overlay.approvalRequired.conversationTask.everyDuration': 'Every {count} {unit}',
+    'overlay.approvalRequired.conversationTask.units': 'seconds,minutes,hours,days',
+    'overlay.approvalRequired.conversationTask.weekdays':
+      'Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday',
     'overlay.approvalRequired.operation.integration': 'Write to {service} ({account}).',
     'overlay.approvalRequired.integration.tool': 'Action',
     'overlay.approvalRequired.loginEnvironmentNotice':
@@ -256,6 +274,20 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.approvalRequired.operation.userBrowserWrite':
       'あなたの{browser}からデータを送ります。ログインしているアカウントで、あなたとして送ります。',
     'overlay.approvalRequired.operation.generic': 'この操作を実行します。',
+    'overlay.approvalRequired.operation.conversationTask': 'この会話を決まった時刻に続けます。',
+    'overlay.approvalRequired.operation.conversationTaskUpdate': 'この会話の予定を変えます。',
+    'overlay.approvalRequired.conversationTask.when': 'いつ',
+    'overlay.approvalRequired.conversationTask.until': '終わり',
+    'overlay.approvalRequired.conversationTask.prompt': '送る内容',
+    'overlay.approvalRequired.conversationTask.once': '{time} に1回',
+    'overlay.approvalRequired.conversationTask.everyHour': '毎時 {minute} 分',
+    'overlay.approvalRequired.conversationTask.everyDay': '毎日 {time}',
+    'overlay.approvalRequired.conversationTask.everyWeek': '毎週{weekday}曜 {time}',
+    'overlay.approvalRequired.conversationTask.everyMonth': '毎月 {day} 日 {time}',
+    'overlay.approvalRequired.conversationTask.everyQuarter': '1・4・7・10 月の {day} 日 {time}',
+    'overlay.approvalRequired.conversationTask.everyDuration': '{count} {unit}ごと',
+    'overlay.approvalRequired.conversationTask.units': '秒,分,時間,日',
+    'overlay.approvalRequired.conversationTask.weekdays': '月,火,水,木,金,土,日',
     'overlay.approvalRequired.operation.integration': '{service}（{account}）で書き込みます。',
     'overlay.approvalRequired.integration.tool': '操作',
     'overlay.approvalRequired.loginEnvironmentNotice': 'ログイン情報を使える状態で実行します。',

@@ -486,10 +486,13 @@ function buildToolApprovalDisplay(
   if (summaryKind === 'conversation_task') {
     const until = readStringValue(summary, 'until');
     return {
+      // A yes on a change to a schedule that is off or stopped turns it back on.
       operationKey:
-        summary.replaces === true
-          ? 'overlay.approvalRequired.operation.conversationTaskUpdate'
-          : 'overlay.approvalRequired.operation.conversationTask',
+        summary.replaces !== true
+          ? 'overlay.approvalRequired.operation.conversationTask'
+          : summary.resumes === true
+            ? 'overlay.approvalRequired.operation.conversationTaskResume'
+            : 'overlay.approvalRequired.operation.conversationTaskUpdate',
       usesLoginEnvironment: false,
       primaryLabelKey: 'overlay.approvalRequired.conversationTask.when',
       primaryValue: describeSchedule(summary, t),

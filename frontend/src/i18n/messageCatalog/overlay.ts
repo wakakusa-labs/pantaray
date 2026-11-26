@@ -109,6 +109,8 @@ export const OVERLAY_MESSAGES = defineMessages({
       'Continue this conversation at a scheduled time.',
     'overlay.approvalRequired.operation.conversationTaskUpdate':
       "Change this conversation's schedule.",
+    'overlay.approvalRequired.operation.conversationTaskResume':
+      "Change this conversation's schedule and turn it back on.",
     'overlay.approvalRequired.conversationTask.when': 'When',
     'overlay.approvalRequired.conversationTask.until': 'Ends',
     'overlay.approvalRequired.conversationTask.prompt': 'Message it sends',
@@ -276,6 +278,8 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.approvalRequired.operation.generic': 'この操作を実行します。',
     'overlay.approvalRequired.operation.conversationTask': 'この会話を決まった時刻に続けます。',
     'overlay.approvalRequired.operation.conversationTaskUpdate': 'この会話の予定を変えます。',
+    'overlay.approvalRequired.operation.conversationTaskResume':
+      'この会話の予定を変えて、また動かします。',
     'overlay.approvalRequired.conversationTask.when': 'いつ',
     'overlay.approvalRequired.conversationTask.until': '終わり',
     'overlay.approvalRequired.conversationTask.prompt': '送る内容',

@@ -71,6 +71,9 @@ describe('buildApprovalDisplay', () => {
     });
     expect(changed.operationKey).toBe('overlay.approvalRequired.operation.conversationTaskUpdate');
     expect(changed.primaryValue).toContain('everyDuration');
+    expect(schedule({ replaces: true, resumes: true, every: 'day' }).operationKey).toBe(
+      'overlay.approvalRequired.operation.conversationTaskResume'
+    );
     expect(changed.details.map((detail) => detail.labelKey)).toEqual([
       'overlay.approvalRequired.conversationTask.until',
     ]);

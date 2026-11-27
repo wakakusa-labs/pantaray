@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from pantaray_agents.hooks.definitions import FieldMatch
 from pantaray_agents.local_runtime.action_conversation.history_deletion import (
     delete_history_item,
 )
@@ -56,6 +57,7 @@ from pantaray_agents.local_runtime.todos.pickup import pick_up_todos
 from pantaray_agents.local_runtime.todos.reads import read_todo
 from pantaray_agents.local_runtime.todos.writes import create_todo_item, update_todo
 from pantaray_agents.schema.agent.action_message import ActionUserMessageInput
+from pantaray_agents.schema.hooks import TaskHookResponse
 from pantaray_agents.schema.todos import todo_view
 
 from ..migrated_db import prepare_test_database
@@ -855,3 +857,48 @@ def test_deleting_the_todo_that_asked_deletes_its_hooks(
         assert connection.execute(
             "SELECT COUNT(*) FROM hook_inbox WHERE hook_id = ?", (continues.hook_id,)
         ).fetchone() == (0,)
+
+
+def test_the_list_names_the_asking_conversation_and_an_activity_condition(
+    world: _World,
+) -> None:
+    # Catches a list that names a conversation by another TODO's text, or that
+    # drops what an activity task waits for, which the screens word for the user.
+    origin = _new_conversation_each_fire(world)
+    world.tick(NINE)
+    world.end_latest_turn("completed")
+    ((started, _),) = world.turns()
+    meeting = (
+        FieldMatch(field="bundle_id", op="equals", values=("us.zoom.xos",)),
+        FieldMatch(field="window_title", op="contains", values=("Zoom", "Meet")),
+    )
+    activity = new_task_id("request-2")
+    _save(
+        world,
+        started,
+        build_task(
+            activity,
+            TaskSchedule(at=None, every=None, offset=None, until=None, match=meeting),
+            "Take notes.",
+        ),
+    )
+
+    asked = world.view(activity)
+    assert (asked.created_from_action_id, asked.created_from_title) == (
+        started,
+        "Build report",
+    )
+    assert asked.match == meeting
+    # The HTTP shape reads the condition as listed.
+    listed = TaskHookResponse.model_validate(asked).model_dump()
+    assert listed["match"][1] == {
+        "field": "window_title",
+        "op": "contains",
+        "values": ("Zoom", "Meet"),
+    }
+    # The conversation the user started is no TODO's.
+    assert (world.view().created_from_action_id, world.view().created_from_title) == (
+        origin,
+        None,
+    )
+    assert world.view().match == ()

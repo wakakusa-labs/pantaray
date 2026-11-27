@@ -17,6 +17,7 @@ import { useConversationScroll } from '@/components/agent-overlay/useConversatio
 import { useI18n } from '@/context/useI18n';
 import { useCopyWorkLink } from '@/history/useCopyWorkLink';
 import { useLiveStageText } from '@/components/history/liveStageText';
+import { ConversationSchedules } from '@/components/schedules/ConversationSchedules';
 import { useHistoryLiveStages } from '@/hooks/useHistoryLiveStages';
 
 import { useActionTask } from './useActionTask';
@@ -52,7 +53,7 @@ type ActionTaskPaneProps = {
 
 /**
  * One Action in the main window's detail pane: its conversation (steps, diffs, answers), the
- * approvals it waits on, and the composer that continues, stops or resumes it.
+ * approvals it waits on, its schedules, and the composer that continues, stops or resumes it.
  */
 export function ActionTaskPane({
   actionId,
@@ -310,6 +311,7 @@ export function ActionTaskPane({
             ))}
           </div>
         ) : null}
+        <ConversationSchedules actionId={actionId} />
         <OverlayComposer
           draft={draft.draft}
           mentions={draft.mentions}

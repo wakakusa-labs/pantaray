@@ -66,6 +66,7 @@ import { createAgentsMdFile } from '../settings/agentsMd';
 import { openRegisteredWorkspaceFolder } from '../settings/workspaceFolderOpen';
 import { createWorkspaceSettingsFetcher } from '../settings/workspaceSettingsFetch';
 import { createIntegrationSettingsFetcher } from '../settings/integrationSettingsFetch';
+import { createHooksFetcher } from '../settings/hooksFetch';
 import { broadcastUiLanguage, loadUiLanguage } from '../ui/uiLanguage';
 import { getWelcomeSuggestionText } from '../ui/mainProcessCopy';
 import type { DesktopRuntime } from './desktopRuntime';
@@ -445,6 +446,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
         todos: createTodoFetcher({ requestJson, getUserId }),
         todoImports: createTodoImportFetcher({ requestJson, getUserId }),
         integrations: createIntegrationSettingsFetcher({ requestJson, getUserId }),
+        hooks: createHooksFetcher({ requestJson, getUserId }),
         actionImages: {
           localArtifactRoot: params.localArtifactRoot,
           decodeImageDimensions: (bytes) => {

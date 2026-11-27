@@ -1,6 +1,8 @@
 import { getLocaleForUiLanguage } from '@/i18n/translate';
 import type { MessageKey, UiLanguage } from '@/i18n/types';
 
+import type { HookView } from '../../../electron/src/settings/hooksFetch';
+
 type Translate = (key: MessageKey, vars?: Record<string, string | number>) => string;
 
 export type ScheduleFieldMatch = {
@@ -19,6 +21,13 @@ export type ScheduleTrigger =
   | { kind: 'at'; at: string }
   | { kind: 'every'; every: string; offset: string | null }
   | { kind: 'on'; match: readonly ScheduleFieldMatch[] };
+
+export const hookTrigger = (hook: HookView): ScheduleTrigger =>
+  hook.match.length > 0
+    ? { kind: 'on', match: hook.match }
+    : hook.at
+      ? { kind: 'at', at: hook.at }
+      : { kind: 'every', every: hook.every ?? '', offset: hook.offset };
 
 const DURATION_UNIT_SECONDS: Record<string, number> = { s: 1, m: 60, h: 3600, d: 86400 };
 const DURATION_UNITS = ['s', 'm', 'h', 'd'];
@@ -124,3 +133,10 @@ export function describeTrigger(
       return describeCondition(trigger.match, t);
   }
 }
+
+/** Whether it may run now: on, not stopped. */
+export const isRunning = (hook: HookView) => hook.enabled && hook.stopped_reason === null;
+
+/** An activity schedule that is on but sees nothing while recording is off. */
+export const isNotWatching = (hook: HookView, recordingReady: boolean) =>
+  isRunning(hook) && hook.match.length > 0 && !recordingReady;

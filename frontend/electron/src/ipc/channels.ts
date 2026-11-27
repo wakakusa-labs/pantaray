@@ -81,6 +81,9 @@ export const validInvokeChannels = [
   'integrations:reconnect',
   'integrations:disconnect',
   'integrations:getConnectionState',
+  // Main window only: the schedules Actions set up, and their switches
+  'hooks:list',
+  'hooks:setEnabled',
   'shortcut:getState',
   'shortcut:setAccelerator',
   'overlayPlacement:get',

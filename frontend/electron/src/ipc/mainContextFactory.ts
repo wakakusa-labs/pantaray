@@ -66,6 +66,7 @@ export function buildMainContext(params: {
   todos: MainContext['todos'];
   todoImports: MainContext['todoImports'];
   integrations: MainContext['integrations'];
+  hooks: MainContext['hooks'];
   actionImages: MainContext['actionImages'];
 
   // ui language
@@ -297,6 +298,7 @@ export function buildMainContext(params: {
     todos: params.todos,
     todoImports: params.todoImports,
     integrations: params.integrations,
+    hooks: params.hooks,
 
     actionImages: params.actionImages,
     taskDrafts: createTaskDraftStore({

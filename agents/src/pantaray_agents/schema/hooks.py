@@ -6,6 +6,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
+from pantaray_agents.hooks.definitions import MatchOp
 from pantaray_agents.local_runtime.hooks.controls import StoppedReason, TurnResult
 
 
@@ -17,21 +18,33 @@ class _View(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, from_attributes=True)
 
 
+class HookFieldMatchResponse(_View):
+    """One field of the window's activity, matched as the user said yes to."""
+
+    field: str
+    op: MatchOp
+    values: tuple[str, ...]
+
+
 class TaskHookResponse(_View):
     """A task an Action scheduled with the user's yes in that conversation. It
     fires while ``enabled`` and not stopped: once ``at``, or ``every`` calendar
-    unit or duration (``offset`` after each unit's start), never after
-    ``until``."""
+    unit or duration (``offset`` after each unit's start), or each time a
+    window starts to match every field of ``match``; never after ``until``."""
 
     hook_id: str
     at: datetime | None
     every: str | None
     offset: str | None
+    # Empty for a task that fires on time.
+    match: tuple[HookFieldMatchResponse, ...]
     until: datetime | None
     message: str
     enabled: bool
     next_fire_at: datetime | None
     created_from_action_id: str
+    # That conversation's TODO text; None when no TODO holds it.
+    created_from_title: str | None
     # The conversation each fire continues; None starts a new one each time,
     # as the conversation of a new TODO with the title, in the place named.
     target_action_id: str | None
@@ -47,6 +60,8 @@ class TaskHookResponse(_View):
 
 class HookListResponse(_View):
     hooks: tuple[TaskHookResponse, ...]
+    # Whether recording runs, so the tasks that fire on activity see it now.
+    recording_ready: bool
 
 
 class HookEnabledRequest(_Request):

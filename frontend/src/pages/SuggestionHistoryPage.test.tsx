@@ -242,6 +242,8 @@ beforeEach(() => {
       openConversation: vi.fn(),
     },
     agentOverlay: { showHistory: vi.fn() },
+    // No schedules, so deleting a TODO asks nothing.
+    hooks: { list: vi.fn(async () => ({ hooks: [], recording_ready: true })) },
     todos: {
       list,
       listDeleted,

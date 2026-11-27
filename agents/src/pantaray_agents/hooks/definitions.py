@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import re
 import tomllib
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Final, Literal
@@ -74,12 +74,20 @@ EventValue = str | int | bool | None
 Collapse = Literal["all", "latest"]
 
 
+MatchOp = Literal["equals", "contains"]
+
+
 @dataclass(frozen=True, slots=True)
-class FieldEquals:
-    """The event's field holds this value."""
+class FieldMatch:
+    """The event's text field equals, or contains, one of ``values``.
+
+    Case is ignored (Unicode casefold). A field the event lacks or holds no text
+    in never matches.
+    """
 
     field: str
-    value: str | int | bool
+    op: MatchOp
+    values: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,7 +97,24 @@ class NamedPredicate:
     name: str
 
 
-Condition = FieldEquals | NamedPredicate
+# Field matches hold only all together; a predicate is checked by the caller.
+Condition = tuple[FieldMatch, ...] | NamedPredicate
+
+
+def fields_match(
+    matches: Sequence[FieldMatch], payload: Mapping[str, EventValue]
+) -> bool:
+    """Every match holds on the payload: fields are all-of, values any-of."""
+    return all(_field_matches(match, payload.get(match.field)) for match in matches)
+
+
+def _field_matches(match: FieldMatch, value: EventValue) -> bool:
+    if not isinstance(value, str):
+        return False
+    text = value.casefold()
+    if match.op == "equals":
+        return any(text == expected.casefold() for expected in match.values)
+    return any(expected.casefold() in text for expected in match.values)
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,7 +180,18 @@ class RunConversation:
     prompt: str
 
 
-Run = RunJob | RunConversation
+@dataclass(frozen=True, slots=True)
+class RunMessage:
+    """Send ``message`` to ``target``, or to a new target on each fire when None.
+
+    What a target is, and how a new one starts, belongs to the caller.
+    """
+
+    target: str | None
+    message: str
+
+
+Run = RunJob | RunConversation | RunMessage
 
 
 @dataclass(frozen=True, slots=True)
@@ -354,11 +390,18 @@ def _parse_condition(value: object, names: _Vocabulary, *, where: str) -> Condit
         if value not in names.predicates:
             raise HookDefinitionError(f"{where}: unknown predicate {value}")
         return NamedPredicate(name=value)
+    # A table of field = value: each an equals match on one value.
     table = _table(value, where=where)
-    match list(table.items()):
-        case [(str() as field, str() | int() | bool() as expected)]:
-            return FieldEquals(field=field, value=expected)
-    raise HookDefinitionError(f"{where}: expected a predicate name or one field")
+    if not table:
+        raise HookDefinitionError(f"{where}: expected a predicate name or fields")
+    return tuple(
+        FieldMatch(
+            field=field,
+            op="equals",
+            values=(_string(expected, where=f"{where} {field}"),),
+        )
+        for field, expected in table.items()
+    )
 
 
 def _parse_delivery(

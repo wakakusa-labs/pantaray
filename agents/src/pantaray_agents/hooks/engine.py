@@ -11,10 +11,10 @@ from typing import Literal, Protocol
 from .definitions import (
     EventValue,
     Every,
-    FieldEquals,
     HookDefinition,
     NamedPredicate,
     On,
+    fields_match,
     hook_has_ended,
 )
 from .schedule import latest_occurrence, next_occurrence_after
@@ -176,8 +176,8 @@ def _fire_on(
             dropped_events.append(event)
             continue
         match trigger.conditions.get(event.name):
-            case FieldEquals(field=field, value=value):
-                holds = event.payload.get(field) == value
+            case tuple() as matches:
+                holds = fields_match(matches, event.payload)
             case NamedPredicate(name=name):
                 holds = predicate_holds(name, event)
             case None:

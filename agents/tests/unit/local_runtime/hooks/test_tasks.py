@@ -696,6 +696,31 @@ def test_the_todo_pickup_never_opens_a_fires_todo(
     assert [conversation for *_, conversation in _todos(world)] == [started]
 
 
+def test_a_fires_todo_deleted_after_a_failed_send_is_not_started(
+    world: _World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Catches a retry that starts the conversation of a TODO the user deleted
+    # while its send kept failing.
+    _new_conversation_each_fire(world)
+
+    def refuse(_command: object) -> None:
+        raise ActionMessageConflictError("Action checkpoint is not restored")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(conversations, "submit_action_message", refuse)
+        world.tick(NINE)
+    with closing(sqlite3.connect(world.db)) as connection:
+        (todo_id,) = connection.execute("SELECT todo_id FROM todo_items").fetchone()
+    update_todo(
+        user_id=USER,
+        todo_id=str(todo_id),
+        step=lambda todo: core.delete_by_user(todo, now="2026-11-21T09:00:05Z"),
+    )
+    world.tick(NINE + timedelta(seconds=3))
+    world.tick(NINE + timedelta(seconds=6))
+    assert world.turns() == []
+
+
 def test_deleting_a_conversation_a_task_started_leaves_the_task(
     world: _World,
 ) -> None:

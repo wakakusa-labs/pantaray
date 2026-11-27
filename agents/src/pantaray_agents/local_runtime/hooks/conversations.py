@@ -174,7 +174,7 @@ def _claim_turn(
     version: int,
     target: str | Todo,
     message_id: str,
-) -> Literal["wait", "sent"] | _Send:
+) -> Literal["wait", "sent", "dropped"] | _Send:
     """Make ``message_id`` the task's latest turn, once the one before it has
     ended and been counted, while the task is still on and the version read;
     in the caller's immediate transaction.
@@ -213,6 +213,9 @@ def _claim_turn(
         if stored is None:
             # No start date: the TODO pickup never opens it, only this turn does.
             insert_todo(connection, user_id=user_id, todo=target, client_todo_id=None)
+        elif stored.deletion is not None or stored.deletion_request is not None:
+            # Deleted after a send that failed: the user dropped this occurrence.
+            return "dropped"
         target = stored or target
     connection.execute(
         """UPDATE user_hooks SET last_message_id = ?, last_result = NULL

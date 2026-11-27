@@ -137,7 +137,7 @@ const todo = (done: boolean): TodoView => ({
   organization_id: null,
   text: 't1',
   author: 'user',
-  origin: 'written',
+  origin: { kind: 'written' },
   starts_on: '2026-11-02',
   due: null,
   state: done

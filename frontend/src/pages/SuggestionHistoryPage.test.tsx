@@ -171,7 +171,7 @@ function todo(todoId: string, projectId: string | null, extra: Partial<TodoView>
     organization_id: null,
     text: `TODO ${todoId}`,
     author: 'user',
-    origin: 'written',
+    origin: { kind: 'written' },
     starts_on: '2026-11-02',
     due: null,
     state: { kind: 'working', note: null },

@@ -50,7 +50,7 @@ test.beforeEach(async ({ page }) => {
             // prettier-ignore
             return { kind: 'ok', result: {
               todo_id: 'todo-1', project_id: request.project_id, organization_id: request.organization_id,
-              text: request.text, author: 'user', origin: 'written', starts_on: request.starts_on ?? '2026-11-16',
+              text: request.text, author: 'user', origin: { kind: 'written' }, starts_on: request.starts_on ?? '2026-11-16',
               due: request.due, deletion_request: null, conversation: { kind: 'none' },
               state: { kind: 'not_started', reason: request.starts_on === undefined ? 'starting' : 'scheduled' },
             } };

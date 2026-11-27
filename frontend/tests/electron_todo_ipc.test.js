@@ -14,7 +14,7 @@ const OPEN_TODO = {
   organization_id: 'org-1',
   text: 'Send the estimate',
   author: 'user',
-  origin: 'written',
+  origin: { kind: 'written' },
   starts_on: '2026-11-02',
   due: { date: '2026-11-06', repeat: 'weekly' },
   state: { kind: 'not_started', reason: 'starting' },
@@ -22,7 +22,7 @@ const OPEN_TODO = {
   conversation: { kind: 'none' },
 };
 
-// One TODO per display state and conversation kind the backend sends.
+// One TODO per display state, conversation kind and origin the backend sends.
 const STATE_VARIANTS = [
   { state: { kind: 'done', by: 'ai', at: '2026-11-03T01:02:03.000000Z' } },
   { state: { kind: 'working', note: null }, conversation: { kind: 'action', action_id: 'a-1' } },
@@ -38,12 +38,13 @@ const STATE_VARIANTS = [
   {
     state: { kind: 'handed_over' },
     author: 'ai',
-    origin: 'suggestion',
+    origin: { kind: 'suggestion' },
     conversation: { kind: 'suggestion', suggestion_id: 's-2' },
   },
   { state: { kind: 'not_started', reason: 'scheduled' }, due: null },
   { state: { kind: 'not_started', reason: 'unscheduled' }, starts_on: null },
   { deletion_request: { request_id: 'req-1', reason: 'Duplicate' }, author: 'ai' },
+  { author: 'ai', origin: { kind: 'hook', origin_action_id: 'a-0' } },
 ].map((overrides, index) => ({ ...OPEN_TODO, todo_id: `todo-${index + 2}`, ...overrides }));
 
 const DELETED_TODO = {
@@ -98,7 +99,7 @@ test('every route reaches its backend path with the token, and each response var
   const next = {
     ...OPEN_TODO,
     todo_id: 'todo-next',
-    origin: 'recurrence',
+    origin: { kind: 'recurrence' },
     starts_on: '2026-11-09',
   };
   const responses = [

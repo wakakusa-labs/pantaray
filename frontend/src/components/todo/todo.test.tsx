@@ -25,7 +25,7 @@ const makeTodo = (overrides: Partial<TodoView> = {}): TodoView => ({
   organization_id: null,
   text: '見積書を送る',
   author: 'user',
-  origin: 'written',
+  origin: { kind: 'written' },
   starts_on: '2026-11-02',
   due: null,
   state: { kind: 'not_started', reason: 'starting' },
@@ -91,7 +91,7 @@ it('says where the TODO stands in a word, Pantaray’s deletion request first', 
 it('shows a TODO handed over to the user with no state word, like an ordinary one', () => {
   renderRow({
     author: 'ai',
-    origin: 'suggestion',
+    origin: { kind: 'suggestion' },
     state: { kind: 'handed_over' },
     conversation: { kind: 'suggestion', suggestion_id: 'sug-1' },
   });

@@ -71,6 +71,7 @@ import type { createChatFetcher } from '../chat/chatFetch';
 import type { createTodoFetcher } from '../todos/todoFetch';
 import type { createTodoImportFetcher } from '../todos/todoImportFetch';
 import type { IntegrationSettingsApi } from '../settings/integrationSettingsFetch';
+import type { HooksApi } from '../settings/hooksFetch';
 import type { AgentsMdFile } from '../settings/agentsMd';
 import type {
   CreateNotificationIpcHandlers,
@@ -242,6 +243,8 @@ export type MainContext = {
   };
 
   integrations: IntegrationSettingsApi;
+
+  hooks: HooksApi;
 
   shortcut: {
     getState: () => GlobalShortcutState;

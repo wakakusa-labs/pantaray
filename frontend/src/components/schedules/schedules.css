@@ -1,0 +1,72 @@
+/*
+ * A conversation's schedules, above its composer where its approvals and waits sit: one line each,
+ * the icon, what it says, and its switch or 「再開する」 at the end. Rules between, no boxes.
+ */
+
+.conversation-schedules {
+  margin: 0 0 var(--space-sm);
+  padding: 0;
+  list-style: none;
+}
+
+.conversation-schedule {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  column-gap: 12px;
+  align-items: center;
+  padding: 10px 0;
+  border-top: 1px solid var(--fog-line);
+}
+
+.conversation-schedule__icon {
+  align-self: start;
+  margin-top: 3px;
+  color: var(--fog-text-3);
+}
+
+.conversation-schedule__copy {
+  min-width: 0;
+}
+
+.conversation-schedule__text {
+  margin: 0;
+  color: var(--fog-text);
+  font-size: 14px;
+}
+
+/* Stopped: it waits on the user. */
+.conversation-schedule__text--turn {
+  font-weight: var(--weight-semibold);
+}
+
+.conversation-schedule__text--off {
+  color: var(--fog-text-3);
+}
+
+.conversation-schedule__note {
+  margin: 4px 0 0;
+  color: var(--fog-text-3);
+  font-size: 12.5px;
+}
+
+.conversation-schedule__message {
+  margin-top: 4px;
+  color: var(--fog-text-3);
+  font-size: 12.5px;
+}
+
+.conversation-schedule__message summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.conversation-schedule__message summary:hover {
+  color: var(--fog-text);
+}
+
+.conversation-schedule__message p {
+  margin: 6px 0 0;
+  color: var(--fog-text-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

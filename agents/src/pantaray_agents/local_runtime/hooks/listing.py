@@ -8,10 +8,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from pantaray_agents.hooks.definitions import hook_has_ended
+from pantaray_agents.hooks.definitions import FieldMatch, hook_has_ended
 from pantaray_agents.local_runtime.storage.migrations.connection import (
     configure_connection,
 )
+from pantaray_agents.local_runtime.todos.action_link import read_todo_for_action
+from pantaray_agents.local_runtime.todos.db import read_todo_row
 
 from .controls import (
     StoppedReason,
@@ -28,12 +30,14 @@ class TaskView:
     at: datetime | None
     every: str | None
     offset: str | None
+    match: tuple[FieldMatch, ...]
     until: datetime | None
     message: str
     enabled: bool
     next_fire_at: datetime | None
-    # The conversation that asked for the task.
+    # The conversation that asked for the task, and its TODO's text.
     created_from_action_id: str
+    created_from_title: str | None
     # The conversation each fire continues; None starts a new one each time,
     # as the conversation of a new TODO with the title, in the place named.
     target_action_id: str | None
@@ -57,12 +61,36 @@ def list_hooks(
 
     now = datetime.now(UTC) if now is None else now
     with closing(sqlite3.connect(db_path)) as connection:
+        # The TODO rows are read by column name.
+        connection.row_factory = sqlite3.Row
         configure_connection(connection, busy_timeout_ms)
         rows = read_tasks(connection, user_id=user_id, origin=origin)
-    return tuple(_view(row, now) for row in rows)
+        titles = {
+            action_id: _conversation_title(connection, user_id, action_id)
+            for action_id in {row.origin_action_id for row in rows}
+        }
+    return tuple(_view(row, titles[row.origin_action_id], now) for row in rows)
 
 
-def _view(row: TaskRow, now: datetime) -> TaskView:
+def _conversation_title(
+    connection: sqlite3.Connection, user_id: str, action_id: str
+) -> str | None:
+    """What the screens call a conversation: its TODO's text.
+
+    Design limit: two reads per conversation that asked, fine for the tens of
+    tasks one owner keeps; read them in one query if the list gets slow.
+    """
+
+    todo_id = read_todo_for_action(user_id=user_id, action_id=action_id)
+    todo = (
+        None
+        if todo_id is None
+        else read_todo_row(connection, user_id=user_id, todo_id=todo_id)
+    )
+    return None if todo is None else todo.text
+
+
+def _view(row: TaskRow, origin_title: str | None, now: datetime) -> TaskView:
     target, new = (
         (row.target, None) if isinstance(row.target, str) else (None, row.target)
     )
@@ -71,11 +99,13 @@ def _view(row: TaskRow, now: datetime) -> TaskView:
         at=row.task.schedule.at,
         every=row.task.schedule.every,
         offset=row.task.schedule.offset,
+        match=row.task.schedule.match,
         until=row.task.schedule.until,
         message=row.task.message,
         enabled=row.enabled,
         next_fire_at=None if hook_has_ended(row.hook, now) else row.next_fire_at,
         created_from_action_id=row.origin_action_id,
+        created_from_title=origin_title,
         target_action_id=target,
         title=new.title if new else None,
         organization_id=new.organization_id if new else None,

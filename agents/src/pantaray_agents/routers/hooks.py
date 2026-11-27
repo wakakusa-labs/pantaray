@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from pantaray_agents.agents.core import PublicAgentHTTPError
 from pantaray_agents.auth_http import get_current_user_id_from_token
+from pantaray_agents.local_runtime.hooks.gates import build_gates
 from pantaray_agents.local_runtime.hooks.listing import list_hooks, set_hook_enabled
 from pantaray_agents.local_runtime.runtime.runtime_env import (
     read_local_runtime_db_config,
@@ -34,7 +35,10 @@ def _require_path_user(user_id: str, resolved_user_id: str) -> None:
 @router.get(
     "/{user_id}/hooks",
     response_model=HookListResponse,
-    description="Every task an Action scheduled, with its state.",
+    description=(
+        "Every task an Action scheduled, with its state, and whether recording "
+        "runs for the tasks that fire on activity."
+    ),
 )
 def get_hooks(
     user_id: str, resolved_user_id: str = Depends(get_current_user_id_from_token)
@@ -47,7 +51,10 @@ def get_hooks(
             for view in list_hooks(
                 db_path=db_path, busy_timeout_ms=busy_timeout_ms, user_id=user_id
             )
-        )
+        ),
+        recording_ready=build_gates(
+            db_path=db_path, busy_timeout_ms=busy_timeout_ms, user_id=user_id
+        )["recording_ready"](),
     )
 
 

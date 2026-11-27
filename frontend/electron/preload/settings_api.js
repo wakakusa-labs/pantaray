@@ -23,6 +23,10 @@ function createSettingsApi({ ipcRenderer }) {
       disconnect: (ref) => ipcRenderer.invoke('integrations:disconnect', ref),
       getConnectionState: (ref) => ipcRenderer.invoke('integrations:getConnectionState', ref),
     },
+    hooks: {
+      list: () => ipcRenderer.invoke('hooks:list'),
+      setEnabled: (update) => ipcRenderer.invoke('hooks:setEnabled', update),
+    },
     shortcut: {
       getState: () => ipcRenderer.invoke('shortcut:getState'),
       setAccelerator: (accelerator) => ipcRenderer.invoke('shortcut:setAccelerator', accelerator),

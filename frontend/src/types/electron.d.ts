@@ -111,6 +111,7 @@ import type {
 import type { RecordingStartResult } from '../../electron/src/screenshot/screenshotSync';
 import type { HistoryFetchResult } from '../../electron/src/history/historyFetch';
 import type { IntegrationSettingsApi } from '../../electron/src/settings/integrationSettingsFetch';
+import type { HooksApi } from '../../electron/src/settings/hooksFetch';
 import type { ActionCompletionViewedRequest } from '../../electron/src/history/actionReadState';
 import type {
   ConversationHistoryListItem,
@@ -424,6 +425,8 @@ declare global {
       };
       /** Connected external apps' permissions; main accepts these from the main window only. */
       integrations?: IntegrationSettingsApi;
+      /** The schedules Actions set up (main window only) */
+      hooks?: HooksApi;
       aiConnection?: {
         getState: () => Promise<ConnectionStateResult>;
         update: (command: ConnectionCommand) => Promise<ConnectionUpdateResult>;

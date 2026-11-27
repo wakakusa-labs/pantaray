@@ -4,6 +4,7 @@ export { HISTORY_MESSAGES } from './history';
 export { INTEGRATION_MESSAGES } from './integrations';
 export { ONBOARDING_MESSAGES } from './onboarding';
 export { OVERLAY_MESSAGES } from './overlay';
+export { SCHEDULE_MESSAGES } from './schedules';
 export { SETTINGS_MESSAGES } from './settings';
 export { TODO_MESSAGES } from './todo';
 export { TODO_PROGRESS_MESSAGES } from './todoProgress';

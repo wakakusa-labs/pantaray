@@ -1,9 +1,10 @@
-"""The tasks an Action schedules to continue its own conversation.
+"""The tasks an Action sets up from its conversation.
 
-The Action's task tools are the one writer of ``user_hooks``. A task they save
-continues the conversation that saved it, and is saved only once the user said
-yes to it in that conversation: one yes saves exactly what the user saw.
-Deleting the conversation deletes its tasks through the table's references.
+The Action's hook tools are the one writer of ``user_hooks``. A task they save
+continues the conversation that saved it, or starts a new TODO's conversation
+on each fire, and is saved only once the user said yes to it in that
+conversation: one yes saves exactly what the user saw. Deleting the
+conversation deletes its tasks through the table's references.
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ from pantaray_agents.local_runtime.storage.migrations.connection import (
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
 from pantaray_agents.local_runtime.storage.users import ensure_user_row
 
-from .listing import TaskView, list_hooks
+from .controls import NewConversation, TaskRow, read_tasks
 from .states import first_fire_after
 from .tasks import TASK_HOOK_PREFIX, Task, trigger_json
 
@@ -35,8 +36,11 @@ TaskRefusal = Literal["not_found", "exists", "ended"]
 TaskState = Literal["on", "paused"]
 
 _NAMESPACE: Final = uuid.uuid5(uuid.NAMESPACE_URL, "pantaray:agent_task:v1")
+# Where a fire goes is part of the definition, as when and what it sends.
 _CHANGED: Final = (
-    "(trigger_json, until, message) IS NOT (:trigger_json, :until, :message)"
+    "(trigger_json, until, message, target_action_id, title, organization_id,"
+    " project_id) IS NOT (:trigger_json, :until, :message, :target_action_id,"
+    " :title, :organization_id, :project_id)"
 )
 
 
@@ -78,10 +82,12 @@ def save_task(
     action_id: str,
     change: TaskChange,
     task: Task,
+    new_conversation: NewConversation | None,
     now: datetime,
 ) -> TaskRefusal | None:
-    """Save the task the user said yes to, bound to the conversation
-    ``action_id``; an update replaces one of its own tasks.
+    """Save the task the user said yes to, asked for by the conversation
+    ``action_id``, which each fire continues, or which starts
+    ``new_conversation`` on each fire; an update replaces one of its own tasks.
 
     The user's yes means they want it to run, so a paused task is switched
     back on, its failures cleared. A changed definition starts its schedule
@@ -103,6 +109,12 @@ def save_task(
         "until": None if until is None else iso_z(until),
         "message": task.message,
         "next_fire_at": None if first_fire_at is None else iso_z(first_fire_at),
+        "target_action_id": action_id if new_conversation is None else None,
+        "title": None if new_conversation is None else new_conversation.title,
+        "organization_id": None
+        if new_conversation is None
+        else new_conversation.organization_id,
+        "project_id": None if new_conversation is None else new_conversation.project_id,
     }
     with _connect(db_path, busy_timeout_ms) as connection:
         with immediate_transaction(connection):
@@ -110,10 +122,11 @@ def save_task(
                 ensure_user_row(connection, user_id=user_id)
                 inserted = connection.execute(
                     """INSERT INTO user_hooks(user_id, hook_id, origin_action_id,
-                         target_action_id, trigger_json, until, message,
-                         next_fire_at)
-                       VALUES (:user_id, :hook_id, :action_id, :action_id,
-                         :trigger_json, :until, :message, :next_fire_at)
+                         target_action_id, title, organization_id, project_id,
+                         trigger_json, until, message, next_fire_at)
+                       VALUES (:user_id, :hook_id, :action_id, :target_action_id,
+                         :title, :organization_id, :project_id, :trigger_json,
+                         :until, :message, :next_fire_at)
                        ON CONFLICT(user_id, hook_id) DO NOTHING""",
                     values,
                 )
@@ -125,7 +138,9 @@ def save_task(
                      next_fire_at = CASE WHEN {_CHANGED}
                        THEN :next_fire_at ELSE next_fire_at END,
                      trigger_json = :trigger_json, until = :until,
-                     message = :message, enabled = 1, failure_count = 0,
+                     message = :message, target_action_id = :target_action_id,
+                     title = :title, organization_id = :organization_id,
+                     project_id = :project_id, enabled = 1, failure_count = 0,
                      stopped_reason = NULL
                    WHERE user_id = :user_id AND hook_id = :hook_id
                      AND origin_action_id = :action_id""",  # noqa: S608
@@ -136,16 +151,14 @@ def save_task(
 
 def list_conversation_tasks(
     *, db_path: Path, busy_timeout_ms: int, user_id: str, action_id: str
-) -> tuple[TaskView, ...]:
-    return list_hooks(
-        db_path=db_path,
-        busy_timeout_ms=busy_timeout_ms,
-        user_id=user_id,
-        origin=action_id,
-    )
+) -> tuple[TaskRow, ...]:
+    """The tasks the conversation ``action_id`` asked for, in id order."""
+
+    with _connect(db_path, busy_timeout_ms) as connection:
+        return read_tasks(connection, user_id=user_id, origin=action_id)
 
 
-def stop_task(
+def delete_task(
     *, db_path: Path, busy_timeout_ms: int, user_id: str, action_id: str, hook_id: str
 ) -> TaskRefusal | None:
     """Delete one of the conversation's tasks with its state and inbox."""
@@ -164,8 +177,8 @@ __all__ = [
     "TaskRefusal",
     "TaskState",
     "conversation_task_state",
+    "delete_task",
     "list_conversation_tasks",
     "new_task_id",
     "save_task",
-    "stop_task",
 ]

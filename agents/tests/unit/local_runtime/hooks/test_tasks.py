@@ -17,11 +17,12 @@ from pantaray_agents.local_runtime.action_conversation.history_deletion import (
 )
 from pantaray_agents.local_runtime.hooks import conversations, gates, runner, states
 from pantaray_agents.local_runtime.hooks.agent_tasks import (
+    delete_task,
     list_conversation_tasks,
     new_task_id,
     save_task,
-    stop_task,
 )
+from pantaray_agents.local_runtime.hooks.controls import NewConversation
 from pantaray_agents.local_runtime.hooks.listing import (
     TaskView,
     list_hooks,
@@ -84,12 +85,20 @@ class _World:
         schedule: TaskSchedule = HOURLY,
         prompt: str = PROMPT,
         now: datetime = APPROVED,
+        new_conversation: NewConversation | None = None,
     ) -> str:
         """The user's yes to a task: created first, replaced after."""
         change = "create" if self.action_id is None else "update"
         if self.action_id is None:
             self.action_id = _conversation(self)
-        _save(self, self.action_id, build_task(HOOK, schedule, prompt), change, now)
+        _save(
+            self,
+            self.action_id,
+            build_task(HOOK, schedule, prompt),
+            change,
+            now,
+            new_conversation,
+        )
         return self.action_id
 
     def enable(self, enabled: bool, hook_id: str = HOOK) -> None:
@@ -393,6 +402,7 @@ def _save(
     task: Task,
     change: str = "create",
     now: datetime = NINE - timedelta(minutes=1),
+    new_conversation: NewConversation | None = None,
 ) -> None:
     assert (
         save_task(
@@ -402,6 +412,7 @@ def _save(
             action_id=action_id,
             change=change,  # type: ignore[arg-type]
             task=task,
+            new_conversation=new_conversation,
             now=now,
         )
         is None
@@ -454,8 +465,8 @@ def test_a_conversation_sees_and_stops_only_its_own_tasks(world: _World) -> None
     listed = list_conversation_tasks(
         db_path=world.db, busy_timeout_ms=1_000, user_id=USER, action_id=mine
     )
-    assert [view.hook_id for view in listed] == [own.hook_id]
-    refusal = stop_task(
+    assert [row.task.hook_id for row in listed] == [own.hook_id]
+    refusal = delete_task(
         db_path=world.db,
         busy_timeout_ms=1_000,
         user_id=USER,
@@ -465,7 +476,7 @@ def test_a_conversation_sees_and_stops_only_its_own_tasks(world: _World) -> None
     assert refusal == "not_found"
 
     assert (
-        stop_task(
+        delete_task(
             db_path=world.db,
             busy_timeout_ms=1_000,
             user_id=USER,
@@ -560,17 +571,15 @@ def test_a_tick_does_not_move_a_newer_approvals_time(
 def _new_conversation_each_fire(
     world: _World, organization_id: str | None = None, project_id: str | None = None
 ) -> str:
-    """A task saved to start a new TODO's conversation on each fire; no tool
-    writes one yet, so the row is moved off its conversation here."""
+    """A task saved to start a new TODO's conversation on each fire."""
 
-    origin = world.save()
-    with closing(sqlite3.connect(world.db)) as connection, connection:
-        connection.execute(
-            "UPDATE user_hooks SET target_action_id = NULL, title = 'Build report',"
-            " organization_id = ?, project_id = ?",
-            (organization_id, project_id),
+    return world.save(
+        new_conversation=NewConversation(
+            title="Build report",
+            organization_id=organization_id,
+            project_id=project_id,
         )
-    return origin
+    )
 
 
 def _todos(world: _World) -> list[tuple[str, str | None, str | None, str | None]]:

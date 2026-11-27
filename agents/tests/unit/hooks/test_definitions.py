@@ -7,8 +7,9 @@ import pytest
 
 from pantaray_agents.hooks.definitions import (
     Delivery,
+    EventValue,
     Every,
-    FieldEquals,
+    FieldMatch,
     HookDefinition,
     HookDefinitionError,
     MinInterval,
@@ -16,6 +17,7 @@ from pantaray_agents.hooks.definitions import (
     On,
     RunConversation,
     RunJob,
+    fields_match,
     load_conversation_hook,
     load_hook_definitions,
 )
@@ -113,7 +115,7 @@ def test_an_on_hook_parses_its_conditions_and_delivery() -> None:
     assert hook.trigger == On(
         events=("a.done", "chat.said", "a.failed"),
         conditions={
-            "a.done": FieldEquals(field="kind", value="24h"),
+            "a.done": (FieldMatch(field="kind", op="equals", values=("24h",)),),
             "chat.said": NamedPredicate(name="still_true"),
         },
         delivery=Delivery(
@@ -123,6 +125,56 @@ def test_an_on_hook_parses_its_conditions_and_delivery() -> None:
             min_interval=MinInterval(after="b.started", duration=timedelta(minutes=15)),
         ),
     )
+
+
+def _equals(field: str, *values: str) -> FieldMatch:
+    return FieldMatch(field=field, op="equals", values=values)
+
+
+def _contains(field: str, *values: str) -> FieldMatch:
+    return FieldMatch(field=field, op="contains", values=values)
+
+
+_WINDOW: dict[str, EventValue] = {
+    "app_name": "Zoom",
+    "bundle_id": "us.zoom.xos",
+    "window_title": "Zoom Meeting (Weekly Strasse.*)",
+    "window_id": 7,
+    "pid": None,
+}
+
+
+@pytest.mark.parametrize(
+    ("matches", "holds"),
+    [
+        ((_equals("bundle_id", "US.ZOOM.XOS"),), True),
+        ((_equals("app_name", "Zoo"),), False),
+        # casefold, not lower: ß folds to ss.
+        ((_contains("window_title", "STRAßE"),), True),
+        ((_contains("window_title", "meeting"),), True),
+        ((_contains("window_title", "Teams", "zoom meeting"),), True),
+        ((_contains("window_title", "Teams", "Meet "),), False),
+        (
+            (_equals("bundle_id", "us.zoom.xos"), _contains("window_title", "Teams")),
+            False,
+        ),
+        (
+            (_equals("bundle_id", "us.zoom.xos"), _contains("window_title", "meeting")),
+            True,
+        ),
+        # A value is text, not a pattern.
+        ((_contains("window_title", "Zoom.*Weekly"),), False),
+        ((_contains("window_title", "Strasse.*"),), True),
+        # A field missing, empty or not text never matches, whatever the op.
+        ((_contains("url", "zoom"),), False),
+        ((_contains("pid", ""),), False),
+        ((_equals("window_id", "7"),), False),
+    ],
+)
+def test_field_matches_follow_the_declared_rules(
+    matches: tuple[FieldMatch, ...], holds: bool
+) -> None:
+    assert fields_match(matches, _WINDOW) is holds
 
 
 _ON = 'id = "a"\ntrigger = { on = ["a.done"] }\nrun = { job = "j" }'
@@ -138,7 +190,9 @@ _ON = 'id = "a"\ntrigger = { on = ["a.done"] }\nrun = { job = "j" }'
         'deliver = { immediate = ["a.done"], collapse = "all", min_interval = { after = "a.done", duration = "1m" } }',
         'deliver = { immediate = ["a.done"], collapse = "all" }\nif = { "chat.said" = "still_true" }',
         'deliver = { immediate = ["a.done"], collapse = "all" }\nif = { "a.done" = "unknown" }',
-        'deliver = { immediate = ["a.done"], collapse = "all" }\nif = { "a.done" = { x = 1, y = 2 } }',
+        'deliver = { immediate = ["a.done"], collapse = "all" }\nif = { "a.done" = { x = 1 } }',
+        'deliver = { immediate = ["a.done"], collapse = "all" }\nif = { "a.done" = { x = "" } }',
+        'deliver = { immediate = ["a.done"], collapse = "all" }\nif = { "a.done" = {} }',
         # A misspelled event name is never written.
         'deliver = { immediate = ["a.dnoe"], collapse = "all" }',
     ],

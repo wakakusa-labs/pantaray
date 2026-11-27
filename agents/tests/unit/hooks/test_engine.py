@@ -16,7 +16,7 @@ from pantaray_agents.hooks.definitions import (
     Delivery,
     EventValue,
     Every,
-    FieldEquals,
+    FieldMatch,
     HookDefinition,
     MinInterval,
     NamedPredicate,
@@ -396,7 +396,7 @@ def test_an_event_whose_condition_fails_is_consumed_without_a_run() -> None:
     harness = _Harness(
         _on_hook(
             conditions={
-                "insight": FieldEquals(field="kind", value="24h"),
+                "insight": (FieldMatch(field="kind", op="equals", values=("24h",)),),
                 "turn": NamedPredicate(name="still_dismissed"),
             }
         )

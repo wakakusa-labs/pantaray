@@ -1,32 +1,13 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { HistoryDeleteDialog } from '@/components/history/HistoryDeleteDialog';
+import {
+  countConversationSchedules,
+  type ConversationScheduleCount,
+} from '@/components/schedules/scheduleCount';
 import { useI18n } from '@/context/useI18n';
 
 import type { TodoView } from '../../../electron/src/todos/todoContracts';
-
-/** How many schedules go with the TODO, or `unknown` when the list could not be read. */
-type ScheduleCount = number | 'unknown';
-
-/**
- * The schedules asked for in the TODO's conversation and those sending to it, which deleting the
- * TODO deletes too. Only an Action's conversation can hold schedules.
- */
-async function countSchedules(todo: TodoView): Promise<ScheduleCount> {
-  const { conversation } = todo;
-  if (conversation.kind !== 'action') return 0;
-  const actionId = conversation.action_id;
-  try {
-    const hooks = window.electron?.hooks;
-    if (!hooks) throw new Error('Schedules bridge is unavailable.');
-    const list = await hooks.list();
-    return list.hooks.filter(
-      (hook) => hook.created_from_action_id === actionId || hook.target_action_id === actionId
-    ).length;
-  } catch {
-    return 'unknown';
-  }
-}
 
 /**
  * Deleting a TODO deletes the schedules of its conversation, and restoring the TODO does not
@@ -45,7 +26,7 @@ export function useTodoDeleteConfirmation({
   const { t } = useI18n();
   const [asking, setAsking] = useState<{
     todoId: string;
-    schedules: ScheduleCount;
+    schedules: ConversationScheduleCount;
     trigger: HTMLElement | null;
   } | null>(null);
   // Focus can leave the modal dialog only once it is gone.
@@ -59,7 +40,10 @@ export function useTodoDeleteConfirmation({
   const requestDelete = async (todo: TodoView) => {
     // The delete button that was pressed, to return to if the user keeps the TODO.
     const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const schedules = await countSchedules(todo);
+    // Only an Action's conversation can hold schedules.
+    const { conversation } = todo;
+    const schedules =
+      conversation.kind === 'action' ? await countConversationSchedules(conversation.action_id) : 0;
     if (schedules === 0) {
       void deleteTodo(todo.todo_id);
       return;

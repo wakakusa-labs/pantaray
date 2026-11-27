@@ -12,8 +12,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from ..context.source_control import context_source_control
+from ..context.source_reader import SourceReader
+from ..hooks.activity_watch import (
+    ACTIVITY_WATCH_INTERVAL_SECONDS,
+    run_activity_watch_once,
+)
 from ..hooks.builtin import builtin_hooks
-from ..hooks.gates import owner_is_settled
+from ..hooks.gates import build_gates, owner_is_settled
 from ..hooks.runner import run_hooks_once
 from ..todos.retention import purge_expired_todos
 from .browser_relay import sweep_browser_sessions
@@ -95,6 +101,22 @@ def _owner_is_settled(_context: PeriodicTaskContext) -> bool:
     return owner_is_settled()
 
 
+def _watch_activity(context: PeriodicTaskContext) -> None:
+    gate = context_source_control.gate
+    run_activity_watch_once(
+        db_path=context.db_path,
+        busy_timeout_ms=context.busy_timeout_ms,
+        user_id=context.owner_user_id,
+        reader=SourceReader(gate),
+        gate=gate,
+        recording_ready=build_gates(
+            db_path=context.db_path,
+            busy_timeout_ms=context.busy_timeout_ms,
+            user_id=context.owner_user_id,
+        )["recording_ready"],
+    )
+
+
 def build_periodic_schedule(
     *, embedding_slot: MemoryEmbeddingProjectionSlot
 ) -> tuple[PeriodicTask, ...]:
@@ -108,6 +130,14 @@ def build_periodic_schedule(
                 db_path=context.db_path,
                 busy_timeout_ms=context.busy_timeout_ms,
             ),
+        ),
+        PeriodicTask(
+            name="activity_watch",
+            interval_seconds=ACTIVITY_WATCH_INTERVAL_SECONDS,
+            # Before the hooks, which fire what it finds in the same tick. It
+            # reads Zanei only for an activity hook and while recording.
+            is_ready=_owner_is_settled,
+            run=_watch_activity,
         ),
         PeriodicTask(
             name="hooks",

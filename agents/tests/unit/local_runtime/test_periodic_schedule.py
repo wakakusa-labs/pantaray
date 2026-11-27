@@ -26,6 +26,7 @@ from pantaray_agents.local_runtime.runtime.session_store import mark_configured
 # `tests/conftest.py` puts the store back to unconfigured after each test. The
 # hooks task runs regardless: each hook waits on its own `owner_settled` gate.
 OWNER_SCOPED_TASK_NAMES = (
+    "activity_watch",
     "memory_embedding_projection",
     "todo_purge",
 )
@@ -362,6 +363,9 @@ def _record_every_periodic_runner(
     )
     monkeypatch.setattr(periodic_schedule, "run_hooks_once", record("hooks"))
     monkeypatch.setattr(
+        periodic_schedule, "run_activity_watch_once", record("activity_watch")
+    )
+    monkeypatch.setattr(
         periodic_schedule, "run_memory_catalog_repair_once", record("memory_repair")
     )
     monkeypatch.setattr(
@@ -564,6 +568,7 @@ def test_due_tasks_run_in_declaration_order(
 
     assert calls == [
         "reaper",
+        "activity_watch",
         "hooks",
         "memory_repair",
         "memory_embedding_projection",

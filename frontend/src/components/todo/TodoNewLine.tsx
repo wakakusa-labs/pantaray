@@ -57,12 +57,14 @@ export function TodoNewLine({
         value={text}
         onChange={(event) => changeText(event.target.value)}
         onKeyDown={(event) => {
+          // Keys an IME takes while composing, its Escape among them, are the IME's.
+          if (isImeKey(event)) return;
           if (event.key === 'Escape') {
             changeText('');
             event.currentTarget.blur();
             return;
           }
-          if (event.key !== 'Enter' || event.shiftKey || isImeKey(event)) return;
+          if (event.key !== 'Enter' || event.shiftKey) return;
           event.preventDefault();
           void send();
         }}

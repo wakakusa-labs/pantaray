@@ -310,6 +310,18 @@ it('adds the line on Enter and stays on the emptied line, but not on an IME’s 
   expect(line).toHaveFocus();
 });
 
+it('leaves an IME’s Escape to the IME, and clears the line on a plain Escape', async () => {
+  const line = renderNewLine(vi.fn(async () => true));
+  await userEvent.type(line, '見積書');
+  fireEvent.keyDown(line, { key: 'Escape', isComposing: true });
+  fireEvent.keyDown(line, { key: 'Escape', keyCode: 229 });
+  expect(line).toHaveValue('見積書');
+  expect(line).toHaveFocus();
+  await userEvent.keyboard('{Escape}');
+  expect(line).toHaveValue('');
+  expect(line).not.toHaveFocus();
+});
+
 it('keeps what was typed while the add was answering, and the whole line when it failed', async () => {
   let answer: (added: boolean) => void = () => undefined;
   const onCreate = vi.fn(() => new Promise<boolean>((resolve) => (answer = resolve)));

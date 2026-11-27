@@ -25,7 +25,8 @@ from .events import HookEvent
 
 
 def _listening_hooks(event: HookEvent) -> tuple[str, ...]:
-    """The hooks that listen to the event: built-ins only, as no task hears one."""
+    """The built-ins that listen to the event; a task hears only activity, which
+    the watcher writes to that one task's inbox."""
 
     now = datetime.now(UTC)
     return tuple(
@@ -47,9 +48,25 @@ def record_event(
     Called inside the caller's transaction, so the event commits or rolls back
     with the write it records. An event no hook listens to is not kept.
     """
-    hook_ids = _listening_hooks(event)
-    if not hook_ids:
-        return
+    record_event_for(
+        connection,
+        user_id=user_id,
+        hook_ids=_listening_hooks(event),
+        event=event,
+        occurred_at=occurred_at,
+    )
+
+
+def record_event_for(
+    connection: sqlite3.Connection,
+    *,
+    user_id: str,
+    hook_ids: Sequence[str],
+    event: HookEvent,
+    occurred_at: str,
+) -> None:
+    """Put the event in the inbox of each of ``hook_ids``, in the caller's
+    transaction: for a writer that knows which hooks it is for."""
     payload_json = json.dumps(event.payload(), ensure_ascii=False, sort_keys=True)
     connection.executemany(
         """INSERT INTO hook_inbox(hook_id, user_id, event_name, payload_json, occurred_at)

@@ -23,6 +23,8 @@ type TaskWorkspaceProps = {
   onAddProject: () => void;
   /** The page's controls for the pane (expand, shrink, close), last in its header. */
   pageControls?: ReactNode;
+  /** What the conversation opens with, above its messages. */
+  conversationStart?: ReactNode;
 };
 
 /**
@@ -44,6 +46,7 @@ export function TaskWorkspace({
   initialPreview = null,
   onAddProject,
   pageControls,
+  conversationStart,
 }: TaskWorkspaceProps) {
   const [preview, setPreview] = useState<WorkspacePreview | null>(
     initialPreview && { kind: 'file', ...initialPreview }
@@ -62,6 +65,7 @@ export function TaskWorkspace({
       title={title}
       onAddProject={onAddProject}
       pageControls={pageControls}
+      conversationStart={conversationStart}
       onWatchBrowser={watchBrowser}
       renderPreview={(view) =>
         preview?.kind === 'browser' ? (

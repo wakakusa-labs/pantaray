@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react';
 
 import type { ConversationHistoryListItem } from '../../../electron/src/history/historyContracts';
+import {
+  countConversationSchedules,
+  type ConversationScheduleCount,
+} from '@/components/schedules/scheduleCount';
 import { useI18n } from '@/context/useI18n';
 
 import { HistoryDeleteDialog } from './HistoryDeleteDialog';
@@ -21,26 +25,15 @@ export function ConversationDeleteDialog({
   const { t } = useI18n();
   const actionId = item.kind === 'conversation' ? item.action_id : null;
   // A suggestion has no conversation of its own to hold schedules.
-  const [schedules, setSchedules] = useState<number | 'unknown' | null>(
+  const [schedules, setSchedules] = useState<ConversationScheduleCount | null>(
     actionId === null ? 0 : null
   );
   useEffect(() => {
     if (actionId === null) return;
     let live = true;
-    const read = window.electron?.hooks?.list() ?? Promise.reject(new Error('No bridge.'));
-    read.then(
-      (list) => {
-        if (!live) return;
-        setSchedules(
-          list.hooks.filter(
-            (hook) => hook.created_from_action_id === actionId || hook.target_action_id === actionId
-          ).length
-        );
-      },
-      () => {
-        if (live) setSchedules('unknown');
-      }
-    );
+    void countConversationSchedules(actionId).then((count) => {
+      if (live) setSchedules(count);
+    });
     return () => {
       live = false;
     };

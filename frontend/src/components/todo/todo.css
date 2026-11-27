@@ -315,6 +315,36 @@
   color: var(--danger-color);
 }
 
+/* What started a schedule's conversation, at its top; the name opens the asking conversation. */
+.todo-hook-start {
+  margin: 0;
+  color: var(--fog-text-3);
+  font-size: var(--text-meta-size);
+  overflow-wrap: anywhere;
+}
+
+.todo-hook-start__open {
+  padding: 0;
+  border: none;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--fog-text-2);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.todo-hook-start__open:hover {
+  color: var(--fog-text);
+}
+
+.todo-hook-start__open:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 .todo-rail {
   display: grid;
   gap: 6px;

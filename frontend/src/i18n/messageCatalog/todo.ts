@@ -5,6 +5,13 @@ export const TODO_MESSAGES = defineMessages({
     'todo.check': 'Done: {text}',
     'todo.delete': 'Delete',
     'todo.deleteNamed': 'Delete: {text}',
+    'todo.deleteConfirm.title': 'Delete “{text}”?',
+    'todo.deleteConfirm.schedules.one':
+      'The schedule asked for in its conversation goes too. Restoring the TODO won’t bring it back.',
+    'todo.deleteConfirm.schedules.other':
+      'The {count} schedules asked for in its conversation go too. Restoring the TODO won’t bring them back.',
+    'todo.deleteConfirm.maybeSchedules':
+      'Any schedules asked for in its conversation go too. Restoring the TODO won’t bring them back.',
     'todo.state.working': 'Working',
     'todo.state.waiting': 'Your reply',
     'todo.state.partial': 'Partly done',
@@ -77,6 +84,8 @@ export const TODO_MESSAGES = defineMessages({
     'todo.page.empty': 'No TODOs yet.',
     'todo.deleted.empty': 'No deleted TODOs.',
     'todo.conversation.none': 'No conversation yet. It shows here once Pantaray starts on it.',
+    'todo.hookStart.askedIn': 'Started by the schedule you asked for in “{title}”',
+    'todo.hookStart.untitled': 'Started by a schedule you asked for in a conversation',
     'todo.conversation.close': 'Close the conversation',
     'todo.conversation.expand': 'Expand',
     'todo.conversation.shrink': 'Shrink',
@@ -130,6 +139,13 @@ export const TODO_MESSAGES = defineMessages({
     'todo.check': '完了: {text}',
     'todo.delete': '削除',
     'todo.deleteNamed': '削除: {text}',
+    'todo.deleteConfirm.title': '「{text}」を削除しますか？',
+    'todo.deleteConfirm.schedules.one':
+      'この TODO の会話で頼んだ予定 1 件も消えます。TODO を戻しても、予定は戻りません。',
+    'todo.deleteConfirm.schedules.other':
+      'この TODO の会話で頼んだ予定 {count} 件も消えます。TODO を戻しても、予定は戻りません。',
+    'todo.deleteConfirm.maybeSchedules':
+      'この TODO の会話で頼んだ予定があれば、それも消えます。TODO を戻しても、予定は戻りません。',
     'todo.state.working': '作業中',
     'todo.state.waiting': '返事待ち',
     'todo.state.partial': '途中まで',
@@ -202,6 +218,8 @@ export const TODO_MESSAGES = defineMessages({
     'todo.page.empty': 'TODO はまだありません。',
     'todo.deleted.empty': '削除した TODO はありません。',
     'todo.conversation.none': 'まだ会話はありません。Pantaray が始めると、ここに出ます。',
+    'todo.hookStart.askedIn': '「{title}」で頼んだ予定で始まりました',
+    'todo.hookStart.untitled': '会話で頼んだ予定で始まりました',
     'todo.conversation.close': '会話を閉じる',
     'todo.conversation.expand': '拡大',
     'todo.conversation.shrink': '縮小',

@@ -1,5 +1,7 @@
-import { useId, useState, type ReactNode } from 'react';
+import { useContext, useId, useState, type ReactNode } from 'react';
 
+import { OpenWorkContext } from '@/components/action-conversation/sentMessageRefs';
+import { useSchedules } from '@/components/schedules/useSchedules';
 import { SuggestionTaskPane } from '@/components/task/SuggestionTaskPane';
 import { TaskWorkspace } from '@/components/task/TaskWorkspace';
 import type { TaskPreview } from '@/components/task/taskFiles';
@@ -134,6 +136,11 @@ function Conversation({
         }
         onAddProject={onAddProject}
         pageControls={pageControls}
+        conversationStart={
+          todo.origin.kind === 'hook' ? (
+            <HookStartLine askedIn={todo.origin.origin_action_id} />
+          ) : null
+        }
       />
     );
   if (conversation.kind === 'suggestion')
@@ -156,5 +163,37 @@ function Conversation({
       </header>
       <p className="todo-conversation-none__text">{t('todo.conversation.none')}</p>
     </section>
+  );
+}
+
+/**
+ * Why a schedule's conversation exists: the conversation the schedule was asked for in, named by
+ * its TODO and opened from here. The schedules list names it while that conversation is there;
+ * once it is gone, or has no TODO to name it, the line says only that a schedule started this.
+ */
+function HookStartLine({ askedIn }: { askedIn: string }) {
+  const { t } = useI18n();
+  const openWork = useContext(OpenWorkContext);
+  const { list, loadFailed } = useSchedules();
+  // Said once the list answers, so a name that arrives does not replace the plain line.
+  if (list === null && !loadFailed) return null;
+  const title =
+    list?.hooks.find((hook) => hook.created_from_action_id === askedIn)?.created_from_title ?? null;
+  if (title === null || openWork === null)
+    return <p className="todo-hook-start">{t('todo.hookStart.untitled')}</p>;
+  const [before, after] = t('todo.hookStart.askedIn').split('{title}');
+  return (
+    <p className="todo-hook-start">
+      {before}
+      <button
+        type="button"
+        className="todo-hook-start__open"
+        aria-label={t('history.chat.workRef.open', { title })}
+        onClick={() => openWork(`action:${askedIn}`)}
+      >
+        {title}
+      </button>
+      {after}
+    </p>
   );
 }

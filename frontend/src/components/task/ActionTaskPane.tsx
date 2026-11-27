@@ -48,7 +48,8 @@ type ActionTaskPaneProps = {
   renderUnderConversation?: (running: boolean) => ReactNode;
   /** The page's controls for the pane (expand, shrink, close), last in its header. */
   pageControls?: ReactNode;
-  /** Where the composer waits while the pane is not shown. */
+  /** What the conversation opens with, above its messages, such as what started it. */
+  conversationStart?: ReactNode;
 };
 
 /**
@@ -64,6 +65,7 @@ export function ActionTaskPane({
   renderFileChips,
   renderUnderConversation,
   pageControls,
+  conversationStart,
 }: ActionTaskPaneProps) {
   const { t, language } = useI18n();
   const titleId = useId();
@@ -216,6 +218,7 @@ export function ActionTaskPane({
       <div className="action-task__scroll" ref={scrollRef}>
         <div className="action-task__column" ref={contentRef}>
           <div className="action-task__conversation" ref={answerRef} tabIndex={-1}>
+            {conversationStart}
             {approvedSuggestion ? (
               <section className="action-task__suggestion" aria-label={suggestionLabel}>
                 <span className="action-task__suggestion-label" aria-hidden="true">

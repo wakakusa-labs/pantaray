@@ -12,6 +12,7 @@ import { TodoConversationPane } from '@/components/todo/TodoConversationPane';
 import { TodoImportPane } from '@/components/todo/TodoImportPane';
 import { TodoProjectGroup } from '@/components/todo/TodoProjectGroup';
 import { TodoRow } from '@/components/todo/TodoRow';
+import { useTodoDeleteConfirmation } from '@/components/todo/useTodoDeleteConfirmation';
 import { useTodoPaneWidth } from '@/components/todo/useTodoPaneWidth';
 import { useI18n } from '@/context/useI18n';
 import type { TaskPreview } from '@/components/task/taskFiles';
@@ -158,6 +159,10 @@ export function TodoScreen({
   const focusList = () => {
     listFocusPending.current = true;
   };
+  const deletion = useTodoDeleteConfirmation({
+    deleteTodo: mutations.deleteTodo,
+    onDeleted: focusList,
+  });
   /** A read that failed after one landed: what is shown may be out of date. */
   const staleAlert = (
     <p className="history-error" role="alert">
@@ -192,7 +197,7 @@ export function TodoScreen({
           pending={mutations.pending.has(todo.todo_id)}
           onToggleCheck={() => void mutations.setCheck(todo.todo_id, todo.state.kind !== 'done')}
           onSelect={() => onSelect({ ...selection, todoId: todo.todo_id, importId: null })}
-          onDelete={() => void mutations.deleteTodo(todo.todo_id)}
+          onDelete={() => void deletion.requestDelete(todo)}
           onSetDates={(change) => void mutations.setDates(todo.todo_id, change)}
         />,
         rowFailure ? (
@@ -413,6 +418,7 @@ export function TodoScreen({
         </div>
         {showingList ? renderAddBar() : null}
       </section>
+      {deletion.dialog}
       {paneOpen && !expanded ? (
         <div
           className="todo-screen__rule"

@@ -3,10 +3,11 @@ turn of a new TODO's conversation when it has none, and count how turns go.
 
 A turn goes through ``submit_action_message`` as an ordinary turn. Its message
 id derives from the task, its version and the occurrence, or for an on task
-the event it hands (for a new conversation, through the TODO's id, as every
-TODO's conversation opens), and is recorded as the task's latest turn before it
-is sent, in the transaction that stores the TODO; so a fire repeated after a
-crash finds its turn, and one occurrence makes one TODO and one conversation.
+from the event it hands alone (for a new conversation, through the TODO's id,
+as every TODO's conversation opens), and is recorded as the task's latest turn
+before it is sent, in the transaction that stores the TODO; so a fire repeated
+after a crash finds its turn, and one occurrence makes one TODO and one
+conversation.
 An on task's events leave its inbox once their turn is sent: a crash before
 that hands the same event, and so the same turn, again. A task fires only once
 its latest turn has ended and been counted, and while its target conversation
@@ -105,10 +106,13 @@ def fire_task(
 ) -> FireOutcome:
     hook_id = task.task.hook_id
     handed = fire.events[-1] if fire.events else None
-    occurrence = (
-        fire.occurrence.isoformat() if handed is None else f"event:{handed.delivery_id}"
+    # An event's turn is the event's, whatever version hands it: a retry after
+    # the task was replaced finds the turn sent before.
+    key = (
+        f"{hook_id}\n{task.version}\n{fire.occurrence.isoformat()}"
+        if handed is None
+        else f"{hook_id}\nevent:{handed.delivery_id}"
     )
-    key = f"{hook_id}\n{task.version}\n{occurrence}"
     consumed = (*fire.superseded, *(event.delivery_id for event in fire.events))
     target: str | Todo
     if isinstance(task.target, str):

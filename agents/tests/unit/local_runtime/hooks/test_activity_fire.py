@@ -39,16 +39,19 @@ def _schedule(match: tuple[FieldMatch, ...] = MEETING) -> TaskSchedule:
     return TaskSchedule(at=None, every=None, offset=None, until=None, match=match)
 
 
-def _save(world: _World) -> str:
-    world.action_id = _conversation(world)
+def _save(world: _World, message: str = "Take notes for the meeting.") -> str:
+    """Create the task; once it exists, replace it with ``message``."""
+    change = "create" if world.action_id is None else "update"
+    if world.action_id is None:
+        world.action_id = _conversation(world)
     assert (
         save_task(
             db_path=world.db,
             busy_timeout_ms=1_000,
             user_id=USER,
             action_id=world.action_id,
-            change="create",
-            task=build_task(HOOK, _schedule(), "Take notes for the meeting."),
+            change=change,
+            task=build_task(HOOK, _schedule(), message),
             now=T0,
         )
         is None
@@ -105,11 +108,13 @@ def test_a_fire_sends_the_message_with_the_window_quoted_as_data(
     }
 
 
+@pytest.mark.parametrize("replaced", [False, True])
 def test_an_event_handed_again_after_a_crash_sends_no_second_turn(
-    world: _World, monkeypatch: pytest.MonkeyPatch
+    world: _World, monkeypatch: pytest.MonkeyPatch, replaced: bool
 ) -> None:
-    # Catches a turn keyed by the tick's time rather than the event, which a
-    # crash before the event leaves the inbox would send twice.
+    # Catches a turn keyed by the tick's time, or by the task's version, rather
+    # than the event alone: a crash before the event leaves the inbox, then a
+    # replace of the task, would send it twice.
     _save(world)
     _observe(world, "Zoom Meeting")
     consume = conversations.consume_in_connection
@@ -124,6 +129,8 @@ def test_an_event_handed_again_after_a_crash_sends_no_second_turn(
     monkeypatch.setattr(conversations, "consume_in_connection", crash_once)
     world.tick(T0 + timedelta(minutes=1))
     world.end_latest_turn("completed")
+    if replaced:
+        _save(world, "Take minutes for the meeting.")
     world.tick(T0 + timedelta(minutes=1, seconds=3))
 
     assert len(world.turns()) == 1

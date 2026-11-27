@@ -48,6 +48,7 @@ from pantaray_agents.local_runtime.todos import core
 from pantaray_agents.local_runtime.todos.conversation import todo_message_id
 from pantaray_agents.local_runtime.todos.db import read_todo_row
 from pantaray_agents.local_runtime.todos.model import Todo, WrittenOrigin
+from pantaray_agents.local_runtime.todos.pickup import todo_handoff
 from pantaray_agents.local_runtime.todos.writes import insert_todo
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings import (
     list_workspace_settings,
@@ -55,7 +56,6 @@ from pantaray_agents.local_runtime.tooling.repository.workspace_settings import 
 from pantaray_agents.schema.agent.action_message import (
     ActionUserMessageInput,
     TodoHandoffInput,
-    TodoHandoffProject,
 )
 
 from .controls import NewConversation, RunState, StoppedReason, TaskRow, TurnResult
@@ -241,25 +241,10 @@ def _new_todo(new: NewConversation, *, todo_id: str) -> Todo:
 def _handoff(
     todo: Todo, *, db_path: Path, busy_timeout_ms: int, user_id: str
 ) -> TodoHandoffInput:
-    """The TODO's project with its folders, as the TODO pickup hands one over."""
-
-    settings = list_workspace_settings(
-        db_path=db_path, busy_timeout_ms=busy_timeout_ms, user_id=user_id
-    )
-    project = next(
-        (p for p in settings.projects if p.project_id == todo.project_id), None
-    )
-    return TodoHandoffInput(
-        todo_id=todo.todo_id,
-        project=None
-        if project is None
-        else TodoHandoffProject(
-            display_name=project.display_name,
-            paths=tuple(
-                folder.real_path
-                for folder in settings.folders
-                if project.project_id in folder.project_ids
-            ),
+    return todo_handoff(
+        todo,
+        list_workspace_settings(
+            db_path=db_path, busy_timeout_ms=busy_timeout_ms, user_id=user_id
         ),
     )
 

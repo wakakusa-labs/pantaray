@@ -64,7 +64,7 @@ export function ActionTaskPane({
   renderUnderConversation,
   pageControls,
 }: ActionTaskPaneProps) {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const titleId = useId();
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -305,6 +305,7 @@ export function ActionTaskPane({
                 onDecide={(decision) => void approval.decide(decision, blocker)}
                 onOpenWorkspaceSettings={onAddProject}
                 t={t}
+                language={language}
               />
             ))}
           </div>

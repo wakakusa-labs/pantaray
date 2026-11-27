@@ -108,6 +108,7 @@ function renderPanel(language: UiLanguage, blocker: ActionApprovalBlocker) {
         t={(key: MessageKey, vars?: Record<string, string | number>) =>
           translate(language, key, vars)
         }
+        language={language}
       />
     ),
   };

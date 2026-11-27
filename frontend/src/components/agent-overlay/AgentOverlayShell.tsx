@@ -284,7 +284,7 @@ const AgentOverlayShell = ({
   const resolvedScrollableRef = scrollableRef ?? internalScrollableRef;
   const expandButtonRef = useRef<HTMLButtonElement>(null);
   useCollapsedFocusBoundary(resolvedScrollableRef, !isExpanded, expandButtonRef);
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const todoStateLabel = todo?.state ? TODO_STATE_LABEL[todo.state] : null;
   // The work this panel stands for: its Action, or the suggestion until one exists.
   const work: { kind: WorkRefKind; id: string } | null =
@@ -520,6 +520,7 @@ const AgentOverlayShell = ({
                 }
                 onOpenWorkspaceSettings={onOpenWorkspaceSettings}
                 t={t}
+                language={language}
               />
             ))}
           </ApprovalDock>

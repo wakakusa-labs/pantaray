@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { t as translate } from '@/i18n/translate';
+import type { MessageKey } from '@/i18n/types';
 import type { ActionApprovalBlocker } from '../../../electron/src/actions/actionLiveCore';
 import { buildApprovalDisplay } from './approvalDisplayModel';
 
@@ -25,66 +27,138 @@ function blocker(
 }
 
 describe('buildApprovalDisplay', () => {
-  // A schedule that falls through to the generic line shows raw keys, so the user
-  // could not tell when it runs or what it sends before saying yes.
-  it('names when a schedule runs, when it ends, and the message it sends', () => {
-    const vars = (key: string, values?: Record<string, string | number>) =>
-      key.endsWith('weekdays')
-        ? 'Mon,Tue,Wed,Thu,Fri,Sat,Sun'
-        : `${key}${values ? JSON.stringify(values) : ''}`;
-    const schedule = (fields: Record<string, unknown>) =>
+  // The user approves a hook that sends with no one watching: a wrong or missing line
+  // here means saying yes to a different hook than the one that is saved.
+  describe('hook', () => {
+    const ja = (key: MessageKey, vars?: Record<string, string | number>) =>
+      translate('ja', key, vars);
+    const hook = (fields: Record<string, unknown>) =>
       buildApprovalDisplay(
-        blocker('schedule_continuation', 'automation_control', {
-          summary_kind: 'conversation_task',
-          task_id: 'task.conversation-1',
+        blocker('create_hook', 'automation_control', {
+          summary_kind: 'hook',
           replaces: false,
           resumes: false,
-          at: null,
-          every: null,
-          offset: null,
+          trigger: { kind: 'every', every: 'day', offset: '510m' },
           until: null,
-          prompt: 'Look for news.',
+          send_to: 'this_session',
+          place: null,
+          title: null,
+          message: 'Look for news.',
           ...fields,
         }),
-        vars
+        ja
       );
-    const daily = schedule({ every: 'day', offset: '510m' });
-    expect(daily.operationKey).toBe('overlay.approvalRequired.operation.conversationTask');
-    expect(daily.primaryValue).toBe(
-      'overlay.approvalRequired.conversationTask.everyDay{"time":"8:30"}'
-    );
-    expect(daily.argumentFields).toEqual([
-      {
-        label: 'overlay.approvalRequired.conversationTask.prompt',
-        format: 'text',
-        value: 'Look for news.',
-      },
-    ]);
-    expect(daily.details).toEqual([]);
-    expect(schedule({ every: 'week', offset: '57h' }).primaryValue).toBe(
-      'overlay.approvalRequired.conversationTask.everyWeek{"weekday":"Wed","time":"9:00"}'
-    );
-    expect(schedule({ every: 'month', offset: '2d' }).primaryValue).toContain('"day":"3"');
-    expect(schedule({ every: 'quarter', offset: '27d' }).primaryValue).toContain('"day":"28"');
-    expect(schedule({ every: 'quarter', offset: '31d' }).primaryValue).toBe(
-      'overlay.approvalRequired.conversationTask.everyQuarterAfter{"days":"31","time":"0:00"}'
-    );
-    const changed = schedule({
-      replaces: true,
-      every: '2h',
-      until: '2026-12-01T00:00:00Z',
+    const details = (display: ReturnType<typeof hook>) =>
+      display.details.map((detail) => [ja(detail.labelKey), detail.value]);
+    const on = (match: unknown[]) => hook({ trigger: { kind: 'on', on: 'activity', match } });
+
+    it('says when a schedule fires, from calendar units and offsets alike', () => {
+      const when = (trigger: Record<string, unknown>) => hook({ trigger }).primaryValue;
+      expect(when({ kind: 'every', every: 'day', offset: '510m' })).toBe('毎日 8:30');
+      expect(when({ kind: 'every', every: 'week', offset: '57h' })).toBe('毎週水曜 9:00');
+      expect(when({ kind: 'every', every: 'month', offset: '2d' })).toBe('毎月 3 日 0:00');
+      expect(when({ kind: 'every', every: 'quarter', offset: '27d' })).toBe(
+        '1・4・7・10 月の 28 日 0:00'
+      );
+      expect(when({ kind: 'every', every: 'quarter', offset: '31d' })).toBe(
+        '1・4・7・10 月の 1 日から 31 日後 0:00'
+      );
+      expect(when({ kind: 'every', every: '2h', offset: null })).toBe('2 時間ごと');
+      const at = new Date(2026, 10, 22, 9, 0).toISOString();
+      expect(when({ kind: 'at', at })).toBe('2026-11-22 09:00 に1回');
     });
-    expect(changed.operationKey).toBe('overlay.approvalRequired.operation.conversationTaskUpdate');
-    expect(changed.primaryValue).toContain('everyDuration');
-    expect(schedule({ replaces: true, resumes: true, every: 'day' }).operationKey).toBe(
-      'overlay.approvalRequired.operation.conversationTaskResume'
-    );
-    expect(changed.details.map((detail) => detail.labelKey)).toEqual([
-      'overlay.approvalRequired.conversationTask.until',
-    ]);
-    expect(schedule({ at: '2026-11-22T09:00:00+09:00' }).primaryValue).toContain(
-      'conversationTask.once'
-    );
+
+    it('shows the end, where the message goes, and the exact message', () => {
+      const daily = hook({});
+      expect(daily.operationKey).toBe('overlay.approvalRequired.operation.hook');
+      expect(details(daily)).toEqual([['送り先', 'この会話を続けます']]);
+      expect(daily.argumentFields).toEqual([
+        { label: '送る内容', format: 'text', value: 'Look for news.' },
+      ]);
+
+      const until = new Date(2026, 11, 1, 9, 0).toISOString();
+      const fresh = hook({
+        until,
+        send_to: 'new_session',
+        place: { organization: 'Wakakusa', project: 'Pantaray' },
+        title: 'Morning news',
+      });
+      expect(details(fresh)).toEqual([
+        ['終わり', '2026-12-01 09:00'],
+        ['送り先', '毎回新しい会話を始めます'],
+        ['毎回作る TODO', 'Morning news'],
+        ['組織', 'Wakakusa'],
+        ['プロジェクト', 'Pantaray'],
+      ]);
+      // No place puts the conversation in neither, which the user should see too.
+      expect(
+        details(hook({ send_to: 'new_session', place: null, title: 'Morning news' })).slice(2)
+      ).toEqual([
+        ['組織', 'なし'],
+        ['プロジェクト', 'なし'],
+      ]);
+    });
+
+    it('keeps the change and turn-back-on questions apart from a new hook', () => {
+      expect(hook({ replaces: true }).operationKey).toBe(
+        'overlay.approvalRequired.operation.hookUpdate'
+      );
+      expect(hook({ replaces: true, resumes: true }).operationKey).toBe(
+        'overlay.approvalRequired.operation.hookResume'
+      );
+    });
+
+    // The sentence is the only place the user reads the condition, so any-of within a
+    // field, all-of across fields, and equals against contains must each read as such.
+    it('words an activity condition from the stored match', () => {
+      const meeting = on([
+        { field: 'bundle_id', op: 'equals', values: ['us.zoom.xos'] },
+        { field: 'window_title', op: 'contains', values: ['Zoom ミーティング', 'Zoom Meeting'] },
+      ]);
+      expect(meeting.primaryValue).toBe(
+        'アプリの識別子が『us.zoom.xos』で、ウィンドウの題名に『Zoom ミーティング』か『Zoom Meeting』を含むウィンドウになったとき'
+      );
+      expect(
+        on([
+          { field: 'window_title', op: 'contains', values: ['Meet'] },
+          { field: 'app_name', op: 'equals', values: ['Google Chrome', 'Arc'] },
+        ]).primaryValue
+      ).toBe(
+        'ウィンドウの題名に『Meet』を含み、アプリの名前が『Google Chrome』か『Arc』のウィンドウになったとき'
+      );
+      const english = buildApprovalDisplay(
+        blocker('create_hook', 'automation_control', {
+          summary_kind: 'hook',
+          trigger: {
+            kind: 'on',
+            on: 'activity',
+            match: [
+              { field: 'bundle_id', op: 'equals', values: ['us.zoom.xos'] },
+              {
+                field: 'window_title',
+                op: 'contains',
+                values: ['Zoom Meeting', 'Zoom ミーティング'],
+              },
+            ],
+          },
+          send_to: 'this_session',
+          message: 'Take notes.',
+        }),
+        (key, vars) => translate('en', key, vars)
+      );
+      expect(english.primaryValue).toBe(
+        'When a window starts to match: app ID is “us.zoom.xos”, and title contains “Zoom Meeting” or “Zoom ミーティング”'
+      );
+    });
+
+    // Only an activity hook sends the matched window along; a schedule must not claim it.
+    it('says the matched window goes with the message only for an activity hook', () => {
+      const alsoSent = ['いっしょに送るもの', '見つけたウィンドウのアプリの名前と識別子、題名'];
+      expect(
+        details(on([{ field: 'app_name', op: 'equals', values: ['zoom.us'] }]))
+      ).toContainEqual(alsoSent);
+      expect(details(hook({}))).not.toContainEqual(alsoSent);
+    });
   });
 
   // What is being consented to must be readable: a screen capture that falls through

@@ -221,52 +221,144 @@ function formatInstant(text: string): string {
 
 // A calendar unit fires at its start on local time plus the offset: weeks start on
 // Monday and months on the 1st.
-function describeSchedule(summary: Record<string, unknown>, t: ApprovalDisplayTranslator): string {
-  const at = readStringValue(summary, 'at');
-  if (at) return t('overlay.approvalRequired.conversationTask.once', { time: formatInstant(at) });
-  const every = readStringValue(summary, 'every') ?? '';
-  const offset = durationSeconds(readStringValue(summary, 'offset'));
+function describeSchedule(trigger: Record<string, unknown>, t: ApprovalDisplayTranslator): string {
+  const at = readStringValue(trigger, 'at');
+  if (at) return t('overlay.approvalRequired.hook.once', { time: formatInstant(at) });
+  const every = readStringValue(trigger, 'every') ?? '';
+  const offset = durationSeconds(readStringValue(trigger, 'offset'));
   const days = Math.floor(offset / 86400);
   const time = `${Math.floor((offset % 86400) / 3600)}:${pad(Math.floor((offset % 3600) / 60))}`;
   switch (every) {
     case 'hour':
-      return t('overlay.approvalRequired.conversationTask.everyHour', {
+      return t('overlay.approvalRequired.hook.everyHour', {
         minute: pad(Math.floor(offset / 60)),
       });
     case 'day':
-      return t('overlay.approvalRequired.conversationTask.everyDay', { time });
+      return t('overlay.approvalRequired.hook.everyDay', { time });
     case 'week':
-      return t('overlay.approvalRequired.conversationTask.everyWeek', {
-        weekday: t('overlay.approvalRequired.conversationTask.weekdays').split(',')[days % 7] ?? '',
+      return t('overlay.approvalRequired.hook.everyWeek', {
+        weekday: t('overlay.approvalRequired.hook.weekdays').split(',')[days % 7] ?? '',
         time,
       });
     case 'month':
-      return t('overlay.approvalRequired.conversationTask.everyMonth', {
-        day: String(days + 1),
-        time,
-      });
+      return t('overlay.approvalRequired.hook.everyMonth', { day: String(days + 1), time });
     // A quarter's offset may run past its first month (up to 89 days), so only an
     // offset inside the shortest month reads as a day of that month.
     case 'quarter':
       return days < 28
-        ? t('overlay.approvalRequired.conversationTask.everyQuarter', {
-            day: String(days + 1),
-            time,
-          })
-        : t('overlay.approvalRequired.conversationTask.everyQuarterAfter', {
-            days: String(days),
-            time,
-          });
+        ? t('overlay.approvalRequired.hook.everyQuarter', { day: String(days + 1), time })
+        : t('overlay.approvalRequired.hook.everyQuarterAfter', { days: String(days), time });
   }
   const match = /^(\d+)([smhd])$/.exec(every);
   if (!match) return every;
-  return t('overlay.approvalRequired.conversationTask.everyDuration', {
+  return t('overlay.approvalRequired.hook.everyDuration', {
     count: match[1],
     unit:
-      t('overlay.approvalRequired.conversationTask.units').split(',')[
-        DURATION_UNITS.indexOf(match[2])
-      ] ?? match[2],
+      t('overlay.approvalRequired.hook.units').split(',')[DURATION_UNITS.indexOf(match[2])] ??
+      match[2],
   });
+}
+
+// The fields an activity condition can name; the runtime refuses any other.
+const MATCH_FIELD_KEYS: Record<string, MessageKey> = {
+  app_name: 'overlay.approvalRequired.hook.field.appName',
+  bundle_id: 'overlay.approvalRequired.hook.field.bundleId',
+  window_title: 'overlay.approvalRequired.hook.field.windowTitle',
+};
+
+// The condition is worded from the stored match, never from the model's paraphrase:
+// every field must match, and a field matches when any one of its values does.
+function describeCondition(trigger: Record<string, unknown>, t: ApprovalDisplayTranslator): string {
+  const matches = Array.isArray(trigger.match) ? trigger.match.filter(isRecord) : [];
+  const clauses = matches.map((match, index) => {
+    const field = readStringValue(match, 'field') ?? '';
+    const values = readStringArrayValue(match, 'values')
+      .map((value) => t('overlay.approvalRequired.hook.quoted', { value }))
+      .join(t('overlay.approvalRequired.hook.valueOr'));
+    const position = index === matches.length - 1 ? 'Last' : 'Middle';
+    const op = match.op === 'contains' ? 'contains' : 'equals';
+    return t(`overlay.approvalRequired.hook.${op}${position}`, {
+      field: MATCH_FIELD_KEYS[field] ? t(MATCH_FIELD_KEYS[field]) : field,
+      values,
+    });
+  });
+  return t('overlay.approvalRequired.hook.windowAppears', { conditions: clauses.join('') });
+}
+
+function describeHook(
+  summary: Record<string, unknown>,
+  t: ApprovalDisplayTranslator
+): ToolApprovalDisplay {
+  const trigger = isRecord(summary.trigger) ? summary.trigger : {};
+  const isEvent = trigger.kind === 'on';
+  const until = readStringValue(summary, 'until');
+  const place = isRecord(summary.place) ? summary.place : {};
+  const none = t('overlay.approvalRequired.hook.none');
+  const isNewSession = summary.send_to === 'new_session';
+  const newSession: ApprovalDetail[] = isNewSession
+    ? [
+        {
+          labelKey: 'overlay.approvalRequired.hook.title',
+          value: readStringValue(summary, 'title') ?? t('overlay.approvalRequired.unavailable'),
+        },
+        {
+          labelKey: 'overlay.approvalRequired.hook.organization',
+          value: readStringValue(place, 'organization') ?? none,
+        },
+        {
+          labelKey: 'overlay.approvalRequired.hook.project',
+          value: readStringValue(place, 'project') ?? none,
+        },
+      ]
+    : [];
+  return {
+    // A yes on a change to a hook that is off or stopped turns it back on.
+    operationKey:
+      summary.replaces !== true
+        ? 'overlay.approvalRequired.operation.hook'
+        : summary.resumes === true
+          ? 'overlay.approvalRequired.operation.hookResume'
+          : 'overlay.approvalRequired.operation.hookUpdate',
+    usesLoginEnvironment: false,
+    primaryLabelKey: 'overlay.approvalRequired.hook.when',
+    primaryValue: isEvent ? describeCondition(trigger, t) : describeSchedule(trigger, t),
+    details: [
+      ...(until
+        ? [
+            {
+              labelKey: 'overlay.approvalRequired.hook.until' as MessageKey,
+              value: formatInstant(until),
+            },
+          ]
+        : []),
+      {
+        labelKey: 'overlay.approvalRequired.hook.sendTo',
+        value: t(
+          isNewSession
+            ? 'overlay.approvalRequired.hook.newSession'
+            : 'overlay.approvalRequired.hook.thisSession'
+        ),
+      },
+      ...newSession,
+      // The matched window's fields go to the model with the message, so the user
+      // learns that more than the message leaves.
+      ...(isEvent
+        ? [
+            {
+              labelKey: 'overlay.approvalRequired.hook.alsoSent' as MessageKey,
+              value: t('overlay.approvalRequired.hook.matchedWindow'),
+            },
+          ]
+        : []),
+    ],
+    argumentFields: [
+      {
+        label: t('overlay.approvalRequired.hook.message'),
+        format: 'text',
+        value: readStringValue(summary, 'message') ?? t('overlay.approvalRequired.unavailable'),
+      },
+    ],
+  };
 }
 
 export function buildApprovalDisplay(
@@ -488,38 +580,9 @@ function buildToolApprovalDisplay(
     };
   }
 
-  // A schedule sends turns later with no one watching, so the user approves when it
-  // runs and the exact message it sends.
-  if (summaryKind === 'conversation_task') {
-    const until = readStringValue(summary, 'until');
-    return {
-      // A yes on a change to a schedule that is off or stopped turns it back on.
-      operationKey:
-        summary.replaces !== true
-          ? 'overlay.approvalRequired.operation.conversationTask'
-          : summary.resumes === true
-            ? 'overlay.approvalRequired.operation.conversationTaskResume'
-            : 'overlay.approvalRequired.operation.conversationTaskUpdate',
-      usesLoginEnvironment: false,
-      primaryLabelKey: 'overlay.approvalRequired.conversationTask.when',
-      primaryValue: describeSchedule(summary, t),
-      details: until
-        ? [
-            {
-              labelKey: 'overlay.approvalRequired.conversationTask.until',
-              value: formatInstant(until),
-            },
-          ]
-        : [],
-      argumentFields: [
-        {
-          label: t('overlay.approvalRequired.conversationTask.prompt'),
-          format: 'text',
-          value: readStringValue(summary, 'prompt') ?? t('overlay.approvalRequired.unavailable'),
-        },
-      ],
-    };
-  }
+  // A hook sends messages later with no one watching, so the user approves when it
+  // fires, where the message goes, and the exact message it sends.
+  if (summaryKind === 'hook') return describeHook(summary, t);
 
   return {
     operationKey: 'overlay.approvalRequired.operation.generic',

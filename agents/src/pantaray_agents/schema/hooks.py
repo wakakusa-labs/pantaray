@@ -18,18 +18,22 @@ class _View(BaseModel):
 
 
 class TaskHookResponse(_View):
-    """A task an Action scheduled with the user's yes in that conversation,
-    which it continues. It fires only while ``approved``, ``enabled``, without
-    an ``error`` and not stopped."""
+    """A task an Action scheduled with the user's yes in that conversation. It
+    fires while ``enabled`` and not stopped: once ``at``, or ``every`` calendar
+    unit or duration (``offset`` after each unit's start), never after
+    ``until``."""
 
     hook_id: str
-    text: str
-    # False once the file no longer holds the content the user said yes to.
-    approved: bool
+    at: datetime | None
+    every: str | None
+    offset: str | None
+    until: datetime | None
+    message: str
     enabled: bool
-    error: str | None
     next_fire_at: datetime | None
     created_from_action_id: str
+    # The conversation each fire continues.
+    target_action_id: str
     # None while the latest turn has not ended.
     last_result: TurnResult | None
     failure_count: int

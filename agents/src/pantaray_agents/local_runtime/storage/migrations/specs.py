@@ -168,6 +168,7 @@ def load_default_migrations() -> tuple[MigrationSpec, ...]:
         "0150_hook_states_per_user.sql",
         "0151_hook_settings.sql",
         "0152_agent_tasks.sql",
+        "0153_user_hooks.sql",
     )
     return tuple(
         MigrationSpec(

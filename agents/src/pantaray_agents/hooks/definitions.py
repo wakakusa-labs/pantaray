@@ -352,7 +352,7 @@ def _hook(
     else:
         if "if" in table or "deliver" in table:
             raise HookDefinitionError(f"{where}: if and deliver need an on trigger")
-        trigger = _parse_time_trigger(trigger_table, where)
+        trigger = parse_time_trigger(trigger_table, where)
     return HookDefinition(
         id=hook_id, trigger=trigger, requires=tuple(requires), run=run, until=until
     )
@@ -460,7 +460,8 @@ def _event_names(value: object, names: _Vocabulary, *, where: str) -> tuple[str,
     return tuple(value)
 
 
-def _parse_time_trigger(table: Mapping[str, object], where: str) -> At | Every:
+def parse_time_trigger(table: Mapping[str, object], where: str) -> At | Every:
+    """An at or every trigger table, as a ``[[hooks]]`` trigger is written."""
     if "at" in table:
         _reject_unknown_keys(table, {"at"}, where=f"{where} trigger")
         return At(at=_instant(table["at"], where=f"{where} at"))

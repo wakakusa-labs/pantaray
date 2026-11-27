@@ -77,7 +77,7 @@ def pick_up_todos(*, user_id: str) -> bool:
     submitted = True
     for todo, target in targets:
         try:
-            command = _command(user_id, todo, target, _handoff(todo, settings))
+            command = _command(user_id, todo, target, todo_handoff(todo, settings))
             submit_action_message(command)
         # A TODO the Action message cannot carry fails alone, so it never holds
         # back the TODOs after it.
@@ -155,7 +155,7 @@ def _command(
             assert_never(target)
 
 
-def _handoff(todo: Todo, settings: WorkspaceSettings) -> TodoHandoffInput:
+def todo_handoff(todo: Todo, settings: WorkspaceSettings) -> TodoHandoffInput:
     """The TODO's project with the folders the Action composer would send for it."""
 
     project = next(
@@ -176,4 +176,4 @@ def _handoff(todo: Todo, settings: WorkspaceSettings) -> TodoHandoffInput:
     )
 
 
-__all__ = ["pick_up_todos"]
+__all__ = ["pick_up_todos", "todo_handoff"]

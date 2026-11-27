@@ -31,21 +31,33 @@ class RunState:
 
 
 @dataclass(frozen=True, slots=True)
+class NewConversation:
+    """Start a new conversation on each fire, as that of a new TODO titled
+    ``title`` in the organization or project named (neither: none)."""
+
+    title: str
+    organization_id: str | None
+    project_id: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class TaskRow:
     task: Task
     # Grows when the definition changes; a fire binds to the one it read.
     version: int
     # The conversation that asked for the task.
     origin_action_id: str
-    # The conversation each fire continues.
-    target_action_id: str
+    # The conversation each fire continues, or how each fire starts one.
+    target: str | NewConversation
     enabled: bool
     next_fire_at: datetime | None
     run: RunState
 
     @property
     def hook(self) -> HookDefinition:
-        return self.task.definition(self.target_action_id)
+        return self.task.definition(
+            self.target if isinstance(self.target, str) else None
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,7 +76,8 @@ def read_tasks(
     rows = connection.execute(
         """SELECT hook_id, trigger_json, until, message, version, origin_action_id,
                   target_action_id, enabled, next_fire_at, last_message_id,
-                  last_result, failure_count, stopped_reason
+                  last_result, failure_count, stopped_reason, title,
+                  organization_id, project_id
            FROM user_hooks
            WHERE user_id = ? AND (? IS NULL OR origin_action_id = ?)
            ORDER BY hook_id""",
@@ -75,7 +88,12 @@ def read_tasks(
             task=stored_task(str(row[0]), str(row[1]), row[2], str(row[3])),
             version=int(row[4]),
             origin_action_id=str(row[5]),
-            target_action_id=str(row[6]),
+            # The table holds a title exactly when it holds no target.
+            target=NewConversation(
+                title=str(row[13]), organization_id=row[14], project_id=row[15]
+            )
+            if row[6] is None
+            else str(row[6]),
             enabled=bool(row[7]),
             next_fire_at=None if row[8] is None else parse_iso_z(row[8]),
             run=RunState(

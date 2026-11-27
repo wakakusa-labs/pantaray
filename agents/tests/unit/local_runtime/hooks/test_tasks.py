@@ -46,6 +46,11 @@ from pantaray_agents.local_runtime.runtime.identity import (
     reset_logged_out_owner,
 )
 from pantaray_agents.local_runtime.storage.migrations import load_default_migrations
+from pantaray_agents.local_runtime.todos import core
+from pantaray_agents.local_runtime.todos.model import ActionConversation
+from pantaray_agents.local_runtime.todos.pickup import pick_up_todos
+from pantaray_agents.local_runtime.todos.reads import read_todo
+from pantaray_agents.local_runtime.todos.writes import update_todo
 from pantaray_agents.schema.agent.action_message import ActionUserMessageInput
 
 from ..migrated_db import prepare_test_database
@@ -550,3 +555,193 @@ def test_a_tick_does_not_move_a_newer_approvals_time(
     world.tick(NINE)
 
     assert world.view().next_fire_at == datetime(2026, 11, 22, 8, 0, tzinfo=UTC)
+
+
+def _new_conversation_each_fire(
+    world: _World, organization_id: str | None = None, project_id: str | None = None
+) -> str:
+    """A task saved to start a new TODO's conversation on each fire; no tool
+    writes one yet, so the row is moved off its conversation here."""
+
+    origin = world.save()
+    with closing(sqlite3.connect(world.db)) as connection, connection:
+        connection.execute(
+            "UPDATE user_hooks SET target_action_id = NULL, title = 'Build report',"
+            " organization_id = ?, project_id = ?",
+            (organization_id, project_id),
+        )
+    return origin
+
+
+def _todos(world: _World) -> list[tuple[str, str | None, str | None, str | None]]:
+    """Each TODO: its text, its place, and the conversation it shows."""
+
+    with closing(sqlite3.connect(world.db)) as connection:
+        todo_ids = [
+            str(row[0])
+            for row in connection.execute(
+                "SELECT todo_id FROM todo_items ORDER BY created_at, rowid"
+            )
+        ]
+    todos = []
+    for todo_id in todo_ids:
+        entry = read_todo(user_id=USER, todo_id=todo_id)
+        assert entry is not None
+        conversation = entry.conversation
+        todos.append(
+            (
+                entry.todo.text,
+                entry.todo.organization_id,
+                entry.todo.project_id,
+                conversation.action_id
+                if isinstance(conversation, ActionConversation)
+                else None,
+            )
+        )
+    return todos
+
+
+def _delete(world: _World, action_id: str) -> None:
+    delete_history_item(
+        db_path=world.db,
+        busy_timeout_ms=1_000,
+        artifact_root=world.db.parent / "artifacts",
+        user_id=USER,
+        kind="conversation",
+        item_id=action_id,
+    )
+
+
+def test_a_task_without_a_target_opens_one_todo_and_conversation_per_fire(
+    world: _World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Catches a fire that continues the conversation that asked, a second run
+    # started while the first is going, a fire repeated after a crash that
+    # makes a second TODO or conversation for the same occurrence, and a
+    # conversation the TODO does not show as its own.
+    origin = _new_conversation_each_fire(world)
+    write = runner.SqliteHookStateStore.write_next_fire_time
+    writes: list[object] = []
+
+    def crash_after_the_turn(
+        self: runner.SqliteHookStateStore, hook_id: str, at: datetime | None
+    ) -> None:
+        writes.append(at)
+        if len(writes) == 1:
+            raise sqlite3.OperationalError("disk I/O error")
+        write(self, hook_id, at)
+
+    monkeypatch.setattr(
+        runner.SqliteHookStateStore, "write_next_fire_time", crash_after_the_turn
+    )
+    world.tick(NINE)
+    world.tick(NINE + timedelta(seconds=3))
+    world.tick(NINE + timedelta(hours=1))
+    assert len(world.turns()) == 1
+
+    world.end_latest_turn("completed")
+    world.tick(NINE + timedelta(hours=1, seconds=3))
+    first, second = (conversation for conversation, _ in world.turns())
+    assert len({origin, first, second}) == 3
+    assert _conversations(world) == {origin, first, second}
+    assert _todos(world) == [
+        ("Build report", None, None, first),
+        ("Build report", None, None, second),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("organization_id", "project_id"),
+    [("org-a", None), (None, "project-1")],
+)
+def test_a_new_conversations_todo_lands_in_the_tasks_place(
+    world: _World, organization_id: str | None, project_id: str | None
+) -> None:
+    # Catches a TODO left in no place, or put in the wrong one.
+    with closing(sqlite3.connect(world.db)) as connection, connection:
+        connection.executescript(
+            f"""INSERT INTO workspace_organizations(organization_id, user_id,
+                  display_name, created_at, updated_at)
+                VALUES ('org-a', '{USER}', 'A', 'T', 'T');
+                INSERT INTO workspace_projects(project_id, user_id, display_name,
+                  created_at, updated_at)
+                VALUES ('project-1', '{USER}', 'One', 'T', 'T');"""
+        )
+    _new_conversation_each_fire(world, organization_id, project_id)
+    world.tick(NINE)
+
+    ((started, _),) = world.turns()
+    assert _todos(world) == [("Build report", organization_id, project_id, started)]
+
+
+def test_the_todo_pickup_never_opens_a_fires_todo(
+    world: _World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Catches a TODO the pickup starts with its own text, before or instead
+    # of the task's message, when the fire's send failed after storing it.
+    _new_conversation_each_fire(world)
+
+    def refuse(_command: object) -> None:
+        raise ActionMessageConflictError("Action checkpoint is not restored")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(conversations, "submit_action_message", refuse)
+        world.tick(NINE)
+    assert pick_up_todos(user_id=USER) is True
+    assert world.turns() == []
+    assert [conversation for *_, conversation in _todos(world)] == [None]
+
+    world.tick(NINE + timedelta(seconds=3))
+    ((started, _),) = world.turns()
+    assert [conversation for *_, conversation in _todos(world)] == [started]
+
+
+def test_a_fires_todo_deleted_after_a_failed_send_is_not_started(
+    world: _World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Catches a retry that starts the conversation of a TODO the user deleted
+    # while its send kept failing.
+    _new_conversation_each_fire(world)
+
+    def refuse(_command: object) -> None:
+        raise ActionMessageConflictError("Action checkpoint is not restored")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(conversations, "submit_action_message", refuse)
+        world.tick(NINE)
+    with closing(sqlite3.connect(world.db)) as connection:
+        (todo_id,) = connection.execute("SELECT todo_id FROM todo_items").fetchone()
+    update_todo(
+        user_id=USER,
+        todo_id=str(todo_id),
+        step=lambda todo: core.delete_by_user(todo, now="2026-11-21T09:00:05Z"),
+    )
+    world.tick(NINE + timedelta(seconds=3))
+    world.tick(NINE + timedelta(seconds=6))
+    assert world.turns() == []
+
+
+def test_deleting_a_conversation_a_task_started_leaves_the_task(
+    world: _World,
+) -> None:
+    # Catches a task that goes with the conversation it started, or that is
+    # left behind when the conversation that asked for it is deleted.
+    origin = _new_conversation_each_fire(world)
+    world.tick(NINE)
+    world.end_latest_turn("completed")
+    ((started, _),) = world.turns()
+    with closing(sqlite3.connect(world.db)) as connection:
+        (todo_id,) = connection.execute("SELECT todo_id FROM todo_items").fetchone()
+    update_todo(
+        user_id=USER,
+        todo_id=str(todo_id),
+        step=lambda todo: core.delete_by_user(todo, now="2026-11-21T09:30:00Z"),
+    )
+    _delete(world, started)
+    world.tick(NINE + timedelta(hours=1))
+    assert len(world.turns()) == 1
+    assert world.view().target_action_id is None
+
+    world.end_latest_turn("completed")
+    _delete(world, origin)
+    assert list_hooks(db_path=world.db, busy_timeout_ms=1_000, user_id=USER) == ()

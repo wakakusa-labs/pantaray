@@ -169,6 +169,7 @@ def _hook(
             action_id=world.action_id,
             change="create",
             task=build_task(hook_id, schedule, message),
+            new_conversation=None,
             now=T0,
         )
         is None

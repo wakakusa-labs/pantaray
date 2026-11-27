@@ -10,19 +10,19 @@ from .base import ToolDefinition
 from .bash_tool import BASH_TOOL
 from .browser_tool import BROWSER_TOOL
 from .capture_screen_tool import CAPTURE_SCREEN_TOOL, CAPTURE_SCREEN_TOOL_ID
-from .conversation_task_tools import (
-    CONVERSATION_TASK_TOOL_IDS,
-    LIST_SCHEDULED_CONTINUATIONS_TOOL,
-    SCHEDULE_CONTINUATION_TOOL,
-    SCHEDULE_CONTINUATION_TOOL_ID,
-    STOP_SCHEDULED_CONTINUATION_TOOL,
-)
 from .discovery_tools import GLOB_TOOL, GREP_TOOL, LIST_TOOL
 from .draft_final_answer_tool import (
     DRAFT_FINAL_ANSWER_TOOL,
     DRAFT_FINAL_ANSWER_TOOL_ID,
 )
 from .history_fetch_tool import HISTORY_FETCH_TOOL
+from .hook_tools import (
+    CREATE_HOOK_TOOL,
+    CREATE_HOOK_TOOL_ID,
+    DELETE_HOOK_TOOL,
+    HOOK_TOOL_IDS,
+    LIST_HOOKS_TOOL,
+)
 from .integration_tools import (
     INTEGRATION_LIST_TOOLS_TOOL,
     INTEGRATION_LIST_TOOLS_TOOL_ID,
@@ -123,8 +123,8 @@ __all__ = [
     "STOP_PROCESS_TOOL",
     "CAPTURE_SCREEN_TOOL",
     "CAPTURE_SCREEN_TOOL_ID",
-    "CONVERSATION_TASK_TOOL_IDS",
-    "SCHEDULE_CONTINUATION_TOOL_ID",
+    "CREATE_HOOK_TOOL_ID",
+    "HOOK_TOOL_IDS",
     "RUN_PYTHON_TOOL",
     "THINKING_TOOL",
     "MEMORY_SEARCH_TOOL",
@@ -210,9 +210,9 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
         REQUEST_TODO_DELETION_TOOL,
         RECORD_PROGRESS_TOOL,
         WRITE_TODO_DRAFT_TOOL,
-        SCHEDULE_CONTINUATION_TOOL,
-        LIST_SCHEDULED_CONTINUATIONS_TOOL,
-        STOP_SCHEDULED_CONTINUATION_TOOL,
+        CREATE_HOOK_TOOL,
+        LIST_HOOKS_TOOL,
+        DELETE_HOOK_TOOL,
     )
 }
 
@@ -253,7 +253,7 @@ SUPERVISOR_SINGLE_REACT_TOOL_IDS: tuple[str, ...] = (
     HISTORY_FETCH_TOOL.tool_id,
     ZANEI_TIMELINE_TOOL.tool_id,
     ZANEI_QUERY_TOOL.tool_id,
-    *CONVERSATION_TASK_TOOL_IDS,
+    *HOOK_TOOL_IDS,
 )
 
 SUPERVISOR_SINGLE_REACT_ACT_TOOL_IDS: tuple[str, ...] = SUPERVISOR_SINGLE_REACT_TOOL_IDS

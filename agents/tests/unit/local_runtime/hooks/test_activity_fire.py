@@ -52,6 +52,7 @@ def _save(world: _World, message: str = "Take notes for the meeting.") -> str:
             action_id=world.action_id,
             change=change,
             task=build_task(HOOK, _schedule(), message),
+            new_conversation=None,
             now=T0,
         )
         is None

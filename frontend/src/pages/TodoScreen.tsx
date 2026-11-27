@@ -7,9 +7,10 @@ import { PageControlButton } from '@/components/task/PageControlButton';
 import { DeletedTodoRow } from '@/components/todo/DeletedTodoRow';
 import { OpenTodoImportRows } from '@/components/todo/OpenTodoImportRows';
 import { ProgressScreen } from '@/components/todo/progress/ProgressScreen';
-import { TodoAddBar } from '@/components/todo/TodoAddBar';
 import { TodoConversationPane } from '@/components/todo/TodoConversationPane';
+import { TodoImportBar } from '@/components/todo/TodoImportBar';
 import { TodoImportPane } from '@/components/todo/TodoImportPane';
+import { TodoNewLine } from '@/components/todo/TodoNewLine';
 import { TodoProjectGroup } from '@/components/todo/TodoProjectGroup';
 import { TodoRow } from '@/components/todo/TodoRow';
 import { useTodoDeleteConfirmation } from '@/components/todo/useTodoDeleteConfirmation';
@@ -18,7 +19,13 @@ import { useI18n } from '@/context/useI18n';
 import type { TaskPreview } from '@/components/task/taskFiles';
 import type { HistorySelection } from '@/history/historySelection';
 import type { WorkspaceSettings } from '@/pages/settings/components/workspaceSettingsModel';
-import { groupTodosByProject, todoProjectSlots } from '@/todos/groupTodosByProject';
+import {
+  groupTodosByProject,
+  todoProjectSlots,
+  type TodoPlace,
+  type TodoProjectGroupView,
+  type TodoProjectSlot,
+} from '@/todos/groupTodosByProject';
 import type { TodoListSort, TodoSelection } from '@/todos/todoSelection';
 import { useDeletedTodos } from '@/todos/useDeletedTodos';
 import {
@@ -35,7 +42,7 @@ import './todoScreen.css';
 
 const SORTS: readonly TodoListSort[] = ['added', 'due'];
 
-/** A failed write, told under the row or the add row it was made from. */
+/** A failed write, told under the row or the new line it was made from. */
 function FailureLine({ failure }: { failure: TodoMutationFailure }) {
   return (
     <p className="todo-screen__failure" role="alert">
@@ -47,16 +54,21 @@ function FailureLine({ failure }: { failure: TodoMutationFailure }) {
 /** The list, which takes focus once a pane closes; the page focuses it too. */
 export const TODO_SCREEN_LIST_ID = 'todo-screen-list';
 
-/** Why an import did not start, told under the add bar. */
+/** Why an import did not start, told under the import bar. */
 const startProblemMessage = (problem: TodoImportProblem) =>
   problem === 'files_unavailable' || problem === 'images_invalid'
     ? 'todo.import.filesUnavailable'
     : 'todo.import.startFailed';
 
+/** One key per place: a project, or an organization's own no project, or none. */
+const placeKey = (place: TodoPlace) =>
+  place.projectId ?? `organization:${place.organizationId ?? ''}`;
+
 /**
  * The home page's TODO list: every TODO in view, by project while several projects are in view
- * and as one list for one project (or their progress, or the deleted TODOs), and beside the list
- * the conversation of the TODO selected, or the draft of an import started from the add bar. The
+ * and as one list for one project (or their progress, or the deleted TODOs), each list ending in
+ * the line a TODO is written on, and beside the list the conversation of the TODO selected, or
+ * the draft of an import started from the import bar. The
  * conversation expands into the list's place and shrinks back beside it, the same pane all along.
  * What is shown is the page's URL; this reads and writes the TODOs through the TODO hooks and
  * draws them with the TODO parts.
@@ -106,6 +118,8 @@ export function TodoScreen({
   const openImports = useOpenTodoImports(selection.scope);
   // How many TODOs the last import added, told over the list once its pane closed.
   const [registered, setRegistered] = useState<number | null>(null);
+  // The place of the last add, under whose new line its failure is told.
+  const [addedTo, setAddedTo] = useState<string | null>(null);
   const deleted = useDeletedTodos(selection.scope);
   const mutations = useTodoMutations({
     reloadList: todoList.reload,
@@ -182,8 +196,26 @@ export function TodoScreen({
 
   const projects = settings ? todoProjectSlots(settings, selection.scope, selection.project) : [];
   const groups = page ? groupTodosByProject(page, projects) : [];
+  // An empty list is written into at the first place in view, drawn as the group it will be, so
+  // the line stays where it is once its first TODO is added. No place: nothing can be added.
+  const shown: TodoProjectGroupView[] =
+    groups.length > 0 || projects.length === 0
+      ? groups
+      : [{ ...projects[0], doneCount: 0, totalCount: 0, items: [] }];
 
-  const renderRows = (items: TodoView[], today: string) =>
+  /** The place's name: its project, or no project in its organization while those are named. */
+  const placeName = (slot: TodoProjectSlot) =>
+    slot.projectName ??
+    (slot.organization === null
+      ? t('todo.noProject')
+      : t('todo.noProjectIn', {
+          organization:
+            slot.organization.kind === 'organization'
+              ? slot.organization.name
+              : t('todo.rail.none'),
+        }));
+
+  const todoRows = (items: TodoView[], today: string) =>
     items.flatMap((todo) => {
       const rowFailure = failureFor(
         (target) => target.kind === 'todo' && target.todoId === todo.todo_id
@@ -208,6 +240,33 @@ export function TodoScreen({
       ];
     });
 
+  /** A group's rows, then the line the next TODO in its place is written on. */
+  const renderRows = (group: TodoProjectGroupView, today: string) => {
+    const place = placeKey(group);
+    const addFailure = addedTo === place ? failureFor((target) => target.kind === 'add') : null;
+    return [
+      ...todoRows(group.items, today),
+      <TodoNewLine
+        key="new"
+        placeName={placeName(group)}
+        onCreate={(text) => {
+          setAddedTo(place);
+          return mutations.create(
+            { projectId: group.projectId, organizationId: group.organizationId },
+            today,
+            text,
+            null
+          );
+        }}
+      />,
+      addFailure ? (
+        <li key="new:failure" className="todo-screen__failure-row">
+          {addFailure}
+        </li>
+      ) : null,
+    ];
+  };
+
   const renderList = (): ReactNode => {
     if (!page || !settings)
       return (todoList.error && !page) || settingsFailed ? loadFailed : loading;
@@ -230,16 +289,16 @@ export function TodoScreen({
             openImportId={importId}
             onOpen={(id) => onSelect({ ...selection, todoId: null, importId: id })}
           />
-          {groups.length === 0 ? (
-            <p className="todo-screen__empty">{t('todo.page.empty')}</p>
-          ) : oneProject && groups.length === 1 ? (
+          {/* An empty list that can be written into shows its new line instead. */}
+          {shown.length === 0 ? <p className="todo-screen__empty">{t('todo.page.empty')}</p> : null}
+          {oneProject && shown.length === 1 ? (
             <ul className="todo-list" aria-label={listName}>
-              {renderRows(groups[0].items, page.today)}
+              {renderRows(shown[0], page.today)}
             </ul>
           ) : (
-            groups.map((group) => (
+            shown.map((group) => (
               <TodoProjectGroup
-                key={group.projectId ?? `organization:${group.organizationId ?? ''}`}
+                key={placeKey(group)}
                 projectName={group.projectName}
                 organizationName={
                   group.organization === null
@@ -251,7 +310,7 @@ export function TodoScreen({
                 doneCount={group.doneCount}
                 totalCount={group.totalCount}
               >
-                {renderRows(group.items, page.today)}
+                {renderRows(group, page.today)}
               </TodoProjectGroup>
             ))
           )}
@@ -275,7 +334,7 @@ export function TodoScreen({
     );
   };
 
-  /** Starts drafting from the add bar's text and files, in the scope in view, and opens it. */
+  /** Starts drafting from the import bar's text and files, in the scope in view, and opens it. */
   const startImport = async (text: string, attachments: TodoImportAttachments) => {
     setRegistered(null);
     const started = await importStart.start(selection.scope, text, attachments);
@@ -290,25 +349,18 @@ export function TodoScreen({
     void openImports.reload();
   };
 
-  /** The bar under the list that adds a TODO. */
-  const renderAddBar = (): ReactNode => {
+  /** The bar under the list that imports TODOs. */
+  const renderImportBar = (): ReactNode => {
     // A scope with no project yet still imports, which can create its projects.
     if (!page || !settings) return null;
     return (
       <div className="todo-screen__add">
-        {failureFor((target) => target.kind === 'add')}
         {importStart.problem ? (
           <p className="todo-screen__failure" role="alert">
             {t(startProblemMessage(importStart.problem))}
           </p>
         ) : null}
-        <TodoAddBar
-          today={page.today}
-          projects={projects}
-          disabled={!listShowsSelection}
-          onSubmit={mutations.create}
-          onImport={startImport}
-        />
+        <TodoImportBar disabled={!listShowsSelection} onImport={startImport} />
       </div>
     );
   };
@@ -380,8 +432,8 @@ export function TodoScreen({
       }
       style={paneWidth.style}
     >
-      {/* Hidden while the conversation is expanded, as it was left: its scroll and its add bar's
-          text are there again on shrinking. */}
+      {/* Hidden while the conversation is expanded, as it was left: its scroll and the text of
+          its new lines and import bar are there again on shrinking. */}
       <section
         ref={setListElement}
         id={TODO_SCREEN_LIST_ID}
@@ -416,7 +468,7 @@ export function TodoScreen({
           ) : null}
           {showingDeleted ? renderDeleted() : renderList()}
         </div>
-        {showingList ? renderAddBar() : null}
+        {showingList ? renderImportBar() : null}
       </section>
       {deletion.dialog}
       {paneOpen && !expanded ? (

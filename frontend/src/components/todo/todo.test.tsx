@@ -1,16 +1,17 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { ReactNode } from 'react';
+import type { ComponentProps, ReactNode } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
-import { expectIconButtonTooltips, expectTooltipIsName } from '@/tests/iconTooltip';
+import { expectIconButtonTooltips } from '@/tests/iconTooltip';
 
 import type { TodoView } from '../../../electron/src/todos/todoContracts';
 import { DeletedTodoRow } from './DeletedTodoRow';
 import { OrganizationRail } from './OrganizationRail';
-import { TodoAddBar } from './TodoAddBar';
 import { TodoConversationPane } from './TodoConversationPane';
+import { TodoImportBar } from './TodoImportBar';
+import { TodoNewLine } from './TodoNewLine';
 import { TodoProjectGroup } from './TodoProjectGroup';
 import { TodoRow } from './TodoRow';
 
@@ -280,100 +281,86 @@ it('answers Pantaray’s deletion request under the conversation, and waits whil
   }
 });
 
-// An organization's page: its project, then its TODOs in no project.
-const PROJECTS = [
-  { projectId: 'p1', organizationId: null, projectName: '見積もり', organization: null },
-  { projectId: null, organizationId: 'org-1', projectName: null, organization: null },
-];
-const IN_P1 = { projectId: 'p1', organizationId: null };
-const NO_PROJECT = { projectId: null, organizationId: 'org-1' };
-const addField = () => screen.getByRole('textbox', { name: 'TODO を追加' });
-const onImport = vi.fn(async () => true);
-
-it('adds to the first project from today with no due, and an IME’s Enter sends nothing', async () => {
-  const onSubmit = vi.fn(async () => true);
+function renderNewLine(onCreate: (text: string) => Promise<boolean>) {
   render(
     ja(
-      <TodoAddBar
-        today={TODAY}
-        projects={PROJECTS}
-        disabled={false}
-        onSubmit={onSubmit}
-        onImport={onImport}
-      />
+      <ul>
+        <TodoNewLine placeName="見積もり" onCreate={onCreate} />
+      </ul>
     )
   );
-  expect(screen.getByRole('button', { name: '追加' })).toBeDisabled();
-  await userEvent.type(addField(), '見積書を送る');
-  // The Enter that ends a composition belongs to the IME.
-  fireEvent.keyDown(addField(), { key: 'Enter', isComposing: true });
-  fireEvent.keyDown(addField(), { key: 'Enter', keyCode: 229 });
-  expect(onSubmit).not.toHaveBeenCalled();
-  await userEvent.type(addField(), '{Enter}');
-  expect(onSubmit).toHaveBeenLastCalledWith(IN_P1, TODAY, '見積書を送る', null);
-  expect(addField()).toHaveValue('');
+  return screen.getByRole('textbox', { name: '見積もりに TODO を追加' });
+}
 
-  // A TODO is one line: pasted lines are joined, and Shift+Enter neither sends nor breaks it.
-  fireEvent.change(addField(), { target: { value: '見積書を\n  送る\n' } });
-  expect(addField()).toHaveValue('見積書を 送る ');
-  await userEvent.type(addField(), '{Shift>}{Enter}{/Shift}');
-  expect(onSubmit).toHaveBeenCalledOnce();
-  expect(addField()).toHaveValue('見積書を 送る ');
-  await userEvent.type(addField(), '{Enter}');
-  expect(onSubmit).toHaveBeenLastCalledWith(IN_P1, TODAY, '見積書を 送る', null);
-  expect(onImport).not.toHaveBeenCalled();
+it('adds the line on Enter and stays on the emptied line, but not on an IME’s or a blank Enter', async () => {
+  const onCreate = vi.fn(async () => true);
+  const line = renderNewLine(onCreate);
+  await userEvent.click(line);
+  await userEvent.keyboard('{Enter}');
+  await userEvent.type(line, '   {Enter}');
+  // The Enter that ends a composition belongs to the IME, and Shift+Enter adds nothing.
+  await userEvent.type(line, ' 見積書を送る ');
+  fireEvent.keyDown(line, { key: 'Enter', isComposing: true });
+  fireEvent.keyDown(line, { key: 'Enter', keyCode: 229 });
+  await userEvent.keyboard('{Shift>}{Enter}{/Shift}');
+  expect(onCreate).not.toHaveBeenCalled();
+  await userEvent.keyboard('{Enter}');
+  expect(onCreate).toHaveBeenCalledExactlyOnceWith('見積書を送る');
+  expect(line).toHaveValue('');
+  expect(line).toHaveFocus();
 });
 
-const modeButton = () => screen.getByRole('button', { name: 'ファイルやテキストから取り込む' });
+it('keeps what was typed while the add was answering, and the whole line when it failed', async () => {
+  let answer: (added: boolean) => void = () => undefined;
+  const onCreate = vi.fn(() => new Promise<boolean>((resolve) => (answer = resolve)));
+  const line = renderNewLine(onCreate);
+  await userEvent.type(line, '見積書{Enter}');
+  // A second Enter while the first add is answering sends nothing more.
+  await userEvent.type(line, ' 請求書{Enter}');
+  expect(onCreate).toHaveBeenCalledOnce();
+  await act(async () => answer(true));
+  expect(line).toHaveValue('請求書');
 
-it('imports text of several lines once its button turns importing on, then turns back', async () => {
-  onImport.mockClear();
-  const onSubmit = vi.fn(async () => true);
-  render(
-    ja(
-      <TodoAddBar
-        today={TODAY}
-        projects={PROJECTS}
-        disabled={false}
-        onSubmit={onSubmit}
-        onImport={onImport}
-      />
-    )
-  );
-  expect(modeButton()).toHaveAttribute('aria-pressed', 'false');
-  expect(screen.queryByRole('button', { name: '添付' })).toBeNull();
-  expectIconButtonTooltips(document.querySelector('.todo-add-bar__choices')!);
-  await userEvent.click(modeButton());
-  // Importing: the field says so, the send button drafts, and one TODO's choices step aside.
-  expect(modeButton()).toHaveAttribute('aria-pressed', 'true');
-  expect(addField()).toHaveAttribute(
-    'placeholder',
-    'テキストを貼るか、ファイルを添付すると、TODO の下書きを作ります'
-  );
-  expectTooltipIsName(screen.getByRole('button', { name: '下書きを作る' }));
-  expect(screen.getByRole('button', { name: '添付' })).toBeVisible();
-  expect(screen.queryByRole('combobox', { name: 'プロジェクト' })).toBeNull();
-  expect(screen.queryByRole('button', { name: /期限/ })).toBeNull();
-  await userEvent.type(addField(), '見積書を送る{Shift>}{Enter}{/Shift}請求書を作る');
-  // Lines kept when importing goes off become one TODO's line.
-  await userEvent.click(modeButton());
-  expect(addField()).toHaveValue('見積書を送る 請求書を作る');
-  await userEvent.click(modeButton());
-  fireEvent.change(addField(), { target: { value: '見積書を送る\n請求書を作る' } });
-  await userEvent.type(addField(), '{Enter}');
-  expect(onSubmit).not.toHaveBeenCalled();
+  await userEvent.type(line, '{Enter}');
+  await userEvent.type(line, 'を作る');
+  await act(async () => answer(false));
+  expect(onCreate).toHaveBeenLastCalledWith('請求書');
+  expect(line).toHaveValue('請求書を作る');
+});
+
+it('joins pasted lines into one, and Escape clears the line and leaves it', async () => {
+  const line = renderNewLine(vi.fn(async () => true));
+  await userEvent.click(line);
+  await userEvent.paste('見積書を\n  送る\n');
+  expect(line).toHaveValue('見積書を 送る ');
+  await userEvent.keyboard('{Escape}');
+  expect(line).toHaveValue('');
+  expect(line).not.toHaveFocus();
+});
+
+const importField = () => screen.getByRole('textbox', { name: 'ファイルやテキストから取り込む' });
+const draftButton = () => screen.getByRole('button', { name: '下書きを作る' });
+const renderImportBar = (onImport: ComponentProps<typeof TodoImportBar>['onImport']) =>
+  render(ja(<TodoImportBar disabled={false} onImport={onImport} />));
+
+it('imports text of several lines on Enter, but not on an IME’s Enter', async () => {
+  const onImport = vi.fn(async () => true);
+  renderImportBar(onImport);
+  expect(draftButton()).toBeDisabled();
+  expectIconButtonTooltips(document.querySelector('.todo-import-bar__choices')!);
+  await userEvent.type(importField(), '見積書を送る{Shift>}{Enter}{/Shift}請求書を作る');
+  fireEvent.keyDown(importField(), { key: 'Enter', isComposing: true });
+  expect(onImport).not.toHaveBeenCalled();
+  await userEvent.type(importField(), '{Enter}');
   expect(onImport).toHaveBeenLastCalledWith('見積書を送る\n請求書を作る', {
     files: [],
     images: [],
   });
-  expect(addField()).toHaveValue('');
-  expect(modeButton()).toHaveAttribute('aria-pressed', 'false');
-  expect(addField()).toHaveAttribute('placeholder', 'TODO を追加');
-  expect(screen.getByRole('button', { name: '追加' })).toBeVisible();
+  expect(importField()).toHaveValue('');
 });
 
 it('imports attached documents and images, staged as the composers stage them', async () => {
-  onImport.mockClear();
+  const onImport = vi.fn(async () => true);
   const attachFile = vi.fn(async ({ name }: { name: string }) => ({
     attachmentId: '6f1c7a64-5d1e-4c4b-9b5b-3d0d7c3f2a10',
     name,
@@ -383,40 +370,22 @@ it('imports attached documents and images, staged as the composers stage them', 
   window.electron = {
     actions: { attachFile, attachImage, discardAttachment: vi.fn(async () => undefined) },
   } as unknown as Window['electron'];
-  const onSubmit = vi.fn(async () => true);
-  const { container } = render(
-    ja(
-      <TodoAddBar
-        today={TODAY}
-        projects={PROJECTS}
-        disabled={false}
-        onSubmit={onSubmit}
-        onImport={onImport}
-      />
-    )
-  );
-  const bar = container.querySelector('fieldset')!;
-  // A file dropped while adding turns importing on in view.
-  fireEvent.drop(bar, {
+  const { container } = renderImportBar(onImport);
+  fireEvent.drop(container.querySelector('fieldset')!, {
     dataTransfer: { files: [new File(['x'], 'board.png', { type: 'image/png' })] },
   });
-  expect(modeButton()).toHaveAttribute('aria-pressed', 'true');
   expect(await screen.findByRole('img')).toBeVisible();
   // An image alone imports.
-  await userEvent.click(screen.getByRole('button', { name: '下書きを作る' }));
-  expect(onSubmit).not.toHaveBeenCalled();
+  await userEvent.click(draftButton());
   expect(onImport).toHaveBeenLastCalledWith('', {
     files: [],
     images: [{ kind: 'image', storage_path: 'images/board.png' }],
   });
   expect(screen.queryByRole('img')).toBeNull();
 
-  expect(modeButton()).toHaveAttribute('aria-pressed', 'false');
-
-  fireEvent.paste(addField(), {
+  fireEvent.paste(importField(), {
     clipboardData: { files: [new File(['x'], 'board.png', { type: 'image/png' })] },
   });
-  expect(modeButton()).toHaveAttribute('aria-pressed', 'true');
   await screen.findByRole('img');
   await userEvent.click(screen.getByRole('button', { name: '添付' }));
   await userEvent.upload(
@@ -424,7 +393,7 @@ it('imports attached documents and images, staged as the composers stage them', 
     new File(['# 議事録'], 'notes.md', { type: 'text/markdown' })
   );
   expect(await screen.findByText('notes.md')).toBeVisible();
-  await userEvent.click(screen.getByRole('button', { name: '下書きを作る' }));
+  await userEvent.click(draftButton());
   expect(onImport).toHaveBeenLastCalledWith('', {
     files: [
       { attachment_id: '6f1c7a64-5d1e-4c4b-9b5b-3d0d7c3f2a10', name: 'notes.md', byte_size: 12 },
@@ -434,35 +403,7 @@ it('imports attached documents and images, staged as the composers stage them', 
   window.electron = undefined;
 });
 
-it('in a scope with no project, imports but says a single TODO needs a project', async () => {
-  onImport.mockClear();
-  const onSubmit = vi.fn(async () => true);
-  render(
-    ja(
-      <TodoAddBar
-        today={TODAY}
-        projects={[]}
-        disabled={false}
-        onSubmit={onSubmit}
-        onImport={onImport}
-      />
-    )
-  );
-  await userEvent.type(addField(), '見積書を送る{Enter}');
-  expect(onSubmit).not.toHaveBeenCalled();
-  expect(screen.getByRole('alert')).toHaveTextContent('TODO を入れるプロジェクトがありません');
-  expect(addField()).toHaveValue('見積書を送る');
-
-  await userEvent.click(modeButton());
-  expect(screen.queryByRole('alert')).toBeNull();
-  await userEvent.type(addField(), '{Shift>}{Enter}{/Shift}請求書を作る{Enter}');
-  expect(onImport).toHaveBeenLastCalledWith('見積書を送る\n請求書を作る', {
-    files: [],
-    images: [],
-  });
-});
-
-it('adds no file while an import is starting', async () => {
+it('adds no file while an import is starting, and keeps lines typed meanwhile', async () => {
   let answer: (started: boolean) => void = () => undefined;
   const pendingImport = vi.fn(() => new Promise<boolean>((resolve) => (answer = resolve)));
   const attachFile = vi.fn(async ({ name }: { name: string }) => ({
@@ -473,210 +414,24 @@ it('adds no file while an import is starting', async () => {
   window.electron = {
     actions: { attachFile, attachImage: vi.fn(), discardAttachment: vi.fn(async () => undefined) },
   } as unknown as Window['electron'];
-  const { container } = render(
-    ja(
-      <TodoAddBar
-        today={TODAY}
-        projects={PROJECTS}
-        disabled={false}
-        onSubmit={vi.fn(async () => true)}
-        onImport={pendingImport}
-      />
-    )
-  );
-  await userEvent.click(modeButton());
-  await userEvent.type(addField(), 'a{Shift>}{Enter}{/Shift}b{Enter}');
+  const { container } = renderImportBar(pendingImport);
+  await userEvent.type(importField(), 'a{Shift>}{Enter}{/Shift}b{Enter}');
   expect(pendingImport).toHaveBeenCalledOnce();
-  expect(modeButton()).toBeDisabled();
   const notes = new File(['# 議事録'], 'notes.md', { type: 'text/markdown' });
   expect(screen.getByRole('button', { name: '添付' })).toBeDisabled();
   fireEvent.drop(container.querySelector('fieldset')!, { dataTransfer: { files: [notes] } });
-  fireEvent.paste(addField(), { clipboardData: { files: [notes] } });
+  fireEvent.paste(importField(), { clipboardData: { files: [notes] } });
   await userEvent.upload(container.querySelector<HTMLInputElement>('input[type="file"]')!, notes);
   expect(attachFile).not.toHaveBeenCalled();
+  fireEvent.change(importField(), { target: { value: 'c\nd' } });
 
   await act(async () => answer(true));
   expect(screen.queryByText('notes.md')).toBeNull();
-  expect(modeButton()).toBeEnabled();
-  window.electron = undefined;
-});
-
-it('stays importing when lines typed while an import was starting are left', async () => {
-  let answer: (started: boolean) => void = () => undefined;
-  const pendingImport = vi.fn(() => new Promise<boolean>((resolve) => (answer = resolve)));
-  const onSubmit = vi.fn(async () => true);
-  render(
-    ja(
-      <TodoAddBar
-        today={TODAY}
-        projects={PROJECTS}
-        disabled={false}
-        onSubmit={onSubmit}
-        onImport={pendingImport}
-      />
-    )
-  );
-  await userEvent.click(modeButton());
-  await userEvent.type(addField(), 'a{Shift>}{Enter}{/Shift}b{Enter}');
-  fireEvent.change(addField(), { target: { value: 'c\nd' } });
-  await act(async () => answer(true));
-  // The newer lines are the next import's, not a TODO that would be refused for its lines.
-  expect(addField()).toHaveValue('c\nd');
-  expect(modeButton()).toHaveAttribute('aria-pressed', 'true');
-  await userEvent.type(addField(), '{Enter}');
+  // The newer lines are the next import's.
+  expect(importField()).toHaveValue('c\nd');
+  await userEvent.type(importField(), '{Enter}');
   expect(pendingImport).toHaveBeenLastCalledWith('c\nd', { files: [], images: [] });
-  expect(onSubmit).not.toHaveBeenCalled();
-});
-
-it('discards the files staged for an import turned off, those still being written too', async () => {
-  let written: (file: unknown) => void = () => undefined;
-  const attachFile = vi
-    .fn()
-    .mockResolvedValueOnce({ attachmentId: 'a-staged', name: 'notes.md', byteSize: 12 })
-    .mockReturnValueOnce(new Promise((resolve) => (written = resolve)));
-  const discardAttachment = vi.fn(async () => undefined);
-  window.electron = {
-    actions: { attachFile, attachImage: vi.fn(), discardAttachment },
-  } as unknown as Window['electron'];
-  const { container } = render(
-    ja(
-      <TodoAddBar
-        today={TODAY}
-        projects={PROJECTS}
-        disabled={false}
-        onSubmit={vi.fn(async () => true)}
-        onImport={onImport}
-      />
-    )
-  );
-  const bar = container.querySelector('fieldset')!;
-  const notes = new File(['# 議事録'], 'notes.md', { type: 'text/markdown' });
-  fireEvent.drop(bar, { dataTransfer: { files: [notes] } });
-  expect(await screen.findByText('notes.md')).toBeVisible();
-  await userEvent.click(modeButton());
-  expect(discardAttachment).toHaveBeenLastCalledWith({ attachmentId: 'a-staged' });
-  expect(screen.queryByText('notes.md')).toBeNull();
-
-  // A file whose write lands after importing went off is discarded, not shown.
-  fireEvent.drop(bar, { dataTransfer: { files: [notes] } });
-  await userEvent.click(modeButton());
-  await act(async () => written({ attachmentId: 'a-late', name: 'notes.md', byteSize: 12 }));
-  expect(discardAttachment).toHaveBeenLastCalledWith({ attachmentId: 'a-late' });
-  await userEvent.click(modeButton());
-  expect(screen.queryByText('notes.md')).toBeNull();
   window.electron = undefined;
-});
-
-it('adds with the start just picked when a click outside the panel sends', async () => {
-  const onSubmit = vi.fn(async () => true);
-  render(
-    ja(
-      <TodoAddBar
-        today={TODAY}
-        projects={PROJECTS}
-        disabled={false}
-        onSubmit={onSubmit}
-        onImport={onImport}
-      />
-    )
-  );
-  await userEvent.type(addField(), '請求書');
-  const dates = screen.getByRole('button', { name: '今日から、期限なし' });
-  fireEvent.click(day(toggle(dates, 'open'), '11月9日'));
-  // The click on 追加 dismisses the panel: `beforetoggle` within it, `toggle` only after it.
-  toggleEvent(dates, 'beforetoggle', 'closed');
-  fireEvent.click(screen.getByRole('button', { name: '追加' }));
-  toggleEvent(dates, 'toggle', 'closed');
-  await act(async () => undefined);
-  expect(onSubmit).toHaveBeenCalledOnce();
-  expect(onSubmit).toHaveBeenLastCalledWith(IN_P1, '2026-11-09', '請求書', null);
-});
-
-it('adds to the project and the dates chosen, shown short beside the calendar icon', async () => {
-  const onSubmit = vi.fn(async () => true);
-  const bar = (projects: typeof PROJECTS) =>
-    ja(
-      <TodoAddBar
-        today={TODAY}
-        projects={projects}
-        disabled={false}
-        onSubmit={onSubmit}
-        onImport={onImport}
-      />
-    );
-  const { rerender } = render(bar(PROJECTS));
-  const dates = screen.getByRole('button', { name: '今日から、期限なし' });
-  expect(dates).toHaveTextContent(/^$/);
-  expectTooltipIsName(dates);
-  await userEvent.selectOptions(
-    screen.getByRole('combobox', { name: 'プロジェクト' }),
-    'プロジェクトなし'
-  );
-  const picker = toggle(dates, 'open');
-  fireEvent.click(day(picker, '11月9日'));
-  fireEvent.click(day(picker, '11月12日'));
-  expect(dates).toHaveAccessibleName('月 11/9から、期限 木 11/12');
-  expect(dates).toHaveTextContent(/^11\/9 → 11\/12$/);
-  await userEvent.type(addField(), '請求書');
-  await userEvent.click(screen.getByRole('button', { name: '追加' }));
-  expect(onSubmit).toHaveBeenLastCalledWith(NO_PROJECT, '2026-11-09', '請求書', {
-    date: '2026-11-12',
-    repeat: 'none',
-  });
-
-  // With no start, a TODO waits until one is set; a start of today is left out of the text.
-  fireEvent.click(toggle(dates, 'open').getByRole('button', { name: '開始を未定にする' }));
-  expect(dates).toHaveTextContent(/^未定 → 11\/12$/);
-  await userEvent.type(addField(), '見積書{Enter}');
-  expect(onSubmit).toHaveBeenLastCalledWith(NO_PROJECT, null, '見積書', {
-    date: '2026-11-12',
-    repeat: 'none',
-  });
-  fireEvent.click(day(toggle(dates, 'open'), '11月7日'));
-  toggle(dates, 'closed');
-  expect(dates).toHaveTextContent(/^→ 11\/12$/);
-
-  rerender(bar(PROJECTS.slice(0, 1)));
-  expect(screen.queryByRole('combobox', { name: 'プロジェクト' })).toBeNull();
-});
-
-it('names each organization’s no project while all organizations are in view', async () => {
-  const onSubmit = vi.fn(async () => true);
-  const xer = { kind: 'organization' as const, name: 'Xer' };
-  render(
-    ja(
-      <TodoAddBar
-        today={TODAY}
-        projects={[
-          { projectId: 'p1', organizationId: null, projectName: '見積もり', organization: xer },
-          { projectId: null, organizationId: 'org-1', projectName: null, organization: xer },
-          {
-            projectId: null,
-            organizationId: null,
-            projectName: null,
-            organization: { kind: 'none' },
-          },
-        ]}
-        disabled={false}
-        onSubmit={onSubmit}
-        onImport={onImport}
-      />
-    )
-  );
-  const select = screen.getByRole('combobox', { name: 'プロジェクト' });
-  expect(
-    within(select)
-      .getAllByRole('option')
-      .map((option) => option.textContent)
-  ).toEqual(['見積もり', 'プロジェクトなし（Xer）', 'プロジェクトなし（組織なし）']);
-  await userEvent.selectOptions(select, 'プロジェクトなし（組織なし）');
-  await userEvent.type(addField(), '請求書{Enter}');
-  expect(onSubmit).toHaveBeenLastCalledWith(
-    { projectId: null, organizationId: null },
-    TODAY,
-    '請求書',
-    null
-  );
 });
 
 it('counts a group’s done TODOs and names its organization after it when one is given', () => {

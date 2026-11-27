@@ -1,0 +1,90 @@
+/* The import bar under the list, as the chat's composer sits under the chat. The TODO list's
+   greys are set in todo.css. */
+.todo-import-bar {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 10px 10px 8px 14px;
+  border: 1px solid var(--todo-line-strong);
+  border-radius: 14px;
+  background: var(--fog-mist);
+}
+
+.todo-import-bar:focus-within {
+  border-color: var(--fog-text-3);
+}
+
+.todo-import-bar__field {
+  min-width: 0;
+  /* One line at first, growing with pasted lines up to a few before it scrolls. */
+  min-height: 26px;
+  max-height: 140px;
+  field-sizing: content;
+  padding: 3px 0;
+  border: 0;
+  background: transparent;
+  color: var(--fog-text);
+  font: inherit;
+  font-size: 14.5px;
+  line-height: 20px;
+  resize: none;
+  outline: none;
+}
+
+.todo-import-bar__choices {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* The attach button, unframed. */
+.todo-import-bar__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fog-text-3);
+  cursor: pointer;
+}
+
+.todo-import-bar__icon:hover:not(:disabled) {
+  background: var(--fog-mist-strong);
+  color: var(--fog-text);
+}
+
+.todo-import-bar__send {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--fog-text-2);
+  color: var(--app-background);
+  cursor: pointer;
+}
+
+.todo-import-bar__send:disabled {
+  background: var(--fog-mist-strong);
+  color: var(--fog-text-3);
+  cursor: default;
+}
+
+.todo-import-bar__icon:focus-visible,
+.todo-import-bar__send:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.todo-import-bar:disabled {
+  opacity: 0.5;
+}

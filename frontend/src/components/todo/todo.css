@@ -1,7 +1,7 @@
 /* The TODO list is greyscale: weight and grey levels carry its distinctions, hairlines its
    structure. The one colour is the muted ochre of a due day gone by. */
 
-.todo-add-bar,
+.todo-import-bar,
 .todo-date-picker,
 .todo-import,
 .todo-group,
@@ -274,12 +274,47 @@
 .todo-row__body:focus-visible,
 .todo-row__date:focus-visible,
 .todo-row__delete:focus-visible,
-.todo-add-bar__icon:focus-visible,
-.todo-add-bar__project select:focus-visible,
-.todo-add-bar__send:focus-visible,
 .todo-date-picker button:not(.todo-date-picker__day):focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
+}
+
+/* The line after a list's rows, where the next TODO is written as on a note: an empty check
+   that does nothing yet, then the text on the row's grid, framed only while it has the focus. */
+.todo-new-line__check {
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid var(--fog-text-3);
+  border-radius: 50%;
+  opacity: 0.5;
+}
+
+.todo-new-line__field {
+  grid-column: 2 / -1;
+  box-sizing: border-box;
+  min-width: 0;
+  height: 30px;
+  padding: 0 3px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fog-text);
+  font: inherit;
+  font-size: 14.5px;
+}
+
+.todo-new-line__field::placeholder {
+  color: var(--fog-text-3);
+}
+
+.todo-new-line__field:focus {
+  border-color: var(--fog-text-3);
+  outline: none;
+}
+
+.todo-new-line:hover {
+  background: transparent;
 }
 
 /* Pantaray's request to delete the open TODO, under its conversation. */

@@ -327,7 +327,8 @@ async function openHome(page: Page, search = '', suggestion: OverlaySnapshot = S
       // every write, and registering creates what the draft names.
       const imports = new Map<string, TodoImportView>();
       const importStarts: TodoImportStartRequest[] = [];
-      Object.assign(window, { importStarts });
+      const createRequests: TodoCreateRequest[] = [];
+      Object.assign(window, { importStarts, createRequests });
       type DraftGroups = {
         organization: string | null;
         project: string | null;
@@ -583,6 +584,7 @@ async function openHome(page: Page, search = '', suggestion: OverlaySnapshot = S
             },
             // Writes change the TODOs the next read returns, as the backend's do.
             create: async (request: TodoCreateRequest) => {
+              createRequests.push(request);
               const added: TodoView = {
                 todo_id: `t-added-${items.length}`,
                 project_id: request.project_id,
@@ -830,6 +832,11 @@ async function capture(page: Page, info: TestInfo, name: string) {
   }
 }
 
+const createRequests = (page: Page) =>
+  page.evaluate(
+    () => (window as unknown as { createRequests: TodoCreateRequest[] }).createRequests
+  );
+
 const sidebarOf = (page: Page) => page.getByRole('complementary', { name: 'TODO', exact: true });
 const railOf = (page: Page) => page.getByRole('group', { name: '組織' });
 const groups = (page: Page) => page.locator('section.todo-group');
@@ -878,13 +885,18 @@ test('the home lists every organization’s TODOs by project, with the rail and 
   await expect(rowOf(page, '古いブランチを消す').locator('.todo-row__state')).toHaveText(
     '消してよい？'
   );
-  // One add bar under the list, into the first project in view until another is chosen.
-  await expect(page.getByRole('textbox', { name: 'TODO を追加' })).toHaveCount(1);
-  await expect(page.getByRole('combobox', { name: 'プロジェクト' })).toHaveValue(
-    'project:estimate'
+  // Each group ends with the line its next TODO is written on, named by its place.
+  await expect(groups(page).locator('.todo-new-line')).toHaveCount(5);
+  await expect(estimate.getByRole('textbox', { name: '見積もりに TODO を追加' })).toHaveAttribute(
+    'placeholder',
+    'TODO を追加'
   );
-  await expect(page.getByRole('button', { name: '今日から、期限なし' })).toBeVisible();
-  // Every row is one line.
+  await expect(
+    page
+      .getByRole('region', { name: 'プロジェクトなし 組織なし' })
+      .getByRole('textbox', { name: 'プロジェクトなし（組織なし）に TODO を追加' })
+  ).toBeVisible();
+  // Every row, the new lines too, is one line.
   const heights = await page
     .locator('.todo-row')
     .evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().height));
@@ -916,6 +928,14 @@ test('the home lists every organization’s TODOs by project, with the rail and 
   await page.keyboard.press('Tab');
   await expect(estimate.getByRole('checkbox', { name: '完了: 見積書を再提出する' })).toBeFocused();
   await capture(page, info, 'list-focus');
+  // Past the group's last row, Tab reaches its new line, then the next group's first row.
+  await estimate.getByRole('button', { name: '削除: 名刺 40 枚を入れておく' }).focus();
+  await page.keyboard.press('Tab');
+  await expect(estimate.getByRole('textbox', { name: '見積もりに TODO を追加' })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(
+    page.getByRole('region', { name: '採用 Xer' }).getByRole('checkbox').first()
+  ).toBeFocused();
 });
 
 test('a selected TODO opens its conversation beside the list, where a reply accepts the suggestion', async ({
@@ -985,24 +1005,27 @@ test('the rail scopes the list to one organization, and a project shows its TODO
   await expect(groups(page).locator('h3')).toHaveText(['見積もり', '採用']);
   await capture(page, info, 'list-organization');
 
-  // The organization's own TODOs in no project are added from the bar and listed last.
-  const place = page.getByRole('combobox', { name: 'プロジェクト' });
-  await expect(place.getByRole('option')).toHaveText(['見積もり', '採用', 'プロジェクトなし']);
-  await place.selectOption({ label: 'プロジェクトなし' });
-  const field = page.getByRole('textbox', { name: 'TODO を追加' });
+  // A group's new line adds to its project, and stays focused for the next line.
+  const hiring = page.getByRole('region', { name: '採用' });
+  const field = hiring.getByRole('textbox', { name: '採用に TODO を追加' });
   await field.fill('請求書の送り先をまとめる');
-  await capture(page, info, 'add-bar-no-project');
+  await capture(page, info, 'new-line-typed');
   await field.press('Enter');
   await expect(field).toHaveValue('');
-  await expect(groups(page).locator('h3')).toHaveText(['見積もり', '採用', 'プロジェクトなし']);
-  await expect(
-    rowOf(page.getByRole('region', { name: 'プロジェクトなし' }), '請求書の送り先をまとめる')
-  ).toBeVisible();
-  await capture(page, info, 'list-organization-no-project');
-  // It is not among the TODOs in no organization.
-  await railOf(page).getByRole('button', { name: '組織なし' }).click();
-  await expect(page.getByText('請求書の送り先をまとめる')).toHaveCount(0);
-  await railOf(page).getByRole('button', { name: 'Xer' }).click();
+  await expect(field).toBeFocused();
+  await expect(rowOf(hiring, '請求書の送り先をまとめる')).toBeVisible();
+  expect((await createRequests(page)).at(-1)).toMatchObject({
+    project_id: 'hiring',
+    organization_id: null,
+    text: '請求書の送り先をまとめる',
+    starts_on: '2026-11-04',
+    due: null,
+  });
+  // Escape clears the line and leaves it.
+  await field.fill('下書き');
+  await field.press('Escape');
+  await expect(field).toHaveValue('');
+  await expect(field).not.toBeFocused();
 
   await sidebarOf(page).getByRole('button', { name: '見積もり', exact: true }).click();
   await expect(page).toHaveURL(/#\/history\?scope=organization:xer&project=project:estimate$/);
@@ -1067,19 +1090,20 @@ test('期限順 puts the open TODOs by due date before the done ones, and stays 
   ]);
 });
 
-test('a project’s TODO opens beside its list, with the add bar under it offering no project', async ({
+test('a project’s TODO opens beside its list, which ends with the line that adds to it', async ({
   page,
 }, info) => {
   await openHome(page, '?project=project:hiring&todo=t-questions');
   const pane = page.getByRole('region', { name: '来週の面接の質問リストを作る' });
   await expect(pane.getByRole('textbox', { name: 'メッセージ' })).toBeVisible();
-  await expect(page.getByRole('textbox', { name: 'TODO を追加' })).toBeVisible();
-  await expect(page.getByRole('combobox', { name: 'プロジェクト' })).toHaveCount(0);
+  await expect(
+    page.getByRole('list', { name: '採用' }).getByRole('textbox', { name: '採用に TODO を追加' })
+  ).toBeVisible();
   expect(await hasNoSideScroll(page)).toBe(true);
   await capture(page, info, 'project-conversation');
 });
 
-test('a row’s start and due day change on one calendar, and the bar under the list adds', async ({
+test('a row’s start and due day change on one calendar, also for a TODO just added', async ({
   page,
 }, info) => {
   await openHome(page);
@@ -1112,41 +1136,40 @@ test('a row’s start and due day change on one calendar, and the bar under the 
     estimate.getByRole('button', { name: '期限なし: 見積書を再提出する' })
   ).toBeFocused();
 
-  // The bar: the first click picks the start, the second the due day, which closes the panel.
-  await page.getByRole('combobox', { name: 'プロジェクト' }).selectOption({ label: '採用' });
-  const dates = page.getByRole('button', { name: '今日から、期限なし' });
-  await capture(page, info, 'add-bar');
-  await dates.click();
+  // A TODO added from its group's line starts today with no due day.
+  const hiring = page.getByRole('region', { name: '採用 Xer' });
+  const line = hiring.getByRole('textbox', { name: '採用に TODO を追加' });
+  await line.fill('面接官の日程を押さえる');
+  await line.press('Enter');
+  await expect(line).toHaveValue('');
+  const added = rowOf(hiring, '面接官の日程を押さえる');
+  await expect(
+    added.getByRole('button', { name: '期限なし: 面接官の日程を押さえる' })
+  ).toBeVisible();
+
+  // From its state, the first click picks the start, the second the due day, which closes the
+  // panel and returns the focus.
+  const soon = added.getByRole('button', { name: '開始日 まもなく: 面接官の日程を押さえる' });
+  await soon.click();
   await picker.getByRole('button', { name: '2026年11月9日(月)' }).click();
   await picker.getByRole('button', { name: '2026年11月18日(水)' }).hover();
   await expect(picker.getByRole('button', { name: '2026年11月12日(木)' })).toHaveAttribute(
     'data-range',
     'between'
   );
+  await capture(page, info, 'range-picker');
   await picker.getByRole('button', { name: '2026年11月18日(水)' }).click();
   await expect(picker).toBeHidden();
-  const chosen = page.getByRole('button', { name: '月 11/9から、期限 水 11/18' });
-  await expect(chosen).toBeFocused();
-  await expect(chosen).toHaveText('11/9 → 11/18');
-  const field = page.getByRole('textbox', { name: 'TODO を追加' });
-  await field.fill('面接官の日程を押さえる');
-  await capture(page, info, 'add-bar-dates');
-  await chosen.click();
-  await capture(page, info, 'range-picker');
-  await page.keyboard.press('Escape');
-  await field.press('Enter');
-  await expect(field).toHaveValue('');
-  const added = rowOf(page.getByRole('region', { name: '採用 Xer' }), '面接官の日程を押さえる');
+  const start = added.getByRole('button', { name: '開始日 月 11/9から: 面接官の日程を押さえる' });
+  await expect(start).toBeFocused();
   await expect(
     added.getByRole('button', { name: '期限 水 11/18: 面接官の日程を押さえる' })
   ).toBeVisible();
 
-  // The start of a TODO not started yet changes from its state; a panel let go keeps the pick.
-  const start = added.getByRole('button', { name: '開始日 月 11/9から: 面接官の日程を押さえる' });
+  // The start changes again from the same word; a panel let go keeps the pick.
   await start.click();
   await picker.getByRole('button', { name: '2026年11月4日(水)' }).click();
   await page.keyboard.press('Escape');
-  const soon = added.getByRole('button', { name: '開始日 まもなく: 面接官の日程を押さえる' });
   await expect(soon).toBeFocused();
   await expect(
     added.getByRole('button', { name: '期限 水 11/18: 面接官の日程を押さえる' })
@@ -1158,17 +1181,6 @@ test('a row’s start and due day change on one calendar, and the bar under the 
   await expect(
     added.getByRole('button', { name: '開始日未定: 面接官の日程を押さえる' })
   ).toBeFocused();
-
-  // A start picked and the panel dismissed by the click on 追加 itself: the TODO takes it.
-  await field.fill('面接の部屋を予約する');
-  await page.getByRole('button', { name: '月 11/9から、期限 水 11/18' }).click();
-  await picker.getByRole('button', { name: '2026年11月10日(火)' }).click();
-  await page.getByRole('button', { name: '追加', exact: true }).click();
-  await expect(field).toHaveValue('');
-  const roomRow = rowOf(page.getByRole('region', { name: '採用 Xer' }), '面接の部屋を予約する');
-  await expect(
-    roomRow.getByRole('button', { name: '開始日 火 11/10から: 面接の部屋を予約する' })
-  ).toBeVisible();
 });
 
 test('the deleted TODOs list what can still be restored', async ({ page }, info) => {
@@ -1523,15 +1535,9 @@ test('lines pasted into the bar open a draft beside the list, which registers wh
   page,
 }, info) => {
   await openHome(page);
-  const field = page.getByRole('textbox', { name: 'TODO を追加' });
-  const mode = page.getByRole('button', { name: 'ファイルやテキストから取り込む' });
-  await capture(page, info, 'add-bar-add-mode');
-  // Importing drafts TODOs from the lines, so one TODO's project and dates step aside.
-  await mode.click();
-  await expect(mode).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByRole('combobox', { name: 'プロジェクト' })).toHaveCount(0);
+  const field = page.getByRole('textbox', { name: 'ファイルやテキストから取り込む' });
   await field.fill('見積書を再提出する\n値引きの条件をまとめる');
-  await capture(page, info, 'add-bar-import-mode');
+  await capture(page, info, 'import-bar');
   await field.press('Enter');
 
   const pane = page.locator('.todo-screen__import');
@@ -1546,7 +1552,6 @@ test('lines pasted into the bar open a draft beside the list, which registers wh
     },
   ]);
   await expect(field).toHaveValue('');
-  await expect(mode).toHaveAttribute('aria-pressed', 'false');
 
   // A new organization and project are marked; the open TODO the draft repeats is left out.
   await expect(pane.getByRole('heading', { name: '取引先 B 新規' })).toBeVisible();
@@ -1599,15 +1604,13 @@ test('a file attached in an organization drafts inside it, and やめる closes 
   page,
 }, info) => {
   await openHome(page, '?scope=organization:xer');
-  await page.getByRole('button', { name: 'ファイルやテキストから取り込む' }).click();
-  await page.locator('.todo-add-bar input[type="file"]').setInputFiles({
+  await page.locator('.todo-import-bar input[type="file"]').setInputFiles({
     name: 'notes.md',
     mimeType: 'text/markdown',
     buffer: Buffer.from('# 議事録'),
   });
-  await expect(page.locator('.todo-add-bar').getByText('notes.md')).toBeVisible();
-  await expect(page.getByRole('button', { name: '今日から、期限なし' })).toHaveCount(0);
-  await capture(page, info, 'add-bar-attached');
+  await expect(page.locator('.todo-import-bar').getByText('notes.md')).toBeVisible();
+  await capture(page, info, 'import-bar-attached');
 
   await page.getByRole('button', { name: '下書きを作る' }).click();
   const pane = page.locator('.todo-screen__import');
@@ -1622,7 +1625,7 @@ test('a file attached in an organization drafts inside it, and やめる closes 
       { attachment_id: '6f1c7a64-5d1e-4c4b-9b5b-3d0d7c3f2a10', name: 'notes.md', byte_size: 11 },
     ],
   });
-  await expect(page.locator('.todo-add-bar').getByText('notes.md')).toHaveCount(0);
+  await expect(page.locator('.todo-import-bar').getByText('notes.md')).toHaveCount(0);
   // Sent with no text, the draft in progress is named by its file.
   await expect(openImportRows(page)).toHaveCount(1);
   await expect(page.getByRole('button', { name: '下書きを開く: notes.md' })).toHaveAttribute(
@@ -1640,8 +1643,7 @@ test('a draft left for another organization is listed over its TODOs, and reopen
   page,
 }, info) => {
   await openHome(page);
-  await page.getByRole('button', { name: 'ファイルやテキストから取り込む' }).click();
-  const field = page.getByRole('textbox', { name: 'TODO を追加' });
+  const field = page.getByRole('textbox', { name: 'ファイルやテキストから取り込む' });
   await field.fill('見積書を再提出する\n値引きの条件をまとめる');
   await field.press('Enter');
   const pane = page.locator('.todo-screen__import');
@@ -1679,16 +1681,20 @@ test('an organization with no project yet adds a TODO in no project, and takes a
   await dialog.getByRole('button', { name: '追加' }).click();
   await expect(page).toHaveURL(/scope=organization:labs/);
 
-  const field = page.getByRole('textbox', { name: 'TODO を追加' });
-  // Its one place is its own no project, so there is nothing to choose.
-  await expect(page.getByRole('combobox', { name: 'プロジェクト' })).toHaveCount(0);
+  // Its empty list is written into at its one place, its own no project, which the line names.
+  await expect(page.getByText('TODO はまだありません。')).toHaveCount(0);
+  await expect(groups(page).locator('.todo-group__head')).toHaveText([/^プロジェクトなし$/]);
+  await expect(page.getByRole('textbox', { name: /に TODO を追加$/ })).toHaveCount(1);
+  const field = page.getByRole('textbox', { name: 'プロジェクトなしに TODO を追加' });
   await field.fill('見積書を送る');
   await field.press('Enter');
   await expect(field).toHaveValue('');
+  // The line stays where it was, now under its first TODO, and keeps the focus.
+  await expect(field).toBeFocused();
   await expect(groups(page).locator('.todo-group__head')).toHaveText([/^プロジェクトなし0 \/ 1$/]);
-  await page.getByRole('button', { name: 'ファイルやテキストから取り込む' }).click();
-  await field.fill('見積書を送る\n請求書を作る');
-  await field.press('Enter');
+  const importField = page.getByRole('textbox', { name: 'ファイルやテキストから取り込む' });
+  await importField.fill('見積書を送る\n請求書を作る');
+  await importField.press('Enter');
   await expect(page.locator('.todo-screen__import')).toBeVisible();
   expect((await importStarts(page)).at(-1)).toEqual({
     import_id: expect.any(String),

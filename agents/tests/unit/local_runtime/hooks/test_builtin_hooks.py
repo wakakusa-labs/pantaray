@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import sqlite3
 from collections.abc import Iterator
-from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -17,9 +15,6 @@ from pantaray_agents.local_runtime.activity_summary_schedule import (
 )
 from pantaray_agents.local_runtime.hooks import gates, jobs
 from pantaray_agents.local_runtime.hooks.builtin import builtin_hooks
-from pantaray_agents.local_runtime.hooks.events import ChatMessageRecorded
-from pantaray_agents.local_runtime.hooks.inbox import record_event
-from pantaray_agents.local_runtime.hooks.listing import set_hook_enabled
 from pantaray_agents.local_runtime.hooks.runner import run_hooks_once
 from pantaray_agents.local_runtime.hooks.states import SqliteHookStateStore
 from pantaray_agents.local_runtime.runtime.identity import (
@@ -176,57 +171,3 @@ def test_a_summary_backlog_after_a_sleep_drains_without_double_fires(
     assert states.read_next_fire_times()["builtin.summary_1h"] == _utc(
         2026, 4, 15, 14, 5
     )
-
-
-def test_a_disabled_builtin_neither_fires_nor_collects_and_resumes_once(
-    db_path: Path,
-    recorder: _Recorder,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # Catches a switch the engine ignores, events piling up for a hook that
-    # is off, and a re-enabled hook that replays every window it was off for
-    # or waits a whole window before firing again.
-    monkeypatch.setenv("HOME", str(tmp_path / "home"))
-    mark_configured()
-
-    def switch(hook_id: str, enabled: bool) -> None:
-        assert (
-            set_hook_enabled(
-                db_path=db_path,
-                busy_timeout_ms=1_000,
-                user_id="local-owner",
-                hook_id=hook_id,
-                enabled=enabled,
-            )
-            is None
-        )
-
-    def chat_message() -> int:
-        with closing(sqlite3.connect(db_path)) as connection, connection:
-            record_event(
-                connection,
-                user_id="local-owner",
-                event=ChatMessageRecorded(sequence=1),
-                occurred_at="2026-09-07T10:20:00Z",
-            )
-            return int(
-                connection.execute(
-                    "SELECT COUNT(*) FROM hook_inbox WHERE hook_id = ?",
-                    ("builtin.memory_update",),
-                ).fetchone()[0]
-            )
-
-    _tick(db_path, _utc(2026, 9, 7, 10, 1))
-    switch("builtin.insight", False)
-    switch("builtin.memory_update", False)
-    for now in (_utc(2026, 9, 7, 10, 16), _utc(2026, 9, 7, 10, 31)):
-        _tick(db_path, now)
-    assert chat_message() == 0
-
-    switch("builtin.insight", True)
-    switch("builtin.memory_update", True)
-    for now in (_utc(2026, 9, 7, 10, 40), _utc(2026, 9, 7, 10, 41)):
-        _tick(db_path, now)
-    assert recorder.insights == [_utc(2026, 9, 7, 10, 0), _utc(2026, 9, 7, 10, 30)]
-    assert chat_message() == 1

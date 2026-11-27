@@ -21,38 +21,17 @@ from pantaray_agents.local_runtime.storage.migrations.connection import (
 )
 
 from .builtin import builtin_hooks
-from .controls import NO_CONVERSATION, active_hooks
 from .events import HookEvent
-from .tasks import TASK_EVENT_NAMES, read_task_files
 
 
-def _listening_hooks(
-    connection: sqlite3.Connection, *, user_id: str, event: HookEvent
-) -> tuple[str, ...]:
-    """The hooks that may fire and listen to the event; a task hears only the
-    events of its own conversation."""
+def _listening_hooks(event: HookEvent) -> tuple[str, ...]:
+    """The hooks that listen to the event: built-ins only, as no task hears one."""
 
-    active = active_hooks(
-        connection,
-        user_id=user_id,
-        builtins=builtin_hooks(),
-        task_files=read_task_files() if event.name in TASK_EVENT_NAMES else (),
-    )
-    action_id = event.payload().get("action_id")
     now = datetime.now(UTC)
     return tuple(
         hook.id
-        for hook in active.hooks
-        if event.name in inbox_events(hook)
-        and not hook_has_ended(hook, now)
-        and (
-            hook.id not in active.tasks
-            or (
-                action_id is not None
-                and active.conversations.get(hook.id, NO_CONVERSATION).action_id
-                == action_id
-            )
-        )
+        for hook in builtin_hooks()
+        if event.name in inbox_events(hook) and not hook_has_ended(hook, now)
     )
 
 
@@ -66,10 +45,9 @@ def record_event(
     """Put the event in the inbox of each hook that listens to it.
 
     Called inside the caller's transaction, so the event commits or rolls back
-    with the write it records. An event no hook listens to is not kept, nor one
-    for a disabled hook.
+    with the write it records. An event no hook listens to is not kept.
     """
-    hook_ids = _listening_hooks(connection, user_id=user_id, event=event)
+    hook_ids = _listening_hooks(event)
     if not hook_ids:
         return
     payload_json = json.dumps(event.payload(), ensure_ascii=False, sort_keys=True)

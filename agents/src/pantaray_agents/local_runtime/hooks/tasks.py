@@ -1,14 +1,16 @@
-"""Tasks the user or an agent adds: one Markdown file each in ~/.pantaray/tasks.
+"""Tasks an Action schedules: one Markdown file each in ~/.pantaray/tasks.
 
 A file holds one conversation hook (``load_conversation_hook``). Its id is
-``task.<file stem>``. The file is read fresh on every use, so an edit takes
-effect at once; it fires only while its content hash is the approved one.
+``task.<file stem>``. Only the files an Action's task tools recorded are read;
+any other file in the folder is not a task. A task fires only while its file
+still hashes to the content the user said yes to.
 """
 
 from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -27,12 +29,8 @@ from pantaray_agents.schema.agent.action_message import (
 )
 from pantaray_agents.tools.files.pantaray_tasks import pantaray_tasks_dir
 
-from .events import ActionTurnEnded
-
 TASK_HOOK_PREFIX: Final = "task."
 _STEM: Final = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
-# A task hears only the ends of its own conversation's turns.
-TASK_EVENT_NAMES: Final = frozenset({ActionTurnEnded.NAME})
 # A task's turn belongs to the owner settled on, and waits for a connection
 # rather than fail without one; the file names no gates of its own.
 TASK_GATES: Final = ("owner_settled", "background_can_send")
@@ -69,25 +67,15 @@ def task_file_path(hook_id: str) -> Path:
     return pantaray_tasks_dir() / f"{hook_id.removeprefix(TASK_HOOK_PREFIX)}.md"
 
 
-def read_task_file(hook_id: str) -> TaskFile | None:
-    """The task file ``hook_id`` names as it is now; None when there is none."""
-
-    stem = hook_id.removeprefix(TASK_HOOK_PREFIX)
-    # An id from a request names a file in the folder, never a path out of it.
-    if stem == hook_id or _STEM.fullmatch(stem) is None:
-        return None
-    return _read(task_file_path(hook_id))
-
-
-def read_task_files() -> tuple[TaskFile, ...]:
-    """Every task file, in file name order; none when the folder is missing."""
+def read_task_files(hook_ids: Iterable[str]) -> tuple[TaskFile, ...]:
+    """The recorded tasks' files as they are now, in id order; a task whose
+    file is gone is left out."""
 
     # Design limit: every call reads each file; fine for tens of small files.
-    # Cache by file mtime when a hooks tick or an event write exceeds 50 ms.
+    # Cache by file mtime when a hooks tick exceeds 50 ms.
     return tuple(
         task
-        for task in map(_read, sorted(pantaray_tasks_dir().glob("*.md")))
-        # None: removed since the listing.
+        for task in (_read(task_file_path(hook_id)) for hook_id in sorted(hook_ids))
         if task is not None
     )
 
@@ -129,7 +117,8 @@ def parse_task_file(stem: str, content: bytes) -> TaskFile:
             hook_id,
             text,
             gate_names=frozenset(TASK_GATES),
-            event_names=TASK_EVENT_NAMES,
+            # A task fires on a time; no event wakes it.
+            event_names=frozenset(),
             requires=TASK_GATES,
         )
     except HookDefinitionError as error:

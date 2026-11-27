@@ -64,8 +64,8 @@ def run_hooks_once(
             db_path=db_path,
             busy_timeout_ms=busy_timeout_ms,
             user_id=user_id,
-            task_hashes={
-                hook_id: task.content_hash for hook_id, task in active.tasks.items()
+            task_versions={
+                hook_id: task.version for hook_id, task in active.tasks.items()
             },
         ),
         inbox=SqliteHookInbox(

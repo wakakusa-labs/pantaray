@@ -66,7 +66,6 @@ DAILY: dict[str, JSONValue] = {
 
 @pytest.fixture
 def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNamespace]:
-    monkeypatch.setenv("HOME", str(tmp_path / "home"))
     db_path, context = _bootstrap_runtime_db(
         tmp_path,
         allowed_tool_ids=(*BROKER_ALLOWED_TOOL_IDS, SCHEDULE_CONTINUATION_TOOL.tool_id),
@@ -96,7 +95,6 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNames
         db_path=db_path,
         context=context,
         state=state,
-        tasks=tmp_path / "home" / ".pantaray" / "tasks",
     )
 
 
@@ -211,7 +209,6 @@ async def test_a_yes_writes_the_task_it_showed_and_a_no_writes_nothing(
         asked.control.command_summary["every"],
         asked.control.command_summary["offset"],
     ) == ("day", "8h")
-    assert not env.tasks.exists()
     _decide(env, "request-no", "denied")
     assert isinstance(
         (await _preflight(env, DAILY, "request-no")).control, ApprovalDeniedToolControl
@@ -220,9 +217,9 @@ async def test_a_yes_writes_the_task_it_showed_and_a_no_writes_nothing(
 
     task_id = await _schedule(env, DAILY)
     (view,) = _tasks(env)
-    assert (view.hook_id, view.approved, view.enabled) == (task_id, True, True)
-    assert 'conversation = "continue"' in view.text
-    assert view.created_from_action_id == "action-1"
+    assert (view.hook_id, view.enabled) == (task_id, True)
+    assert (view.every, view.offset, view.message) == ("day", "8h", DAILY["prompt"])
+    assert view.created_from_action_id == view.target_action_id == "action-1"
 
 
 async def test_the_approval_review_never_answers_for_a_schedule(
@@ -252,17 +249,17 @@ async def test_an_update_asks_again_and_keeps_the_old_task_until_yes(
     # Catches an agent's change that fires before the user saw it, and an
     # update that reaches another conversation's schedule.
     task_id = await _schedule(env, DAILY)
-    before = _tasks(env)[0].text
+    before = _tasks(env)[0].message
     changed = {**DAILY, "prompt": "Also check their pricing page.", "task_id": task_id}
     asked = await _preflight(env, changed, "request-update")
     assert isinstance(asked.control, ApprovalRequiredToolControl)
-    assert _tasks(env)[0].text == before
+    assert _tasks(env)[0].message == before
 
     _decide(env, "request-update", "approved_once")
     assert (await _call(env, changed, "request-update"))["status"] == "scheduled"
     (view,) = _tasks(env)
-    assert (view.hook_id, view.approved) == (task_id, True)
-    assert "pricing page" in view.text
+    assert view.hook_id == task_id
+    assert "pricing page" in view.message
 
     insert_agent_action(db_path=env.db_path, action_id="action-2", suggestion_id="s-2")
     env.state["action_id"] = "action-2"
@@ -335,7 +332,6 @@ async def test_list_and_stop_reach_this_conversations_tasks(
         "task_id": task_id,
     }
     assert _tasks(env) == ()
-    assert list(env.tasks.glob("*.md")) == []
 
 
 @pytest.mark.parametrize("paused", ["switched off", "stopped by failures"])
@@ -348,10 +344,10 @@ async def test_an_approved_update_turns_a_paused_task_back_on(
     task_id = await _schedule(env, DAILY)
     with closing(sqlite3.connect(env.db_path)) as connection, connection:
         if paused == "switched off":
-            connection.execute("UPDATE hook_settings SET enabled = 0")
+            connection.execute("UPDATE user_hooks SET enabled = 0")
         else:
             connection.execute(
-                "UPDATE hook_conversations SET failure_count = 3,"
+                "UPDATE user_hooks SET failure_count = 3,"
                 " stopped_reason = 'turn_failed'"
             )
     changed = {**DAILY, "prompt": "Also check their pricing page.", "task_id": task_id}
@@ -404,4 +400,3 @@ async def test_a_schedule_whose_window_passed_during_the_approval_writes_nothing
     assert output["status"] == "error"
     assert output["error"]["error_type"] == "invalid_schedule"  # type: ignore[index]
     assert _tasks(env) == ()
-    assert list(env.tasks.glob("*.md")) == []

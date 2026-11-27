@@ -20,19 +20,18 @@ from pantaray_agents.agents.action_agent.tools.conversation_task_tools import (
     SCHEDULE_CONTINUATION_TOOL_ID,
     STOP_SCHEDULED_CONTINUATION_TOOL_ID,
 )
+from pantaray_agents.hooks.definitions import HookDefinitionError
 from pantaray_agents.local_runtime.hooks.agent_tasks import (
     TaskRefusal,
-    TaskSchedule,
     conversation_task_state,
     list_conversation_tasks,
     new_task_id,
-    parse_task,
     save_task,
     stop_task,
-    task_text,
 )
+from pantaray_agents.local_runtime.hooks.listing import TaskView
 from pantaray_agents.local_runtime.hooks.states import first_fire_after
-from pantaray_agents.local_runtime.hooks.tasks import InvalidTask, Task
+from pantaray_agents.local_runtime.hooks.tasks import Task, TaskSchedule, build_task
 from pantaray_agents.local_runtime.runtime.bootstrap import read_local_runtime_db_config
 from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
@@ -285,11 +284,12 @@ def run_conversation_task_tool(
     tasks: list[JSONValue] = [
         {
             "task_id": view.hook_id,
-            "text": view.text,
+            "text": _text(view),
             "next_run_at": _describe(view.next_fire_at),
-            "approved": view.approved,
+            # Saved only with the user's yes, and nothing edits it after.
+            "approved": True,
             "enabled": view.enabled,
-            "error": view.error,
+            "error": None,
             "last_result": view.last_result,
             "failure_count": view.failure_count,
             "stopped_reason": view.stopped_reason,
@@ -317,11 +317,10 @@ def _resolve_request(args: ToolArgs, *, tool_request_id: str) -> _Request:
     )
     prompt = require_string_arg(args, "prompt")
     replaces = optional_string_arg(args, "task_id")
-    task = parse_task(
-        replaces or new_task_id(tool_request_id), task_text(schedule, prompt)
-    )
-    if isinstance(task, InvalidTask):
-        raise ScheduleError(task.error)
+    try:
+        task = build_task(replaces or new_task_id(tool_request_id), schedule, prompt)
+    except HookDefinitionError as exc:
+        raise ScheduleError(str(exc)) from exc
     return _Request(task=task, schedule=schedule, prompt=prompt, replaces=replaces)
 
 
@@ -334,7 +333,7 @@ def _check_times(request: _Request, *, now: datetime) -> None:
     if schedule.until <= now:
         raise ScheduleError("until is not in the future.")
     # The first fire the approval would set: one at or after until never comes.
-    first = first_fire_after(request.task.hook, now)
+    first = first_fire_after(request.task.trigger, now)
     if first is not None and first >= schedule.until:
         raise ScheduleError(
             f"The first run, {_describe(first)}, is not before until, so it "
@@ -444,6 +443,18 @@ def _claim(
         invocation=None,
         started_at=requested_at,
     )
+
+
+def _text(view: TaskView) -> str:
+    """The schedule, then the prompt, as the list tool shows a task."""
+
+    if view.at is not None:
+        trigger = f"at {view.at.isoformat()}"
+    else:
+        offset = "" if view.offset is None else f" offset {view.offset}"
+        trigger = f"every {view.every}{offset}"
+    until = "" if view.until is None else f", until {view.until.isoformat()}"
+    return f"{trigger}{until}\n{view.message}"
 
 
 def _describe(instant: datetime | None) -> str | None:

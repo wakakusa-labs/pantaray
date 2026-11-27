@@ -1,12 +1,12 @@
-"""Send a task's prompt as a turn of its conversation, and count how turns go.
+"""Send a task's message as a turn of its target conversation, and count how
+turns go.
 
-A task's conversation is the one it was written from. A turn goes through
-``submit_action_message`` as an ordinary next turn. Its first message id
-derives from the task, its content and the occurrence, and is recorded as the
-task's latest turn before it is sent, so a fire repeated after a crash finds
-its turn. A task fires only once its latest turn has ended and been counted,
-and while its conversation is not running or waiting for the user's approval.
-Three failures in a row stop the task.
+A turn goes through ``submit_action_message`` as an ordinary next turn. Its
+message id derives from the task, its version and the occurrence, and is
+recorded as the task's latest turn before it is sent, so a fire repeated after
+a crash finds its turn. A task fires only once its latest turn has ended and
+been counted, and while its conversation is not running or waiting for the
+user's approval. Three failures in a row stop the task.
 """
 
 from __future__ import annotations
@@ -39,25 +39,18 @@ from pantaray_agents.local_runtime.storage.migrations.connection import (
     configure_connection,
 )
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
-from pantaray_agents.local_runtime.storage.users import ensure_user_row
 from pantaray_agents.schema.agent.action_message import ActionUserMessageInput
 
-from .controls import (
-    NO_CONVERSATION,
-    HookControl,
-    StoppedReason,
-    TaskConversation,
-    TurnResult,
-    control_of,
-    read_controls,
-    task_origin_in_connection,
-)
-from .tasks import Task
+from .controls import RunState, StoppedReason, TaskRow, TurnResult
 
 logger = logging.getLogger(__name__)
 
 # Failures in a row that stop a task, so it does not keep failing unseen.
 TASK_FAILURE_LIMIT: Final = 3
+# A task deleted since its row was read.
+_NO_RUN: Final = RunState(
+    last_message_id=None, last_result=None, failure_count=0, stopped_reason=None
+)
 _NAMESPACE: Final = uuid.uuid5(uuid.NAMESPACE_URL, "pantaray:hook_turn_message:v1")
 # A run's terminal status, as a turn result.
 _ENDED: Final[dict[str, TurnResult]] = {
@@ -84,23 +77,22 @@ class _Send:
 
 def fire_task(
     fire: Fire,
-    task: Task,
+    task: TaskRow,
     *,
     db_path: Path,
     busy_timeout_ms: int,
     user_id: str,
 ) -> FireOutcome:
+    hook_id = task.task.hook_id
     occurrence = fire.occurrence.isoformat()
-    message_id = str(
-        uuid.uuid5(_NAMESPACE, f"{task.hook.id}\n{task.content_hash}\n{occurrence}")
-    )
+    message_id = str(uuid.uuid5(_NAMESPACE, f"{hook_id}\n{task.version}\n{occurrence}"))
     with _connect(db_path, busy_timeout_ms) as connection:
         with immediate_transaction(connection):
             claim = _claim_turn(
                 connection,
                 user_id=user_id,
-                hook_id=task.hook.id,
-                content_hash=task.content_hash,
+                hook_id=hook_id,
+                version=task.version,
                 message_id=message_id,
             )
     if claim == "wait":
@@ -116,7 +108,7 @@ def fire_task(
                     ),
                     message=ActionUserMessageInput(
                         message_id=message_id,
-                        content=action_hook_request_text(task.run.prompt),
+                        content=action_hook_request_text(task.task.message),
                     ),
                 )
             )
@@ -126,14 +118,14 @@ def fire_task(
         except (ValidationError, ActionMessageSubmissionError, sqlite3.Error) as exc:
             logger.warning(
                 "task turn not started: hook=%s error=%s",
-                task.hook.id,
+                hook_id,
                 type(exc).__name__,
             )
             _record_result(
                 db_path,
                 busy_timeout_ms,
                 user_id=user_id,
-                hook_id=task.hook.id,
+                hook_id=hook_id,
                 result="not_started",
             )
             return "retry"
@@ -145,11 +137,11 @@ def _claim_turn(
     *,
     user_id: str,
     hook_id: str,
-    content_hash: str,
+    version: int,
     message_id: str,
 ) -> Literal["wait", "sent"] | _Send:
     """Make ``message_id`` the task's latest turn, once the one before it has
-    ended and been counted, while the task is still on and approved as read;
+    ended and been counted, while the task is still on and the version read;
     in the caller's immediate transaction.
 
     The turn is recorded before it is sent, so a crash after the send finds
@@ -158,13 +150,15 @@ def _claim_turn(
     send a turn, least of all to a new conversation.
     """
 
-    ensure_user_row(connection, user_id=user_id)
-    # The origin's reference keeps that conversation while the task exists.
-    origin = task_origin_in_connection(connection, user_id=user_id, hook_id=hook_id)
-    if origin is None or control_of(
-        read_controls(connection, user_id=user_id), hook_id
-    ) != HookControl(enabled=True, approved_hash=content_hash):
+    # The target's reference keeps that conversation while the task exists.
+    row = connection.execute(
+        """SELECT target_action_id FROM user_hooks
+           WHERE user_id = ? AND hook_id = ? AND version = ? AND enabled = 1""",
+        (user_id, hook_id, version),
+    ).fetchone()
+    if row is None:
         return "wait"
+    target = str(row[0])
     conversation, unresolved = _settle_in_connection(
         connection, user_id=user_id, hook_id=hook_id
     )
@@ -172,23 +166,21 @@ def _claim_turn(
         return "wait"
     if _turn_of_message(connection, user_id=user_id, message_id=message_id) is not None:
         return "sent"
-    if _is_busy(connection, user_id=user_id, action_id=origin):
+    if _is_busy(connection, user_id=user_id, action_id=target):
         return "wait"
     connection.execute(
-        """INSERT INTO hook_conversations(user_id, hook_id, last_message_id)
-           VALUES (?, ?, ?)
-           ON CONFLICT(user_id, hook_id) DO UPDATE SET
-             last_message_id = excluded.last_message_id, last_result = NULL""",
-        (user_id, hook_id, message_id),
+        """UPDATE user_hooks SET last_message_id = ?, last_result = NULL
+           WHERE user_id = ? AND hook_id = ?""",
+        (message_id, user_id, hook_id),
     )
-    return _Send(action_id=origin)
+    return _Send(action_id=target)
 
 
 def record_turn_results(connection: sqlite3.Connection, *, user_id: str) -> None:
     """Count each task's latest turn once it has ended."""
 
     for (hook_id,) in connection.execute(
-        """SELECT hook_id FROM hook_conversations
+        """SELECT hook_id FROM user_hooks
            WHERE user_id = ? AND last_message_id IS NOT NULL
              AND last_result IS NULL""",
         (user_id,),
@@ -199,7 +191,7 @@ def record_turn_results(connection: sqlite3.Connection, *, user_id: str) -> None
 
 def _settle_in_connection(
     connection: sqlite3.Connection, *, user_id: str, hook_id: str
-) -> tuple[TaskConversation, bool]:
+) -> tuple[RunState, bool]:
     """The task's state once its latest turn, if it ended, is counted
     (exactly once); and whether that turn is still unresolved.
 
@@ -231,7 +223,6 @@ def _record_result(
     result: TurnResult,
 ) -> None:
     with _connect(db_path, busy_timeout_ms) as connection, connection:
-        ensure_user_row(connection, user_id=user_id)
         _record_in_connection(
             connection, user_id=user_id, hook_id=hook_id, result=result
         )
@@ -251,10 +242,13 @@ def _record_in_connection(
     connection: sqlite3.Connection, *, user_id: str, hook_id: str, result: TurnResult
 ) -> None:
     row = connection.execute(
-        "SELECT failure_count FROM hook_conversations WHERE user_id = ? AND hook_id = ?",
+        "SELECT failure_count FROM user_hooks WHERE user_id = ? AND hook_id = ?",
         (user_id, hook_id),
     ).fetchone()
-    failure_count = _failures_after(0 if row is None else int(row[0]), result)
+    # Deleted since: nothing is left to count on.
+    if row is None:
+        return
+    failure_count = _failures_after(int(row[0]), result)
     reason: StoppedReason | None = None
     if failure_count >= TASK_FAILURE_LIMIT:
         reason = "start_failed" if result == "not_started" else "turn_failed"
@@ -265,27 +259,23 @@ def _record_in_connection(
             reason,
         )
     connection.execute(
-        """INSERT INTO hook_conversations(user_id, hook_id, last_result,
-             failure_count, stopped_reason) VALUES (?, ?, ?, ?, ?)
-           ON CONFLICT(user_id, hook_id) DO UPDATE SET
-             last_result = excluded.last_result,
-             failure_count = excluded.failure_count,
-             stopped_reason = excluded.stopped_reason""",
-        (user_id, hook_id, result, failure_count, reason),
+        """UPDATE user_hooks SET last_result = ?, failure_count = ?,
+             stopped_reason = ? WHERE user_id = ? AND hook_id = ?""",
+        (result, failure_count, reason, user_id, hook_id),
     )
 
 
 def _conversation(
     connection: sqlite3.Connection, *, user_id: str, hook_id: str
-) -> TaskConversation:
+) -> RunState:
     row = connection.execute(
         """SELECT last_message_id, last_result, failure_count, stopped_reason
-           FROM hook_conversations WHERE user_id = ? AND hook_id = ?""",
+           FROM user_hooks WHERE user_id = ? AND hook_id = ?""",
         (user_id, hook_id),
     ).fetchone()
     if row is None:
-        return NO_CONVERSATION
-    return TaskConversation(
+        return _NO_RUN
+    return RunState(
         last_message_id=row[0],
         last_result=row[1],
         failure_count=int(row[2]),

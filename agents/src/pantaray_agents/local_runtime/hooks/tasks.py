@@ -52,8 +52,9 @@ class Task:
     trigger: At | Every
     message: str
 
-    def definition(self, target: str) -> HookDefinition:
-        """The hook that sends the message to the conversation ``target``."""
+    def definition(self, target: str | None) -> HookDefinition:
+        """The hook that sends the message to the conversation ``target``, or
+        to a new conversation on each fire when None."""
 
         return HookDefinition(
             id=self.hook_id,

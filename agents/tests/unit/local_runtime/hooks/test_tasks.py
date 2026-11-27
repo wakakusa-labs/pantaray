@@ -550,3 +550,76 @@ def test_a_tick_does_not_move_a_newer_approvals_time(
     world.tick(NINE)
 
     assert world.view().next_fire_at == datetime(2026, 11, 22, 8, 0, tzinfo=UTC)
+
+
+def _new_conversation_each_fire(world: _World) -> str:
+    """A task saved to start a new conversation on each fire; no tool writes
+    one yet, so the row is moved off its conversation here."""
+
+    origin = world.save()
+    with closing(sqlite3.connect(world.db)) as connection, connection:
+        connection.execute("UPDATE user_hooks SET target_action_id = NULL")
+    return origin
+
+
+def _delete(world: _World, action_id: str) -> None:
+    delete_history_item(
+        db_path=world.db,
+        busy_timeout_ms=1_000,
+        artifact_root=world.db.parent / "artifacts",
+        user_id=USER,
+        kind="conversation",
+        item_id=action_id,
+    )
+
+
+def test_a_task_without_a_target_starts_one_new_conversation_per_fire(
+    world: _World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Catches a fire that continues the conversation that asked, a second run
+    # started while the first is going, and a fire repeated after a crash
+    # that starts a second conversation for the same occurrence.
+    origin = _new_conversation_each_fire(world)
+    write = runner.SqliteHookStateStore.write_next_fire_time
+    writes: list[object] = []
+
+    def crash_after_the_turn(
+        self: runner.SqliteHookStateStore, hook_id: str, at: datetime | None
+    ) -> None:
+        writes.append(at)
+        if len(writes) == 1:
+            raise sqlite3.OperationalError("disk I/O error")
+        write(self, hook_id, at)
+
+    monkeypatch.setattr(
+        runner.SqliteHookStateStore, "write_next_fire_time", crash_after_the_turn
+    )
+    world.tick(NINE)
+    world.tick(NINE + timedelta(seconds=3))
+    world.tick(NINE + timedelta(hours=1))
+    assert len(world.turns()) == 1
+
+    world.end_latest_turn("completed")
+    world.tick(NINE + timedelta(hours=1, seconds=3))
+    first, second = (conversation for conversation, _ in world.turns())
+    assert len({origin, first, second}) == 3
+    assert _conversations(world) == {origin, first, second}
+
+
+def test_deleting_a_conversation_a_task_started_leaves_the_task(
+    world: _World,
+) -> None:
+    # Catches a task that goes with the conversation it started, or that is
+    # left behind when the conversation that asked for it is deleted.
+    origin = _new_conversation_each_fire(world)
+    world.tick(NINE)
+    world.end_latest_turn("completed")
+    ((started, _),) = world.turns()
+    _delete(world, started)
+    world.tick(NINE + timedelta(hours=1))
+    assert len(world.turns()) == 1
+    assert world.view().target_action_id is None
+
+    world.end_latest_turn("completed")
+    _delete(world, origin)
+    assert list_hooks(db_path=world.db, busy_timeout_ms=1_000, user_id=USER) == ()

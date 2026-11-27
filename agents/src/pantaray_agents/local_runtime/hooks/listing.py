@@ -33,8 +33,8 @@ class TaskView:
     next_fire_at: datetime | None
     # The conversation that asked for the task.
     created_from_action_id: str
-    # The conversation each fire continues.
-    target_action_id: str
+    # The conversation each fire continues; None starts a new one each time.
+    target_action_id: str | None
     last_result: TurnResult | None
     failure_count: int
     stopped_reason: StoppedReason | None

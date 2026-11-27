@@ -1,12 +1,13 @@
-"""Send a task's message as a turn of its target conversation, and count how
-turns go.
+"""Send a task's message as a turn of its target conversation, or as the first
+turn of a new conversation when it has none, and count how turns go.
 
-A turn goes through ``submit_action_message`` as an ordinary next turn. Its
-message id derives from the task, its version and the occurrence, and is
-recorded as the task's latest turn before it is sent, so a fire repeated after
-a crash finds its turn. A task fires only once its latest turn has ended and
-been counted, and while its conversation is not running or waiting for the
-user's approval. Three failures in a row stop the task.
+A turn goes through ``submit_action_message`` as an ordinary turn. Its message
+id derives from the task, its version and the occurrence, and is recorded as
+the task's latest turn before it is sent, so a fire repeated after a crash
+finds its turn, and a new conversation is started once per occurrence. A task
+fires only once its latest turn has ended and been counted, and while its
+target conversation is not running or waiting for the user's approval. Three
+failures in a row stop the task.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from pantaray_agents.local_runtime.runtime.action_message_models import (
     ActionMessageSubmissionError,
     ExistingActionTarget,
     ExpectedProcessConflictError,
+    NewActionTarget,
     SubmitActionMessageCommand,
     action_hook_request_text,
 )
@@ -70,9 +72,9 @@ def _connect(db_path: Path, busy_timeout_ms: int) -> closing[sqlite3.Connection]
 
 @dataclass(frozen=True, slots=True)
 class _Send:
-    """Send the turn to this conversation."""
+    """Send the turn to this conversation, or start a new one when None."""
 
-    action_id: str
+    action_id: str | None
 
 
 def fire_task(
@@ -103,7 +105,9 @@ def fire_task(
                 SubmitActionMessageCommand(
                     user_id=user_id,
                     origin="hook",
-                    target=ExistingActionTarget(
+                    target=NewActionTarget()
+                    if claim.action_id is None
+                    else ExistingActionTarget(
                         action_id=claim.action_id, expected_process_id=None
                     ),
                     message=ActionUserMessageInput(
@@ -150,7 +154,8 @@ def _claim_turn(
     send a turn, least of all to a new conversation.
     """
 
-    # The target's reference keeps that conversation while the task exists.
+    # The target's reference keeps that conversation while the task exists:
+    # deleting it deletes the task, so a lost target never turns into NULL.
     row = connection.execute(
         """SELECT target_action_id FROM user_hooks
            WHERE user_id = ? AND hook_id = ? AND version = ? AND enabled = 1""",
@@ -158,7 +163,7 @@ def _claim_turn(
     ).fetchone()
     if row is None:
         return "wait"
-    target = str(row[0])
+    target: str | None = row[0]
     conversation, unresolved = _settle_in_connection(
         connection, user_id=user_id, hook_id=hook_id
     )
@@ -166,7 +171,7 @@ def _claim_turn(
         return "wait"
     if _turn_of_message(connection, user_id=user_id, message_id=message_id) is not None:
         return "sent"
-    if _is_busy(connection, user_id=user_id, action_id=target):
+    if target is not None and _is_busy(connection, user_id=user_id, action_id=target):
         return "wait"
     connection.execute(
         """UPDATE user_hooks SET last_message_id = ?, last_result = NULL

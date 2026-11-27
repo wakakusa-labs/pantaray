@@ -37,8 +37,8 @@ class TaskRow:
     version: int
     # The conversation that asked for the task.
     origin_action_id: str
-    # The conversation each fire continues.
-    target_action_id: str
+    # The conversation each fire continues; None starts a new one each time.
+    target_action_id: str | None
     enabled: bool
     next_fire_at: datetime | None
     run: RunState
@@ -75,7 +75,7 @@ def read_tasks(
             task=stored_task(str(row[0]), str(row[1]), row[2], str(row[3])),
             version=int(row[4]),
             origin_action_id=str(row[5]),
-            target_action_id=str(row[6]),
+            target_action_id=row[6],
             enabled=bool(row[7]),
             next_fire_at=None if row[8] is None else parse_iso_z(row[8]),
             run=RunState(

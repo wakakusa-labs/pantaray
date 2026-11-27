@@ -1,5 +1,4 @@
-"""Hook definitions: the closed types, parsed from a TOML document of hooks or
-from one conversation hook's Markdown file."""
+"""Hook definitions: the closed types, parsed from a TOML document of hooks."""
 
 from __future__ import annotations
 
@@ -37,10 +36,6 @@ _DURATION_UNITS: Final[Mapping[str, timedelta]] = {
     "d": timedelta(days=1),
 }
 _DAY: Final = timedelta(days=1)
-# TOML front matter between +++ lines, then the prompt.
-_FRONT_MATTER: Final = re.compile(
-    r"\+\+\+\n(?P<front>.*?)\n\+\+\+\n(?P<body>.*)", re.DOTALL
-)
 
 
 class HookDefinitionError(ValueError):
@@ -165,21 +160,6 @@ class RunJob:
     args: Mapping[str, str]
 
 
-ConversationMode = Literal["continue", "new"]
-
-
-@dataclass(frozen=True, slots=True)
-class RunConversation:
-    """Send the prompt as a turn of a conversation the caller keeps for the hook.
-
-    continue: the next turn of the hook's conversation, which its first fire
-    starts; new: a new conversation on each fire.
-    """
-
-    conversation: ConversationMode
-    prompt: str
-
-
 @dataclass(frozen=True, slots=True)
 class RunMessage:
     """Send ``message`` to ``target``, or to a new target on each fire when None.
@@ -191,7 +171,7 @@ class RunMessage:
     message: str
 
 
-Run = RunJob | RunConversation | RunMessage
+Run = RunJob | RunMessage
 
 
 @dataclass(frozen=True, slots=True)
@@ -259,57 +239,6 @@ def load_hook_definitions(
     if len(ids) != len(set(ids)):
         raise HookDefinitionError(f"hook ids are not unique: {ids}")
     return hooks
-
-
-def load_conversation_hook(
-    hook_id: str,
-    text: str,
-    *,
-    gate_names: frozenset[str],
-    event_names: frozenset[str],
-    requires: tuple[str, ...],
-) -> HookDefinition:
-    """Parse one hook written as Markdown: TOML front matter between ``+++``
-    lines names its ``trigger``, an optional ``until`` and its ``conversation``
-    (continue or new); the body is the prompt.
-
-    An on trigger fires once for its newest event. ``requires`` are the gates the
-    caller imposes; the file names none.
-    """
-    where = f"hook {hook_id}"
-    parts = _FRONT_MATTER.fullmatch(text)
-    if parts is None:
-        raise HookDefinitionError(f"{where}: expected +++ front matter, then a prompt")
-    try:
-        front = tomllib.loads(parts["front"])
-    except tomllib.TOMLDecodeError as error:
-        raise HookDefinitionError(
-            f"{where}: front matter is not TOML: {error}"
-        ) from error
-    _reject_unknown_keys(front, {"trigger", "until", "conversation"}, where=where)
-    conversation: ConversationMode
-    match front.get("conversation"):
-        case "continue" | "new" as mode:
-            conversation = mode
-        case _:
-            raise HookDefinitionError(f"{where}: conversation must be continue or new")
-    prompt = parts["body"].strip()
-    if not prompt:
-        raise HookDefinitionError(
-            f"{where}: the prompt after the front matter is empty"
-        )
-    trigger = _table(front.get("trigger"), where=f"{where} trigger")
-    table: dict[str, object] = {"trigger": trigger, "requires": list(requires)}
-    if "until" in front:
-        table["until"] = front["until"]
-    if "on" in trigger:
-        table["deliver"] = {"immediate": trigger["on"], "collapse": "latest"}
-    return _hook(
-        hook_id,
-        table,
-        _Vocabulary(gates=gate_names, events=event_names, predicates=frozenset()),
-        RunConversation(conversation=conversation, prompt=prompt),
-    )
 
 
 def _parse_hook(

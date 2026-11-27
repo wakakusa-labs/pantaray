@@ -2,14 +2,17 @@
 turn of a new TODO's conversation when it has none, and count how turns go.
 
 A turn goes through ``submit_action_message`` as an ordinary turn. Its message
-id derives from the task, its version and the occurrence (for a new
-conversation, through the TODO's id, as every TODO's conversation opens), and
-is recorded as the task's latest turn before it is sent, in the transaction
-that stores the TODO; so a fire repeated after a crash finds its turn, and one
-occurrence makes one TODO and one conversation. A task fires only once its
-latest turn has ended and been counted, and while its target conversation is
-not running or waiting for the user's approval. Three failures in a row stop
-the task.
+id derives from the task, its version and the occurrence, or for an on task
+from the event it hands alone (for a new conversation, through the TODO's id,
+as every TODO's conversation opens), and is recorded as the task's latest turn
+before it is sent, in the transaction that stores the TODO; so a fire repeated
+after a crash finds its turn, and one occurrence makes one TODO and one
+conversation.
+An on task's events leave its inbox once their turn is sent: a crash before
+that hands the same event, and so the same turn, again. A task fires only once
+its latest turn has ended and been counted, and while its target conversation
+is not running or waiting for the user's approval. Three failures in a row
+stop the task.
 """
 
 from __future__ import annotations
@@ -31,7 +34,6 @@ from pantaray_agents.local_runtime.runtime.action_message_models import (
     ExpectedProcessConflictError,
     NewActionTarget,
     SubmitActionMessageCommand,
-    action_hook_request_text,
 )
 from pantaray_agents.local_runtime.runtime.action_message_process_disposition import (
     classify_action_process_disposition_in_connection,
@@ -59,6 +61,7 @@ from pantaray_agents.schema.agent.action_message import (
 )
 
 from .controls import NewConversation, RunState, StoppedReason, TaskRow, TurnResult
+from .inbox import consume_in_connection
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +105,15 @@ def fire_task(
     user_id: str,
 ) -> FireOutcome:
     hook_id = task.task.hook_id
-    key = f"{hook_id}\n{task.version}\n{fire.occurrence.isoformat()}"
+    handed = fire.events[-1] if fire.events else None
+    # An event's turn is the event's, whatever version hands it: a retry after
+    # the task was replaced finds the turn sent before.
+    key = (
+        f"{hook_id}\n{task.version}\n{fire.occurrence.isoformat()}"
+        if handed is None
+        else f"{hook_id}\nevent:{handed.delivery_id}"
+    )
+    consumed = (*fire.superseded, *(event.delivery_id for event in fire.events))
     target: str | Todo
     if isinstance(task.target, str):
         target, message_id = task.target, str(uuid.uuid5(_NAMESPACE, key))
@@ -119,6 +130,10 @@ def fire_task(
                 target=target,
                 message_id=message_id,
             )
+            if claim in ("sent", "dropped"):
+                consume_in_connection(
+                    connection, hook_id=hook_id, delivery_ids=consumed
+                )
     if claim == "wait":
         return "retry"
     if isinstance(claim, _Send):
@@ -134,7 +149,9 @@ def fire_task(
                     else NewActionTarget(),
                     message=ActionUserMessageInput(
                         message_id=message_id,
-                        content=action_hook_request_text(task.task.message),
+                        content=task.task.text(
+                            None if handed is None else handed.payload
+                        ),
                         todo_handoff=None
                         if isinstance(claim.target, str)
                         else _handoff(
@@ -163,6 +180,8 @@ def fire_task(
                 result="not_started",
             )
             return "retry"
+        with _connect(db_path, busy_timeout_ms) as connection, connection:
+            consume_in_connection(connection, hook_id=hook_id, delivery_ids=consumed)
     return "done"
 
 

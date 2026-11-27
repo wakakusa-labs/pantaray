@@ -128,6 +128,20 @@ class TodoSaved(_DomainEvent):
     NAME: ClassVar[str] = "todo.saved"
 
 
+@dataclass(frozen=True, slots=True)
+class ActivityStarted(_DomainEvent):
+    """A window Zanei recorded started to match an on activity hook.
+
+    Written by the activity watcher into the one hook's inbox; a field Zanei
+    did not record, or left out as too long, is None.
+    """
+
+    NAME: ClassVar[str] = "activity"
+    app_name: str | None
+    bundle_id: str | None
+    window_title: str | None
+
+
 HookEvent = (
     JobLifecycleEvent
     | InsightRecorded
@@ -138,6 +152,7 @@ HookEvent = (
     | SuggestionRequested
     | SuggestionGenerationStarted
     | TodoSaved
+    | ActivityStarted
 )
 
 # An Action run's terminal is written by the Action terminal repository, not
@@ -163,4 +178,10 @@ EVENT_NAMES: Final = frozenset(
         SuggestionGenerationStarted,
         TodoSaved,
     )
+}
+
+# The events a hook the user agreed to may listen to, each with the fields its
+# match may name; the built-ins listen to EVENT_NAMES only.
+USER_HOOK_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = {
+    ActivityStarted.NAME: frozenset({"app_name", "bundle_id", "window_title"}),
 }

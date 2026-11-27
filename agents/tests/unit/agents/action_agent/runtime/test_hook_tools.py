@@ -60,7 +60,7 @@ NOW = "2026-03-23T00:00:02Z"
 _REQUESTS = itertools.count(1)
 TOMORROW = (datetime.now(UTC) + timedelta(days=1)).isoformat(timespec="seconds")
 DAILY: dict[str, JSONValue] = {
-    "trigger": {"every": "day", "offset": "8h"},
+    "trigger": {"kind": "every", "every": "day", "offset": "8h"},
     "send_to": "this_session",
     "message": "Look for the competitor's news since the last run.",
 }
@@ -69,7 +69,7 @@ MEETING_MATCH: list[JSONValue] = [
     {"field": "window_title", "op": "contains", "values": ["Zoom Meeting", "(.*)"]},
 ]
 MEETINGS: dict[str, JSONValue] = {
-    "trigger": {"on": "activity", "match": MEETING_MATCH},
+    "trigger": {"kind": "on", "on": "activity", "match": MEETING_MATCH},
     "send_to": "new_session",
     "place": {"organization": "Acme", "project": "Sales"},
     "title": "Meeting notes",
@@ -242,7 +242,7 @@ async def test_a_yes_saves_the_hook_it_showed_and_a_no_saves_nothing(
         "summary_kind": "hook",
         "replaces": False,
         "resumes": False,
-        "trigger": {"every": "day", "offset": "8h"},
+        "trigger": {"kind": "every", "every": "day", "offset": "8h"},
         "until": None,
         "send_to": "this_session",
         "place": None,
@@ -271,7 +271,11 @@ async def test_a_new_session_hook_saves_its_title_and_the_place_it_named(
     asked = await _preflight(env, MEETINGS, "request-meetings")
     assert isinstance(asked.control, ApprovalRequiredToolControl)
     summary = asked.control.command_summary
-    assert summary["trigger"] == {"on": "activity", "match": MEETING_MATCH}
+    assert summary["trigger"] == {
+        "kind": "on",
+        "on": "activity",
+        "match": MEETING_MATCH,
+    }
     assert (summary["send_to"], summary["title"]) == ("new_session", "Meeting notes")
     assert summary["place"] == {"organization": "Acme", "project": "Sales"}
     _decide(env, "request-meetings", "approved_once")
@@ -282,7 +286,7 @@ async def test_a_new_session_hook_saves_its_title_and_the_place_it_named(
     assert isinstance(row.target, NewConversation)
     assert (row.target.title, row.target.organization_id) == ("Meeting notes", None)
     (listed,) = _run(env, LIST_HOOKS_TOOL, {})["hooks"]  # type: ignore[misc]
-    assert listed["trigger"] == {"on": "activity", "match": MEETING_MATCH}  # type: ignore[index]
+    assert listed["trigger"] == {"kind": "on", "on": "activity", "match": MEETING_MATCH}  # type: ignore[index]
     assert listed["place"] == {"organization": None, "project": "Sales"}  # type: ignore[index]
     assert (listed["send_to"], listed["title"]) == ("new_session", "Meeting notes")  # type: ignore[index]
 
@@ -341,7 +345,7 @@ async def test_a_replace_that_only_moves_where_it_goes_is_a_new_definition(
 ) -> None:
     # Catches a changed title or place saved without a new version, so a fire
     # computed from the old definition writes over the new one.
-    unplaced = {**MEETINGS, "place": None}
+    unplaced = {key: value for key, value in MEETINGS.items() if key != "place"}
     hook_id = await _create(env, unplaced)
     await _create(env, {**unplaced, "replaces": hook_id})
     assert _version(env) == 1
@@ -357,21 +361,21 @@ async def test_a_replace_that_only_moves_where_it_goes_is_a_new_definition(
 @pytest.mark.parametrize(
     "args",
     [
-        {**DAILY, "trigger": {"at": "2020-01-01T09:00:00+09:00"}},
-        {**DAILY, "trigger": {"at": "2030-01-01T09:00:00"}},
-        {**DAILY, "trigger": {"every": "2h", "offset": "1h"}},
-        {**DAILY, "trigger": {"every": "day", "offset": "25h"}},
+        {**DAILY, "trigger": {"kind": "at", "at": "2020-01-01T09:00:00+09:00"}},
+        {**DAILY, "trigger": {"kind": "at", "at": "2030-01-01T09:00:00"}},
+        {**DAILY, "trigger": {"kind": "every", "every": "2h", "offset": "1h"}},
+        {**DAILY, "trigger": {"kind": "every", "every": "day", "offset": "25h"}},
         {**DAILY, "until": "2020-01-01T00:00:00+00:00"},
         # The first run is not before until: one at, and a repeat whose first
         # run, two days after the approval, is after an until one day away.
         {
             **DAILY,
-            "trigger": {"at": "2030-01-03T09:00:00+09:00"},
+            "trigger": {"kind": "at", "at": "2030-01-03T09:00:00+09:00"},
             "until": "2030-01-02T00:00:00+09:00",
         },
         {
             **DAILY,
-            "trigger": {"every": "2d"},
+            "trigger": {"kind": "every", "every": "2d"},
             "until": (datetime.now(UTC) + timedelta(days=1)).isoformat(),
         },
         {**DAILY, "title": "Notes"},
@@ -416,12 +420,17 @@ async def test_an_unknown_place_is_refused_with_the_names_there_are(
         {**DAILY, "replaces": "builtin.insight"},
         {**DAILY, "conversation": "action-2"},
         {**DAILY, "send_to": "action-2"},
-        {**DAILY, "trigger": {"at": TOMORROW, "every": "day"}},
-        {**MEETINGS, "trigger": {"on": "insight.recorded", "match": MEETING_MATCH}},
-        {**MEETINGS, "trigger": {"on": "activity", "match": []}},
+        {**DAILY, "trigger": {"kind": "at", "at": TOMORROW, "every": "day"}},
+        {**DAILY, "trigger": {"kind": "every", "at": TOMORROW}},
+        {
+            **MEETINGS,
+            "trigger": {"kind": "on", "on": "insight.recorded", "match": MEETING_MATCH},
+        },
+        {**MEETINGS, "trigger": {"kind": "on", "on": "activity", "match": []}},
         {
             **MEETINGS,
             "trigger": {
+                "kind": "on",
                 "on": "activity",
                 "match": [{"field": "url", "op": "contains", "values": ["meet"]}],
             },
@@ -429,6 +438,7 @@ async def test_an_unknown_place_is_refused_with_the_names_there_are(
         {
             **MEETINGS,
             "trigger": {
+                "kind": "on",
                 "on": "activity",
                 "match": [{"field": "app_name", "op": "matches", "values": ["Zoom"]}],
             },
@@ -436,6 +446,7 @@ async def test_an_unknown_place_is_refused_with_the_names_there_are(
         {
             **MEETINGS,
             "trigger": {
+                "kind": "on",
                 "on": "activity",
                 "match": [{"field": "app_name", "op": "equals", "values": []}],
             },
@@ -443,6 +454,7 @@ async def test_an_unknown_place_is_refused_with_the_names_there_are(
         {
             **MEETINGS,
             "trigger": {
+                "kind": "on",
                 "on": "activity",
                 "match": [{"field": "app_name", "op": "equals", "values": [" "]}],
             },
@@ -529,7 +541,7 @@ async def test_a_hook_whose_window_passed_during_the_approval_saves_nothing(
     # time past until and reports a hook that will never run.
     args: dict[str, JSONValue] = {
         **DAILY,
-        "trigger": {"every": "1h"},
+        "trigger": {"kind": "every", "every": "1h"},
         "until": (datetime.now(UTC) + timedelta(hours=1, minutes=1)).isoformat(),
     }
     asked = await _preflight(env, args, "request-slow")

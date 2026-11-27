@@ -44,30 +44,33 @@ _HOOK_ID: Final[dict[str, JSONValue]] = {
     "pattern": r"^task\.[a-z0-9][a-z0-9_-]{0,63}$",
 }
 _ACTIVITY_FIELDS: Final[list[JSONValue]] = [*sorted(USER_HOOK_EVENT_FIELDS["activity"])]
-# The trigger as stored: one of the three shapes, as the model gave it.
+# One of the three shapes, told apart by kind so that a provider can check
+# the branches are disjoint.
 _TRIGGER: Final[dict[str, JSONValue]] = {
     "oneOf": [
         {
             "type": "object",
-            "properties": {"at": _INSTANT},
-            "required": ["at"],
+            "properties": {"kind": {"const": "at"}, "at": _INSTANT},
+            "required": ["kind", "at"],
             "additionalProperties": False,
         },
         {
             "type": "object",
             "properties": {
+                "kind": {"const": "every"},
                 "every": {
                     "type": "string",
                     "pattern": r"^(hour|day|week|month|quarter|[0-9]+[smhd])$",
                 },
                 "offset": {"type": ["string", "null"], "pattern": r"^[0-9]+[smhd]$"},
             },
-            "required": ["every"],
+            "required": ["kind", "every"],
             "additionalProperties": False,
         },
         {
             "type": "object",
             "properties": {
+                "kind": {"const": "on"},
                 "on": {"const": "activity"},
                 "match": {
                     "type": "array",
@@ -84,13 +87,13 @@ _TRIGGER: Final[dict[str, JSONValue]] = {
                     },
                 },
             },
-            "required": ["on", "match"],
+            "required": ["kind", "on", "match"],
             "additionalProperties": False,
         },
     ]
 }
 _PLACE: Final[dict[str, JSONValue]] = {
-    "type": ["object", "null"],
+    "type": "object",
     "properties": {"organization": _NAME, "project": _NAME},
     "additionalProperties": False,
 }
@@ -108,6 +111,7 @@ _LISTED_HOOK: Final[dict[str, JSONValue]] = {
     "send_to": {"enum": ["this_session", "new_session"]},
     "place": {
         **_PLACE,
+        "type": ["object", "null"],
         "properties": {"organization": _NULLABLE_TEXT, "project": _NULLABLE_TEXT},
         "required": ["organization", "project"],
     },
@@ -133,13 +137,13 @@ CREATE_HOOK_TOOL = ToolDefinition.from_spec(
                 "Each time the trigger fires, Pantaray sends the message as the next "
                 'turn of this conversation (send_to "this_session"), or starts a new '
                 'conversation with it (send_to "new_session") as that of a new TODO '
-                "titled title, in place's organization or project. Triggers: "
-                "{at} for one time; {every, offset} to repeat, where every is a "
+                "titled title, in place's organization or project. Triggers, by kind: "
+                "at for one time; every, with offset, to repeat, where every is a "
                 "calendar unit (hour, day, week, month, quarter) that fires at the "
                 "unit's start on local time plus offset, or a duration (30m, 2h, 3d) "
                 "that repeats from the approval. Weeks start on Monday 00:00 and "
                 'months on the 1st, so every day at 08:30 is every "day" with offset '
-                '"510m". {on: "activity", match} fires once each time a window the '
+                '"510m". on "activity" with match fires once each time a window the '
                 "user's computer recorded starts to match: every field match must "
                 "hold, a field matches when it equals, or contains, any one of its "
                 "values, ignoring case; values are plain text, not patterns. Apps "
@@ -177,8 +181,8 @@ CREATE_HOOK_TOOL = ToolDefinition.from_spec(
                     schema=_TRIGGER,
                     required=True,
                     description=(
-                        "{at}, {every, offset}, or {on, match}. Times are ISO 8601 "
-                        "with their offset, such as 2026-11-22T09:00:00+09:00."
+                        "kind at, every or on, with that kind's fields. Times are "
+                        "ISO 8601 with their offset, such as 2026-11-22T09:00:00+09:00."
                     ),
                 ),
                 field_spec(

@@ -49,6 +49,7 @@ class _MatchArg(TypedDict):
 
 
 class _TriggerArg(TypedDict, total=False):
+    kind: Literal["at", "every", "on"]
     at: str
     every: str
     offset: str | None
@@ -101,8 +102,11 @@ class HookRequest:
 
 
 def stored_trigger(task: Task) -> dict[str, JSONValue]:
+    """The trigger as stored, in the shape create_hook takes it."""
+
     trigger: dict[str, JSONValue] = json.loads(trigger_json(task.schedule))
-    return trigger
+    kind = next(key for key in ("at", "every", "on") if key in trigger)
+    return {"kind": kind, **trigger}
 
 
 def resolve_request(
@@ -155,7 +159,7 @@ def resolve_request(
 
 
 def _schedule(trigger: _TriggerArg, until: datetime | None) -> TaskSchedule:
-    if "on" in trigger:
+    if trigger["kind"] == "on":
         return TaskSchedule(
             at=None,
             every=None,
@@ -166,7 +170,7 @@ def _schedule(trigger: _TriggerArg, until: datetime | None) -> TaskSchedule:
                 for m in trigger["match"]
             ),
         )
-    if "at" in trigger:
+    if trigger["kind"] == "at":
         return TaskSchedule(
             at=_parse_instant(trigger["at"], "trigger.at"),
             every=None,

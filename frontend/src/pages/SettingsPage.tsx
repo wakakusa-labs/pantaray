@@ -18,6 +18,7 @@ import { OverlayPositionSection } from './settings/components/OverlayPositionSec
 import { RecordingFilterDialog } from './settings/components/RecordingFilterDialog';
 import { RecordingFilterSection } from './settings/components/RecordingFilterSection';
 import { RecordingSwitch } from './settings/components/RecordingSwitch';
+import { SchedulesSection } from './settings/components/SchedulesSection';
 import { ShortcutSection } from './settings/components/ShortcutSection';
 import type { Translate } from './settings/types';
 import { useCapturePermissionRequired } from './settings/useCapturePermissionRequired';
@@ -30,6 +31,7 @@ type SettingsSectionId =
   | 'language'
   | 'execution'
   | 'integrations'
+  | 'schedules'
   | 'shortcuts'
   | 'overlay_position'
   | 'screenshots';
@@ -40,6 +42,7 @@ const SETTINGS_SECTIONS: SettingsSectionId[] = [
   'screenshots',
   'integrations',
   'agents_md',
+  'schedules',
   'execution',
   'overlay_position',
   'shortcuts',
@@ -47,11 +50,11 @@ const SETTINGS_SECTIONS: SettingsSectionId[] = [
 ];
 
 /**
- * Recording and execution act on the local owner's own data. The AI connection, the
+ * Recording, execution and schedules act on the local owner's own data. The AI connection, the
  * instructions, the language, the shortcut and the overlay position belong to the installation, and the connection section owns a
  * browser sign-in that its unmount cancels, so none of them may hang off the owner.
  */
-const OWNER_SCOPED_SECTIONS: SettingsSectionId[] = ['execution', 'screenshots'];
+const OWNER_SCOPED_SECTIONS: SettingsSectionId[] = ['execution', 'schedules', 'screenshots'];
 
 const PERMISSION_TITLES = {
   read_accessibility_tree: 'settings.screenshotCapture.permission.accessibility',
@@ -84,6 +87,7 @@ const SettingsPage: React.FC = () => {
     language: t('settings.language.title'),
     execution: t('settings.execution.title'),
     integrations: t('settings.integrations.title'),
+    schedules: t('schedules.settings.title'),
     shortcuts: t('settings.shortcut.title'),
     overlay_position: t('settings.overlayPosition.title'),
     screenshots: t('settings.screenshotCapture.title'),
@@ -152,6 +156,7 @@ function OwnerScopedSections({
   return (
     <>
       {activeSection === 'execution' ? <ExecutionSettingsSection t={t} /> : null}
+      {activeSection === 'schedules' ? <SchedulesSection /> : null}
       {activeSection === 'screenshots' ? (
         <ScreenshotSections controller={controller} t={t} />
       ) : null}

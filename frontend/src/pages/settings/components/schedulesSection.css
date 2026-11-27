@@ -1,0 +1,161 @@
+/*
+ * The schedules list in Settings, drawn like a conversation's schedules. Each row: on the left what it sends (one line) and a muted meta
+ * line; on the right its state in a word and the chevron. The whole row is the button, and its
+ * detail opens under it. Rules between rows, no boxes.
+ */
+
+.schedule-list {
+  max-width: 820px;
+  margin: var(--space-lg) 0 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--fog-line);
+}
+
+.schedule-row {
+  border-bottom: 1px solid var(--fog-line);
+}
+
+.schedule-row__button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 24px;
+  align-items: center;
+  width: 100%;
+  min-height: 64px;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.schedule-row__button:hover,
+.schedule-row--open > .schedule-row__button {
+  background: var(--fog-mist);
+}
+
+.schedule-row__button:focus-visible {
+  outline: none;
+  box-shadow: inset var(--focus-ring);
+}
+
+.schedule-summary {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.schedule-summary__heading {
+  overflow: hidden;
+  color: var(--fog-text);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-summary__heading--off {
+  color: var(--fog-text-3);
+}
+
+.schedule-summary__meta {
+  display: flex;
+  gap: 16px;
+  overflow: hidden;
+  color: var(--fog-text-3);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.schedule-summary__meta > span {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.schedule-state {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  color: var(--fog-text-3);
+}
+
+.schedule-state__word {
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+/* A word that waits on the user. */
+.schedule-state__word--turn {
+  color: var(--fog-text);
+  font-weight: var(--weight-semibold);
+}
+
+.schedule-detail {
+  padding: 4px 12px 18px;
+  background: var(--fog-mist);
+}
+
+.schedule-detail__reason {
+  margin: 0 0 14px;
+  color: var(--fog-text);
+  font-size: 14px;
+}
+
+.schedule-fields {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 16px;
+  margin: 0;
+  font-size: 14px;
+}
+
+.schedule-fields dt {
+  color: var(--fog-text-3);
+  font-size: 12.5px;
+  line-height: 1.75;
+}
+
+.schedule-fields dd {
+  margin: 0;
+  color: var(--fog-text);
+  overflow-wrap: anywhere;
+}
+
+.schedule-fields__message {
+  white-space: pre-wrap;
+}
+
+.schedule-detail__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--fog-line);
+}
+
+.schedule-detail__switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--fog-text-2);
+  font-size: 13px;
+}
+
+.schedule-detail__buttons {
+  display: inline-flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.schedule-detail__failure {
+  margin: 10px 0 0;
+  font-size: 13px;
+}

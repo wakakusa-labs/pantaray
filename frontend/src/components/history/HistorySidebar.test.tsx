@@ -934,7 +934,14 @@ it('日の見出しが増えたり行が別の日へ移ったりしても、残�
 
 function installDeleteBridge(result: { ok: true } | { ok: false; errorCode: string | null }) {
   const deleteItem = vi.fn(async () => result);
-  window.electron = { history: { deleteItem } } as unknown as Window['electron'];
+  const list = async () => ({
+    hooks: [
+      { hook_id: 'task.a1', created_from_action_id: 'A1', target_action_id: 'A1' },
+      { hook_id: 'task.other', created_from_action_id: 'A9', target_action_id: null },
+    ],
+    recording_ready: true,
+  });
+  window.electron = { history: { deleteItem }, hooks: { list } } as unknown as Window['electron'];
   mocks.error = null;
   mocks.unreadActionId = null;
   return deleteItem;
@@ -946,15 +953,16 @@ it('削除の確認はキャンセルが初期フォーカスで、キャンセ�
 
   const trigger = screen.getByRole('button', { name: 'common.delete Conversation' });
   await userEvent.click(trigger);
-  const dialog = screen.getByRole('dialog', { name: 'history.delete.confirmTitle' });
-  expect(dialog).toHaveAccessibleDescription('history.delete.confirmBody');
+  const dialog = await screen.findByRole('dialog', { name: 'history.delete.confirmTitle' });
+  // A1 asked for one schedule, which goes with it; another conversation's is not counted.
+  expect(dialog).toHaveAccessibleDescription('history.delete.confirmBodySchedules.one {"count":1}');
   expect(screen.getByRole('button', { name: 'common.cancel' })).toHaveFocus();
   await userEvent.keyboard('{Enter}');
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(trigger).toHaveFocus();
 
   await userEvent.click(trigger);
-  fireEvent(screen.getByRole('dialog'), new Event('cancel', { cancelable: true }));
+  fireEvent(await screen.findByRole('dialog'), new Event('cancel', { cancelable: true }));
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(trigger).toHaveFocus();
   expect(deleteItem).not.toHaveBeenCalled();
@@ -966,7 +974,7 @@ it('削除すると行を一覧から外し、次の行へフォーカスを移�
   render(<Sidebar />, { wrapper: SidebarWrapper });
 
   await userEvent.click(screen.getByRole('button', { name: 'common.delete Conversation' }));
-  await userEvent.click(screen.getByRole('button', { name: 'common.delete' }));
+  await userEvent.click(await screen.findByRole('button', { name: 'common.delete' }));
   expect(deleteItem).toHaveBeenCalledWith({ kind: 'conversation', id: 'A1' });
   expect(mocks.removeItem).toHaveBeenCalledWith('conversation:A1');
   expect(screen.queryByRole('dialog')).toBeNull();
@@ -976,7 +984,7 @@ it('削除すると行を一覧から外し、次の行へフォーカスを移�
 
   // A Suggestion row is deleted the same way, by its own id.
   await userEvent.click(screen.getByRole('button', { name: 'common.delete Suggestion' }));
-  await userEvent.click(screen.getByRole('button', { name: 'common.delete' }));
+  await userEvent.click(await screen.findByRole('button', { name: 'common.delete' }));
   expect(deleteItem).toHaveBeenLastCalledWith({ kind: 'suggestion', id: 'S1' });
 });
 
@@ -986,7 +994,7 @@ it('表示中の行を削除すると、選択を次の行へ、無ければチ�
   const { rerender } = render(<Sidebar />, { wrapper: SidebarWrapper });
 
   await userEvent.click(screen.getByRole('button', { name: 'common.delete Conversation' }));
-  await userEvent.click(screen.getByRole('button', { name: 'common.delete' }));
+  await userEvent.click(await screen.findByRole('button', { name: 'common.delete' }));
   expect(mocks.select).toHaveBeenCalledExactlyOnceWith('suggestion:S1', { replace: true });
 
   mocks.selected = 'suggestion:S1';
@@ -1002,7 +1010,7 @@ it('表示中の行を削除すると、選択を次の行へ、無ければチ�
   ];
   rerender(<Sidebar />);
   await userEvent.click(screen.getByRole('button', { name: 'common.delete Suggestion' }));
-  await userEvent.click(screen.getByRole('button', { name: 'common.delete' }));
+  await userEvent.click(await screen.findByRole('button', { name: 'common.delete' }));
   expect(mocks.select).toHaveBeenLastCalledWith('chat', { replace: true });
 });
 
@@ -1013,7 +1021,7 @@ it('実行中で断られたら短い通知を出し、行を残して削除ボ�
 
   const trigger = screen.getByRole('button', { name: 'common.delete Conversation' });
   await userEvent.click(trigger);
-  await userEvent.click(screen.getByRole('button', { name: 'common.delete' }));
+  await userEvent.click(await screen.findByRole('button', { name: 'common.delete' }));
   expect(await screen.findByRole('alert')).toHaveTextContent('history.delete.busy');
   expect(mocks.removeItem).not.toHaveBeenCalled();
   // The row stays, and so does the selection.
@@ -1032,12 +1040,12 @@ it('ほかの失敗は削除失敗として通知する', async () => {
   render(<Sidebar />, { wrapper: SidebarWrapper });
 
   await userEvent.click(screen.getByRole('button', { name: 'common.delete Conversation' }));
-  await userEvent.click(screen.getByRole('button', { name: 'common.delete' }));
+  await userEvent.click(await screen.findByRole('button', { name: 'common.delete' }));
   expect(await screen.findByRole('alert')).toHaveTextContent('history.delete.failed');
 
   deleteItem.mockRejectedValueOnce(new Error('bridge failed'));
   await userEvent.click(screen.getByRole('button', { name: 'common.delete Conversation' }));
-  await userEvent.click(screen.getByRole('button', { name: 'common.delete' }));
+  await userEvent.click(await screen.findByRole('button', { name: 'common.delete' }));
   expect(await screen.findByRole('alert')).toHaveTextContent('history.delete.failed');
   expect(mocks.removeItem).not.toHaveBeenCalled();
 });
@@ -1087,7 +1095,7 @@ it('削除の応答を待つ間に選択が変わったら、応答の時点の�
   deleteItem.mockImplementation(() => new Promise((resolve) => (answer = resolve)));
   const deleteConversation = async () => {
     await userEvent.click(screen.getByRole('button', { name: 'common.delete Conversation' }));
-    await userEvent.click(screen.getByRole('button', { name: 'common.delete' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'common.delete' }));
   };
 
   // Shown when the delete started, then the user moved on: the selection stays theirs.

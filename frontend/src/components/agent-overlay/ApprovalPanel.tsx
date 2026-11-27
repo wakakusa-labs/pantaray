@@ -1,7 +1,7 @@
 import { Fragment } from 'react';
 import styled from 'styled-components';
 
-import type { MessageKey } from '@/i18n/types';
+import type { MessageKey, UiLanguage } from '@/i18n/types';
 import type { ActionApprovalBlocker } from '../../../electron/src/actions/actionLiveCore';
 import { ApprovalDecisionButton } from './ApprovalDecisionButton';
 import { buildApprovalDisplay, type ApprovalDecision } from './approvalDisplayModel';
@@ -183,6 +183,7 @@ type ApprovalPanelProps = {
   onDecide?: (decision: ApprovalDecision) => void;
   onOpenWorkspaceSettings?: () => void;
   t: (key: MessageKey, vars?: Record<string, string | number>) => string;
+  language: UiLanguage;
 };
 
 const DECISION_OPTIONS: readonly {
@@ -201,8 +202,9 @@ export function ApprovalPanel({
   onDecide,
   onOpenWorkspaceSettings,
   t,
+  language,
 }: ApprovalPanelProps) {
-  const display = buildApprovalDisplay(approvalPanel, t);
+  const display = buildApprovalDisplay(approvalPanel, t, language);
   const folderPaths =
     display.outsideWorkspace === null ? null : display.outsideWorkspace.folders.length === 1 ? (
       <ApprovalFolderPath>{display.outsideWorkspace.folders[0].path}</ApprovalFolderPath>

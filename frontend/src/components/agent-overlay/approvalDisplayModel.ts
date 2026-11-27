@@ -1,5 +1,10 @@
-import type { MessageKey } from '@/i18n/types';
+import type { MessageKey, UiLanguage } from '@/i18n/types';
 import { formatBytes } from '@/lib/formatBytes';
+import {
+  describeTrigger,
+  formatInstant,
+  type ScheduleTrigger,
+} from '@/components/schedules/scheduleText';
 import type { ActionApprovalBlocker } from '../../../electron/src/actions/actionLiveCore';
 
 export type ApprovalDetail = {
@@ -197,97 +202,31 @@ function readUsersBrowser(summary: Record<string, unknown>): string | null {
     : null;
 }
 
-const DURATION_UNIT_SECONDS: Record<string, number> = { s: 1, m: 60, h: 3600, d: 86400 };
-const DURATION_UNITS = ['s', 'm', 'h', 'd'];
-
-// The runtime writes every duration as one number and unit, such as 30m.
-function durationSeconds(text: string | null): number {
-  const match = text ? /^(\d+)([smhd])$/.exec(text) : null;
-  return match ? Number(match[1]) * DURATION_UNIT_SECONDS[match[2]] : 0;
-}
-
-function pad(value: number): string {
-  return String(value).padStart(2, '0');
-}
-
-// Local wall time, as the schedule fires on it.
-function formatInstant(text: string): string {
-  const date = new Date(text);
-  if (Number.isNaN(date.getTime())) return text;
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(
-    date.getHours()
-  )}:${pad(date.getMinutes())}`;
-}
-
-// A calendar unit fires at its start on local time plus the offset: weeks start on
-// Monday and months on the 1st.
-function describeSchedule(trigger: Record<string, unknown>, t: ApprovalDisplayTranslator): string {
+// The tool's trigger argument, read as the schedule the user will see saved.
+function readTrigger(trigger: Record<string, unknown>): ScheduleTrigger {
+  if (trigger.kind === 'on')
+    return {
+      kind: 'on',
+      match: (Array.isArray(trigger.match) ? trigger.match.filter(isRecord) : []).map((match) => ({
+        field: readStringValue(match, 'field') ?? '',
+        op: match.op === 'contains' ? 'contains' : 'equals',
+        values: readStringArrayValue(match, 'values'),
+      })),
+    };
   const at = readStringValue(trigger, 'at');
-  if (at) return t('overlay.approvalRequired.hook.once', { time: formatInstant(at) });
-  const every = readStringValue(trigger, 'every') ?? '';
-  const offset = durationSeconds(readStringValue(trigger, 'offset'));
-  const days = Math.floor(offset / 86400);
-  const time = `${Math.floor((offset % 86400) / 3600)}:${pad(Math.floor((offset % 3600) / 60))}`;
-  switch (every) {
-    case 'hour':
-      return t('overlay.approvalRequired.hook.everyHour', {
-        minute: pad(Math.floor(offset / 60)),
-      });
-    case 'day':
-      return t('overlay.approvalRequired.hook.everyDay', { time });
-    case 'week':
-      return t('overlay.approvalRequired.hook.everyWeek', {
-        weekday: t('overlay.approvalRequired.hook.weekdays').split(',')[days % 7] ?? '',
-        time,
-      });
-    case 'month':
-      return t('overlay.approvalRequired.hook.everyMonth', { day: String(days + 1), time });
-    // A quarter's offset may run past its first month (up to 89 days), so only an
-    // offset inside the shortest month reads as a day of that month.
-    case 'quarter':
-      return days < 28
-        ? t('overlay.approvalRequired.hook.everyQuarter', { day: String(days + 1), time })
-        : t('overlay.approvalRequired.hook.everyQuarterAfter', { days: String(days), time });
-  }
-  const match = /^(\d+)([smhd])$/.exec(every);
-  if (!match) return every;
-  return t('overlay.approvalRequired.hook.everyDuration', {
-    count: match[1],
-    unit:
-      t('overlay.approvalRequired.hook.units').split(',')[DURATION_UNITS.indexOf(match[2])] ??
-      match[2],
-  });
-}
-
-// The fields an activity condition can name; the runtime refuses any other.
-const MATCH_FIELD_KEYS: Record<string, MessageKey> = {
-  app_name: 'overlay.approvalRequired.hook.field.appName',
-  bundle_id: 'overlay.approvalRequired.hook.field.bundleId',
-  window_title: 'overlay.approvalRequired.hook.field.windowTitle',
-};
-
-// The condition is worded from the stored match, never from the model's paraphrase:
-// every field must match, and a field matches when any one of its values does.
-function describeCondition(trigger: Record<string, unknown>, t: ApprovalDisplayTranslator): string {
-  const matches = Array.isArray(trigger.match) ? trigger.match.filter(isRecord) : [];
-  const clauses = matches.map((match, index) => {
-    const field = readStringValue(match, 'field') ?? '';
-    const values = readStringArrayValue(match, 'values')
-      .map((value) => t('overlay.approvalRequired.hook.quoted', { value }))
-      .join(t('overlay.approvalRequired.hook.valueOr'));
-    const position = index === matches.length - 1 ? 'Last' : 'Middle';
-    const op = match.op === 'contains' ? 'contains' : 'equals';
-    return t(`overlay.approvalRequired.hook.${op}${position}`, {
-      field: MATCH_FIELD_KEYS[field] ? t(MATCH_FIELD_KEYS[field]) : field,
-      values,
-    });
-  });
-  return t('overlay.approvalRequired.hook.windowAppears', { conditions: clauses.join('') });
+  return at
+    ? { kind: 'at', at }
+    : {
+        kind: 'every',
+        every: readStringValue(trigger, 'every') ?? '',
+        offset: readStringValue(trigger, 'offset'),
+      };
 }
 
 function describeHook(
   summary: Record<string, unknown>,
-  t: ApprovalDisplayTranslator
+  t: ApprovalDisplayTranslator,
+  language: UiLanguage
 ): ToolApprovalDisplay {
   const trigger = isRecord(summary.trigger) ? summary.trigger : {};
   const isEvent = trigger.kind === 'on';
@@ -321,13 +260,13 @@ function describeHook(
           : 'overlay.approvalRequired.operation.hookUpdate',
     usesLoginEnvironment: false,
     primaryLabelKey: 'overlay.approvalRequired.hook.when',
-    primaryValue: isEvent ? describeCondition(trigger, t) : describeSchedule(trigger, t),
+    primaryValue: describeTrigger(readTrigger(trigger), t, language),
     details: [
       ...(until
         ? [
             {
               labelKey: 'overlay.approvalRequired.hook.until' as MessageKey,
-              value: formatInstant(until),
+              value: formatInstant(until, language),
             },
           ]
         : []),
@@ -363,9 +302,10 @@ function describeHook(
 
 export function buildApprovalDisplay(
   approvalPanel: ActionApprovalBlocker,
-  t: ApprovalDisplayTranslator
+  t: ApprovalDisplayTranslator,
+  language: UiLanguage
 ): ApprovalDisplay {
-  const toolDisplay = buildToolApprovalDisplay(approvalPanel, t);
+  const toolDisplay = buildToolApprovalDisplay(approvalPanel, t, language);
   // In the user's own browser the run acts signed in as the user. Pantaray's line
   // saying so must stay in view, so the model's reason does not replace it and is
   // shown as a row instead.
@@ -432,7 +372,8 @@ export function buildApprovalDisplay(
 
 function buildToolApprovalDisplay(
   approvalPanel: ActionApprovalBlocker,
-  t: ApprovalDisplayTranslator
+  t: ApprovalDisplayTranslator,
+  language: UiLanguage
 ): ToolApprovalDisplay {
   const summary = approvalPanel.commandSummary;
   const summaryKind = readStringValue(summary, 'summary_kind');
@@ -582,7 +523,7 @@ function buildToolApprovalDisplay(
 
   // A hook sends messages later with no one watching, so the user approves when it
   // fires, where the message goes, and the exact message it sends.
-  if (summaryKind === 'hook') return describeHook(summary, t);
+  if (summaryKind === 'hook') return describeHook(summary, t, language);
 
   return {
     operationKey: 'overlay.approvalRequired.operation.generic',

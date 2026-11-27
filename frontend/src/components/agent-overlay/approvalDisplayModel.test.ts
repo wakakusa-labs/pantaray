@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { t as translate } from '@/i18n/translate';
 import type { MessageKey } from '@/i18n/types';
@@ -30,6 +30,12 @@ describe('buildApprovalDisplay', () => {
   // The user approves a hook that sends with no one watching: a wrong or missing line
   // here means saying yes to a different hook than the one that is saved.
   describe('hook', () => {
+    // A moment this year reads without its year.
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date(2026, 0, 1));
+    });
+    afterEach(() => vi.useRealTimers());
     const ja = (key: MessageKey, vars?: Record<string, string | number>) =>
       translate('ja', key, vars);
     const hook = (fields: Record<string, unknown>) =>
@@ -46,7 +52,8 @@ describe('buildApprovalDisplay', () => {
           message: 'Look for news.',
           ...fields,
         }),
-        ja
+        ja,
+        'ja'
       );
     const details = (display: ReturnType<typeof hook>) =>
       display.details.map((detail) => [ja(detail.labelKey), detail.value]);
@@ -65,7 +72,7 @@ describe('buildApprovalDisplay', () => {
       );
       expect(when({ kind: 'every', every: '2h', offset: null })).toBe('2 時間ごと');
       const at = new Date(2026, 10, 22, 9, 0).toISOString();
-      expect(when({ kind: 'at', at })).toBe('2026-11-22 09:00 に1回');
+      expect(when({ kind: 'at', at })).toBe('11月22日(日) 9:00 に1回');
     });
 
     it('shows the end, where the message goes, and the exact message', () => {
@@ -84,7 +91,7 @@ describe('buildApprovalDisplay', () => {
         title: 'Morning news',
       });
       expect(details(fresh)).toEqual([
-        ['終わり', '2026-12-01 09:00'],
+        ['終わり', '12月1日(火) 9:00'],
         ['送り先', '毎回新しい会話を始めます'],
         ['毎回作る TODO', 'Morning news'],
         ['組織', 'Wakakusa'],
@@ -144,7 +151,8 @@ describe('buildApprovalDisplay', () => {
           send_to: 'this_session',
           message: 'Take notes.',
         }),
-        (key, vars) => translate('en', key, vars)
+        (key, vars) => translate('en', key, vars),
+        'en'
       );
       expect(english.primaryValue).toBe(
         'When a window starts to match: app ID is “us.zoom.xos”, and title contains “Zoom Meeting” or “Zoom ミーティング”'
@@ -169,14 +177,14 @@ describe('buildApprovalDisplay', () => {
       blocker('capture_screen', 'screen_capture', summary),
       blocker('unknown_tool', 'screen_capture', summary),
     ]) {
-      const display = buildApprovalDisplay(panel, t);
+      const display = buildApprovalDisplay(panel, t, 'ja');
       expect(display.operationKey).toBe('overlay.approvalRequired.operation.captureScreen');
       expect(display.primaryLabelKey).toBe('overlay.approvalRequired.app');
       expect(display.primaryValue).toBe('Google Chrome');
       expect(display.details).toEqual([]);
     }
     expect(
-      buildApprovalDisplay(blocker('capture_screen', 'screen_capture', {}), t).primaryValue
+      buildApprovalDisplay(blocker('capture_screen', 'screen_capture', {}), t, 'ja').primaryValue
     ).toBe('overlay.approvalRequired.unavailable');
   });
 
@@ -190,7 +198,8 @@ describe('buildApprovalDisplay', () => {
         page_host: 'localhost',
         reason: 'Send the signup form you asked me to test.',
       }),
-      t
+      t,
+      'ja'
     );
     expect(display.operationKey).toBe('overlay.approvalRequired.operation.browserWrite');
     expect(display.reason).toBe('Send the signup form you asked me to test.');
@@ -207,7 +216,8 @@ describe('buildApprovalDisplay', () => {
           page_host: null,
           reason: 'x',
         }),
-        t
+        t,
+        'ja'
       ).details
     ).toEqual([]);
   });
@@ -222,7 +232,8 @@ describe('buildApprovalDisplay', () => {
         host: 'mail.example.com',
         reason: 'Read the invoice email you mentioned.',
       }),
-      t
+      t,
+      'ja'
     );
     expect(read.operationKey).toBe('overlay.approvalRequired.operation.userBrowserRead');
     expect(read.operationVars).toEqual({ browser: 'Google Chrome' });
@@ -241,7 +252,8 @@ describe('buildApprovalDisplay', () => {
         page_host: 'shop.example.com',
         reason: 'Place the order you asked for.',
       }),
-      t
+      t,
+      'ja'
     );
     expect(write.operationKey).toBe('overlay.approvalRequired.operation.userBrowserWrite');
     expect(write.operationVars).toEqual({ browser: 'Google Chrome' });
@@ -260,13 +272,15 @@ describe('buildApprovalDisplay', () => {
     expect(
       buildApprovalDisplay(
         blocker('bash', 'process_exec_local', { ...summary, use_login_environment: true }),
-        t
+        t,
+        'ja'
       ).operationKey
     ).toBe('overlay.approvalRequired.operation.bashLoginEnvironment');
     expect(
       buildApprovalDisplay(
         blocker('bash', 'process_exec_local', { ...summary, use_login_environment: false }),
-        t
+        t,
+        'ja'
       ).operationKey
     ).toBe('overlay.approvalRequired.operation.bash');
   });
@@ -274,7 +288,8 @@ describe('buildApprovalDisplay', () => {
   it('still falls back to the generic line for a tool it does not know', () => {
     const display = buildApprovalDisplay(
       blocker('web_fetch', 'read_only', { url: 'https://example.com' }),
-      t
+      t,
+      'ja'
     );
 
     expect(display.operationKey).toBe('overlay.approvalRequired.operation.generic');
@@ -295,7 +310,8 @@ describe('buildApprovalDisplay', () => {
         tool: 'Create email draft',
         arguments: raw,
       }),
-      t
+      t,
+      'ja'
     );
 
     expect(display.argumentFields).toEqual([

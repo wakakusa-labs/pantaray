@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, expect, it, vi } from 'vitest';
 
@@ -31,28 +31,34 @@ const todo = (conversation: TodoView['conversation']): TodoView => ({
 const IN_ACTION = todo({ kind: 'action', action_id: 'action-1' });
 
 function Harness({
-  item,
+  items,
   deleteTodo,
   onDeleted,
 }: {
-  item: TodoView;
+  items: TodoView[];
   deleteTodo: (todoId: string) => Promise<boolean>;
   onDeleted: () => void;
 }) {
   const { requestDelete, dialog } = useTodoDeleteConfirmation({ deleteTodo, onDeleted });
   return (
     <>
-      <button type="button" onClick={() => void requestDelete(item)}>
-        削除: {item.text}
-      </button>
+      {items.map((item) => (
+        <button key={item.todo_id} type="button" onClick={() => void requestDelete(item)}>
+          削除: {item.text}
+        </button>
+      ))}
       {dialog}
     </>
   );
 }
 
-function renderHarness(item: TodoView, list: HookList | Error) {
+function renderHarness(
+  item: TodoView | TodoView[],
+  list: HookList | Error | (() => Promise<HookList>)
+) {
   const hooks = {
     list: vi.fn(async () => {
+      if (typeof list === 'function') return list();
       if (list instanceof Error) throw list;
       return list;
     }),
@@ -62,10 +68,19 @@ function renderHarness(item: TodoView, list: HookList | Error) {
   const onDeleted = vi.fn();
   render(
     <UiLanguageProvider initialLanguage="ja">
-      <Harness item={item} deleteTodo={deleteTodo} onDeleted={onDeleted} />
+      <Harness
+        items={Array.isArray(item) ? item : [item]}
+        deleteTodo={deleteTodo}
+        onDeleted={onDeleted}
+      />
     </UiLanguageProvider>
   );
-  return { hooks, deleteTodo, onDeleted, trigger: screen.getByRole('button', { name: /^削除/ }) };
+  return {
+    hooks,
+    deleteTodo,
+    onDeleted,
+    trigger: screen.getAllByRole('button', { name: /^削除/ })[0],
+  };
 }
 
 // Asked for here and continuing it, asked for here and starting a new one each time; one
@@ -87,7 +102,7 @@ const LIST: HookList = {
 it('asks before deleting a TODO whose conversation has schedules, and counts them', async () => {
   const { deleteTodo, onDeleted, trigger } = renderHarness(IN_ACTION, LIST);
   await userEvent.click(trigger);
-  const dialog = await screen.findByRole('dialog', { name: 'この TODO を削除しますか？' });
+  const dialog = await screen.findByRole('dialog', { name: '「発注チェック」を削除しますか？' });
   expect(dialog).toHaveAccessibleDescription(
     'この TODO の会話で頼んだ予定 2 件も消えます。TODO を戻しても、予定は戻りません。'
   );
@@ -129,4 +144,37 @@ it('asks when the schedules cannot be read', async () => {
     'この TODO の会話で頼んだ予定があれば、それも消えます。TODO を戻しても、予定は戻りません。'
   );
   expect(deleteTodo).not.toHaveBeenCalled();
+});
+
+// Catches a count that answers late taking the question over from the TODO pressed after it,
+// so that 削除 deletes a TODO the question does not name.
+it('keeps the question on the TODO pressed last when the counts answer in reverse order', async () => {
+  const answers: ((list: HookList) => void)[] = [];
+  const first = { ...IN_ACTION, todo_id: 'todo-a', text: '発注チェック' };
+  const second = {
+    ...todo({ kind: 'action', action_id: 'action-9' }),
+    todo_id: 'todo-b',
+    text: '週次の振り返り',
+  };
+  const { deleteTodo } = renderHarness(
+    [first, second],
+    () => new Promise<HookList>((resolve) => answers.push(resolve))
+  );
+  await userEvent.click(screen.getByRole('button', { name: '削除: 発注チェック' }));
+  await userEvent.click(screen.getByRole('button', { name: '削除: 週次の振り返り' }));
+  await waitFor(() => expect(answers).toHaveLength(2));
+
+  await act(async () => answers[1](LIST));
+  expect(await screen.findByRole('dialog')).toHaveAccessibleName(
+    '「週次の振り返り」を削除しますか？'
+  );
+  await act(async () => answers[0](LIST));
+  const dialog = screen.getByRole('dialog');
+  expect(dialog).toHaveAccessibleName('「週次の振り返り」を削除しますか？');
+  expect(dialog).toHaveAccessibleDescription(
+    'この TODO の会話で頼んだ予定 1 件も消えます。TODO を戻しても、予定は戻りません。'
+  );
+
+  await userEvent.click(screen.getByRole('button', { name: '削除' }));
+  expect(deleteTodo).toHaveBeenCalledExactlyOnceWith('todo-b');
 });

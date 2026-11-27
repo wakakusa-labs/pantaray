@@ -5,7 +5,7 @@ export const TODO_MESSAGES = defineMessages({
     'todo.check': 'Done: {text}',
     'todo.delete': 'Delete',
     'todo.deleteNamed': 'Delete: {text}',
-    'todo.deleteConfirm.title': 'Delete this TODO?',
+    'todo.deleteConfirm.title': 'Delete “{text}”?',
     'todo.deleteConfirm.schedules.one':
       'The schedule asked for in its conversation goes too. Restoring the TODO won’t bring it back.',
     'todo.deleteConfirm.schedules.other':
@@ -139,7 +139,7 @@ export const TODO_MESSAGES = defineMessages({
     'todo.check': '完了: {text}',
     'todo.delete': '削除',
     'todo.deleteNamed': '削除: {text}',
-    'todo.deleteConfirm.title': 'この TODO を削除しますか？',
+    'todo.deleteConfirm.title': '「{text}」を削除しますか？',
     'todo.deleteConfirm.schedules.one':
       'この TODO の会話で頼んだ予定 1 件も消えます。TODO を戻しても、予定は戻りません。',
     'todo.deleteConfirm.schedules.other':

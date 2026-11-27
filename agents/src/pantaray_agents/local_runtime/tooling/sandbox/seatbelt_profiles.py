@@ -6,7 +6,6 @@ from pathlib import Path, PurePosixPath
 from pantaray_agents.tools.files.pantaray_agents_md import (
     pantaray_agents_md_write_patterns,
 )
-from pantaray_agents.tools.files.pantaray_tasks import pantaray_tasks_write_patterns
 from pantaray_agents.tools.files.secret_paths import (
     SecretTier,
     secret_path_patterns,
@@ -93,16 +92,10 @@ def render_seatbelt_profile(
                     if str(folder) != "/"
                 )
             ),
-            # Only an approved apply_patch writes the Pantaray-wide AGENTS.md,
-            # and only the user and the task tool write Pantaray's tasks.
+            # Only an approved apply_patch writes the Pantaray-wide AGENTS.md.
             *(
                 f'(deny file-write* (regex "{_escape_seatbelt_string(pattern)}"))'
-                for pattern in dict.fromkeys(
-                    (
-                        *pantaray_agents_md_write_patterns(),
-                        *pantaray_tasks_write_patterns(),
-                    )
-                )
+                for pattern in pantaray_agents_md_write_patterns()
             ),
             "",
         )

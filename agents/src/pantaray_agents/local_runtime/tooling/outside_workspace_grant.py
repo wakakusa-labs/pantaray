@@ -17,7 +17,6 @@ from pantaray_agents.local_runtime.runtime.runtime_env import (
 )
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.files.pantaray_agents_md import holds_pantaray_agents_md
-from pantaray_agents.tools.files.pantaray_tasks import holds_pantaray_tasks
 from pantaray_agents.tools.files.secret_paths import withheld_folder_reason
 
 from .action_session_temp_paths import (
@@ -69,18 +68,14 @@ def folder_can_be_granted(*, folder: Path, db_path: Path) -> bool:
     A folder that is not an existing canonical directory, that lies inside or
     encloses app-owned storage (/, the home folder, ~/Library...), that lies
     inside a folder of secrets (~/.ssh, ~/.aws...), or that holds the
-    Pantaray-wide AGENTS.md or Pantaray's tasks, is refused.
+    Pantaray-wide AGENTS.md, is refused.
     """
 
     try:
         validate_workspace_root(real_path=folder, canonical_real_path=folder)
     except WorkspaceRootAuthorityError:
         return False
-    if (
-        withheld_folder_reason(folder) is not None
-        or holds_pantaray_agents_md(folder)
-        or holds_pantaray_tasks(folder)
-    ):
+    if withheld_folder_reason(folder) is not None or holds_pantaray_agents_md(folder):
         return False
     return not any(
         path_is_within(path=folder, root=root) or path_is_within(path=root, root=folder)

@@ -3,9 +3,13 @@
  * the icon, what it says, and its switch or 「再開する」 at the end. Rules between, no boxes.
  */
 
+/* The dock does not shrink, so the list scrolls on its own and the composer stays in view. */
 .conversation-schedules {
+  max-height: 30vh;
   margin: 0 0 var(--space-sm);
   padding: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   list-style: none;
 }
 
@@ -13,13 +17,13 @@
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr) auto;
   column-gap: 12px;
-  align-items: center;
+  /* The control stays by the first line when the message is open. */
+  align-items: start;
   padding: 10px 0;
   border-top: 1px solid var(--fog-line);
 }
 
 .conversation-schedule__icon {
-  align-self: start;
   margin-top: 3px;
   color: var(--fog-text-3);
 }

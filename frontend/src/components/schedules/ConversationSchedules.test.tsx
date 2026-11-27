@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
@@ -8,6 +8,7 @@ import type { MessageKey } from '@/i18n/types';
 import type { HookEnabledUpdate, HookList } from '../../../electron/src/settings/hooksFetch';
 import { ConversationSchedules } from './ConversationSchedules';
 import { hook } from './scheduleFixtures';
+import { SCHEDULES_POLL_MS } from './useSchedules';
 
 const ja = (key: MessageKey, vars?: Record<string, string | number>) => translate('ja', key, vars);
 
@@ -41,6 +42,7 @@ const meeting = hook({
 describe('ConversationSchedules', () => {
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     delete window.electron;
   });
 
@@ -95,5 +97,23 @@ describe('ConversationSchedules', () => {
     await waitFor(() =>
       expect(screen.queryByRole('button', { name: ja('schedules.resume') })).toBeNull()
     );
+  });
+
+  // Catches a strip that shows a schedule on after it stopped: the stop lands a few seconds
+  // after its turn ends, with nothing else for the window to hear.
+  it('shows a schedule that stopped after its turn without being told', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const daily = hook({ offset: '450m' });
+    installBridge([
+      { hooks: [daily], recording_ready: true },
+      { hooks: [{ ...daily, stopped_reason: 'turn_failed' }], recording_ready: true },
+    ]);
+    renderStrip('action-1');
+    expect(await screen.findByRole('switch', { name: ja('schedules.switch') })).toBeChecked();
+
+    act(() => vi.advanceTimersByTime(SCHEDULES_POLL_MS));
+
+    expect(await screen.findByRole('button', { name: ja('schedules.resume') })).toBeVisible();
+    expect(screen.queryByRole('switch')).toBeNull();
   });
 });

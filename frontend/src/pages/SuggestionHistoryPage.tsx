@@ -463,6 +463,8 @@ const SuggestionHistoryPage = () => {
           onSelect={selectTodos}
           onOpenWork={select}
           onAddProject={addProject}
+          onCreateProject={workspace.createProject}
+          projectFailure={workspace.errorMessage}
           onWorkspaceChanged={workspace.reload}
           requestedFile={requestedFile}
           handedPreview={handedPreview}

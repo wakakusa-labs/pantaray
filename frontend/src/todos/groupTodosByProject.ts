@@ -21,7 +21,7 @@ export type TodoGroupOrganization = { kind: 'organization'; name: string } | { k
  */
 export type TodoPlace = { projectId: string | null; organizationId: string | null };
 
-/** A place in view: a group of the list, and a place the add bar can put a TODO. */
+/** A place in view: a group of the list, whose new line puts a TODO there. */
 export type TodoProjectSlot = TodoPlace & {
   /** Null for no project. */
   projectName: string | null;
@@ -110,25 +110,23 @@ export const todoProjectSlots = (
   scopeSlots(settings, scope).filter((slot) => inFilter(slot.projectId, filter));
 
 /**
- * The list's TODOs by place, for the places that hold any. A TODO whose place is not in `slots`
- * is not shown: the settings are read with the page, and a deleted project's TODOs move to no
- * project, a deleted organization's own ones to no organization.
+ * The list's TODOs by place, one group for every slot, empty or not. A TODO whose place is not in
+ * `slots` is not shown: the settings are read with the page, and a deleted project's TODOs move
+ * to no project, a deleted organization's own ones to no organization.
  */
 export function groupTodosByProject(
   page: TodoListPage,
   slots: readonly TodoProjectSlot[]
 ): TodoProjectGroupView[] {
-  return slots
-    .map((slot) => {
-      const items = page.items.filter(
-        (item) => item.project_id === slot.projectId && item.organization_id === slot.organizationId
-      );
-      return {
-        ...slot,
-        doneCount: items.filter((item) => item.state.kind === 'done').length,
-        totalCount: items.length,
-        items,
-      };
-    })
-    .filter((group) => group.totalCount > 0);
+  return slots.map((slot) => {
+    const items = page.items.filter(
+      (item) => item.project_id === slot.projectId && item.organization_id === slot.organizationId
+    );
+    return {
+      ...slot,
+      doneCount: items.filter((item) => item.state.kind === 'done').length,
+      totalCount: items.length,
+      items,
+    };
+  });
 }

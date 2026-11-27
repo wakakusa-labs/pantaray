@@ -122,21 +122,17 @@ test('the pickers work from the keyboard, and a TODO starting today opens in the
   await expect(page.getByRole('button', { name: '組織: Xer' })).toBeFocused();
   await expect.poll(() => windowHeight(page)).toBe(closed);
 
-  const project = page.getByRole('button', { name: 'プロジェクト: プロジェクトなし' });
+  const project = page.getByRole('button', { name: 'プロジェクト: その他' });
   await project.click();
   const projects = page.getByRole('menu', { name: 'プロジェクト' });
-  await expect(projects.getByRole('menuitemradio')).toHaveText([
-    'Pantaray',
-    '営業資料',
-    'プロジェクトなし',
-  ]);
+  await expect(projects.getByRole('menuitemradio')).toHaveText(['Pantaray', '営業資料', 'その他']);
   await expectWindowHolds(page, projects, closed);
   await page.keyboard.press('Escape');
   await expect(projects).toBeHidden();
   await expect(project).toBeFocused();
   await expect.poll(() => windowHeight(page)).toBe(closed);
   await project.click();
-  await expect(projects.getByRole('menuitemradio', { name: 'プロジェクトなし' })).toBeFocused();
+  await expect(projects.getByRole('menuitemradio', { name: 'その他' })).toBeFocused();
   await page.keyboard.press('ArrowDown');
   await expect(projects.getByRole('menuitemradio', { name: 'Pantaray' })).toBeFocused();
   await page.keyboard.press('Space');

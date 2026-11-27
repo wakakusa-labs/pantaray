@@ -12,13 +12,17 @@ import { TodoImportBar } from '@/components/todo/TodoImportBar';
 import { TodoImportPane } from '@/components/todo/TodoImportPane';
 import { TodoNewLine } from '@/components/todo/TodoNewLine';
 import { TodoProjectGroup } from '@/components/todo/TodoProjectGroup';
+import { TodoProjectLine } from '@/components/todo/TodoProjectLine';
 import { TodoRow } from '@/components/todo/TodoRow';
 import { useTodoDeleteConfirmation } from '@/components/todo/useTodoDeleteConfirmation';
 import { useTodoPaneWidth } from '@/components/todo/useTodoPaneWidth';
 import { useI18n } from '@/context/useI18n';
 import type { TaskPreview } from '@/components/task/taskFiles';
 import type { HistorySelection } from '@/history/historySelection';
-import type { WorkspaceSettings } from '@/pages/settings/components/workspaceSettingsModel';
+import type {
+  WorkspaceProject,
+  WorkspaceSettings,
+} from '@/pages/settings/components/workspaceSettingsModel';
 import {
   groupTodosByProject,
   todoProjectSlots,
@@ -64,6 +68,9 @@ const startProblemMessage = (problem: TodoImportProblem) =>
 const placeKey = (place: TodoPlace) =>
   place.projectId ?? `organization:${place.organizationId ?? ''}`;
 
+/** The id of a place's new line, which takes the focus once its project is made. */
+const newLineId = (place: TodoPlace) => `todo-new-line:${placeKey(place)}`;
+
 /**
  * The home page's TODO list: every TODO in view, by project while several projects are in view
  * and as one list for one project (or their progress, or the deleted TODOs), each list ending in
@@ -82,6 +89,8 @@ export function TodoScreen({
   onSelect,
   onOpenWork,
   onAddProject,
+  onCreateProject,
+  projectFailure,
   onWorkspaceChanged,
   requestedFile,
   handedPreview,
@@ -101,6 +110,13 @@ export function TodoScreen({
   /** A work named in a conversation opens in the page's main area. */
   onOpenWork: (work: HistorySelection) => void;
   onAddProject: () => void;
+  /** The sidebar's ＋ as the list's project line uses it: null when the name was refused. */
+  onCreateProject: (
+    name: string,
+    organizationId: string | null
+  ) => Promise<WorkspaceProject | null>;
+  /** Why the workspace's last change was refused, told under the project line it came from. */
+  projectFailure: string | null;
   /** An import created organizations or projects: the workspace is read again. */
   onWorkspaceChanged: () => void;
   /** A file of the selected TODO's suggestion an Overlay chip asked to preview. */
@@ -151,6 +167,9 @@ export function TodoScreen({
   // One project in view is one list under its name; with several, the groups name them. No
   // project across all organizations is a group for each organization.
   const oneProject = selection.project.project !== 'any';
+  // One organization's list (or the one of the projects in none) is a note of each of its places,
+  // empty ones too, ending in the line a project is named on.
+  const organizationNote = selection.scope.scope !== 'all' && !oneProject;
   // The list's name for assistive tech. No title is drawn: the sidebar shows what is selected,
   // and the groups name their projects.
   const listName = !showingList
@@ -196,12 +215,34 @@ export function TodoScreen({
 
   const projects = settings ? todoProjectSlots(settings, selection.scope, selection.project) : [];
   const groups = page ? groupTodosByProject(page, projects) : [];
-  // An empty list is written into at the first place in view, drawn as the group it will be, so
-  // the line stays where it is once its first TODO is added. No place: nothing can be added.
+  // Across all organizations only the places holding TODOs show; an empty list is written into at
+  // the first place, drawn as the group it will be, so the line stays where it is once its first
+  // TODO is added. A note keeps every place, so no line goes while it is being written on.
+  const filled = groups.filter((group) => group.totalCount > 0);
   const shown: TodoProjectGroupView[] =
-    groups.length > 0 || projects.length === 0
-      ? groups
-      : [{ ...projects[0], doneCount: 0, totalCount: 0, items: [] }];
+    oneProject || organizationNote ? groups : filled.length > 0 ? filled : groups.slice(0, 1);
+
+  // A project made on the project line hands the focus to its group's new line once it shows: the
+  // request renders the list again, and the workspace's change renders it once the group is there.
+  const focusLinePending = useRef<string | null>(null);
+  const [, requestLineFocus] = useState(0);
+  useEffect(() => {
+    const field = focusLinePending.current && document.getElementById(focusLinePending.current);
+    if (!field) return;
+    focusLinePending.current = null;
+    field.focus();
+  });
+  const createProject = async (name: string) => {
+    const scope = selection.scope;
+    const project = await onCreateProject(
+      name,
+      scope.scope === 'organization' ? (scope.organization_id ?? null) : null
+    );
+    if (project === null) return false;
+    focusLinePending.current = newLineId({ projectId: project.project_id, organizationId: null });
+    requestLineFocus((request) => request + 1);
+    return true;
+  };
 
   /** The place's name: its project, or no project in its organization while those are named. */
   const placeName = (slot: TodoProjectSlot) =>
@@ -248,6 +289,7 @@ export function TodoScreen({
       ...todoRows(group.items, today),
       <TodoNewLine
         key="new"
+        id={newLineId(group)}
         placeName={placeName(group)}
         onCreate={(text) => {
           setAddedTo(place);
@@ -314,6 +356,14 @@ export function TodoScreen({
               </TodoProjectGroup>
             ))
           )}
+          {/* Each organization's line is its own, so a name left on one is not made in another. */}
+          {organizationNote ? (
+            <TodoProjectLine
+              key={selection.scope.organization_id ?? ''}
+              failure={projectFailure}
+              onCreate={createProject}
+            />
+          ) : null}
         </fieldset>
       </>
     );

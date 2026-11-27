@@ -597,7 +597,7 @@ it('lists every TODO by project, counts open TODOs in the sidebar, and hands the
   renderPage(['/history']);
   expect(await screen.findByRole('checkbox', { name: '完了: TODO T1' })).toBeInTheDocument();
   expect(list).toHaveBeenCalledWith({ scope: 'all', project: 'any', sort: 'added' });
-  // Xer › 見積もり, then 組織なし › 採用 and 組織なし › プロジェクトなし.
+  // Xer › 見積もり, then 組織なし › 採用 and 組織なし › その他.
   expect(projectGroups()).toHaveLength(3);
   expect(screen.getByText('1 / 4 完了')).toBeVisible();
   const sidebar = screen.getByRole('complementary', SIDEBAR);

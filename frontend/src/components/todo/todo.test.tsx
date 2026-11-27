@@ -13,6 +13,7 @@ import { TodoConversationPane } from './TodoConversationPane';
 import { TodoImportBar } from './TodoImportBar';
 import { TodoNewLine } from './TodoNewLine';
 import { TodoProjectGroup } from './TodoProjectGroup';
+import { TodoProjectLine } from './TodoProjectLine';
 import { TodoRow } from './TodoRow';
 
 afterEach(cleanup);
@@ -285,7 +286,7 @@ function renderNewLine(onCreate: (text: string) => Promise<boolean>) {
   render(
     ja(
       <ul>
-        <TodoNewLine placeName="見積もり" onCreate={onCreate} />
+        <TodoNewLine id="new-line" placeName="見積もり" onCreate={onCreate} />
       </ul>
     )
   );
@@ -348,6 +349,49 @@ it('joins pasted lines into one, and Escape clears the line and leaves it', asyn
   await userEvent.keyboard('{Escape}');
   expect(line).toHaveValue('');
   expect(line).not.toHaveFocus();
+});
+
+function renderProjectLine(onCreate: (name: string) => Promise<boolean>, failure: string | null) {
+  render(ja(<TodoProjectLine failure={failure} onCreate={onCreate} />));
+  return screen.getByRole('textbox', { name: 'プロジェクトを追加' });
+}
+
+it('names a project on Enter and empties the line, but not on an IME’s Enter or Escape', async () => {
+  const onCreate = vi.fn(async () => true);
+  const line = renderProjectLine(onCreate, null);
+  await userEvent.click(line);
+  await userEvent.keyboard('   {Enter}');
+  await userEvent.type(line, '{Backspace}{Backspace}{Backspace}販路開拓 ');
+  fireEvent.keyDown(line, { key: 'Enter', isComposing: true });
+  fireEvent.keyDown(line, { key: 'Enter', keyCode: 229 });
+  fireEvent.keyDown(line, { key: 'Escape', isComposing: true });
+  fireEvent.keyDown(line, { key: 'Escape', keyCode: 229 });
+  await userEvent.keyboard('{Shift>}{Enter}{/Shift}');
+  expect(onCreate).not.toHaveBeenCalled();
+  expect(line).toHaveValue('販路開拓 ');
+  expect(line).toHaveFocus();
+  await userEvent.keyboard('{Enter}');
+  expect(onCreate).toHaveBeenCalledExactlyOnceWith('販路開拓');
+  expect(line).toHaveValue('');
+
+  await userEvent.type(line, '採用');
+  await userEvent.keyboard('{Escape}');
+  expect(line).toHaveValue('');
+  expect(line).not.toHaveFocus();
+  expect(onCreate).toHaveBeenCalledOnce();
+});
+
+it('keeps a refused name on the line and tells why under it', async () => {
+  const line = renderProjectLine(
+    vi.fn(async () => false),
+    '見積もり という名前のプロジェクトがすでにあります。'
+  );
+  expect(screen.queryByRole('alert')).toBeNull();
+  await userEvent.type(line, '見積もり{Enter}');
+  expect(line).toHaveValue('見積もり');
+  expect(screen.getByRole('alert')).toHaveTextContent(
+    '見積もり という名前のプロジェクトがすでにあります。'
+  );
 });
 
 const importField = () => screen.getByRole('textbox', { name: 'ファイルやテキストから取り込む' });
@@ -461,7 +505,7 @@ it('counts a group’s done TODOs and names its organization after it when one i
   const { rerender } = render(group(null));
   expect(screen.getByRole('region', { name: '販路開拓' })).toHaveTextContent('2 / 5');
   rerender(group('Wakakusa'));
-  expect(screen.getByRole('region', { name: 'プロジェクトなし Wakakusa' })).toBeInTheDocument();
+  expect(screen.getByRole('region', { name: 'その他 Wakakusa' })).toBeInTheDocument();
 });
 
 it('counts the days a deleted TODO can still be restored', async () => {

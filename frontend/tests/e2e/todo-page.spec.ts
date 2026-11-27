@@ -507,6 +507,16 @@ async function openHome(page: Page, search = '', suggestion: OverlaySnapshot = S
               organizations.push(created);
               return created;
             },
+            createProject: async (input: { displayName: string; organizationIds: string[] }) => {
+              const created = {
+                project_id: `project-${projects.length}`,
+                display_name: input.displayName,
+                sort_order: projects.length,
+                organization_ids: input.organizationIds,
+              };
+              projects.push(created);
+              return created;
+            },
           },
           auth: {
             getState: async () => ({
@@ -601,6 +611,13 @@ async function openHome(page: Page, search = '', suggestion: OverlaySnapshot = S
               added.state = notStarted(added.starts_on);
               items.push(added);
               return { kind: 'ok', result: added };
+            },
+            delete: async ({ todo_id }: { todo_id: string }) => {
+              items.splice(
+                items.findIndex((item) => item.todo_id === todo_id),
+                1
+              );
+              return { kind: 'ok', result: null };
             },
             setDue: async ({ todo_id, due }: TodoDueRequest) => {
               const item = items.find((candidate) => candidate.todo_id === todo_id)!;
@@ -870,7 +887,7 @@ test('the home lists every organization’s TODOs by project, with the rail and 
     /^採用Xer0 \/ 1$/,
     /^プロダクトWakakusa0 \/ 2$/,
     /^家のこと組織なし0 \/ 1$/,
-    /^プロジェクトなし組織なし1 \/ 1$/,
+    /^その他組織なし1 \/ 1$/,
   ]);
   const estimate = page.getByRole('region', { name: '見積もり Xer' });
   await expect(
@@ -893,8 +910,8 @@ test('the home lists every organization’s TODOs by project, with the rail and 
   );
   await expect(
     page
-      .getByRole('region', { name: 'プロジェクトなし 組織なし' })
-      .getByRole('textbox', { name: 'プロジェクトなし（組織なし）に TODO を追加' })
+      .getByRole('region', { name: 'その他 組織なし' })
+      .getByRole('textbox', { name: 'その他（組織なし）に TODO を追加' })
   ).toBeVisible();
   // Every row, the new lines too, is one line.
   const heights = await page
@@ -1002,7 +1019,14 @@ test('the rail scopes the list to one organization, and a project shows its TODO
     'aria-pressed',
     'true'
   );
-  await expect(groups(page).locator('h3')).toHaveText(['見積もり', '採用']);
+  // Every place of the organization shows, its own TODOs in no project (その他) last even when
+  // empty, then the line a project is named on.
+  await expect(groups(page).locator('.todo-group__head')).toHaveText([
+    /^見積もり1 \/ 2$/,
+    /^採用0 \/ 1$/,
+    /^その他$/,
+  ]);
+  await expect(page.getByRole('textbox', { name: 'プロジェクトを追加' })).toBeVisible();
   await capture(page, info, 'list-organization');
 
   // A group's new line adds to its project, and stays focused for the next line.
@@ -1683,15 +1707,15 @@ test('an organization with no project yet adds a TODO in no project, and takes a
 
   // Its empty list is written into at its one place, its own no project, which the line names.
   await expect(page.getByText('TODO はまだありません。')).toHaveCount(0);
-  await expect(groups(page).locator('.todo-group__head')).toHaveText([/^プロジェクトなし$/]);
+  await expect(groups(page).locator('.todo-group__head')).toHaveText([/^その他$/]);
   await expect(page.getByRole('textbox', { name: /に TODO を追加$/ })).toHaveCount(1);
-  const field = page.getByRole('textbox', { name: 'プロジェクトなしに TODO を追加' });
+  const field = page.getByRole('textbox', { name: 'その他に TODO を追加' });
   await field.fill('見積書を送る');
   await field.press('Enter');
   await expect(field).toHaveValue('');
   // The line stays where it was, now under its first TODO, and keeps the focus.
   await expect(field).toBeFocused();
-  await expect(groups(page).locator('.todo-group__head')).toHaveText([/^プロジェクトなし0 \/ 1$/]);
+  await expect(groups(page).locator('.todo-group__head')).toHaveText([/^その他0 \/ 1$/]);
   const importField = page.getByRole('textbox', { name: 'ファイルやテキストから取り込む' });
   await importField.fill('見積書を送る\n請求書を作る');
   await importField.press('Enter');
@@ -1702,6 +1726,54 @@ test('an organization with no project yet adds a TODO in no project, and takes a
     organization_id: 'labs',
     text: '見積書を送る\n請求書を作る',
   });
+});
+
+test('an organization’s list keeps every place while it is written on, and names projects on its last line', async ({
+  page,
+}, info) => {
+  await openHome(page, '?scope=organization:xer');
+  const hiring = page.getByRole('region', { name: '採用' });
+  const other = page.getByRole('region', { name: 'その他' });
+  const hiringLine = hiring.getByRole('textbox', { name: '採用に TODO を追加' });
+  await hiringLine.fill('面接官を決める');
+
+  // その他 takes its first TODO, then 採用 loses its last: neither line goes, nor what it holds.
+  const otherLine = other.getByRole('textbox', { name: 'その他に TODO を追加' });
+  await otherLine.fill('請求書の宛名を確かめる');
+  await otherLine.press('Enter');
+  await expect(rowOf(other, '請求書の宛名を確かめる')).toBeVisible();
+  await expect(otherLine).toBeFocused();
+  await hiring.getByRole('button', { name: '削除: 来週の面接の質問リストを作る' }).click();
+  await expect(hiring.locator('.todo-group__head')).toHaveText(/^採用$/);
+  await expect(hiringLine).toHaveValue('面接官を決める');
+
+  // A taken name stays on the line, told why under it.
+  const projectLine = page.getByRole('textbox', { name: 'プロジェクトを追加' });
+  await projectLine.fill('採用');
+  await projectLine.press('Enter');
+  await expect(page.locator('.todo-project-line').getByRole('alert')).toHaveText(
+    '採用 という名前のプロジェクトがすでにあります。'
+  );
+  await expect(projectLine).toHaveValue('採用');
+
+  // A new name is made in the organization, as the sidebar's ＋ makes it, above その他; the line
+  // empties and its group's line takes the focus.
+  await projectLine.fill('販路開拓');
+  await capture(page, info, 'project-line-typed');
+  await projectLine.press('Enter');
+  await expect(projectLine).toHaveValue('');
+  await expect(page.getByRole('textbox', { name: '販路開拓に TODO を追加' })).toBeFocused();
+  await expect(groups(page).locator('h3')).toHaveText(['見積もり', '採用', '販路開拓', 'その他']);
+  await expect(
+    sidebarOf(page).getByRole('button', { name: '販路開拓', exact: true })
+  ).toBeVisible();
+  await capture(page, info, 'project-line-created');
+
+  // Across all organizations only the places with TODOs show, and no project is named there.
+  await railOf(page).getByRole('button', { name: 'すべての組織' }).click();
+  await expect(page.getByRole('region', { name: 'すべての TODO' })).toBeVisible();
+  await expect(page.getByRole('region', { name: '販路開拓 Xer' })).toHaveCount(0);
+  await expect(page.getByRole('textbox', { name: 'プロジェクトを追加' })).toHaveCount(0);
 });
 
 /** The list's and the pane's widths, and the rule's place, as drawn. */

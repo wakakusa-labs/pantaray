@@ -13,9 +13,12 @@ import './todo.css';
  * joined. It goes in a list after the `TodoRow`s.
  */
 export function TodoNewLine({
+  id,
   placeName,
   onCreate,
 }: {
+  /** The field's id, by which the list moves the focus here. */
+  id: string;
   /** Where the TODO goes, which names the line for assistive tech. */
   placeName: string;
   /** Resolves true once the TODO has been read into the list. */
@@ -50,6 +53,7 @@ export function TodoNewLine({
     <li className="todo-row todo-new-line">
       <span className="todo-new-line__check" aria-hidden="true" />
       <input
+        id={id}
         type="text"
         className="todo-new-line__field"
         aria-label={t('todo.add.to', { place: placeName })}

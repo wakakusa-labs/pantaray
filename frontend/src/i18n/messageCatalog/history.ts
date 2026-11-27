@@ -12,6 +12,12 @@ export const HISTORY_MESSAGES = defineMessages({
     'history.tasks.title': 'Tasks',
     'history.delete.confirmTitle': 'Delete this conversation?',
     'history.delete.confirmBody': 'The conversation will be removed and can’t be restored.',
+    'history.delete.confirmBodySchedules.one':
+      'The conversation and the schedule asked for in it will be removed and can’t be restored.',
+    'history.delete.confirmBodySchedules.other':
+      'The conversation and the {count} schedules asked for in it will be removed and can’t be restored.',
+    'history.delete.confirmBodyMaybeSchedules':
+      'The conversation will be removed and can’t be restored, along with any schedules asked for in it.',
     'history.delete.busy': 'This conversation is running, so it can’t be deleted right now.',
     'history.delete.failed': 'Failed to delete the conversation.',
     'history.projects.title': 'Projects',
@@ -153,6 +159,12 @@ export const HISTORY_MESSAGES = defineMessages({
     'history.tasks.title': '作業',
     'history.delete.confirmTitle': 'この会話を削除しますか？',
     'history.delete.confirmBody': '会話の内容が消え、元に戻せません。',
+    'history.delete.confirmBodySchedules.one':
+      '会話の内容と、この会話で頼んだ予定 1 件が消え、元に戻せません。',
+    'history.delete.confirmBodySchedules.other':
+      '会話の内容と、この会話で頼んだ予定 {count} 件が消え、元に戻せません。',
+    'history.delete.confirmBodyMaybeSchedules':
+      '会話の内容が消え、元に戻せません。この会話で頼んだ予定があれば、それも消えます。',
     'history.delete.busy': 'この会話は実行中のため、いまは削除できません。',
     'history.delete.failed': '会話を削除できませんでした。',
     'history.projects.title': 'プロジェクト',

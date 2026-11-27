@@ -16,7 +16,7 @@ import { getLocaleForUiLanguage } from '@/i18n/translate';
 import type { MessageKey } from '@/i18n/types';
 import { TODO_UX_ENABLED } from '@/todos/todoUxFeature';
 
-import { HistoryDeleteDialog } from './HistoryDeleteDialog';
+import { ConversationDeleteDialog } from './ConversationDeleteDialog';
 import { HistoryProjects, type WorkspaceProjects } from './HistoryProjects';
 import HistorySearchField from './HistorySearchField';
 import { useLiveStageText } from './liveStageText';
@@ -519,10 +519,8 @@ export function HistorySidebar({
         </>
       )}
       {confirmingDelete ? (
-        <HistoryDeleteDialog
-          t={t}
-          title={t('history.delete.confirmTitle')}
-          body={t('history.delete.confirmBody')}
+        <ConversationDeleteDialog
+          item={confirmingDelete}
           onCancel={cancelDelete}
           onConfirm={() => void confirmDelete()}
         />

@@ -36,7 +36,16 @@ class RecurrenceOrigin:
     kind: Literal["recurrence"] = "recurrence"
 
 
-type TodoOrigin = WrittenOrigin | SuggestionOrigin | RecurrenceOrigin
+@dataclass(frozen=True, slots=True)
+class HookOrigin:
+    # The conversation that asked for the hook whose fire wrote this TODO to
+    # open its conversation. Provenance only: deleting this TODO leaves the
+    # hook, and deleting that conversation leaves this TODO.
+    origin_action_id: str
+    kind: Literal["hook"] = "hook"
+
+
+type TodoOrigin = WrittenOrigin | SuggestionOrigin | RecurrenceOrigin | HookOrigin
 
 
 @dataclass(frozen=True, slots=True)

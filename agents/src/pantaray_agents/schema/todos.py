@@ -36,13 +36,18 @@ from pantaray_agents.local_runtime.todos.display import (
 )
 from pantaray_agents.local_runtime.todos.model import (
     ActionConversation,
+    HookOrigin,
     LocalDate,
     NoConversation,
+    RecurrenceOrigin,
     SuggestionConversation,
+    SuggestionOrigin,
     Todo,
     TodoAuthor,
     TodoConversation,
     TodoDue,
+    TodoOrigin,
+    WrittenOrigin,
 )
 from pantaray_agents.local_runtime.todos.reads import TodoListSort
 from pantaray_agents.schema.agent.action_message import (
@@ -179,6 +184,31 @@ type TodoConversationRef = Annotated[
 ]
 
 
+class WrittenOriginRef(_View):
+    kind: Literal["written"] = "written"
+
+
+class SuggestionOriginRef(_View):
+    kind: Literal["suggestion"] = "suggestion"
+
+
+class RecurrenceOriginRef(_View):
+    kind: Literal["recurrence"] = "recurrence"
+
+
+class HookOriginRef(_View):
+    # The conversation that asked for the hook whose fire wrote this TODO; it
+    # may have been deleted since.
+    origin_action_id: str
+    kind: Literal["hook"] = "hook"
+
+
+type TodoOriginRef = Annotated[
+    WrittenOriginRef | SuggestionOriginRef | RecurrenceOriginRef | HookOriginRef,
+    Field(discriminator="kind"),
+]
+
+
 class PendingDeletionRequestView(_View):
     request_id: str
     reason: str
@@ -191,7 +221,7 @@ class TodoView(_View):
     organization_id: str | None
     text: str
     author: TodoAuthor
-    origin: Literal["written", "suggestion", "recurrence"]
+    origin: TodoOriginRef
     starts_on: LocalDate | None  # the AI picks it up from this date; null never
     due: TodoDue | None
     state: Annotated[TodoDisplayState, Field(discriminator="kind")]
@@ -236,7 +266,7 @@ def todo_view(
         organization_id=todo.organization_id,
         text=todo.text,
         author=todo.author,
-        origin=todo.origin.kind,
+        origin=_origin_ref(todo.origin),
         starts_on=todo.starts_on,
         due=todo.due,
         state=display_state(todo, conversation, today),
@@ -263,6 +293,20 @@ def deleted_todo_view(todo: Todo, zone: ZoneInfo) -> DeletedTodoView:
         deleted_at=deletion.at,
         purge_on=purge_at.astimezone(zone).date().isoformat(),
     )
+
+
+def _origin_ref(origin: TodoOrigin) -> TodoOriginRef:
+    match origin:
+        case WrittenOrigin():
+            return WrittenOriginRef()
+        case SuggestionOrigin():
+            return SuggestionOriginRef()
+        case RecurrenceOrigin():
+            return RecurrenceOriginRef()
+        case HookOrigin(origin_action_id=origin_action_id):
+            return HookOriginRef(origin_action_id=origin_action_id)
+        case _:
+            assert_never(origin)
 
 
 def _conversation_ref(conversation: TodoConversation) -> TodoConversationRef:

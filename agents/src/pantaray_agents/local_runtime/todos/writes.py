@@ -1,6 +1,7 @@
 """Store the core's results: each write is one transaction over `todo_items`,
 except a Suggestion's TODO, which joins the Suggestion's save. Every row it
-writes records `todo.saved` in that transaction, for the pickup.
+writes records `todo.saved` in that transaction, for the pickup. Deleting a
+TODO deletes its conversation's hooks in the same transaction.
 
 A write that changes nothing writes nothing, so a replayed request leaves the
 row and the revision the live session follows as they were.
@@ -29,6 +30,9 @@ from pantaray_agents.local_runtime.storage.transactions import immediate_transac
 from pantaray_agents.local_runtime.storage.users import ensure_user_row
 from pantaray_agents.local_runtime.todos import core
 from pantaray_agents.local_runtime.todos.clock import TodoClock
+from pantaray_agents.local_runtime.todos.conversation import (
+    resolve_todo_conversations,
+)
 from pantaray_agents.local_runtime.todos.core import CheckSet, Rejected
 from pantaray_agents.local_runtime.todos.db import (
     TODO_COLUMNS,
@@ -42,6 +46,7 @@ from pantaray_agents.local_runtime.todos.db import (
     todo_params,
 )
 from pantaray_agents.local_runtime.todos.model import (
+    ActionConversation,
     AiReport,
     LocalDate,
     SuggestionOrigin,
@@ -266,6 +271,10 @@ def update_todo[R: str](
 
     `step` is a core operation with its arguments bound, such as
     ``lambda todo: core.restore(todo, now=clock.now)``.
+
+    A transition that deletes the TODO also deletes the hooks asked for in
+    its conversation and those that send to it, as deleting the conversation
+    would; restoring the TODO does not bring them back.
     """
 
     verify_current_owner(user_id)
@@ -276,6 +285,8 @@ def update_todo[R: str](
         result = step(current)
         if isinstance(result, Todo) and result != current:
             _update(connection, user_id=user_id, todo=result)
+            if current.deletion is None and result.deletion is not None:
+                _delete_conversation_hooks(connection, user_id=user_id, todo=result)
     return result
 
 
@@ -335,6 +346,29 @@ def _attachments_available(
     except (ValueError, ActionFileAttachmentUnavailableError):
         return False
     return True
+
+
+def _delete_conversation_hooks(
+    connection: sqlite3.Connection, *, user_id: str, todo: Todo
+) -> None:
+    """Delete the hooks whose origin or target is the TODO's conversation.
+
+    Done when the TODO is deleted rather than when it is purged: until then
+    they would keep sending turns to, or starting work from, a conversation
+    the user deleted. Their state goes with the row, and their inbox with its
+    trigger. A hook whose fire opened this TODO asked elsewhere, so it stays.
+    """
+
+    conversation = resolve_todo_conversations(
+        connection, user_id=user_id, todos=(todo,)
+    )[todo.todo_id]
+    if not isinstance(conversation, ActionConversation):
+        return
+    connection.execute(
+        "DELETE FROM user_hooks WHERE user_id = :user_id "
+        "AND (origin_action_id = :action_id OR target_action_id = :action_id)",
+        {"user_id": user_id, "action_id": conversation.action_id},
+    )
 
 
 def _update(connection: sqlite3.Connection, *, user_id: str, todo: Todo) -> None:

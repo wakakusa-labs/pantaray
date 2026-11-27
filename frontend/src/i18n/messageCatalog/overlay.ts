@@ -299,7 +299,7 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.approvalRequired.operation.hook': 'あとでメッセージを送る予定を作ります。',
     'overlay.approvalRequired.operation.hookUpdate': 'あとでメッセージを送る予定を変えます。',
     'overlay.approvalRequired.operation.hookResume':
-      'あとでメッセージを送る予定を変えて、また動かします。',
+      'あとでメッセージを送る予定を変えて、再開します。',
     'overlay.approvalRequired.hook.when': 'いつ',
     'overlay.approvalRequired.hook.until': '終わり',
     'overlay.approvalRequired.hook.sendTo': '送り先',

@@ -207,6 +207,15 @@ const TodoConversationRefSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('action'), action_id: z.string() }).strict(),
 ]);
 
+const TodoOriginSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('written') }).strict(),
+  z.object({ kind: z.literal('suggestion') }).strict(),
+  z.object({ kind: z.literal('recurrence') }).strict(),
+  // A hook's fire wrote it; the conversation that asked for the hook, which
+  // may have been deleted since.
+  z.object({ kind: z.literal('hook'), origin_action_id: z.string() }).strict(),
+]);
+
 const TodoViewSchema = z
   .object({
     todo_id: z.string(),
@@ -215,7 +224,7 @@ const TodoViewSchema = z
     organization_id: z.string().nullable(),
     text: z.string(),
     author: TodoAuthorSchema,
-    origin: z.enum(['written', 'suggestion', 'recurrence']),
+    origin: TodoOriginSchema,
     // The AI picks it up from this date; null: not until the user sets one.
     starts_on: LocalDateSchema.nullable(),
     due: TodoDueSchema.nullable(),

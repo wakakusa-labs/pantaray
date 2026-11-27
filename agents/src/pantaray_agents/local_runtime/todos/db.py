@@ -19,6 +19,7 @@ from pantaray_agents.local_runtime.storage.migrations.connection import (
 from pantaray_agents.local_runtime.todos.model import (
     AiReport,
     DeletionRequest,
+    HookOrigin,
     RecurrenceOrigin,
     SuggestionOrigin,
     Todo,
@@ -34,10 +35,10 @@ from pantaray_agents.schema.agent.image import ImageInput
 
 TODO_COLUMNS: Final = tuple(
     """todo_id project_id organization_id text author origin_kind suggestion_id
-    previous_todo_id starts_on due_date due_repeat checked_by checked_at report_kind report_note
-    report_run_id report_at deletion_request_id deletion_request_reason
-    deletion_requested_at deletion_request_state deleted_by deleted_at
-    created_at attachments_json""".split()
+    previous_todo_id hook_origin_action_id starts_on due_date due_repeat
+    checked_by checked_at report_kind report_note report_run_id report_at
+    deletion_request_id deletion_request_reason deletion_requested_at
+    deletion_request_state deleted_by deleted_at created_at attachments_json""".split()
 )
 
 
@@ -225,6 +226,9 @@ def todo_params(todo: Todo) -> dict[str, str | None]:
         "previous_todo_id": (
             origin.previous_todo_id if isinstance(origin, RecurrenceOrigin) else None
         ),
+        "hook_origin_action_id": (
+            origin.origin_action_id if isinstance(origin, HookOrigin) else None
+        ),
         "starts_on": todo.starts_on,
         "due_date": None if todo.due is None else todo.due.date,
         "due_repeat": None if todo.due is None else todo.due.repeat,
@@ -300,11 +304,15 @@ def todo_from_row(row: sqlite3.Row) -> Todo:
 
 
 def _origin(row: sqlite3.Row) -> TodoOrigin:
-    kind = cast("Literal['written', 'suggestion', 'recurrence']", row["origin_kind"])
+    kind = cast(
+        "Literal['written', 'suggestion', 'recurrence', 'hook']", row["origin_kind"]
+    )
     if kind == "suggestion":
         return SuggestionOrigin(suggestion_id=row["suggestion_id"])
     if kind == "recurrence":
         return RecurrenceOrigin(previous_todo_id=row["previous_todo_id"])
+    if kind == "hook":
+        return HookOrigin(origin_action_id=row["hook_origin_action_id"])
     if row["attachments_json"] is None:
         return WrittenOrigin()
     stored = _StoredAttachments.model_validate_json(row["attachments_json"])

@@ -4,11 +4,12 @@ the conversation that saved them, and go with it."""
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import closing
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -48,11 +49,14 @@ from pantaray_agents.local_runtime.runtime.identity import (
 )
 from pantaray_agents.local_runtime.storage.migrations import load_default_migrations
 from pantaray_agents.local_runtime.todos import core
-from pantaray_agents.local_runtime.todos.model import ActionConversation
+from pantaray_agents.local_runtime.todos.clock import TodoClock
+from pantaray_agents.local_runtime.todos.conversation import todo_message_id
+from pantaray_agents.local_runtime.todos.model import ActionConversation, Todo
 from pantaray_agents.local_runtime.todos.pickup import pick_up_todos
 from pantaray_agents.local_runtime.todos.reads import read_todo
-from pantaray_agents.local_runtime.todos.writes import update_todo
+from pantaray_agents.local_runtime.todos.writes import create_todo_item, update_todo
 from pantaray_agents.schema.agent.action_message import ActionUserMessageInput
+from pantaray_agents.schema.todos import todo_view
 
 from ..migrated_db import prepare_test_database
 
@@ -657,6 +661,19 @@ def test_a_task_without_a_target_opens_one_todo_and_conversation_per_fire(
         ("Build report", None, None, first),
         ("Build report", None, None, second),
     ]
+    # Each names the conversation that asked, so it can say what started it.
+    with closing(sqlite3.connect(world.db)) as connection:
+        todo_ids = [
+            str(row[0]) for row in connection.execute("SELECT todo_id FROM todo_items")
+        ]
+    for todo_id in todo_ids:
+        entry = read_todo(user_id=USER, todo_id=todo_id)
+        assert entry is not None
+        view = todo_view(entry.todo, entry.conversation, today="2026-11-21")
+        assert view.model_dump()["origin"] == {
+            "kind": "hook",
+            "origin_action_id": origin,
+        }
 
 
 @pytest.mark.parametrize(
@@ -754,3 +771,87 @@ def test_deleting_a_conversation_a_task_started_leaves_the_task(
     world.end_latest_turn("completed")
     _delete(world, origin)
     assert list_hooks(db_path=world.db, busy_timeout_ms=1_000, user_id=USER) == ()
+
+
+def _todo_conversation(world: _World) -> tuple[str, str]:
+    """A TODO the user wrote and its conversation, its first turn ended."""
+
+    created = create_todo_item(
+        user_id=USER,
+        client_todo_id="client-1",
+        project_id=None,
+        organization_id=None,
+        text="Watch the build",
+        starts_on=None,
+        due=None,
+        clock=TodoClock(now="2026-11-21T08:00:00Z", zone=ZoneInfo("UTC")),
+    )
+    assert isinstance(created, Todo)
+    action_id = submit_action_message(
+        SubmitActionMessageCommand(
+            user_id=USER,
+            target=NewActionTarget(),
+            message=ActionUserMessageInput(
+                message_id=todo_message_id(created.todo_id),
+                content="Watch the build for me.",
+            ),
+        )
+    ).action_id
+    world.end_latest_turn("completed")
+    return created.todo_id, action_id
+
+
+def _delete_by_user(todo: Todo) -> Todo | core.Rejected[str]:
+    return core.delete_by_user(todo, now="2026-11-21T08:59:30Z")
+
+
+def _approve_the_ais_request(todo: Todo) -> Todo | core.Rejected[str]:
+    requested = core.request_deletion(
+        todo, request_id="request-x", reason="Done", now="2026-11-21T08:59:20Z"
+    )
+    assert isinstance(requested, Todo)
+    return core.answer_deletion(
+        requested, request_id="request-x", answer="approve", now="2026-11-21T08:59:30Z"
+    )
+
+
+@pytest.mark.parametrize("delete", [_delete_by_user, _approve_the_ais_request])
+def test_deleting_the_todo_that_asked_deletes_its_hooks(
+    world: _World, delete: Callable[[Todo], Todo | core.Rejected[str]]
+) -> None:
+    # Catches a TODO deletion that leaves its conversation's hooks, their
+    # state or their inbox behind until the purge, so they keep sending turns
+    # to, or starting conversations from, a conversation the user deleted;
+    # and one that deletes hooks another conversation asked for.
+    todo_id, asked_in = _todo_conversation(world)
+    continues = _task(request="continues")
+    _save(world, asked_in, continues)
+    _save(
+        world,
+        asked_in,
+        _task(request="starts-new"),
+        new_conversation=NewConversation(
+            title="Build report", organization_id=None, project_id=None
+        ),
+    )
+    theirs = _conversation(world)
+    _save(world, theirs, _task(request="theirs"))
+    with closing(sqlite3.connect(world.db)) as connection, connection:
+        connection.execute(
+            "INSERT INTO hook_inbox(hook_id, user_id, event_name, payload_json,"
+            " occurred_at) VALUES (?, ?, 'activity', '{}', '2026-11-21T09:00:00Z')",
+            (continues.hook_id, USER),
+        )
+
+    assert isinstance(update_todo(user_id=USER, todo_id=todo_id, step=delete), Todo)
+    world.tick(NINE)
+
+    assert [conversation for conversation, _ in world.turns()] == [theirs]
+    assert [
+        view.hook_id
+        for view in list_hooks(db_path=world.db, busy_timeout_ms=1_000, user_id=USER)
+    ] == [new_task_id("theirs")]
+    with closing(sqlite3.connect(world.db)) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM hook_inbox WHERE hook_id = ?", (continues.hook_id,)
+        ).fetchone() == (0,)

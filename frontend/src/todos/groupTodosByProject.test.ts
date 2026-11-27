@@ -40,7 +40,7 @@ function todo(
     organization_id: organizationId,
     text: todoId,
     author: 'user',
-    origin: 'written',
+    origin: { kind: 'written' },
     starts_on: '2026-11-02',
     due: null,
     state: done

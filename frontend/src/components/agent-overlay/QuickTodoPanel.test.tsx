@@ -28,7 +28,7 @@ const SETTINGS: WorkspaceSettings = {
 // prettier-ignore
 const todo = (state: TodoView['state']): TodoView => ({
   todo_id: 'todo-1', project_id: null, organization_id: null, text: 'Draft the agenda', author: 'user',
-  origin: 'written', starts_on: null, due: null, state, deletion_request: null, conversation: { kind: 'none' },
+  origin: { kind: 'written' }, starts_on: null, due: null, state, deletion_request: null, conversation: { kind: 'none' },
 });
 const STARTING = { kind: 'ok', result: todo({ kind: 'not_started', reason: 'starting' }) } as const;
 

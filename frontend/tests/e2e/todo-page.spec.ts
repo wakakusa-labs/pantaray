@@ -67,7 +67,7 @@ function todo(todoId: string, projectId: string | null, text: string, extra: Par
     organization_id: null,
     text,
     author: 'user',
-    origin: 'written',
+    origin: { kind: 'written' },
     starts_on: '2026-11-02',
     due: null,
     state: { kind: 'working', note: null },
@@ -80,7 +80,7 @@ function todo(todoId: string, projectId: string | null, text: string, extra: Par
 const ITEMS: TodoView[] = [
   todo('t-resubmit', 'estimate', '見積書を再提出する', {
     author: 'ai',
-    origin: 'suggestion',
+    origin: { kind: 'suggestion' },
     starts_on: '2026-10-26',
     due: { date: '2026-11-06', repeat: 'none' },
     state: { kind: 'partial', note: '数量と納期は直しました' },
@@ -91,7 +91,7 @@ const ITEMS: TodoView[] = [
   }),
   todo('t-questions', 'hiring', '来週の面接の質問リストを作る', {
     author: 'ai',
-    origin: 'suggestion',
+    origin: { kind: 'suggestion' },
     state: { kind: 'waiting', reason: 'approval', note: null },
     conversation: { kind: 'suggestion', suggestion_id: 'suggestion-questions' },
   }),
@@ -111,7 +111,7 @@ const ITEMS: TodoView[] = [
   }),
   todo('t-garbage', 'home', '粗大ごみの申し込み', {
     due: { date: '2026-11-07', repeat: 'weekly' },
-    origin: 'recurrence',
+    origin: { kind: 'recurrence' },
     state: { kind: 'waiting', reason: 'reply', note: '回収日を選んでください' },
     conversation: { kind: 'action', action_id: 'action-garbage' },
   }),
@@ -589,7 +589,7 @@ async function openHome(page: Page, search = '', suggestion: OverlaySnapshot = S
                 organization_id: request.organization_id,
                 text: request.text,
                 author: 'user',
-                origin: 'written',
+                origin: { kind: 'written' },
                 starts_on: request.starts_on === undefined ? TODAY : request.starts_on,
                 due: request.due,
                 state: { kind: 'not_started', reason: 'starting' },
@@ -756,7 +756,7 @@ async function openHome(page: Page, search = '', suggestion: OverlaySnapshot = S
                     organization_id: null,
                     text: line.text,
                     author: 'user',
-                    origin: 'written',
+                    origin: { kind: 'written' },
                     starts_on: null,
                     due: line.due === null ? null : { date: line.due, repeat: 'none' },
                     state: notStarted(null),

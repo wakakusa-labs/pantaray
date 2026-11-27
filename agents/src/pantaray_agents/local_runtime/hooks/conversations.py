@@ -49,7 +49,7 @@ from pantaray_agents.local_runtime.storage.transactions import immediate_transac
 from pantaray_agents.local_runtime.todos import core
 from pantaray_agents.local_runtime.todos.conversation import todo_message_id
 from pantaray_agents.local_runtime.todos.db import read_todo_row
-from pantaray_agents.local_runtime.todos.model import Todo, WrittenOrigin
+from pantaray_agents.local_runtime.todos.model import HookOrigin, Todo
 from pantaray_agents.local_runtime.todos.pickup import todo_handoff
 from pantaray_agents.local_runtime.todos.writes import insert_todo
 from pantaray_agents.local_runtime.tooling.repository.workspace_settings import (
@@ -118,7 +118,11 @@ def fire_task(
     if isinstance(task.target, str):
         target, message_id = task.target, str(uuid.uuid5(_NAMESPACE, key))
     else:
-        target = _new_todo(task.target, todo_id=str(uuid.uuid5(_TODO_NAMESPACE, key)))
+        target = _new_todo(
+            task.target,
+            todo_id=str(uuid.uuid5(_TODO_NAMESPACE, key)),
+            origin_action_id=task.origin_action_id,
+        )
         message_id = todo_message_id(target.todo_id)
     with _connect(db_path, busy_timeout_ms) as connection:
         with immediate_transaction(connection):
@@ -244,12 +248,12 @@ def _claim_turn(
     return _Send(target=target)
 
 
-def _new_todo(new: NewConversation, *, todo_id: str) -> Todo:
+def _new_todo(new: NewConversation, *, todo_id: str, origin_action_id: str) -> Todo:
     created = core.create_todo(
         todo_id=todo_id,
         text=new.title,
         author="ai",
-        origin=WrittenOrigin(),
+        origin=HookOrigin(origin_action_id=origin_action_id),
         project_id=new.project_id,
         organization_id=new.organization_id,
         starts_on=None,

@@ -232,7 +232,7 @@ def test_the_user_removes_the_ais_check_and_checking_a_weekly_todo_adds_the_next
     }
     assert rechecked.json()["todo"]["state"]["by"] == "user"
     next_todo = rechecked.json()["next_todo"]
-    assert next_todo["origin"] == "recurrence"
+    assert next_todo["origin"] == {"kind": "recurrence"}
     assert next_todo["starts_on"] == "2026-11-11"
     assert next_todo["due"] == {"date": "2026-11-13", "repeat": "weekly"}
 

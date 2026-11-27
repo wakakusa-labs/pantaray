@@ -116,7 +116,7 @@ describe('buildApprovalDisplay', () => {
         { field: 'window_title', op: 'contains', values: ['Zoom ミーティング', 'Zoom Meeting'] },
       ]);
       expect(meeting.primaryValue).toBe(
-        'アプリの識別子が『us.zoom.xos』で、ウィンドウの題名に『Zoom ミーティング』か『Zoom Meeting』を含むウィンドウが出たとき'
+        'アプリの識別子が『us.zoom.xos』で、ウィンドウの題名に『Zoom ミーティング』か『Zoom Meeting』を含むウィンドウになったとき'
       );
       expect(
         on([
@@ -124,7 +124,7 @@ describe('buildApprovalDisplay', () => {
           { field: 'app_name', op: 'equals', values: ['Google Chrome', 'Arc'] },
         ]).primaryValue
       ).toBe(
-        'ウィンドウの題名に『Meet』を含み、アプリの名前が『Google Chrome』か『Arc』のウィンドウが出たとき'
+        'ウィンドウの題名に『Meet』を含み、アプリの名前が『Google Chrome』か『Arc』のウィンドウになったとき'
       );
       const english = buildApprovalDisplay(
         blocker('create_hook', 'automation_control', {
@@ -147,13 +147,13 @@ describe('buildApprovalDisplay', () => {
         (key, vars) => translate('en', key, vars)
       );
       expect(english.primaryValue).toBe(
-        'When a window appears whose app ID is “us.zoom.xos”, and title contains “Zoom Meeting” or “Zoom ミーティング”'
+        'When a window starts to match: app ID is “us.zoom.xos”, and title contains “Zoom Meeting” or “Zoom ミーティング”'
       );
     });
 
     // Only an activity hook sends the matched window along; a schedule must not claim it.
     it('says the matched window goes with the message only for an activity hook', () => {
-      const alsoSent = ['いっしょに送るもの', '見つけたウィンドウのアプリの名前と題名'];
+      const alsoSent = ['いっしょに送るもの', '見つけたウィンドウのアプリの名前と識別子、題名'];
       expect(
         details(on([{ field: 'app_name', op: 'equals', values: ['zoom.us'] }]))
       ).toContainEqual(alsoSent);

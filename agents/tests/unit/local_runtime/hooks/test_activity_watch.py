@@ -131,14 +131,21 @@ def _gate() -> SourceGate:
     return gate
 
 
-def _watch(world: _World, zanei: _Zanei, at: timedelta, *, ready: bool = True) -> None:
-    """One tick of the watcher; a new gate each time, as after a restart."""
+def _watch(
+    world: _World,
+    zanei: _Zanei,
+    at: timedelta,
+    *,
+    ready: bool = True,
+    gate: SourceGate | None = None,
+) -> None:
+    """One tick of the watcher; a new gate unless given, as after a restart."""
     run_activity_watch_once(
         db_path=world.db,
         busy_timeout_ms=1_000,
         user_id=USER,
         reader=zanei,
-        gate=_gate(),
+        gate=_gate() if gate is None else gate,
         recording_ready=lambda: ready,
         now=lambda: T0 + at,
     )
@@ -170,12 +177,19 @@ def _hook(
 
 
 def _fires(world: _World, hook_id: str) -> int:
+    return len(_fired_titles(world, hook_id))
+
+
+def _fired_titles(world: _World, hook_id: str) -> list[str]:
     with closing(sqlite3.connect(world.db)) as connection:
-        (count,) = connection.execute(
-            "SELECT COUNT(*) FROM hook_inbox WHERE hook_id = ? AND event_name = 'activity'",
-            (hook_id,),
-        ).fetchone()
-    return int(count)
+        return [
+            str(row[0])
+            for row in connection.execute(
+                "SELECT json_extract(payload_json, '$.window_title') FROM hook_inbox"
+                " WHERE hook_id = ? AND event_name = 'activity' ORDER BY delivery_id",
+                (hook_id,),
+            )
+        ]
 
 
 def _started(world: _World) -> tuple[str, _Zanei]:
@@ -215,17 +229,18 @@ def test_working_in_another_app_mid_meeting_does_not_fire_again(
     assert _fires(world, hook_id) == 1
 
 
-def test_the_next_meeting_in_a_new_window_fires_even_two_minutes_later(
-    world: _World,
-) -> None:
-    # Catches a match counted per app rather than per window.
+def test_a_new_window_or_an_app_quit_starts_a_new_match(world: _World) -> None:
+    # Catches a match counted per app rather than per window, and a quit
+    # that does not end the app's windows' matches.
     hook_id, zanei = _started(world)
     zanei.record(timedelta(minutes=1), "Zoom Meeting")
     zanei.record(timedelta(minutes=2), "Zoom Workplace")
     zanei.record(timedelta(minutes=4), "Zoom Meeting", window_id=2)
-    _watch(world, zanei, timedelta(minutes=5))
+    zanei.record(timedelta(minutes=5), None, window_id=None, event_type="app.terminate")
+    zanei.record(timedelta(minutes=6), "Zoom Meeting", window_id=2)
+    _watch(world, zanei, timedelta(minutes=7))
 
-    assert _fires(world, hook_id) == 2
+    assert _fires(world, hook_id) == 3
 
 
 def test_a_window_matches_again_only_after_ten_quiet_minutes(world: _World) -> None:
@@ -242,16 +257,6 @@ def test_a_window_matches_again_only_after_ten_quiet_minutes(world: _World) -> N
     _watch(world, zanei, timedelta(minutes=15, seconds=30))
     zanei.record(timedelta(minutes=22), "Zoom Meeting")
     _watch(world, zanei, timedelta(minutes=22, seconds=30))
-    assert _fires(world, hook_id) == 2
-
-
-def test_quitting_the_app_ends_its_windows_matches(world: _World) -> None:
-    hook_id, zanei = _started(world)
-    zanei.record(timedelta(minutes=1), "Zoom Meeting")
-    zanei.record(timedelta(minutes=2), None, window_id=None, event_type="app.terminate")
-    zanei.record(timedelta(minutes=3), "Zoom Meeting")
-    _watch(world, zanei, timedelta(minutes=4))
-
     assert _fires(world, hook_id) == 2
 
 
@@ -286,15 +291,18 @@ def test_a_restart_mid_meeting_does_not_fire_again(world: _World) -> None:
     assert _fires(world, hook_id) == 1
 
 
+@pytest.mark.parametrize("window_seen_first", [True, False])
 def test_a_browser_navigation_without_a_window_id_fires_its_window_once(
-    world: _World,
+    world: _World, window_seen_first: bool
 ) -> None:
     # Zanei records a navigation without a window id: keyed by the app, the
-    # tab's title would fire once there and again on the window.
+    # tab's title would fire once there and again on the window, also when
+    # the navigation comes before any record of the window.
     hook_id = _hook(world, MEET_TAB)
     zanei = _Zanei()
     _watch(world, zanei, timedelta(0))
-    zanei.record(timedelta(minutes=1), "Inbox", window_id=5, bundle_id=CHROME)
+    if window_seen_first:
+        zanei.record(timedelta(minutes=1), "Inbox", window_id=5, bundle_id=CHROME)
     zanei.record(
         timedelta(minutes=2),
         "Meet - abc-defg-hij",
@@ -330,12 +338,54 @@ def test_a_gap_resumes_from_the_head_without_firing_what_it_skipped(
 def test_zanei_is_not_called_unless_recording_is_ready_and_a_hook_listens(
     world: _World, listening: bool
 ) -> None:
+    # Also catches window titles kept past their week while nothing is read.
     if listening:
         _hook(world)
+    with closing(sqlite3.connect(world.db)) as connection, connection:
+        connection.execute(
+            "INSERT INTO activity_windows(user_id, window_key, seen_at)"
+            " VALUES (?, 'window:1', '2026-11-19T10:00:00.000Z')",
+            (USER,),
+        )
     zanei = _Zanei()
     _watch(world, zanei, timedelta(0), ready=not listening)
 
     assert zanei.calls == 0
+    with closing(sqlite3.connect(world.db)) as connection:
+        assert connection.execute("SELECT * FROM activity_windows").fetchall() == []
+
+
+def test_the_first_read_knows_meetings_going_on_and_fires_ones_just_begun(
+    world: _World,
+) -> None:
+    # Catches a first read that drops the store: a meeting begun between the
+    # save and the first tick never fires, one already going fires later.
+    zanei = _Zanei()
+    zanei.record(-timedelta(minutes=20), "Zoom Meeting A")
+    hook_id = _hook(world)
+    zanei.record(-timedelta(seconds=10), "Zoom Meeting B", window_id=2)
+    _watch(world, zanei, timedelta(0))
+    zanei.record(timedelta(minutes=5), "Zoom Meeting A")
+    zanei.record(timedelta(minutes=5), "Zoom Meeting B", window_id=2)
+    _watch(world, zanei, timedelta(minutes=6))
+
+    assert _fired_titles(world, hook_id) == ["Zoom Meeting B"]
+
+
+def test_a_hook_switched_back_on_ignores_meetings_begun_while_it_was_off(
+    world: _World,
+) -> None:
+    hook_id, zanei = _started(world)
+    world.enable(False, hook_id)
+    zanei.record(timedelta(minutes=1), "Zoom Meeting")
+    _watch(world, zanei, timedelta(minutes=2))
+    world.enable(True, hook_id)
+    _watch(world, zanei, timedelta(minutes=3))
+    zanei.record(timedelta(minutes=4), "Zoom Meeting")
+    _watch(world, zanei, timedelta(minutes=5))
+
+    assert zanei.calls == 3
+    assert _fires(world, hook_id) == 0
 
 
 def test_revoking_recorded_context_mid_read_ends_the_tick(world: _World) -> None:
@@ -355,15 +405,7 @@ def test_revoking_recorded_context_mid_read_ends_the_tick(world: _World) -> None
                 await asyncio.sleep(10)
             raise AssertionError("the revoke cancels the read")
 
-    run_activity_watch_once(
-        db_path=world.db,
-        busy_timeout_ms=1_000,
-        user_id=USER,
-        reader=_Revoked(),
-        gate=gate,
-        recording_ready=lambda: True,
-        now=lambda: T0 + timedelta(minutes=2),
-    )
+    _watch(world, _Revoked(), timedelta(minutes=2), gate=gate)
     _watch(world, zanei, timedelta(minutes=3))
 
     assert _fires(world, hook_id) == 1

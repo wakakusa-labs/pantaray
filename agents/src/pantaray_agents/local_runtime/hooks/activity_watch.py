@@ -1,19 +1,16 @@
 """Watch Zanei's records for the on activity hooks, by fixed rules, no model.
 
 Every tick reads what Zanei recorded since the watcher's own position, while
-at least one activity hook is on and recording is ready; otherwise Zanei is
-not called. Each window's last recorded form says whether it matches a hook,
-and stands while nothing more is recorded of it. A hook fires when a window
-starts to match it: not when one already matched as the hook was saved, and
-not again until that window has been seen not matching for ``QUIET_PERIOD``
-or its app was recorded quitting. A window is keyed by Zanei's window id; a
-record without one belongs to the window its app last showed with an id, or
-to the app when it has shown none.
+an activity hook is on and recording is ready; otherwise Zanei is not called.
+Each window's last recorded form says whether it matches a hook, and stands
+while nothing more is recorded of it. A hook fires when a window starts to
+match it, and not again until that window has been seen not matching for
+``QUIET_PERIOD`` or its app was recorded quitting. Records from before a hook
+was watched only build its matches, so a window already matching never fires
+it; the first read goes through the whole store for that.
 
 The position, the window forms, the match state and the events a page fires
-commit in one transaction, so a restart neither loses nor repeats a fire. A gap
-in the store, a first read, or more than a tick's pages resume from the
-store's head without reading back.
+commit in one transaction, so a restart neither loses nor repeats a fire.
 """
 
 from __future__ import annotations
@@ -69,9 +66,10 @@ logger = logging.getLogger(__name__)
 ACTIVITY_WATCH_INTERVAL_SECONDS: Final[float] = 30.0
 # How long a window seen not matching must stay so before its match ends.
 QUIET_PERIOD: Final = timedelta(minutes=10)
-# A tick reads at most this many pages; a longer backlog (after a long time
-# with no activity hook) is skipped to the store's head.
-PAGES_PER_TICK: Final = 8
+# A tick reads at most this many pages, and the next one goes on from there.
+# Design limit: the store keeps two days, a few hundred pages at most, so a
+# first read takes a few ticks; raise this if one takes more than ten.
+PAGES_PER_TICK: Final = 32
 # A window not recorded for this long is forgotten, with its matches.
 # Design limit: a meeting window silent a week fires again when next seen.
 WINDOW_FORGET_AFTER: Final = timedelta(days=7)
@@ -125,6 +123,10 @@ def run_activity_watch_once(
     now: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> None:
     with _connect(db_path, busy_timeout_ms) as connection:
+        # Every tick, so the titles kept go when they are due even while
+        # nothing is read.
+        with immediate_transaction(connection):
+            _forget_stale_windows(connection, user_id=user_id, now=now())
         if not _listening(connection, user_id=user_id, now=now()):
             return
     if not recording_ready():
@@ -154,7 +156,7 @@ async def _watch(
         source = gate.current(user_id)
     if source is None:
         return
-    for page_number in range(PAGES_PER_TICK):
+    for _page in range(PAGES_PER_TICK):
         with _connect(db_path, busy_timeout_ms) as connection:
             cursor = _position(connection, user_id=user_id)
         try:
@@ -176,15 +178,15 @@ async def _watch(
             logger.warning("activity watch read failed: %s", type(result).__name__)
             return
         observations: Sequence[Observation] = ()
-        next_cursor = result.upper_bound
-        more = False
-        # A first read starts at the oldest record and a gap has none: both
-        # resume from the head, so nothing recorded before is fired late.
-        if isinstance(result, PageResponse) and cursor is not None:
-            observations = result.observations
-            more = result.has_more and page_number + 1 < PAGES_PER_TICK
-            if more or not result.has_more:
-                next_cursor = result.next_cursor
+        if isinstance(result, PageResponse):
+            observations, next_cursor = result.observations, result.next_cursor
+            more = result.has_more
+        # From no position, a gap only says the oldest records expired; from
+        # one, the records it skips are not read back.
+        elif cursor is None:
+            next_cursor, more = result.resume_cursor, True
+        else:
+            next_cursor, more = result.upper_bound, False
         try:
             async with gate.guard(source):
                 with _connect(db_path, busy_timeout_ms) as connection:
@@ -228,7 +230,6 @@ def _commit_page(
             hooks=hooks,
             fires_from=fires_from,
         )
-    _forget_stale_windows(connection, user_id=user_id, now=now)
     ensure_user_row(connection, user_id=user_id)
     connection.execute(
         """INSERT INTO activity_watch_positions(user_id, cursor) VALUES (?, ?)
@@ -249,7 +250,9 @@ def _watch_hooks(
 
     Watching starts a tick before now, so a window that starts to match
     between the hook's save and this tick still fires it. A hook that no
-    longer listens is no longer watched: switched back on, it starts afresh.
+    longer listens is no longer watched; switching one on or off drops its
+    watch where the switch is written (migration 0155), so a hook switched
+    back on starts afresh even before a tick saw it off.
     """
 
     watched = {
@@ -274,7 +277,19 @@ def _watch_hooks(
             fires_from[hook.hook_id] = current[1]
             continue
         if windows is None:
-            windows = _window_forms(connection, user_id=user_id)
+            # Design limit: read whole when a hook is new; the table holds a
+            # week of windows, a few thousand rows.
+            windows = [
+                (
+                    str(key),
+                    {"app_name": app, "bundle_id": bundle, "window_title": title},
+                )
+                for key, app, bundle, title in connection.execute(
+                    """SELECT window_key, app_name, bundle_id, window_title
+                       FROM activity_windows WHERE user_id = ?""",
+                    (user_id,),
+                )
+            ]
         connection.execute(
             "DELETE FROM activity_hook_watches WHERE user_id = ? AND hook_id = ?",
             (user_id, hook.hook_id),
@@ -297,24 +312,6 @@ def _watch_hooks(
     return fires_from
 
 
-def _window_forms(
-    connection: sqlite3.Connection, *, user_id: str
-) -> list[tuple[str, Mapping[str, EventValue]]]:
-    # Design limit: read whole when a hook is new; the table holds the windows
-    # of a week, a few thousand rows.
-    return [
-        (
-            str(key),
-            {"app_name": app_name, "bundle_id": bundle_id, "window_title": title},
-        )
-        for key, app_name, bundle_id, title in connection.execute(
-            """SELECT window_key, app_name, bundle_id, window_title
-               FROM activity_windows WHERE user_id = ?""",
-            (user_id,),
-        )
-    ]
-
-
 def _apply(
     connection: sqlite3.Connection,
     *,
@@ -324,6 +321,7 @@ def _apply(
     fires_from: Mapping[str, datetime],
 ) -> None:
     seen_at = parse_iso_z(observation.ts)
+    seen = format_utc_iso(seen_at)
     bundle_id = _text(observation.bundle_id)
     if _text(observation.event_type) == _APP_QUIT:
         if bundle_id is not None:
@@ -349,14 +347,7 @@ def _apply(
            ON CONFLICT(user_id, window_key) DO UPDATE SET
              bundle_id = excluded.bundle_id, app_name = excluded.app_name,
              window_title = excluded.window_title, seen_at = excluded.seen_at""",
-        (
-            user_id,
-            key,
-            bundle_id,
-            event.app_name,
-            event.window_title,
-            format_utc_iso(seen_at),
-        ),
+        (user_id, key, bundle_id, event.app_name, event.window_title, seen),
     )
     for hook in hooks:
         if _starts_match(
@@ -373,7 +364,7 @@ def _apply(
                 user_id=user_id,
                 hook_ids=(hook.hook_id,),
                 event=event,
-                occurred_at=format_utc_iso(seen_at),
+                occurred_at=seen,
             )
 
 
@@ -429,7 +420,12 @@ def _window_key(
     bundle_id: str | None,
 ) -> str | None:
     if window_id is not None:
-        return f"window:{window_id}"
+        key = f"window:{window_id}"
+        if bundle_id is not None:
+            _hand_app_to_window(
+                connection, user_id=user_id, bundle_id=bundle_id, key=key
+            )
+        return key
     if bundle_id is None:
         return None
     # Zanei records a browser's navigation, and some apps' input, without a
@@ -443,17 +439,31 @@ def _window_key(
     return f"app:{bundle_id}" if row is None else str(row[0])
 
 
+def _hand_app_to_window(
+    connection: sqlite3.Connection, *, user_id: str, bundle_id: str, key: str
+) -> None:
+    """What an app had before it showed a window id becomes its window's, so
+    a match begun on a navigation does not start again on that window."""
+
+    app_key = f"app:{bundle_id}"
+    # The matches follow the form (ON UPDATE CASCADE). A window that already
+    # has a form keeps its own, and the app's goes.
+    connection.execute(
+        """UPDATE OR IGNORE activity_windows SET window_key = ?
+           WHERE user_id = ? AND window_key = ?""",
+        (key, user_id, app_key),
+    )
+    connection.execute(
+        "DELETE FROM activity_windows WHERE user_id = ? AND window_key = ?",
+        (user_id, app_key),
+    )
+
+
 def _forget_app(
     connection: sqlite3.Connection, *, user_id: str, bundle_id: str
 ) -> None:
-    """The app quit: its windows' matches end, and their forms go."""
+    """The app quit: its windows' forms go, and their matches end with them."""
 
-    connection.execute(
-        """DELETE FROM activity_hook_windows WHERE user_id = ? AND window_key IN (
-             SELECT window_key FROM activity_windows
-             WHERE user_id = ? AND bundle_id = ?)""",
-        (user_id, user_id, bundle_id),
-    )
     connection.execute(
         "DELETE FROM activity_windows WHERE user_id = ? AND bundle_id = ?",
         (user_id, bundle_id),
@@ -463,16 +473,9 @@ def _forget_app(
 def _forget_stale_windows(
     connection: sqlite3.Connection, *, user_id: str, now: datetime
 ) -> None:
-    cutoff = format_utc_iso(now - WINDOW_FORGET_AFTER)
-    connection.execute(
-        """DELETE FROM activity_hook_windows WHERE user_id = ? AND window_key IN (
-             SELECT window_key FROM activity_windows
-             WHERE user_id = ? AND seen_at < ?)""",
-        (user_id, user_id, cutoff),
-    )
     connection.execute(
         "DELETE FROM activity_windows WHERE user_id = ? AND seen_at < ?",
-        (user_id, cutoff),
+        (user_id, format_utc_iso(now - WINDOW_FORGET_AFTER)),
     )
 
 
@@ -480,10 +483,3 @@ def _text(value: ObservationText) -> str | None:
     """A recorded text; absent, or left out as too long, is none."""
 
     return value.text if isinstance(value, ValueText) else None
-
-
-__all__ = [
-    "ACTIVITY_WATCH_INTERVAL_SECONDS",
-    "QUIET_PERIOD",
-    "run_activity_watch_once",
-]

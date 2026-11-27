@@ -20,7 +20,6 @@ from pantaray_agents.tools.files.manifest_paths import (
     validate_manifest_root,
 )
 from pantaray_agents.tools.files.pantaray_agents_md import holds_pantaray_agents_md
-from pantaray_agents.tools.files.pantaray_tasks import refuse_pantaray_tasks_writes
 from pantaray_agents.tools.files.private_storage import (
     PrivateAppStorage,
     private_app_storage_error,
@@ -109,10 +108,6 @@ def resolve_write_tool_path(
         raw_path=raw_path, cwd_path=Path(context.execution_session.cwd_path)
     )
     refuse_withheld_paths(candidate)
-    # Nor may any file tool write a task, in a registered or granted folder or
-    # with the user's approval: only the user and the task tool do. The check
-    # follows links, so it holds for the path the write will use.
-    refuse_pantaray_tasks_writes(candidate)
     is_private_storage = _private_storage(context).hides
     try:
         resolved = resolve_local_path(

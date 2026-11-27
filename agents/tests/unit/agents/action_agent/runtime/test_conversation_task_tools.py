@@ -40,7 +40,6 @@ from pantaray_agents.agents.action_agent.tools.conversation_task_tools import (
 )
 from pantaray_agents.local_runtime.hooks.agent_tasks import list_conversation_tasks
 from pantaray_agents.local_runtime.hooks.controls import active_hooks
-from pantaray_agents.local_runtime.hooks.tasks import read_task_files
 from pantaray_agents.local_runtime.runtime.action_approval_review import (
     pending_operation,
 )
@@ -223,7 +222,7 @@ async def test_a_yes_writes_the_task_it_showed_and_a_no_writes_nothing(
     (view,) = _tasks(env)
     assert (view.hook_id, view.approved, view.enabled) == (task_id, True, True)
     assert 'conversation = "continue"' in view.text
-    assert view.action_id == "action-1"
+    assert view.created_from_action_id == "action-1"
 
 
 async def test_the_approval_review_never_answers_for_a_schedule(
@@ -364,9 +363,7 @@ async def test_an_approved_update_turns_a_paused_task_back_on(
 
     assert "runs again" in str(output["message"])
     with closing(sqlite3.connect(env.db_path)) as connection:
-        active = active_hooks(
-            connection, user_id="user-1", builtins=(), task_files=read_task_files()
-        )
+        active = active_hooks(connection, user_id="user-1", builtins=())
     assert list(active.tasks) == [task_id]
     (view,) = _tasks(env)
     assert (view.enabled, view.failure_count, view.stopped_reason) == (True, 0, None)

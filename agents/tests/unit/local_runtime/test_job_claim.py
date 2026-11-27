@@ -371,7 +371,7 @@ def test_a_job_writes_its_lifecycle_to_the_inboxes_that_listen(
     monkeypatch.setattr(
         inbox,
         "_listening_hooks",
-        lambda _connection, *, user_id, event: ("h",) if event.name in listens else (),
+        lambda event: ("h",) if event.name in listens else (),
     )
     db_path = _bootstrap_db(tmp_path)
     _insert_job(

@@ -20,22 +20,15 @@ from .gates import build_gates, build_predicates
 from .inbox import SqliteHookInbox
 from .jobs import enqueue_hook_job, run_is_active
 from .states import SqliteHookStateStore, local_zone
-from .tasks import read_task_files
 
 
 def run_hooks_once(
     *, db_path: Path, busy_timeout_ms: int, user_id: str, now: datetime | None = None
 ) -> None:
-    task_files = read_task_files()
     with closing(sqlite3.connect(db_path)) as connection:
         configure_connection(connection, busy_timeout_ms)
         record_turn_results(connection, user_id=user_id)
-        active = active_hooks(
-            connection,
-            user_id=user_id,
-            builtins=builtin_hooks(),
-            task_files=task_files,
-        )
+        active = active_hooks(connection, user_id=user_id, builtins=builtin_hooks())
     gates = build_gates(
         db_path=db_path, busy_timeout_ms=busy_timeout_ms, user_id=user_id
     )

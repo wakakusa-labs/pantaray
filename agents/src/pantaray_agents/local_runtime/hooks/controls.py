@@ -1,7 +1,8 @@
-"""Which hooks may fire for an owner: the owner's switches and approvals.
+"""Which hooks may fire for an owner.
 
-A built-in hook fires unless the owner disabled it. A task fires only while it
-is enabled, not stopped, and its file still hashes to the approved content.
+A built-in hook always fires. A task is one an Action recorded; it fires only
+while it is enabled, not stopped, and its file still hashes to the content the
+user said yes to.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from pantaray_agents.hooks.definitions import HookDefinition
 from pantaray_agents.local_runtime.activity_summary_schedule import iso_z
 from pantaray_agents.local_runtime.storage.users import ensure_user_row
 
-from .tasks import Task, TaskFile
+from .tasks import Task, read_task_files
 
 StoppedReason = Literal["start_failed", "turn_failed"]
 TurnResult = Literal["completed", "failed", "canceled", "not_started"]
@@ -30,7 +31,6 @@ class HookControl:
 
 @dataclass(frozen=True, slots=True)
 class TaskConversation:
-    action_id: str | None
     last_message_id: str | None
     # None while the latest turn has not ended.
     last_result: TurnResult | None
@@ -39,7 +39,6 @@ class TaskConversation:
 
 
 NO_CONVERSATION = TaskConversation(
-    action_id=None,
     last_message_id=None,
     last_result=None,
     failure_count=0,
@@ -50,11 +49,10 @@ _DEFAULT_CONTROL = HookControl(enabled=True, approved_hash=None)
 
 @dataclass(frozen=True, slots=True)
 class ActiveHooks:
-    """The hooks that may fire now, and the approved tasks among them."""
+    """The hooks that may fire now, and the tasks among them."""
 
     hooks: tuple[HookDefinition, ...]
     tasks: Mapping[str, Task]
-    conversations: Mapping[str, TaskConversation]
 
 
 def read_controls(
@@ -77,14 +75,13 @@ def read_task_conversations(
     connection: sqlite3.Connection, *, user_id: str
 ) -> Mapping[str, TaskConversation]:
     rows = connection.execute(
-        """SELECT hook_id, action_id, last_message_id, last_result, failure_count,
+        """SELECT hook_id, last_message_id, last_result, failure_count,
                   stopped_reason
            FROM hook_conversations WHERE user_id = ?""",
         (user_id,),
     ).fetchall()
     return {
         str(hook_id): TaskConversation(
-            action_id=action_id,
             last_message_id=last_message_id,
             last_result=last_result,
             failure_count=int(failure_count),
@@ -92,7 +89,6 @@ def read_task_conversations(
         )
         for (
             hook_id,
-            action_id,
             last_message_id,
             last_result,
             failure_count,
@@ -118,7 +114,7 @@ def read_task_origins(
 def task_origin_in_connection(
     connection: sqlite3.Connection, *, user_id: str, hook_id: str
 ) -> str | None:
-    """The conversation an Action's task was written from; None for the user's."""
+    """The conversation a task was written from; None when there is no such task."""
 
     row = connection.execute(
         "SELECT action_id FROM hook_task_origins WHERE user_id = ? AND hook_id = ?",
@@ -136,32 +132,27 @@ def active_hooks(
     *,
     user_id: str,
     builtins: Sequence[HookDefinition],
-    task_files: Sequence[TaskFile],
 ) -> ActiveHooks:
     controls = read_controls(connection, user_id=user_id)
     conversations = read_task_conversations(connection, user_id=user_id)
     tasks = {
         task.hook.id: task
-        for task in task_files
+        for task in read_task_files(read_task_origins(connection, user_id=user_id))
         if isinstance(task, Task)
         and control_of(controls, task.hook.id).enabled
         and control_of(controls, task.hook.id).approved_hash == task.content_hash
         and conversations.get(task.hook.id, NO_CONVERSATION).stopped_reason is None
     }
     return ActiveHooks(
-        hooks=(
-            *(hook for hook in builtins if control_of(controls, hook.id).enabled),
-            *(task.hook for task in tasks.values()),
-        ),
+        hooks=(*builtins, *(task.hook for task in tasks.values())),
         tasks=tasks,
-        conversations=conversations,
     )
 
 
 def set_enabled_in_connection(
     connection: sqlite3.Connection, *, user_id: str, hook_id: str, enabled: bool
 ) -> None:
-    """Switch a hook; enabling a stopped task also clears its failures."""
+    """Switch a task; enabling a stopped one also clears its failures."""
 
     ensure_user_row(connection, user_id=user_id)
     connection.execute(
@@ -186,10 +177,10 @@ def approve_in_connection(
     first_fire_at: datetime | None,
 ) -> None:
     """Approve the task's content. New content starts its schedule afresh at
-    ``first_fire_at``, its first occurrence after the approval (None for an on
-    trigger), so a spent at moved later fires on its new time and an every
-    approved mid-period waits for its next occurrence instead of firing the
-    one already past; approving the same content again keeps the schedule."""
+    ``first_fire_at``, its first occurrence after the approval, so a spent at
+    moved later fires on its new time and an every approved mid-period waits
+    for its next occurrence instead of firing the one already past; approving
+    the same content again keeps the schedule."""
 
     ensure_user_row(connection, user_id=user_id)
     if control_of(

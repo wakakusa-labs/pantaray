@@ -789,11 +789,13 @@ it('orders the list by due date from the sort switch, and keeps the order in the
   expect(screen.getByRole('combobox', { name: '並び順' })).toHaveValue('due');
 });
 
-it('adds to the project chosen in the add bar from today, and tells a refused write under its row', async () => {
+it('adds to the project of the group’s new line from today, and tells a refused write under its row', async () => {
   renderPage(['/history']);
   await screen.findByRole('checkbox', { name: '完了: TODO T1' });
-  await userEvent.selectOptions(screen.getByRole('combobox', { name: 'プロジェクト' }), '採用');
-  await userEvent.type(screen.getByRole('textbox', { name: 'TODO を追加' }), '請求書を送る{Enter}');
+  await userEvent.type(
+    screen.getByRole('textbox', { name: '採用に TODO を追加' }),
+    '請求書を送る{Enter}'
+  );
   expect(createTodo).toHaveBeenCalledWith(
     expect.objectContaining({
       project_id: 'P2',

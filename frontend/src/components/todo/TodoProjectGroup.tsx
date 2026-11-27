@@ -6,7 +6,7 @@ import './todo.css';
 
 /**
  * One project's TODOs: its heading, how many are done, and its rows (`TodoRow`s, in the order
- * given).
+ * given, then its `TodoNewLine`).
  */
 export function TodoProjectGroup({
   projectName,
@@ -38,9 +38,12 @@ export function TodoProjectGroup({
             {organizationName}
           </span>
         ) : null}
-        <span className="todo-group__count">
-          {t('todo.group.count', { done: doneCount, total: totalCount })}
-        </span>
+        {/* An empty list's first place has nothing to count yet. */}
+        {totalCount > 0 ? (
+          <span className="todo-group__count">
+            {t('todo.group.count', { done: doneCount, total: totalCount })}
+          </span>
+        ) : null}
       </div>
       <ul className="todo-group__rows">{children}</ul>
     </section>

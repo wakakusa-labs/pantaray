@@ -15,6 +15,7 @@ from pantaray_agents.local_runtime.storage.migrations.connection import (
 
 from .controls import (
     StoppedReason,
+    TaskRow,
     TurnResult,
     read_tasks,
     set_enabled_in_connection,
@@ -33,8 +34,12 @@ class TaskView:
     next_fire_at: datetime | None
     # The conversation that asked for the task.
     created_from_action_id: str
-    # The conversation each fire continues; None starts a new one each time.
+    # The conversation each fire continues; None starts a new one each time,
+    # as the conversation of a new TODO with the title, in the place named.
     target_action_id: str | None
+    title: str | None
+    organization_id: str | None
+    project_id: str | None
     last_result: TurnResult | None
     failure_count: int
     stopped_reason: StoppedReason | None
@@ -54,23 +59,30 @@ def list_hooks(
     with closing(sqlite3.connect(db_path)) as connection:
         configure_connection(connection, busy_timeout_ms)
         rows = read_tasks(connection, user_id=user_id, origin=origin)
-    return tuple(
-        TaskView(
-            hook_id=row.task.hook_id,
-            at=row.task.schedule.at,
-            every=row.task.schedule.every,
-            offset=row.task.schedule.offset,
-            until=row.task.schedule.until,
-            message=row.task.message,
-            enabled=row.enabled,
-            next_fire_at=None if hook_has_ended(row.hook, now) else row.next_fire_at,
-            created_from_action_id=row.origin_action_id,
-            target_action_id=row.target_action_id,
-            last_result=row.run.last_result,
-            failure_count=row.run.failure_count,
-            stopped_reason=row.run.stopped_reason,
-        )
-        for row in rows
+    return tuple(_view(row, now) for row in rows)
+
+
+def _view(row: TaskRow, now: datetime) -> TaskView:
+    target, new = (
+        (row.target, None) if isinstance(row.target, str) else (None, row.target)
+    )
+    return TaskView(
+        hook_id=row.task.hook_id,
+        at=row.task.schedule.at,
+        every=row.task.schedule.every,
+        offset=row.task.schedule.offset,
+        until=row.task.schedule.until,
+        message=row.task.message,
+        enabled=row.enabled,
+        next_fire_at=None if hook_has_ended(row.hook, now) else row.next_fire_at,
+        created_from_action_id=row.origin_action_id,
+        target_action_id=target,
+        title=new.title if new else None,
+        organization_id=new.organization_id if new else None,
+        project_id=new.project_id if new else None,
+        last_result=row.run.last_result,
+        failure_count=row.run.failure_count,
+        stopped_reason=row.run.stopped_reason,
     )
 
 

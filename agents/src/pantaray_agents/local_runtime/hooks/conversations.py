@@ -1,13 +1,15 @@
 """Send a task's message as a turn of its target conversation, or as the first
-turn of a new conversation when it has none, and count how turns go.
+turn of a new TODO's conversation when it has none, and count how turns go.
 
 A turn goes through ``submit_action_message`` as an ordinary turn. Its message
-id derives from the task, its version and the occurrence, and is recorded as
-the task's latest turn before it is sent, so a fire repeated after a crash
-finds its turn, and a new conversation is started once per occurrence. A task
-fires only once its latest turn has ended and been counted, and while its
-target conversation is not running or waiting for the user's approval. Three
-failures in a row stop the task.
+id derives from the task, its version and the occurrence (for a new
+conversation, through the TODO's id, as every TODO's conversation opens), and
+is recorded as the task's latest turn before it is sent, in the transaction
+that stores the TODO; so a fire repeated after a crash finds its turn, and one
+occurrence makes one TODO and one conversation. A task fires only once its
+latest turn has ended and been counted, and while its target conversation is
+not running or waiting for the user's approval. Three failures in a row stop
+the task.
 """
 
 from __future__ import annotations
@@ -37,13 +39,26 @@ from pantaray_agents.local_runtime.runtime.action_message_process_disposition im
 from pantaray_agents.local_runtime.runtime.action_messages import (
     submit_action_message,
 )
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 from pantaray_agents.local_runtime.storage.migrations.connection import (
     configure_connection,
 )
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
-from pantaray_agents.schema.agent.action_message import ActionUserMessageInput
+from pantaray_agents.local_runtime.todos import core
+from pantaray_agents.local_runtime.todos.conversation import todo_message_id
+from pantaray_agents.local_runtime.todos.db import read_todo_row
+from pantaray_agents.local_runtime.todos.model import Todo, WrittenOrigin
+from pantaray_agents.local_runtime.todos.writes import insert_todo
+from pantaray_agents.local_runtime.tooling.repository.workspace_settings import (
+    list_workspace_settings,
+)
+from pantaray_agents.schema.agent.action_message import (
+    ActionUserMessageInput,
+    TodoHandoffInput,
+    TodoHandoffProject,
+)
 
-from .controls import RunState, StoppedReason, TaskRow, TurnResult
+from .controls import NewConversation, RunState, StoppedReason, TaskRow, TurnResult
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +69,7 @@ _NO_RUN: Final = RunState(
     last_message_id=None, last_result=None, failure_count=0, stopped_reason=None
 )
 _NAMESPACE: Final = uuid.uuid5(uuid.NAMESPACE_URL, "pantaray:hook_turn_message:v1")
+_TODO_NAMESPACE: Final = uuid.uuid5(uuid.NAMESPACE_URL, "pantaray:hook_todo:v1")
 # A run's terminal status, as a turn result.
 _ENDED: Final[dict[str, TurnResult]] = {
     "completed": "completed",
@@ -72,9 +88,9 @@ def _connect(db_path: Path, busy_timeout_ms: int) -> closing[sqlite3.Connection]
 
 @dataclass(frozen=True, slots=True)
 class _Send:
-    """Send the turn to this conversation, or start a new one when None."""
+    """Send the turn to this conversation, or open this TODO's."""
 
-    action_id: str | None
+    target: str | Todo
 
 
 def fire_task(
@@ -86,8 +102,13 @@ def fire_task(
     user_id: str,
 ) -> FireOutcome:
     hook_id = task.task.hook_id
-    occurrence = fire.occurrence.isoformat()
-    message_id = str(uuid.uuid5(_NAMESPACE, f"{hook_id}\n{task.version}\n{occurrence}"))
+    key = f"{hook_id}\n{task.version}\n{fire.occurrence.isoformat()}"
+    target: str | Todo
+    if isinstance(task.target, str):
+        target, message_id = task.target, str(uuid.uuid5(_NAMESPACE, key))
+    else:
+        target = _new_todo(task.target, todo_id=str(uuid.uuid5(_TODO_NAMESPACE, key)))
+        message_id = todo_message_id(target.todo_id)
     with _connect(db_path, busy_timeout_ms) as connection:
         with immediate_transaction(connection):
             claim = _claim_turn(
@@ -95,6 +116,7 @@ def fire_task(
                 user_id=user_id,
                 hook_id=hook_id,
                 version=task.version,
+                target=target,
                 message_id=message_id,
             )
     if claim == "wait":
@@ -105,14 +127,22 @@ def fire_task(
                 SubmitActionMessageCommand(
                     user_id=user_id,
                     origin="hook",
-                    target=NewActionTarget()
-                    if claim.action_id is None
-                    else ExistingActionTarget(
-                        action_id=claim.action_id, expected_process_id=None
-                    ),
+                    target=ExistingActionTarget(
+                        action_id=claim.target, expected_process_id=None
+                    )
+                    if isinstance(claim.target, str)
+                    else NewActionTarget(),
                     message=ActionUserMessageInput(
                         message_id=message_id,
                         content=action_hook_request_text(task.task.message),
+                        todo_handoff=None
+                        if isinstance(claim.target, str)
+                        else _handoff(
+                            claim.target,
+                            db_path=db_path,
+                            busy_timeout_ms=busy_timeout_ms,
+                            user_id=user_id,
+                        ),
                     ),
                 )
             )
@@ -142,6 +172,7 @@ def _claim_turn(
     user_id: str,
     hook_id: str,
     version: int,
+    target: str | Todo,
     message_id: str,
 ) -> Literal["wait", "sent"] | _Send:
     """Make ``message_id`` the task's latest turn, once the one before it has
@@ -151,19 +182,22 @@ def _claim_turn(
     The turn is recorded before it is sent, so a crash after the send finds
     it on the next fire. The task is read again here because the tick read it
     earlier: a task stopped or deleted with its conversation since must not
-    send a turn, least of all to a new conversation.
+    send a turn, least of all to a new conversation. A new conversation's
+    TODO is stored here, with the turn that opens it.
     """
 
-    # The target's reference keeps that conversation while the task exists:
-    # deleting it deletes the task, so a lost target never turns into NULL.
-    row = connection.execute(
-        """SELECT target_action_id FROM user_hooks
-           WHERE user_id = ? AND hook_id = ? AND version = ? AND enabled = 1""",
-        (user_id, hook_id, version),
-    ).fetchone()
-    if row is None:
+    # The target's reference keeps that conversation while the task of this
+    # version exists: deleting it deletes the task, so a lost target never
+    # turns into a new conversation.
+    if (
+        connection.execute(
+            """SELECT 1 FROM user_hooks
+               WHERE user_id = ? AND hook_id = ? AND version = ? AND enabled = 1""",
+            (user_id, hook_id, version),
+        ).fetchone()
+        is None
+    ):
         return "wait"
-    target: str | None = row[0]
     conversation, unresolved = _settle_in_connection(
         connection, user_id=user_id, hook_id=hook_id
     )
@@ -171,14 +205,63 @@ def _claim_turn(
         return "wait"
     if _turn_of_message(connection, user_id=user_id, message_id=message_id) is not None:
         return "sent"
-    if target is not None and _is_busy(connection, user_id=user_id, action_id=target):
-        return "wait"
+    if isinstance(target, str):
+        if _is_busy(connection, user_id=user_id, action_id=target):
+            return "wait"
+    else:
+        stored = read_todo_row(connection, user_id=user_id, todo_id=target.todo_id)
+        if stored is None:
+            # No start date: the TODO pickup never opens it, only this turn does.
+            insert_todo(connection, user_id=user_id, todo=target, client_todo_id=None)
+        target = stored or target
     connection.execute(
         """UPDATE user_hooks SET last_message_id = ?, last_result = NULL
            WHERE user_id = ? AND hook_id = ?""",
         (message_id, user_id, hook_id),
     )
-    return _Send(action_id=target)
+    return _Send(target=target)
+
+
+def _new_todo(new: NewConversation, *, todo_id: str) -> Todo:
+    created = core.create_todo(
+        todo_id=todo_id,
+        text=new.title,
+        author="ai",
+        origin=WrittenOrigin(),
+        project_id=new.project_id,
+        organization_id=new.organization_id,
+        starts_on=None,
+        due=None,
+        now=now_utc_iso(),
+    )
+    assert isinstance(created, Todo)  # The writer checks the title the same way.
+    return created
+
+
+def _handoff(
+    todo: Todo, *, db_path: Path, busy_timeout_ms: int, user_id: str
+) -> TodoHandoffInput:
+    """The TODO's project with its folders, as the TODO pickup hands one over."""
+
+    settings = list_workspace_settings(
+        db_path=db_path, busy_timeout_ms=busy_timeout_ms, user_id=user_id
+    )
+    project = next(
+        (p for p in settings.projects if p.project_id == todo.project_id), None
+    )
+    return TodoHandoffInput(
+        todo_id=todo.todo_id,
+        project=None
+        if project is None
+        else TodoHandoffProject(
+            display_name=project.display_name,
+            paths=tuple(
+                folder.real_path
+                for folder in settings.folders
+                if project.project_id in folder.project_ids
+            ),
+        ),
+    )
 
 
 def record_turn_results(connection: sqlite3.Connection, *, user_id: str) -> None:

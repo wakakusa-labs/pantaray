@@ -109,6 +109,13 @@ import type {
   TaskFileRequest,
 } from '../../electron/src/actions/actionFileAccess';
 import type { RecordingStartResult } from '../../electron/src/screenshot/screenshotSync';
+import type {
+  MeetingAvailability,
+  MeetingCall,
+  MeetingCommandResult,
+  MeetingPermission,
+  MeetingSettings,
+} from '../../electron/src/context/meetingTranscript';
 import type { HistoryFetchResult } from '../../electron/src/history/historyFetch';
 import type { IntegrationSettingsApi } from '../../electron/src/settings/integrationSettingsFetch';
 import type { HooksApi } from '../../electron/src/settings/hooksFetch';
@@ -213,7 +220,9 @@ declare global {
         /** macOS に指定した権限を求める（macOS 自身の案内がシステム設定へ誘導する） */
         askForPermission: (permission: CapturePermission) => Promise<void>;
         /** 指定した権限のシステム設定のパネルを開く（macOS の案内が出ないとき用） */
-        openPermissionSettings: (permission: CapturePermission) => Promise<void>;
+        openPermissionSettings: (
+          permission: CapturePermission | MeetingPermission
+        ) => Promise<void>;
         /** 権限が足りず記録できない状態か（記録係の状態を今読み直す。メインウィンドウ用） */
         getPermissionRequired?: () => Promise<boolean>;
         onPermissionRequiredChanged?: (callback: (isRequired: boolean) => void) => () => void;
@@ -223,6 +232,18 @@ declare global {
         onStatusChanged?: (callback: (isEnabled: boolean) => void) => () => void;
         /** OS 権限を今すぐ読み直す合図（main がこのウィンドウを前面に出したとき） */
         onGateStateChanged?: (callback: () => void) => () => void;
+      };
+      /** Call transcription (main window only); `MainContext['meeting']` documents each call. */
+      meeting?: {
+        getCall: () => Promise<MeetingCall>;
+        onCallChanged: (callback: (call: MeetingCall) => void) => () => void;
+        getAvailability: () => Promise<MeetingAvailability | null>;
+        getSettings: () => Promise<{ settings: MeetingSettings; supported: boolean }>;
+        updateSettings: (settings: MeetingSettings) => Promise<void>;
+        record: (callId: string) => Promise<MeetingCommandResult>;
+        stop: (callId: string) => Promise<MeetingCommandResult>;
+        decline: (callId: string) => Promise<void>;
+        prepare: () => Promise<MeetingCommandResult>;
       };
       window: {
         getPosition: () => Promise<{ x: number; y: number }>;

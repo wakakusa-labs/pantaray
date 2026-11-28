@@ -1,6 +1,13 @@
 import type { CaptureEditingRequest } from '../screenshot/captureEditing';
 import type { CapturePermissions } from '../windows/macosPermissions';
 import type { CapturePermission, CapturePermissionCheck } from '../context/zaneiProcess';
+import type {
+  MeetingAvailability,
+  MeetingCall,
+  MeetingCommandResult,
+  MeetingPermission,
+  MeetingSettings,
+} from '../context/meetingTranscript';
 /**
  * MainContext for IPC handlers.
  *
@@ -309,9 +316,26 @@ export type MainContext = {
     /** Asks macOS for the permission; macOS's own popup lists the app and offers its pane. */
     askForPermission: (permission: CapturePermission) => Promise<void>;
     /** Opens the permission's System Settings pane, for when macOS shows no popup. */
-    openPermissionSettings: (permission: CapturePermission) => Promise<void>;
+    openPermissionSettings: (permission: CapturePermission | MeetingPermission) => Promise<void>;
     /** Whether the recorder cannot run until macOS grants it a permission, read again now. */
     getPermissionRequired: () => Promise<boolean>;
+  };
+
+  /** Call transcription; `meeting:callChanged` carries every change of the call. */
+  meeting: {
+    getCall: () => MeetingCall;
+    /** Null while no recorder runs or it does not report transcription. */
+    readAvailability: () => Promise<MeetingAvailability | null>;
+    /** `supported`: this Mac and the bundled recorder can transcribe calls. */
+    getSettings: () => { settings: MeetingSettings; supported: boolean };
+    /** The answer arrives as `meeting:callChanged` (`recording`, or `not_recording` refused). */
+    record: (callId: string) => Promise<MeetingCommandResult>;
+    stop: (callId: string) => Promise<MeetingCommandResult>;
+    /** "Not this time": the call stays recordable while it lasts. */
+    decline: (callId: string) => void;
+    /** Asks macOS for the microphone and system audio once, and fetches the speech model. */
+    prepare: () => Promise<MeetingCommandResult>;
+    updateSettings: (settings: MeetingSettings) => Promise<void>;
   };
 
   onboarding: {

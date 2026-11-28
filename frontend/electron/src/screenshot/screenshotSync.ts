@@ -14,12 +14,14 @@ import {
   type ZaneiStatus,
 } from '../context/zaneiProcess';
 import { readZaneiManifest, zaneiConfig, policyRevision } from '../context/zaneiConfig';
+import { createMeetingTranscript, type MeetingSettings } from '../context/meetingTranscript';
 import type {
   SourceState,
   SourceTransition,
   SourceTransitionResult,
   StopReason,
 } from '../context/sourceControl';
+import { createContextSourceClient } from './contextSourceClient';
 export type ScreenshotSyncManager = ReturnType<typeof createScreenshotSyncManager>;
 
 /**
@@ -50,6 +52,8 @@ export function createScreenshotSyncManager(params: {
   /** Capture started for this owner; called once per owner in a run, after the start succeeded. */
   onRecordingStarted?: (userId: string) => void;
   createProcess?: typeof createZaneiProcess;
+  /** Whether this Mac can transcribe calls; read from macOS unless a test sets it. */
+  supportsTranscription?: () => boolean;
 }) {
   let owner: LocalOwner | null = null;
   let collector: ReturnType<typeof createZaneiProcess> | null = null;
@@ -66,6 +70,17 @@ export function createScreenshotSyncManager(params: {
     request: Extract<SourceTransition, { kind: 'activate' }>;
   } | null = null;
   let pending = Promise.resolve();
+  const source = createContextSourceClient(params);
+  const meeting = createMeetingTranscript({
+    getRecorder: () => collector,
+    onChange: (call) => {
+      const win = params.getMainWindow();
+      if (win && !win.isDestroyed()) win.webContents.send('meeting:callChanged', call);
+    },
+    settingsPath: () => (owner ? scopedPath('meeting-transcription-settings.json') : null),
+    getManifestPath: params.getManifestPath,
+    supportsTranscription: params.supportsTranscription,
+  });
   /** Owners `onRecordingStarted` already heard about in this run. */
   const reportedStarts = new Set<string>();
   const reportRecordingStarted = (userId: string) => {
@@ -78,12 +93,15 @@ export function createScreenshotSyncManager(params: {
       console.error('Recording start hook failed:', error);
     }
   };
-  const settingsPath = () =>
+  const scopedPath = (fileName: string) =>
     resolveScopedSettingsPath({
       userDataDir: params.userDataDir,
       userId: owner?.kind === 'account' ? owner.id : null,
-      fileName: SCOPED_PREFERENCE_FILES.recording,
+      fileName,
     });
+  const settingsPath = () => scopedPath(SCOPED_PREFERENCE_FILES.recording);
+  const renderConfig = () =>
+    zaneiConfig(params.capturePrivacy.getCaptureSettings(), meeting.transcription());
   /**
    * The owner as `kind:id`, the identity the renderer's owner boundary keys on. A session
    * that expires keeps the id and changes only the kind, and that is another owner with
@@ -155,22 +173,12 @@ export function createScreenshotSyncManager(params: {
     // a read and a write that can each take ten seconds.
     await collector?.stop();
     collector = null;
+    meeting.reset();
     notify();
     let epoch: string | null = null;
     try {
       if (suspended) {
-        const state = await params.readSource(suspended.id);
-        const result = await params.transitionSource(suspended.id, {
-          kind: 'suspend',
-          request_id: randomUUID(),
-          expected_epoch: state.kind === 'ready' ? state.binding.epoch : state.epoch,
-          policy_revision: policyRevision(zaneiConfig(params.capturePrivacy.getCaptureSettings())),
-          reason: storedReason,
-        });
-        if (result.kind !== 'applied' || result.state.kind === 'ready') {
-          throw new Error(`Context source suspend ${result.kind}.`);
-        }
-        epoch = result.state.epoch;
+        epoch = await source.suspend(suspended.id, storedReason, policyRevision(renderConfig()));
       }
     } catch (error) {
       if (suspended) await params.containSource(suspended.id);
@@ -178,37 +186,6 @@ export function createScreenshotSyncManager(params: {
     }
     failure = null;
     return epoch;
-  }
-  /**
-   * The epoch of a source that still holds its read permit, or null.
-   *
-   * The backend reports a source whose permit it no longer holds as stopped, which
-   * is what a local backend restarted under a still-running recorder leaves behind.
-   * Pausing capture keeps the generation and so cannot restore that permit: the
-   * caller has to fall back to the full stop or the full activation instead.
-   */
-  async function readyEpoch(ownerId: string): Promise<string | null> {
-    const state = await params.readSource(ownerId);
-    return state.kind === 'ready' ? state.binding.epoch : null;
-  }
-  /**
-   * Publishes the capture state the user chose. The recorder keeps its generation
-   * and its read permit, so a paused source still answers timeline and event reads.
-   */
-  async function publishCapturePaused(
-    ownerId: string,
-    epoch: string,
-    nowPaused: boolean
-  ): Promise<void> {
-    const result = await params.transitionSource(ownerId, {
-      kind: 'set_capture_paused',
-      request_id: randomUUID(),
-      expected_epoch: epoch,
-      paused: nowPaused,
-    });
-    if (result.kind !== 'applied' || result.state.kind !== 'ready') {
-      throw new Error(`Context source capture pause ${result.kind}.`);
-    }
   }
   /**
    * Turning recording off pauses the recorder instead of stopping it, so what it
@@ -236,12 +213,12 @@ export function createScreenshotSyncManager(params: {
     capturePaused = true;
     notify();
     try {
-      const epoch = await readyEpoch(pausedFor.id);
+      const epoch = await source.readyEpoch(pausedFor.id);
       if (epoch === null) {
         await suspend('disabled');
         return;
       }
-      await publishCapturePaused(pausedFor.id, epoch, true);
+      await source.publishCapturePaused(pausedFor.id, epoch, true);
     } catch (error) {
       await suspend('disabled');
       throw error;
@@ -262,7 +239,6 @@ export function createScreenshotSyncManager(params: {
     )
       return 'failed';
     const startedForKey = ownerKey();
-    const config = zaneiConfig(params.capturePrivacy.getCaptureSettings());
     const epoch = await suspend('policy_change');
     if (!epoch || ownerKey() !== startedForKey) return 'failed';
     collector = (params.createProcess ?? createZaneiProcess)({
@@ -270,6 +246,7 @@ export function createScreenshotSyncManager(params: {
       userId: startedFor.id,
       requestPermissions: params.requestPermissions,
       holdsScreenRecording: params.holdsScreenRecording,
+      onHostEvents: meeting.readHostEvents,
       onExit: () => {
         void enqueue(async () => {
           await suspend('shutdown');
@@ -278,12 +255,13 @@ export function createScreenshotSyncManager(params: {
       },
     });
     try {
-      const result = await collector.start(config, manual, restorePaused);
+      const result = await collector.start(renderConfig(), manual, restorePaused);
       if (ownerKey() !== startedForKey) {
         // The owner left while macOS was asking for the capture permissions. Nothing was
         // published for it, so taking the recorder back down is the whole rollback.
         await collector.stop();
         collector = null;
+        meeting.reset();
         notify();
         return 'failed';
       }
@@ -409,6 +387,7 @@ export function createScreenshotSyncManager(params: {
       requestPermissions: params.requestPermissions,
       holdsScreenRecording: params.holdsScreenRecording,
       onExit: () => undefined,
+      onHostEvents: () => undefined,
     }).readPermissions();
   }
   /** The latest report, or null when no recorder is up or it cannot answer. */
@@ -423,6 +402,22 @@ export function createScreenshotSyncManager(params: {
       console.error('Activity recording status unavailable:', error);
       return null;
     }
+  }
+  /**
+   * A filter change restarts the recorder; editing filters keeps it down until the edit ends,
+   * the next call here. Except while a call is transcribed, unless `capture.sources` changes:
+   * a restart would end the transcription, and the recorder reads the rest again by itself.
+   */
+  async function reconfigure<T>(update: () => T, sourcesKept: boolean): Promise<T> {
+    if (sourcesKept && collector && meeting.isRecording()) {
+      const result = update();
+      collector.writeConfig(renderConfig());
+      return result;
+    }
+    await suspend('policy_change');
+    const result = update();
+    await restoreFromPreference();
+    return result;
   }
   /**
    * The recorder is up and able to capture. The capture pause is deliberately not
@@ -479,7 +474,9 @@ export function createScreenshotSyncManager(params: {
         // next status poll. Only a full activation can give the source a permit
         // again or report the permission the user still has to grant, and without
         // one the recorder would run on while nothing could read it.
-        const epoch = captureReady(await readReport()) ? await readyEpoch(startedFor.id) : null;
+        const epoch = captureReady(await readReport())
+          ? await source.readyEpoch(startedFor.id)
+          : null;
         // The owner left while the recorder and the backend answered. Lifting the pause
         // now would let the recorder the previous owner holds capture whoever arrived,
         // into that owner's store, and the "on" would be stored in the arriving owner's
@@ -491,7 +488,7 @@ export function createScreenshotSyncManager(params: {
         }
         // The recorder and its permit are still current: only capture was paused.
         // Publishing first keeps a failure on the user's "off" instead of half on.
-        await publishCapturePaused(startedFor.id, epoch, false);
+        await source.publishCapturePaused(startedFor.id, epoch, false);
         try {
           await collector.resume();
         } catch (error) {
@@ -536,15 +533,12 @@ export function createScreenshotSyncManager(params: {
         if (failure) return;
         await restoreFromPreference();
       }),
-    updatePrivacy: <T>(update: () => T) =>
-      enqueue(async () => {
-        await suspend('policy_change');
-        const result = update();
-        // A filter change restarts the recorder under the same rule. Editing
-        // filters keeps it down until the edit ends, which is the next call here.
-        await restoreFromPreference();
-        return result;
-      }),
+    updatePrivacy: <T>(update: () => T) => enqueue(() => reconfigure(update, true)),
+    meeting: {
+      ...meeting,
+      updateSettings: (next: MeetingSettings) =>
+        enqueue(() => reconfigure(() => meeting.writeSettings(next), meeting.keepsSources(next))),
+    },
     getCaptureStatusSnapshot: (): Promise<CaptureStatusSnapshot> =>
       enqueue(async () => {
         // A restore that found a macOS permission missing left no recorder behind, and

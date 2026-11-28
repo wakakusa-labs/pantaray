@@ -6,6 +6,7 @@ import {
   ALWAYS_DENIED_BUNDLE_IDS,
 } from '../privacy/alwaysDeniedCaptureApps';
 import { captureAppKey, type CapturePrivacySettings } from '../privacy/capturePrivacy';
+import type { MeetingSettings } from './meetingTranscript';
 
 export type ZaneiManifest = {
   executable_path: string;
@@ -44,6 +45,18 @@ export function zaneiSubjectPaths(manifest: ZaneiManifest, userId: string) {
     label: `${manifest.keychain_label_prefix}.${suffix}`,
   };
 }
+
+/**
+ * A recorder release with call transcription ships its `zanei-meeting` helper beside it, and
+ * only such a release accepts `--host-events` and `[meeting]`. Staging requires the helper
+ * from the release that has it on, so its presence says what the staged recorder can do.
+ */
+export function recorderTranscribesCalls(manifest: Pick<ZaneiManifest, 'executable_path'>) {
+  return fs.existsSync(path.join(path.dirname(manifest.executable_path), 'zanei-meeting'));
+}
+
+/** `capture.sources` replaces the recorder's default list, so transcription names them all. */
+const DEFAULT_SOURCES = ['app', 'window', 'ui', 'input', 'browser', 'audio_input'] as const;
 
 // TOML basic strings share JSON escaping except for JSON's optional escaped slash.
 const quote = (value: string) => JSON.stringify(value);
@@ -100,13 +113,22 @@ function excludedAppKeys(settings: CapturePrivacySettings): string[] {
  * left out so the recorder's own defaults keep browser bodies (Safari, Firefox, Brave,
  * Edge, Vivaldi, Arc) out of the store.
  */
-export function zaneiConfig(settings: CapturePrivacySettings): string {
+export function zaneiConfig(
+  settings: CapturePrivacySettings,
+  /** Null leaves transcription off, the recorder's default. */
+  transcription: MeetingSettings | null
+): string {
   const isAppIncludeOnly = settings.apps.mode === 'include_only';
   const recordsNoApp = isAppIncludeOnly && settings.apps.entries.length === 0;
   const isWebsiteIncludeOnly = settings.websites.mode === 'include_only';
   const hosts = settings.websites.hosts;
+  const meeting = transcription && [
+    ...(transcription.callApps ? [`call_apps = ${quotedList(transcription.callApps)}`] : []),
+    ...(transcription.callSites ? [`call_sites = ${quotedList(transcription.callSites)}`] : []),
+    ...(transcription.locale ? [`locale = ${quote(transcription.locale)}`] : []),
+  ];
   return `[capture]
-text_content = true
+${transcription ? `sources = ${quotedList([...DEFAULT_SOURCES, 'transcript'])}\n` : ''}text_content = true
 content_snapshot = true
 [output]
 retention_hours = 48
@@ -125,7 +147,7 @@ block_list = ${websiteRules(isWebsiteIncludeOnly ? [] : hosts)}
 [filter.capture_policy.ide]
 block_env_files = ${settings.ideFileRules.sensitivePresets.blockEnvFiles}
 on_file_name_unavailable = ${quote(settings.ideFileRules.onFileNameUnavailable)}
-`;
+${meeting ? ['[meeting]', ...meeting, ''].join('\n') : ''}`;
 }
 
 export function policyRevision(config: string): string {

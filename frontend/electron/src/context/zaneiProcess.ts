@@ -1,8 +1,13 @@
 import { spawn, execFile, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
-import { zaneiSubjectPaths, type ZaneiManifest } from './zaneiConfig';
+import { recorderTranscribesCalls, zaneiSubjectPaths, type ZaneiManifest } from './zaneiConfig';
 import type { RecorderBinding } from './sourceControl';
+import type {
+  MeetingAvailability,
+  MeetingCommand,
+  MeetingCommandResult,
+} from './meetingTranscript';
 
 export type ZaneiStatus = {
   instance: string | null;
@@ -14,6 +19,8 @@ export type ZaneiStatus = {
   store_write_state: string | null;
   last_event_ts: string | null;
   degraded: { [component: string]: string };
+  /** Absent from a recorder without call transcription; null while it does not report it. */
+  meeting?: { availability: MeetingAvailability } | null;
 };
 /** The permissions a start can wait on: the ones the user turns on in System Settings. */
 export type CapturePermission =
@@ -33,11 +40,21 @@ export class ZaneiPermissionRequired extends Error {
 }
 const START_TIMEOUT_MS = 15_000;
 const COMMAND_TIMEOUT_MS = 10_000;
+/** `zanei meeting` and `pause`: no recorder runs, so nothing was queued. */
+const EXIT_NO_RECORDER = 4;
+const HOST_FLAG = ['--host-events'];
+class ZaneiCommandFailed extends Error {
+  constructor(readonly exitCode: number | null) {
+    super('Zanei command failed.');
+  }
+}
 
 export function createZaneiProcess(params: {
   manifest: ZaneiManifest;
   userId: string;
   onExit: () => void;
+  /** The recorder's stdout, when it runs as the host's recorder (`hostEvents`). */
+  onHostEvents: (chunk: string) => void;
   requestPermissions: (missing: CapturePermission[]) => Promise<void>;
   /**
    * Screen Recording, which recording requires although the recorder treats it as
@@ -57,6 +74,8 @@ export function createZaneiProcess(params: {
   };
   delete env.ZANEI_STORE_KEY_FILE;
   const prefix = ['--config', paths.config, '--store', paths.store];
+  /** This app owns the consent, so it starts a recorder that can transcribe as its host. */
+  const hostEvents = recorderTranscribesCalls(params.manifest);
   let child: ChildProcess | null = null;
   let exited: Promise<void> = Promise.resolve();
   let expectedExit = false;
@@ -75,7 +94,7 @@ export function createZaneiProcess(params: {
             (args.includes('status') && [1, 4].includes(Number(error?.code))) ||
             (args.includes('doctor') && error?.code === 3);
           if (error && !(expectedExit && stdout.trim().startsWith('{'))) {
-            reject(new Error('Zanei command failed.'));
+            reject(new ZaneiCommandFailed(typeof error.code === 'number' ? error.code : null));
           } else resolve(stdout);
         }
       );
@@ -134,6 +153,31 @@ export function createZaneiProcess(params: {
   async function resume(): Promise<void> {
     await command(['resume']);
   }
+  /** Queues the command for the recorder, which answers with a host event. */
+  async function meeting(request: MeetingCommand): Promise<MeetingCommandResult> {
+    try {
+      await command(
+        request.kind === 'prepare'
+          ? ['meeting', 'prepare']
+          : ['meeting', request.kind, request.call_id]
+      );
+      return 'requested';
+    } catch (error) {
+      if (error instanceof ZaneiCommandFailed && error.exitCode === EXIT_NO_RECORDER) {
+        return 'no_recorder';
+      }
+      throw error;
+    }
+  }
+  async function readMeetingAvailability(): Promise<MeetingAvailability | null> {
+    return (await status()).meeting?.availability ?? null;
+  }
+  /** The recorder reads `[filter]` and `[meeting]` again within seconds, the rest at a start. */
+  function writeConfig(config: string): void {
+    fs.mkdirSync(paths.directory, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(`${paths.config}.tmp`, config, { mode: 0o600 });
+    fs.renameSync(`${paths.config}.tmp`, paths.config);
+  }
   async function stop(): Promise<void> {
     const current = child;
     if (!current) return;
@@ -167,9 +211,7 @@ export function createZaneiProcess(params: {
     manual = false,
     paused = false
   ): Promise<{ binding: RecorderBinding; permissionsReady: boolean }> {
-    fs.mkdirSync(paths.directory, { recursive: true, mode: 0o700 });
-    fs.writeFileSync(`${paths.config}.tmp`, config, { mode: 0o600 });
-    fs.renameSync(`${paths.config}.tmp`, paths.config);
+    writeConfig(config);
     const missing = (await readPermissions())
       .filter((check) => !check.granted)
       .map((check) => check.permission);
@@ -181,10 +223,12 @@ export function createZaneiProcess(params: {
     processError = null;
     const current = (params.spawnProcess ?? spawn)(
       params.manifest.executable_path,
-      [...prefix, 'start', '--foreground', '--exit-on-stdin-eof'],
-      { env, stdio: ['pipe', 'ignore', 'ignore'] }
+      [...prefix, 'start', '--foreground', '--exit-on-stdin-eof', ...(hostEvents ? HOST_FLAG : [])],
+      { env, stdio: ['pipe', hostEvents ? 'pipe' : 'ignore', 'ignore'] }
     );
     child = current;
+    // Read to the end: a pipe nobody drains would block the recorder's writes.
+    current.stdout?.setEncoding('utf8').on('data', params.onHostEvents);
     current.stdin?.on('error', (error) => {
       processError = error;
       current.kill('SIGTERM');
@@ -253,5 +297,15 @@ export function createZaneiProcess(params: {
       throw error;
     }
   }
-  return { start, stop, status, pause, resume, readPermissions };
+  return {
+    start,
+    stop,
+    status,
+    pause,
+    resume,
+    readPermissions,
+    meeting,
+    readMeetingAvailability,
+    writeConfig,
+  };
 }

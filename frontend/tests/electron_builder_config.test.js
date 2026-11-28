@@ -23,3 +23,12 @@ test('macOS build declares the screen recording purpose string and entitlement',
   const entitlements = fs.readFileSync(path.join(__dirname, '..', build.mac.entitlements), 'utf8');
   assert.ok(entitlements.includes('<key>com.apple.security.device.screen-capture</key>'));
 });
+
+test('macOS build bundles the transcription helper and declares its two purpose strings', () => {
+  // macOS asks for the helper's microphone and system audio in Pantaray's name, with these.
+  assert.match(build.mac.extendInfo.NSMicrophoneUsageDescription, /call/);
+  assert.match(build.mac.extendInfo.NSAudioCaptureUsageDescription, /call/);
+  // Beside the recorder, where its presence says the recorder can host transcription.
+  assert.ok(build.extraResources.some(({ from, to }) => to === 'zanei/bin/zanei-meeting' &&
+    from === '.generated/zanei/Zanei.app/Contents/MacOS/zanei-meeting'));
+});

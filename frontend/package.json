@@ -40,7 +40,9 @@
       "extendInfo": {
         "CFBundleDevelopmentRegion": "en",
         "NSAppleEventsUsageDescription": "Pantaray needs Automation permission to access active window or browser information.",
-        "NSScreenCaptureUsageDescription": "Pantaray captures your screen only when you ask an Action to look at it."
+        "NSScreenCaptureUsageDescription": "Pantaray captures your screen only when you ask an Action to look at it.",
+        "NSMicrophoneUsageDescription": "Pantaray transcribes your voice in a call only when you allow it for that call.",
+        "NSAudioCaptureUsageDescription": "Pantaray transcribes what others say in a call only when you allow it for that call."
       },
       "icon": "build/icon.icns",
       "target": [
@@ -106,6 +108,10 @@
       {
         "from": ".generated/zanei/Zanei.app/Contents/MacOS/zanei",
         "to": "zanei/bin/zanei"
+      },
+      {
+        "from": ".generated/zanei/Zanei.app/Contents/MacOS/zanei-meeting",
+        "to": "zanei/bin/zanei-meeting"
       },
       {
         "from": ".generated/zanei/THIRD_PARTY_NOTICES.md",

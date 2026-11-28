@@ -1005,3 +1005,67 @@ test('a start whose owner changes while the recorder comes up takes the recorder
   assert.equal(f.manager.getStatus(), false);
   assert.equal(f.stored(), false);
 });
+
+/** A fixture whose recorder reports the config it starts with and takes host events. */
+function meetingFixture(t, { supported = true, helper = true } = {}) {
+  let hostEvents = null;
+  const configs = [];
+  const written = [];
+  const f = fixture(t, {
+    supportsTranscription: () => supported,
+    createProcess: (processParams) => { hostEvents = processParams.onHostEvents; return f.process; },
+  });
+  if (helper) fs.writeFileSync(path.join(f.dir, 'zanei-meeting'), 'helper');
+  const start = f.process.start;
+  f.process.start = (config, ...rest) => { configs.push(config); return start(config, ...rest); };
+  f.process.writeConfig = (config) => written.push(config);
+  const transcribing = { enabled: true, callApps: null, callSites: ['meet.google.com'], locale: 'ja-JP' };
+  const startRecordingCall = () => hostEvents(JSON.stringify({ type: 'recording', started_at: 'now',
+    call_id: 'call_01JDQ3ZK8W5N3S8C7V6B5X4Y3Z', app: { name: 'zoom.us', bundle_id: 'us.zoom.xos' } }) + '\n');
+  return { ...f, configs, written, transcribing, startRecordingCall };
+}
+
+test('transcription is configured only once turned on, on a Mac and recorder that can run it', async t => {
+  const off = meetingFixture(t);
+  await off.manager.start();
+  // Off by default: the recorder's own default sources, which leave transcripts out.
+  assert.doesNotMatch(off.configs[0], /sources =|\[meeting\]/);
+  assert.equal(off.manager.meeting.getSettings().supported, true);
+
+  await off.manager.meeting.updateSettings(off.transcribing);
+  assert.match(off.configs.at(-1),
+    /\[capture\]\nsources = \["app", "window", "ui", "input", "browser", "audio_input", "transcript"\]\n/);
+  assert.match(off.configs.at(-1), /\n\[meeting\]\ncall_sites = \["meet\.google\.com"\]\nlocale = "ja-JP"\n$/);
+
+  for (const options of [{ supported: false }, { helper: false }]) {
+    const f = meetingFixture(t, options);
+    await f.manager.start();
+    await f.manager.meeting.updateSettings(f.transcribing);
+    assert.equal(f.manager.meeting.getSettings().settings.enabled, true);
+    assert.equal(f.manager.meeting.getSettings().supported, false);
+    assert.doesNotMatch(f.configs.at(-1), /transcript|\[meeting\]/, JSON.stringify(options));
+  }
+});
+
+test('a filter or call-list change while a call is transcribed rewrites the config in place', async t => {
+  const f = meetingFixture(t);
+  await f.manager.start();
+  await f.manager.meeting.updateSettings(f.transcribing);
+  f.startRecordingCall();
+  assert.equal(f.manager.meeting.getCall().kind, 'recording');
+  f.calls.length = 0;
+
+  await f.manager.updatePrivacy(() => f.privacy.updateCaptureSettings({ ...f.privacy.getCaptureSettings(), websites: { mode: 'exclude', hosts: ['example.com'] } }));
+  await f.manager.meeting.updateSettings({ ...f.transcribing, callSites: ['zoom.us'] });
+  // A restart would end the transcription; the recorder reads both sections again by itself.
+  assert.deepEqual(f.calls, []);
+  assert.match(f.written[0], /block_list = \[\{ host = "example\.com"/);
+  assert.match(f.written[1], /call_sites = \["zoom\.us"\]/);
+  assert.equal(f.manager.meeting.getCall().kind, 'recording');
+
+  // Turning transcription off changes the sources, which only a restart applies.
+  await f.manager.meeting.updateSettings({ ...f.transcribing, enabled: false });
+  assert.ok(f.calls.includes('stop'));
+  assert.equal(f.manager.meeting.getCall().kind, 'idle');
+  assert.ok(!f.configs.at(-1).includes('transcript'));
+});

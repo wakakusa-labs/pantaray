@@ -30,6 +30,21 @@ function createCaptureApi({ ipcRenderer }) {
         return () => ipcRenderer.removeListener('recording:gateStateChanged', listener);
       },
     },
+    meeting: {
+      getCall: () => ipcRenderer.invoke('meeting:getCall'),
+      getAvailability: () => ipcRenderer.invoke('meeting:getAvailability'),
+      getSettings: () => ipcRenderer.invoke('meeting:getSettings'),
+      record: (callId) => ipcRenderer.invoke('meeting:record', callId),
+      stop: (callId) => ipcRenderer.invoke('meeting:stop', callId),
+      decline: (callId) => ipcRenderer.invoke('meeting:decline', callId),
+      prepare: () => ipcRenderer.invoke('meeting:prepare'),
+      updateSettings: (settings) => ipcRenderer.invoke('meeting:updateSettings', settings),
+      onCallChanged: (callback) => {
+        const listener = (_event, call) => callback(call);
+        ipcRenderer.on('meeting:callChanged', listener);
+        return () => ipcRenderer.removeListener('meeting:callChanged', listener);
+      },
+    },
     privacy: {
       getCaptureSettings: () => ipcRenderer.invoke('privacy:getCaptureSettings'),
       updateCaptureSettings: (settings) =>

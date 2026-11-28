@@ -8,6 +8,13 @@ const ZANEI_STAGING_DIR = path.resolve(__dirname, '../.generated/zanei');
 const PARITY_CASES_BASE_URL = 'https://raw.githubusercontent.com/KentoShimizu/zanei';
 const PARITY_CASES_PATH = 'crates/zanei-core/tests/privacy_parity_cases.json';
 const PARITY_CASES_VENDORED = 'tests/fixtures/zanei_privacy_parity_cases.json';
+/**
+ * The first recorder release that ships the call transcription helper beside `zanei`. The app
+ * hosts transcription exactly when the staged helper is there, so a release that has it must
+ * not stage without it; an earlier one has none to stage.
+ */
+const MEETING_HELPER_SINCE = [0, 8, 0];
+const MEETING_HELPER = 'zanei-meeting';
 
 async function stageZaneiRuntime({
   releasePath = RELEASE_PATH,
@@ -47,11 +54,18 @@ async function stageZaneiRuntime({
     run('/usr/bin/tar', ['-xzf', archivePath, '-C', unpacked], { stdio: 'pipe' });
     const app = path.join(unpacked, 'Zanei.app');
     const binary = path.join(app, 'Contents/MacOS/zanei');
+    const helper = path.join(app, 'Contents/MacOS', MEETING_HELPER);
     if (
       !fs.statSync(app).isDirectory() ||
       !fs.statSync(path.join(unpacked, 'THIRD_PARTY_NOTICES.md')).isFile()
     ) {
       throw new Error('Zanei release is missing its app or notices');
+    }
+    if (
+      shipsMeetingHelper(release.version) &&
+      !fs.statSync(helper, { throwIfNoEntry: false })?.isFile()
+    ) {
+      throw new Error(`Zanei ${release.version} release is missing ${MEETING_HELPER}`);
     }
     run('/usr/bin/codesign', ['--verify', '--deep', '--strict', app], { stdio: 'pipe' });
     const version = run(binary, ['--version'], { encoding: 'utf8', timeout: 10000 }).trim();
@@ -64,6 +78,12 @@ async function stageZaneiRuntime({
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
   }
+}
+
+function shipsMeetingHelper(version) {
+  const parts = version.split('.').map(Number);
+  const index = parts.findIndex((part, i) => part !== MEETING_HELPER_SINCE[i]);
+  return index === -1 || parts[index] > MEETING_HELPER_SINCE[index];
 }
 
 /**

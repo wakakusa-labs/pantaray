@@ -397,6 +397,7 @@ export function buildMainContext(params: {
       getCall: () => params.screenshotSync.meeting.getCall(),
       readAvailability: withOwner(() => params.screenshotSync.meeting.readAvailability()),
       getSettings: withOwner(() => params.screenshotSync.meeting.getSettings()),
+      readDefaultCallLists: () => params.screenshotSync.meeting.readDefaultCallLists(),
       record: withOwner((callId) => params.screenshotSync.meeting.record(callId)),
       stop: withOwner((callId) => params.screenshotSync.meeting.stop(callId)),
       decline: (callId) => params.screenshotSync.meeting.decline(callId),

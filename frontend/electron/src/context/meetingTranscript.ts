@@ -1,4 +1,6 @@
+import { execFile } from 'node:child_process';
 import fs from 'node:fs';
+import { promisify } from 'node:util';
 import { z } from 'zod';
 import { readZaneiManifest, recorderTranscribesCalls } from './zaneiConfig';
 
@@ -210,6 +212,9 @@ export function createMeetingTranscript(params: {
     prepare: () => send({ kind: 'prepare' }),
     readAvailability: async () => (await params.getRecorder()?.readMeetingAvailability()) ?? null,
     getSettings: () => ({ settings: readSettings(), supported: isSupported() }),
+    /** The lists the recorder listens to while the user's own are null. */
+    readDefaultCallLists: () =>
+      readDefaultCallLists(readZaneiManifest(params.getManifestPath()).executable_path),
     /** Null leaves transcription off in the recorder's configuration. */
     transcription: (): MeetingSettings | null => {
       const settings = readSettings();
@@ -224,6 +229,27 @@ export function createMeetingTranscript(params: {
       fs.renameSync(`${filePath}.tmp`, filePath);
     },
   };
+}
+
+/** The call apps and sites the recorder listens to by default. */
+export type MeetingCallLists = { callApps: string[]; callSites: string[] };
+
+/**
+ * The recorder's own defaults: its effective configuration with an empty file. `config show`
+ * prints TOML, and a list of plain strings in it reads as JSON once its trailing comma goes.
+ */
+async function readDefaultCallLists(executablePath: string): Promise<MeetingCallLists> {
+  const { stdout } = await promisify(execFile)(
+    executablePath,
+    ['--config', '/dev/null', 'config', 'show'],
+    { timeout: 10_000, encoding: 'utf8' }
+  );
+  const section = /^\[meeting\]\n([\s\S]*?)(?=^\[|(?![\s\S]))/m.exec(stdout)?.[1] ?? '';
+  const list = (key: string) => {
+    const value = new RegExp(`^${key} = (\\[[\\s\\S]*?\\])`, 'm').exec(section)?.[1] ?? 'null';
+    return z.array(z.string()).parse(JSON.parse(value.replace(/,\s*\]$/, ']')));
+  };
+  return { callApps: list('call_apps'), callSites: list('call_sites') };
 }
 
 const uniqueIgnoringCase = (values: string[]) =>

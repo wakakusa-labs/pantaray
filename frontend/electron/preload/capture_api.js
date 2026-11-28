@@ -34,6 +34,7 @@ function createCaptureApi({ ipcRenderer }) {
       getCall: () => ipcRenderer.invoke('meeting:getCall'),
       getAvailability: () => ipcRenderer.invoke('meeting:getAvailability'),
       getSettings: () => ipcRenderer.invoke('meeting:getSettings'),
+      getDefaultCallLists: () => ipcRenderer.invoke('meeting:getDefaultCallLists'),
       record: (callId) => ipcRenderer.invoke('meeting:record', callId),
       stop: (callId) => ipcRenderer.invoke('meeting:stop', callId),
       decline: (callId) => ipcRenderer.invoke('meeting:decline', callId),

@@ -161,9 +161,7 @@ CREATE_HOOK_TOOL = ToolDefinition.from_spec(
             pitfalls=(
                 "Every call asks the user to approve it, and nothing is saved if they "
                 "decline. Write the message so it stands on its own when it arrives "
-                "later. Before choosing app names or window titles, look at the "
-                "user's actual records with zanei_timeline; a meeting app is picked "
-                "reliably by its bundle_id. place names existing organizations and "
+                "later. place names existing organizations and "
                 "projects exactly. A hook runs one turn at a time, and three failed "
                 "turns in a row stop it; replacing it turns it back on."
             ),

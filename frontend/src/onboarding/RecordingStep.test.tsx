@@ -5,6 +5,7 @@ import { AuthContext, type AuthContextType } from '@/context/AuthContextDef';
 import { LocalOwnerContext } from '@/context/localOwnerContext';
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
 import { useI18n } from '@/context/useI18n';
+import { RECHECK } from './CallPermissionRows';
 import { RecordingStep } from './RecordingStep';
 import { useRecordingStep } from './useRecordingStep';
 
@@ -115,6 +116,7 @@ async function returnFromSystemSettings() {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
   delete window.electron;
 });
@@ -308,5 +310,39 @@ describe('RecordingStep', () => {
     meeting.availability = 'available';
     await returnFromSystemSettings();
     expect(await row(SYSTEM_AUDIO).findByText('許可済み')).toBeVisible();
+  });
+
+  it('reads the call transcription permissions again for a while after a return', async () => {
+    const bridge = stubBridge();
+    const { meeting } = stubMeeting(true);
+    bridge.grantAll();
+    bridge.start.mockImplementation(async () => {
+      bridge.reportStatus(true);
+      return 'started';
+    });
+    const start = await renderStep();
+    await waitFor(() => expect(start).toBeEnabled());
+    fireEvent.click(start);
+    await waitFor(() =>
+      expect(row(MICROPHONE).getByRole('button', { name: /^許可する/ })).toBeEnabled()
+    );
+
+    // The recorder sees the answer to macOS only after the window was focused again.
+    vi.useFakeTimers();
+    await returnFromSystemSettings();
+    expect(row(MICROPHONE).getByRole('button', { name: /^許可する/ })).toBeVisible();
+    meeting.availability = 'available';
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(RECHECK.everyMs);
+    });
+    expect(row(MICROPHONE).getByText('許可済み')).toBeVisible();
+    expect(row(SYSTEM_AUDIO).getByText('許可済み')).toBeVisible();
+
+    // Both are granted, so the reads stop.
+    const reads = meeting.getAvailability.mock.calls.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(RECHECK.forMs);
+    });
+    expect(meeting.getAvailability).toHaveBeenCalledTimes(reads);
   });
 });

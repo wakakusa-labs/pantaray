@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useAuth } from '@/hooks/useAuth';
 
@@ -29,6 +29,9 @@ const ROWS = [
   note: MessageKey;
   waiting: MessageKey;
 }[];
+
+/** How long and how often the rows read the permissions again after an ask or a return. */
+export const RECHECK = { everyMs: 3_000, forMs: 30_000 } as const;
 
 /** Granted only when the recorder says so; it reports nothing about them while it is off. */
 const isGranted = (availability: MeetingAvailability | null, permission: MeetingPermission) =>
@@ -70,28 +73,46 @@ export function CallPermissionRows({
     };
   }, [ownerId]);
 
+  const live = supported && recorderRunning;
+  const latestRead = useRef(0);
+  const read = useCallback(() => {
+    const call = ++latestRead.current;
+    window.electron?.meeting?.getAvailability().then(
+      (next) => {
+        if (call === latestRead.current) setAvailability(next);
+      },
+      (error: unknown) => console.error('Failed to read call transcription availability:', error)
+    );
+  }, []);
+  // Starts another round of reads; the recorder can take a while to see an answer to macOS.
+  const [rechecks, setRechecks] = useState(0);
+  const allGranted = ROWS.every((row) => isGranted(availability, row.permission));
+
   // Read again whenever the window regains focus, which is how the user comes back from
   // macOS's popup or System Settings.
   useEffect(() => {
-    if (!supported || !recorderRunning) return;
-    let active = true;
-    let latest = 0;
-    const read = () => {
-      const call = ++latest;
-      window.electron?.meeting?.getAvailability().then(
-        (next) => {
-          if (active && call === latest) setAvailability(next);
-        },
-        (error: unknown) => console.error('Failed to read call transcription availability:', error)
-      );
+    if (!live) return;
+    const onFocus = () => {
+      read();
+      setRechecks((count) => count + 1);
     };
     read();
-    window.addEventListener('focus', read);
+    window.addEventListener('focus', onFocus);
     return () => {
-      active = false;
-      window.removeEventListener('focus', read);
+      latestRead.current += 1;
+      window.removeEventListener('focus', onFocus);
     };
-  }, [supported, recorderRunning]);
+  }, [live, read]);
+
+  useEffect(() => {
+    if (!live || rechecks === 0 || allGranted) return;
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      if (Date.now() - startedAt >= RECHECK.forMs) window.clearInterval(timer);
+      else read();
+    }, RECHECK.everyMs);
+    return () => window.clearInterval(timer);
+  }, [live, rechecks, allGranted, read]);
 
   if (!supported) return null;
 
@@ -104,6 +125,7 @@ export function CallPermissionRows({
       // The rows stay waiting with System Settings one press away.
       console.error('Failed to ask for the call transcription permissions:', error);
     }
+    setRechecks((count) => count + 1);
   };
   const openSettings = async (permission: MeetingPermission) => {
     try {

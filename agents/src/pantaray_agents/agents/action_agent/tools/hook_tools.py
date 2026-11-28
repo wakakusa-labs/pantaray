@@ -146,8 +146,7 @@ CREATE_HOOK_TOOL = ToolDefinition.from_spec(
                 '"510m". on "activity" with match fires once each time a window the '
                 "user's computer recorded starts to match: every field match must "
                 "hold, a field matches when it equals, or contains, any one of its "
-                "values, ignoring case; values are plain text, not patterns. Apps "
-                "that need different matches take one hook each. The "
+                "values, ignoring case; values are plain text, not patterns. The "
                 "matched window's app name, bundle id and title are added to the "
                 "message. Nothing fires at or after until. Give replaces to replace "
                 "one of this conversation's hooks."
@@ -161,11 +160,18 @@ CREATE_HOOK_TOOL = ToolDefinition.from_spec(
             pitfalls=(
                 "Every call asks the user to approve it, and nothing is saved if they "
                 "decline. Write the message so it stands on its own when it arrives "
-                "later. Before choosing app names or window titles, look at the "
-                "user's actual records with zanei_timeline; a meeting app is picked "
-                "reliably by its bundle_id. place names existing organizations and "
-                "projects exactly. A hook runs one turn at a time, and three failed "
-                "turns in a row stop it; replacing it turns it back on."
+                "later. Write an activity match from what you know of each app: its "
+                "bundle id, or for a web app the words its window title shows at "
+                "that moment. The user's records are not needed for it, and finding "
+                "none that match is no reason to wait or ask; a hook that does not "
+                "fire can be replaced. Apps that need different matches take one "
+                "hook each: make one for every app whose window at that moment is "
+                "told apart from its other windows. For an app whose windows are "
+                "not, do not match all of them; tell the user briefly why that app "
+                "is left out, and still make the others. place names existing "
+                "organizations and projects exactly. A hook runs one turn at a time, "
+                "and three failed turns in a row stop it; replacing it turns it back "
+                "on."
             ),
         ),
         # Sequential: it pauses the Action for the user's approval.

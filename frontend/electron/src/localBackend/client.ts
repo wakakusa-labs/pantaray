@@ -152,6 +152,8 @@ const ALLOWED_LOCAL_BACKEND_ROUTES: ReadonlyArray<{
     path: /^\/v1\/agents\/users\/[^/]+\/workspace-settings\/projects\/[^/]+\/name$/,
     methods: new Set(['PUT']),
   },
+  { path: /^\/v1\/agents\/users\/[^/]+\/hooks$/, methods: new Set(['GET']) },
+  { path: /^\/v1\/agents\/users\/[^/]+\/hooks\/[^/]+\/enabled$/, methods: new Set(['PUT']) },
   { path: /^\/v1\/agents\/users\/[^/]+\/integrations$/, methods: new Set(['GET']) },
   {
     path: /^\/v1\/agents\/users\/[^/]+\/integrations\/[^/]+\/(connect|accounts\/[^/]+\/reconnect)$/,

@@ -411,3 +411,33 @@ test('Stop reaches the backend through the allowlist', async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test('The schedules list and switch reach the backend through the allowlist', async () => {
+  const { createHooksFetcher } = require('../electron/dist/settings/hooksFetch.js');
+  const originalFetch = globalThis.fetch;
+  const requested = [];
+  globalThis.fetch = async (url, options) => {
+    requested.push({ url: String(url), method: options.method, body: options.body });
+    if (options.method === 'PUT') return new Response(null, { status: 204 });
+    return new Response(JSON.stringify({ hooks: [], recording_ready: true }));
+  };
+  const fetcher = createHooksFetcher({
+    requestJson: readyClient.requestJson,
+    getUserId: () => 'user-1',
+  });
+
+  try {
+    assert.deepEqual(await fetcher.list(), { hooks: [], recording_ready: true });
+    await fetcher.setEnabled({ hook_id: 'hook-1', enabled: false });
+    assert.deepEqual(
+      requested.map(({ url, method }) => [method, new URL(url).pathname]),
+      [
+        ['GET', '/v1/agents/users/user-1/hooks'],
+        ['PUT', '/v1/agents/users/user-1/hooks/hook-1/enabled'],
+      ]
+    );
+    assert.deepEqual(JSON.parse(requested[1].body), { enabled: false });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

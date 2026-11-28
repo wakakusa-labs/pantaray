@@ -1,4 +1,6 @@
+import { execFile } from 'node:child_process';
 import fs from 'node:fs';
+import { promisify } from 'node:util';
 import { z } from 'zod';
 import { readZaneiManifest, recorderTranscribesCalls } from './zaneiConfig';
 
@@ -156,9 +158,9 @@ export function createMeetingTranscript(params: {
 }) {
   /** macOS 26 or later on Apple silicon, and a staged recorder release that can host it. */
   const isSupported = () =>
+    recorderTranscribesCalls(readZaneiManifest(params.getManifestPath())) &&
     (params.supportsTranscription?.() ??
-      (process.arch === 'arm64' && Number(process.getSystemVersion().split('.')[0]) >= 26)) &&
-    recorderTranscribesCalls(readZaneiManifest(params.getManifestPath()));
+      (process.arch === 'arm64' && Number(process.getSystemVersion().split('.')[0]) >= 26));
   let call: MeetingCall = IDLE;
   let consentTimer: NodeJS.Timeout | null = null;
   function apply(event: HostEvent | LocalEvent | null): void {
@@ -210,13 +212,14 @@ export function createMeetingTranscript(params: {
     prepare: () => send({ kind: 'prepare' }),
     readAvailability: async () => (await params.getRecorder()?.readMeetingAvailability()) ?? null,
     getSettings: () => ({ settings: readSettings(), supported: isSupported() }),
-    /** Null leaves transcription off in the recorder's configuration. */
-    transcription: (): MeetingSettings | null => {
-      const settings = readSettings();
-      return settings.enabled && isSupported() ? settings : null;
-    },
-    /** Only turning transcription on or off changes `capture.sources`. */
-    keepsSources: (next: MeetingSettings) => next.enabled === readSettings().enabled,
+    /** The lists the recorder listens to while the user's own are null. */
+    readDefaultCallLists: () =>
+      readDefaultCallLists(readZaneiManifest(params.getManifestPath()).executable_path),
+    /**
+     * Where this Mac and recorder can transcribe, transcription is part of the configuration:
+     * macOS grants or refuses its permissions, and every call is asked about. Null leaves it out.
+     */
+    transcription: (): MeetingSettings | null => (isSupported() ? readSettings() : null),
     writeSettings: (next: MeetingSettings) => {
       const filePath = params.settingsPath();
       if (!filePath) throw new Error('Local owner is unavailable.');
@@ -226,6 +229,27 @@ export function createMeetingTranscript(params: {
   };
 }
 
+/** The call apps and sites the recorder listens to by default. */
+export type MeetingCallLists = { callApps: string[]; callSites: string[] };
+
+/**
+ * The recorder's own defaults: its effective configuration with an empty file. `config show`
+ * prints TOML, and a list of plain strings in it reads as JSON once its trailing comma goes.
+ */
+async function readDefaultCallLists(executablePath: string): Promise<MeetingCallLists> {
+  const { stdout } = await promisify(execFile)(
+    executablePath,
+    ['--config', '/dev/null', 'config', 'show'],
+    { timeout: 10_000, encoding: 'utf8' }
+  );
+  const section = /^\[meeting\]\n([\s\S]*?)(?=^\[|(?![\s\S]))/m.exec(stdout)?.[1] ?? '';
+  const list = (key: string) => {
+    const value = new RegExp(`^${key} = (\\[[\\s\\S]*?\\])`, 'm').exec(section)?.[1] ?? 'null';
+    return z.array(z.string()).parse(JSON.parse(value.replace(/,\s*\]$/, ']')));
+  };
+  return { callApps: list('call_apps'), callSites: list('call_sites') };
+}
+
 const uniqueIgnoringCase = (values: string[]) =>
   new Set(values.map((value) => value.toLowerCase())).size === values.length;
 /** The recorder refuses a whole configuration with one bad entry, so entries are checked here. */
@@ -233,13 +257,9 @@ const listOf = (entry: z.ZodString) =>
   z.array(entry).max(200).refine(uniqueIgnoringCase, 'Duplicate entry.').nullable();
 const DOMAIN_LABEL = '[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?';
 
-/**
- * The user's transcription settings. A null list leaves the recorder's default list in place.
- * Off by default: the recorder records no call unless the user turned this on once.
- */
+/** The user's transcription settings. A null list leaves the recorder's default list in place. */
 export const MeetingSettingsSchema = z
   .object({
-    enabled: z.boolean(),
     /** Bundle identifiers, as the recorder matches call apps. */
     callApps: listOf(z.string().regex(/^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/)),
     /** Meeting site hosts; a host covers its subdomains. */
@@ -256,8 +276,9 @@ export const MeetingSettingsSchema = z
   })
   .strict();
 export type MeetingSettings = z.infer<typeof MeetingSettingsSchema>;
+/** `restart_failed`: the settings are saved, but recording did not come back after it. */
+export type MeetingSettingsSaveResult = 'saved' | 'restart_failed';
 const DEFAULT_MEETING_SETTINGS: MeetingSettings = {
-  enabled: false,
   callApps: null,
   callSites: null,
   locale: null,

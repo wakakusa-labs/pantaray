@@ -537,7 +537,8 @@ export function createScreenshotSyncManager(params: {
     meeting: {
       ...meeting,
       updateSettings: (next: MeetingSettings) =>
-        enqueue(() => reconfigure(() => meeting.writeSettings(next), meeting.keepsSources(next))),
+        // The call lists and the language leave `capture.sources` as it is.
+        enqueue(() => reconfigure(() => meeting.writeSettings(next), true)),
     },
     getCaptureStatusSnapshot: (): Promise<CaptureStatusSnapshot> =>
       enqueue(async () => {

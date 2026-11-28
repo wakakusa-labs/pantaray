@@ -10,7 +10,7 @@ const CHIP = { id: 2 };
 const PANEL = { id: 3 };
 
 /** The handlers over a call awaiting consent until `expiresInMs`, offered by the chip `CHIP`. */
-function meetingIpc({ expiresInMs = 60_000 } = {}) {
+function meetingIpc({ expiresInMs = 60_000, updateSettings = async () => {}, stored = null } = {}) {
   const handlers = new Map();
   const answered = [];
   const call = {
@@ -32,6 +32,8 @@ function meetingIpc({ expiresInMs = 60_000 } = {}) {
           return 'requested';
         },
         decline: (callId) => answered.push(['decline', callId]),
+        updateSettings,
+        getSettings: () => ({ settings: stored, supported: true }),
       },
     },
     { handle: (channel, handler) => handlers.set(channel, handler) }
@@ -68,4 +70,19 @@ test('the main window still starts a call the user let pass', async () => {
   const { send, answered } = meetingIpc({ expiresInMs: -1 });
   assert.equal(await send('meeting:record', MAIN, CALL), 'requested');
   assert.deepEqual(answered, [['record', CALL]]);
+});
+
+test('a save whose file was written reports only the failed restart; an unwritten one fails', async () => {
+  const settings = { callApps: null, callSites: ['zoom.us'], locale: null };
+  const restartFails = async () => {
+    throw new Error('recorder did not start');
+  };
+  const written = meetingIpc({ updateSettings: restartFails, stored: settings });
+  assert.equal(await written.send('meeting:updateSettings', MAIN, settings), 'restart_failed');
+  const unwritten = meetingIpc({
+    updateSettings: restartFails,
+    stored: { ...settings, callSites: null },
+  });
+  await assert.rejects(unwritten.send('meeting:updateSettings', MAIN, settings), /did not start/);
+  assert.equal(await meetingIpc().send('meeting:updateSettings', MAIN, settings), 'saved');
 });

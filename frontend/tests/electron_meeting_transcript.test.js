@@ -91,7 +91,7 @@ test('commands go to the running recorder, and without one nothing is queued', a
 });
 
 test('settings refuse entries the recorder would reject the whole configuration for', () => {
-  const valid = { enabled: true, callApps: ['us.zoom.xos'], callSites: ['meet.google.com'], locale: 'ja-JP' };
+  const valid = { callApps: ['us.zoom.xos'], callSites: ['meet.google.com'], locale: 'ja-JP' };
   assert.ok(MeetingSettingsSchema.safeParse(valid).success);
   for (const invalid of [{ callApps: ['Zoom'] }, { callApps: ['us.zoom.xos', 'US.ZOOM.XOS'] },
     { callSites: ['https://meet.google.com'] }, { callSites: ['meet.google.com/abc'] }, { locale: 'ja_JP' }])
@@ -155,4 +155,21 @@ test('a recorder release with the helper starts as the host and its stdout is re
   await assert.rejects(earlier.process.start('config', true));
   assert.ok(!earlier.spawns[0].args.includes('--host-events'));
   assert.deepEqual(earlier.spawns[0].stdio, ['pipe', 'ignore', 'ignore']);
+});
+
+test('the default call lists are read from the recorder\'s own configuration', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pantaray-meeting-defaults-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  // `config show` with an empty file, as the recorder prints it.
+  const shown = '[output]\nretention_hours = 48\n\n[meeting]\ncall_apps = [\n    "us.zoom.xos",\n    "com.microsoft.teams2",\n]\ncall_sites = [\n    "meet.google.com",\n]\n';
+  const executable = path.join(dir, 'zanei');
+  fs.writeFileSync(executable, `#!/bin/sh\n[ "$*" = "--config /dev/null config show" ] || exit 2\nprintf '%s' '${shown}'\n`, { mode: 0o755 });
+  const manifestPath = path.join(dir, 'manifest.json');
+  fs.writeFileSync(manifestPath, JSON.stringify({ zanei: { executable_path: executable, protocol_version: 1,
+    executable_sha256: require('node:crypto').createHash('sha256').update(fs.readFileSync(executable)).digest('hex'),
+    subject_root: dir, keychain_service_prefix: 'service', keychain_label_prefix: 'label' } }));
+  const manager = createMeetingTranscript({ getRecorder: () => null, onChange: () => {},
+    settingsPath: () => null, getManifestPath: () => manifestPath });
+  assert.deepEqual(await manager.readDefaultCallLists(), {
+    callApps: ['us.zoom.xos', 'com.microsoft.teams2'], callSites: ['meet.google.com'] });
 });

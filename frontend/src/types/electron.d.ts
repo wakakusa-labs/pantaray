@@ -112,9 +112,11 @@ import type { RecordingStartResult } from '../../electron/src/screenshot/screens
 import type {
   MeetingAvailability,
   MeetingCall,
+  MeetingCallLists,
   MeetingCommandResult,
   MeetingPermission,
   MeetingSettings,
+  MeetingSettingsSaveResult,
 } from '../../electron/src/context/meetingTranscript';
 import type { HistoryFetchResult } from '../../electron/src/history/historyFetch';
 import type { IntegrationSettingsApi } from '../../electron/src/settings/integrationSettingsFetch';
@@ -239,7 +241,8 @@ declare global {
         onCallChanged: (callback: (call: MeetingCall) => void) => () => void;
         getAvailability: () => Promise<MeetingAvailability | null>;
         getSettings: () => Promise<{ settings: MeetingSettings; supported: boolean }>;
-        updateSettings: (settings: MeetingSettings) => Promise<void>;
+        getDefaultCallLists: () => Promise<MeetingCallLists>;
+        updateSettings: (settings: MeetingSettings) => Promise<MeetingSettingsSaveResult>;
         record: (callId: string) => Promise<MeetingCommandResult>;
         stop: (callId: string) => Promise<MeetingCommandResult>;
         decline: (callId: string) => Promise<void>;

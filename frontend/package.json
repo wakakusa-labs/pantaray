@@ -41,8 +41,8 @@
         "CFBundleDevelopmentRegion": "en",
         "NSAppleEventsUsageDescription": "Pantaray needs Automation permission to access active window or browser information.",
         "NSScreenCaptureUsageDescription": "Pantaray captures your screen only when you ask an Action to look at it.",
-        "NSMicrophoneUsageDescription": "Pantaray transcribes your voice in a call only when you allow it for that call.",
-        "NSAudioCaptureUsageDescription": "Pantaray transcribes what others say in a call only when you allow it for that call."
+        "NSMicrophoneUsageDescription": "Used to transcribe your calls.",
+        "NSAudioCaptureUsageDescription": "Used to transcribe the other side of your calls."
       },
       "icon": "build/icon.icns",
       "target": [

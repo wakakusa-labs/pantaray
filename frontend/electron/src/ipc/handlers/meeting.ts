@@ -2,6 +2,8 @@ import {
   CallIdSchema,
   MeetingSettingsSchema,
   type MeetingCommandResult,
+  type MeetingSettings,
+  type MeetingSettingsSaveResult,
 } from '../../context/meetingTranscript';
 import type { MainContext } from '../context';
 import type { IpcRegistrar } from '../registrar';
@@ -27,11 +29,31 @@ function requireAnswerer(ctx: MainContext, sender: IpcSenderIdentity, callId: st
     throw new IpcSenderRejectedError('meeting_consent_not_open');
 }
 
+/**
+ * Saving writes the settings file, then brings the recorder back. When the file holds what was
+ * sent, only that restart failed: the settings are saved, and sending them again retries it.
+ */
+async function saveSettings(
+  ctx: MainContext,
+  settings: MeetingSettings
+): Promise<MeetingSettingsSaveResult> {
+  try {
+    await ctx.meeting.updateSettings(settings);
+    return 'saved';
+  } catch (error) {
+    if (JSON.stringify(ctx.meeting.getSettings().settings) !== JSON.stringify(settings))
+      throw error;
+    console.error('Recording did not come back after the call settings were saved:', error);
+    return 'restart_failed';
+  }
+}
+
 /** Call transcription: the call the recorder offers, the user's answer, and the settings. */
 export function registerMeetingHandlers(ctx: MainContext, registrar: IpcRegistrar): void {
   registrar.handle('meeting:getCall', () => ctx.meeting.getCall());
   registrar.handle('meeting:getAvailability', () => ctx.meeting.readAvailability());
   registrar.handle('meeting:getSettings', () => ctx.meeting.getSettings());
+  registrar.handle('meeting:getDefaultCallLists', () => ctx.meeting.readDefaultCallLists());
 
   const noRecorder = (result: MeetingCommandResult) => result === 'no_recorder';
   for (const command of ['record', 'stop'] as const) {
@@ -60,8 +82,11 @@ export function registerMeetingHandlers(ctx: MainContext, registrar: IpcRegistra
 
   registrar.handle('meeting:updateSettings', (_evt, settings) => {
     const parsed = parseInput(MeetingSettingsSchema, 'meeting:updateSettings', settings);
-    return runAuditedMutation(ctx, 'meeting.updateSettings', () =>
-      ctx.meeting.updateSettings(parsed)
+    return runAuditedMutation(
+      ctx,
+      'meeting.updateSettings',
+      () => saveSettings(ctx, parsed),
+      (result) => result === 'restart_failed'
     );
   });
 }

@@ -11,6 +11,7 @@ import type { CapturePermission } from '../../electron/src/context/zaneiProcess'
 import { LanguageSection } from './settings/components/LanguageSection';
 import { AgentsMdSection } from './settings/components/AgentsMdSection';
 import { AiConnectionSettingsSection } from './settings/components/AiConnectionSettingsSection';
+import { CallTranscriptionSection } from './settings/components/CallTranscriptionSection';
 import { ExecutionSettingsSection } from './settings/components/ExecutionSettingsSection';
 import { IdeFileRulesSection } from './settings/components/IdeFileRulesSection';
 import { IntegrationSettings } from './settings/components/IntegrationSettings';
@@ -218,6 +219,7 @@ function ScreenshotSections({
         openFilterDialog={controller.openFilterDialog}
         t={t}
       />
+      <CallTranscriptionSection t={t} />
       <IdeFileRulesSection
         ideFileRules={controller.ideFileRules}
         ideFileRulesError={controller.ideFileRulesError}

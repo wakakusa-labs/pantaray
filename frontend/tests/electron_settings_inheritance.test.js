@@ -23,7 +23,7 @@ function profile(t) {
   );
   fs.writeFileSync(
     path.join(source, SCOPED_PREFERENCE_FILES.meetingTranscription),
-    '{"enabled":true,"callApps":null,"callSites":null,"locale":null}'
+    '{"callApps":null,"callSites":null,"locale":"ja-JP"}'
   );
   const privacy = createCapturePrivacyManager({ userDataDir, resolveAppBundleId: () => null });
   privacy.updateCaptureSettings({

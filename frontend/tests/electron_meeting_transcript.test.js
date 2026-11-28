@@ -91,7 +91,7 @@ test('commands go to the running recorder, and without one nothing is queued', a
 });
 
 test('settings refuse entries the recorder would reject the whole configuration for', () => {
-  const valid = { enabled: true, callApps: ['us.zoom.xos'], callSites: ['meet.google.com'], locale: 'ja-JP' };
+  const valid = { callApps: ['us.zoom.xos'], callSites: ['meet.google.com'], locale: 'ja-JP' };
   assert.ok(MeetingSettingsSchema.safeParse(valid).success);
   for (const invalid of [{ callApps: ['Zoom'] }, { callApps: ['us.zoom.xos', 'US.ZOOM.XOS'] },
     { callSites: ['https://meet.google.com'] }, { callSites: ['meet.google.com/abc'] }, { locale: 'ja_JP' }])

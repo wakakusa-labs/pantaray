@@ -10,7 +10,7 @@ import type {
 } from '../../../../electron/src/context/meetingTranscript';
 import { CallTranscriptionSection } from './CallTranscriptionSection';
 
-const SETTINGS: MeetingSettings = { enabled: true, callApps: null, callSites: null, locale: null };
+const SETTINGS: MeetingSettings = { callApps: null, callSites: null, locale: null };
 const DEFAULTS = { callApps: ['us.zoom.xos'], callSites: ['meet.google.com', 'zoom.us'] };
 
 function renderSection({
@@ -50,12 +50,13 @@ afterEach(() => {
   delete window.electron;
 });
 
-it('on a Mac that cannot transcribe, says where it works and offers no switch', async () => {
+it('on a Mac that cannot transcribe, only says where it works', async () => {
   const meeting = renderSection({ supported: false });
   expect(
     await screen.findByText('macOS 26 以降の Apple シリコンの Mac で使えます。')
   ).toBeInTheDocument();
-  expect(screen.queryByRole('switch')).toBeNull();
+  expect(screen.queryByText(/文字起こしするか確認します/)).toBeNull();
+  expect(screen.queryByRole('combobox')).toBeNull();
   expect(meeting.getDefaultCallLists).not.toHaveBeenCalled();
 });
 
@@ -96,26 +97,26 @@ it('an edit made while a slow save runs cannot undo that save', async () => {
   renderSection({ updateSettings });
   await screen.findByRole('list', { name: '対象のサイト（Chrome と Safari）' });
 
-  fireEvent.click(screen.getByRole('switch', { name: '通話の文字起こし' }));
-  // The language and the lists wait for the save of "off" to finish.
+  fireEvent.click(screen.getByRole('button', { name: 'zoom.us を削除' }));
+  // The language and the lists wait for that save to finish.
   const language = screen.getByRole('combobox', { name: '言語' });
   expect(language).toBeDisabled();
   fireEvent.change(language, { target: { value: 'ja-JP' } });
-  fireEvent.click(screen.getByRole('button', { name: 'zoom.us を削除' }));
+  fireEvent.click(screen.getByRole('button', { name: 'meet.google.com を削除' }));
   expect(updateSettings).toHaveBeenCalledTimes(1);
 
   await act(async () => finishSave());
-  expect(screen.getByRole('switch', { name: '通話の文字起こし' })).toHaveAttribute(
-    'aria-checked',
-    'false'
-  );
   fireEvent.change(screen.getByRole('combobox', { name: '言語' }), {
     target: { value: 'ja-JP' },
   });
-  expect(updateSettings).toHaveBeenLastCalledWith({ ...SETTINGS, enabled: false, locale: 'ja-JP' });
+  expect(updateSettings).toHaveBeenLastCalledWith({
+    ...SETTINGS,
+    callSites: ['meet.google.com'],
+    locale: 'ja-JP',
+  });
 });
 
-it('keeps the switch when the default lists cannot be read, and reads them again on request', async () => {
+it('keeps the language when the default lists cannot be read, and reads them again on request', async () => {
   const getDefaultCallLists = vi
     .fn<() => Promise<MeetingCallLists>>()
     .mockRejectedValueOnce(new Error('config show failed'))
@@ -127,9 +128,11 @@ it('keeps the switch when the default lists cannot be read, and reads them again
   // A failed read is not an empty list.
   expect(screen.queryByRole('list', { name: '対象のアプリ' })).toBeNull();
 
-  fireEvent.click(screen.getByRole('switch', { name: '通話の文字起こし' }));
+  fireEvent.change(screen.getByRole('combobox', { name: '言語' }), {
+    target: { value: 'en-US' },
+  });
   await waitFor(() =>
-    expect(meeting.updateSettings).toHaveBeenCalledWith({ ...SETTINGS, enabled: false })
+    expect(meeting.updateSettings).toHaveBeenCalledWith({ ...SETTINGS, locale: 'en-US' })
   );
 
   fireEvent.click(screen.getByRole('button', { name: 'もう一度読み込む' }));

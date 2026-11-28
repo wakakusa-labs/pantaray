@@ -31,8 +31,9 @@ const LOCALES = [
 ] as const;
 
 /**
- * Call transcription: off until the user turns it on, and then asked about call by call. The
- * apps and sites start as the recorder's own lists; editing one saves it as the user's.
+ * Call transcription has no switch of its own: macOS's two permissions and the consent asked for
+ * each call decide. The apps and sites start as the recorder's own lists; editing one saves it as
+ * the user's.
  */
 export function CallTranscriptionSection({ t }: { t: Translate }) {
   const meeting = window.electron?.meeting;
@@ -80,22 +81,13 @@ export function CallTranscriptionSection({ t }: { t: Translate }) {
 
   if (!meeting || loaded === 'loading') return null;
 
-  const header = (control: React.ReactNode) => (
-    <div className="settings-section-header">
-      <div className="settings-section-heading">
-        <h4 className="dashboard-subsection-title">{t('settings.callTranscription.title')}</h4>
-      </div>
-      {control}
-    </div>
-  );
-  const description = (
-    <p className="dashboard-section-description">{t('settings.callTranscription.description')}</p>
+  const title = (
+    <h4 className="dashboard-subsection-title">{t('settings.callTranscription.title')}</h4>
   );
   if (loaded === 'unsupported' || loaded === 'failed') {
     return (
       <div className="dashboard-subsection">
-        {header(null)}
-        {description}
+        {title}
         <p
           className="dashboard-section-description"
           role={loaded === 'failed' ? 'alert' : undefined}
@@ -111,7 +103,7 @@ export function CallTranscriptionSection({ t }: { t: Translate }) {
   }
 
   const { settings } = loaded;
-  // `prepare` asks macOS for the two permissions once and fetches the language's speech data.
+  // `prepare` fetches the speech data of the language just chosen.
   const save = async (next: MeetingSettings, prepare = false) => {
     if (savingRef.current) return;
     savingRef.current = true;
@@ -128,7 +120,7 @@ export function CallTranscriptionSection({ t }: { t: Translate }) {
       savingRef.current = false;
       setSaving(false);
     }
-    if (prepare && next.enabled) {
+    if (prepare) {
       await meeting.prepare().catch((reason: unknown) => {
         console.error('Failed to prepare call transcription:', reason);
       });
@@ -151,30 +143,15 @@ export function CallTranscriptionSection({ t }: { t: Translate }) {
 
   return (
     <div className="dashboard-subsection">
-      {header(
-        <button
-          type="button"
-          role="switch"
-          aria-checked={settings.enabled}
-          aria-label={t('settings.callTranscription.title')}
-          className={settings.enabled ? 'settings-toggle settings-toggle--on' : 'settings-toggle'}
-          disabled={saving}
-          onClick={() => void save({ ...settings, enabled: !settings.enabled }, true)}
-        >
-          <span className="settings-toggle-thumb" />
-          <span className="settings-toggle-label">
-            {t(settings.enabled ? 'common.on' : 'common.off')}
-          </span>
-        </button>
-      )}
-      {description}
+      {title}
+      <p className="dashboard-section-description">{t('settings.callTranscription.description')}</p>
       {error ? (
         <p className="dashboard-section-description settings-section-error" role="alert">
           {t(error)}
         </p>
       ) : null}
       {/* The recorder reports the permissions only while it can transcribe or waits on them. */}
-      {settings.enabled && (availability === 'available' || missing.length > 0) ? (
+      {availability === 'available' || missing.length > 0 ? (
         <ul className="checklist">
           {PERMISSIONS.map(([permission, title]) => {
             const granted = !missing.includes(permission);
@@ -209,12 +186,12 @@ export function CallTranscriptionSection({ t }: { t: Translate }) {
           })}
         </ul>
       ) : null}
-      {settings.enabled && missing.includes('speech_model') ? (
+      {missing.includes('speech_model') ? (
         <p className="dashboard-section-description">
           {t('settings.callTranscription.preparingLanguage')}
         </p>
       ) : null}
-      {settings.enabled && unavailable === 'locale_unsupported' ? (
+      {unavailable === 'locale_unsupported' ? (
         <p className="dashboard-section-description">
           {t('settings.callTranscription.languageUnsupported')}
         </p>

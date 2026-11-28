@@ -158,9 +158,9 @@ export function createMeetingTranscript(params: {
 }) {
   /** macOS 26 or later on Apple silicon, and a staged recorder release that can host it. */
   const isSupported = () =>
+    recorderTranscribesCalls(readZaneiManifest(params.getManifestPath())) &&
     (params.supportsTranscription?.() ??
-      (process.arch === 'arm64' && Number(process.getSystemVersion().split('.')[0]) >= 26)) &&
-    recorderTranscribesCalls(readZaneiManifest(params.getManifestPath()));
+      (process.arch === 'arm64' && Number(process.getSystemVersion().split('.')[0]) >= 26));
   let call: MeetingCall = IDLE;
   let consentTimer: NodeJS.Timeout | null = null;
   function apply(event: HostEvent | LocalEvent | null): void {
@@ -215,13 +215,11 @@ export function createMeetingTranscript(params: {
     /** The lists the recorder listens to while the user's own are null. */
     readDefaultCallLists: () =>
       readDefaultCallLists(readZaneiManifest(params.getManifestPath()).executable_path),
-    /** Null leaves transcription off in the recorder's configuration. */
-    transcription: (): MeetingSettings | null => {
-      const settings = readSettings();
-      return settings.enabled && isSupported() ? settings : null;
-    },
-    /** Only turning transcription on or off changes `capture.sources`. */
-    keepsSources: (next: MeetingSettings) => next.enabled === readSettings().enabled,
+    /**
+     * Where this Mac and recorder can transcribe, transcription is part of the configuration:
+     * macOS grants or refuses its permissions, and every call is asked about. Null leaves it out.
+     */
+    transcription: (): MeetingSettings | null => (isSupported() ? readSettings() : null),
     writeSettings: (next: MeetingSettings) => {
       const filePath = params.settingsPath();
       if (!filePath) throw new Error('Local owner is unavailable.');
@@ -259,13 +257,9 @@ const listOf = (entry: z.ZodString) =>
   z.array(entry).max(200).refine(uniqueIgnoringCase, 'Duplicate entry.').nullable();
 const DOMAIN_LABEL = '[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?';
 
-/**
- * The user's transcription settings. A null list leaves the recorder's default list in place.
- * Off by default: the recorder records no call unless the user turned this on once.
- */
+/** The user's transcription settings. A null list leaves the recorder's default list in place. */
 export const MeetingSettingsSchema = z
   .object({
-    enabled: z.boolean(),
     /** Bundle identifiers, as the recorder matches call apps. */
     callApps: listOf(z.string().regex(/^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/)),
     /** Meeting site hosts; a host covers its subdomains. */
@@ -283,7 +277,6 @@ export const MeetingSettingsSchema = z
   .strict();
 export type MeetingSettings = z.infer<typeof MeetingSettingsSchema>;
 const DEFAULT_MEETING_SETTINGS: MeetingSettings = {
-  enabled: false,
   callApps: null,
   callSites: null,
   locale: null,

@@ -1019,23 +1019,23 @@ function meetingFixture(t, { supported = true, helper = true } = {}) {
   const start = f.process.start;
   f.process.start = (config, ...rest) => { configs.push(config); return start(config, ...rest); };
   f.process.writeConfig = (config) => written.push(config);
-  const transcribing = { enabled: true, callApps: null, callSites: ['meet.google.com'], locale: 'ja-JP' };
+  const transcribing = { callApps: null, callSites: ['meet.google.com'], locale: 'ja-JP' };
   const startRecordingCall = () => hostEvents(JSON.stringify({ type: 'recording', started_at: 'now',
     call_id: 'call_01JDQ3ZK8W5N3S8C7V6B5X4Y3Z', app: { name: 'zoom.us', bundle_id: 'us.zoom.xos' } }) + '\n');
   return { ...f, configs, written, transcribing, startRecordingCall, hostEvents: chunk => hostEvents(chunk) };
 }
 
-test('transcription is configured only once turned on, on a Mac and recorder that can run it', async t => {
-  const off = meetingFixture(t);
-  await off.manager.start();
-  // Off by default: the recorder's own default sources, which leave transcripts out.
-  assert.doesNotMatch(off.configs[0], /sources =|\[meeting\]/);
-  assert.equal(off.manager.meeting.getSettings().supported, true);
-
-  await off.manager.meeting.updateSettings(off.transcribing);
-  assert.match(off.configs.at(-1),
+test('transcription is configured wherever this Mac and the recorder can run it', async t => {
+  const f = meetingFixture(t);
+  await f.manager.start();
+  // No switch of its own: macOS's permissions and the consent for each call decide.
+  assert.match(f.configs[0],
     /\[capture\]\nsources = \["app", "window", "ui", "input", "browser", "audio_input", "transcript"\]\n/);
-  assert.match(off.configs.at(-1), /\n\[meeting\]\ncall_sites = \["meet\.google\.com"\]\nlocale = "ja-JP"\n$/);
+  assert.match(f.configs[0], /\n\[meeting\]\n$/);
+  assert.equal(f.manager.meeting.getSettings().supported, true);
+
+  await f.manager.meeting.updateSettings(f.transcribing);
+  assert.match(f.configs.at(-1), /\n\[meeting\]\ncall_sites = \["meet\.google\.com"\]\nlocale = "ja-JP"\n$/);
 
   for (const options of [{ supported: false }, { helper: false }]) {
     const f = meetingFixture(t, options);
@@ -1061,12 +1061,6 @@ test('a filter or call-list change while a call is transcribed rewrites the conf
   assert.match(f.written[0], /block_list = \[\{ host = "example\.com"/);
   assert.match(f.written[1], /call_sites = \["zoom\.us"\]/);
   assert.equal(f.manager.meeting.getCall().kind, 'recording');
-
-  // Turning transcription off changes the sources, which only a restart applies.
-  await f.manager.meeting.updateSettings({ ...f.transcribing, enabled: false });
-  assert.ok(f.calls.includes('stop'));
-  assert.equal(f.manager.meeting.getCall().kind, 'idle');
-  assert.ok(!f.configs.at(-1).includes('transcript'));
 });
 
 test('a config that cannot be rewritten while a call is transcribed stops the recorder', async t => {

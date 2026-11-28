@@ -159,13 +159,53 @@ describe('buildApprovalDisplay', () => {
       );
     });
 
-    // Only an activity hook sends the matched window along; a schedule must not claim it.
-    it('says the matched window goes with the message only for an activity hook', () => {
-      const alsoSent = ['いっしょに送るもの', '見つけたウィンドウのアプリの名前と識別子、題名'];
+    // A microphone hook without a condition hears any app; read as an activity hook it
+    // would ask the user to approve a window with no condition at all.
+    it('words a microphone condition, and none as any app', () => {
+      const microphone = (match: unknown[]) =>
+        hook({ trigger: { kind: 'on', on: 'microphone', match } }).primaryValue;
+      expect(microphone([])).toBe('どれかのアプリがマイクを使い始めたとき');
+      expect(
+        microphone([
+          { field: 'bundle_id', op: 'equals', values: ['com.google.Chrome'] },
+          { field: 'window_title', op: 'contains', values: ['Meet'] },
+        ])
+      ).toBe(
+        'アプリの識別子が『com.google.Chrome』で、使い始めたときのウィンドウの題名に『Meet』を含むアプリがマイクを使い始めたとき'
+      );
+      const english = (match: { field: string; op: string; values: string[] }[]) =>
+        buildApprovalDisplay(
+          blocker('create_hook', 'automation_control', {
+            summary_kind: 'hook',
+            trigger: { kind: 'on', on: 'microphone', match },
+            send_to: 'this_session',
+            message: 'Take notes.',
+          }),
+          (key, vars) => translate('en', key, vars),
+          'en'
+        ).primaryValue;
+      expect(english([])).toBe('When any app starts using the microphone');
+      expect(english([{ field: 'bundle_id', op: 'equals', values: ['us.zoom.xos'] }])).toBe(
+        'When an app starts using the microphone, where app ID is “us.zoom.xos”'
+      );
+    });
+
+    // Only an event hook sends its event's fields along, and it must name the right ones;
+    // a schedule must not claim any.
+    it('says what goes with the message for each event, and nothing for a schedule', () => {
+      const alsoSent = (value: string) => ['いっしょに送るもの', value];
+      const window = alsoSent('見つけたウィンドウのアプリの名前と識別子、題名');
+      const microphone = alsoSent(
+        'マイクを使い始めたアプリの名前と識別子、そのときのウィンドウの題名'
+      );
       expect(
         details(on([{ field: 'app_name', op: 'equals', values: ['zoom.us'] }]))
-      ).toContainEqual(alsoSent);
-      expect(details(hook({}))).not.toContainEqual(alsoSent);
+      ).toContainEqual(window);
+      const heard = details(hook({ trigger: { kind: 'on', on: 'microphone', match: [] } }));
+      expect(heard).toContainEqual(microphone);
+      expect(heard).not.toContainEqual(window);
+      expect(details(hook({}))).not.toContainEqual(window);
+      expect(details(hook({}))).not.toContainEqual(microphone);
     });
   });
 

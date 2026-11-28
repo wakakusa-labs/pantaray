@@ -70,6 +70,7 @@ describe('SchedulesSection', () => {
             every: null,
             target_action_id: null,
             title: '会議メモ',
+            on: 'activity',
             match: [{ field: 'bundle_id', op: 'equals', values: ['us.zoom.xos'] }],
           }),
         ],
@@ -81,5 +82,30 @@ describe('SchedulesSection', () => {
     fireEvent.click(await screen.findByRole('button', { name: /会議メモ/ }));
     expect(screen.getByText(ja('schedules.notWatching'))).toBeVisible();
     expect(screen.getByText(ja('overlay.approvalRequired.hook.newSession'))).toBeVisible();
+  });
+
+  // Catches a microphone schedule read as a repeat with no time, or looking on while
+  // recording is off and it hears nothing.
+  it('words a microphone schedule and says it is not watching while recording is off', async () => {
+    installBridge([
+      {
+        hooks: [
+          hook({
+            every: null,
+            title: '会議の議事録',
+            on: 'microphone',
+            match: [{ field: 'bundle_id', op: 'equals', values: ['us.zoom.xos'] }],
+          }),
+        ],
+        recording_ready: false,
+      },
+    ]);
+    renderSection();
+
+    fireEvent.click(await screen.findByRole('button', { name: /会議の議事録/ }));
+    expect(
+      screen.getAllByText('アプリの識別子が『us.zoom.xos』のアプリがマイクを使い始めたとき')
+    ).toHaveLength(2);
+    expect(screen.getByText(ja('schedules.notWatching'))).toBeVisible();
   });
 });

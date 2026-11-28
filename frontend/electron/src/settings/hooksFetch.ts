@@ -23,7 +23,8 @@ const HookSchema = z.strictObject({
   at: InstantSchema.nullable(),
   every: z.string().nullable(),
   offset: z.string().nullable(),
-  on: z.string().nullable(),
+  // The events a user's hook may wait on (`USER_HOOK_EVENT_FIELDS` in `hooks/events.py`).
+  on: z.enum(['activity', 'microphone']).nullable(),
   match: z.array(FieldMatchSchema),
   until: InstantSchema.nullable(),
   message: z.string(),

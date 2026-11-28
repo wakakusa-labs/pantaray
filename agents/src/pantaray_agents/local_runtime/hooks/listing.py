@@ -30,6 +30,8 @@ class TaskView:
     at: datetime | None
     every: str | None
     offset: str | None
+    # The event an on task fires on; None for one that fires on time.
+    on: str | None
     match: tuple[FieldMatch, ...]
     until: datetime | None
     message: str
@@ -99,6 +101,7 @@ def _view(row: TaskRow, origin_title: str | None, now: datetime) -> TaskView:
         at=row.task.schedule.at,
         every=row.task.schedule.every,
         offset=row.task.schedule.offset,
+        on=row.task.schedule.on,
         match=row.task.schedule.match,
         until=row.task.schedule.until,
         message=row.task.message,

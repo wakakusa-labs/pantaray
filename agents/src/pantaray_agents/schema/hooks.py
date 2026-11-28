@@ -19,7 +19,7 @@ class _View(BaseModel):
 
 
 class HookFieldMatchResponse(_View):
-    """One field of the window's activity, matched as the user said yes to."""
+    """One field of the event, matched as the user said yes to."""
 
     field: str
     op: MatchOp
@@ -29,14 +29,17 @@ class HookFieldMatchResponse(_View):
 class TaskHookResponse(_View):
     """A task an Action scheduled with the user's yes in that conversation. It
     fires while ``enabled`` and not stopped: once ``at``, or ``every`` calendar
-    unit or duration (``offset`` after each unit's start), or each time a
-    window starts to match every field of ``match``; never after ``until``."""
+    unit or duration (``offset`` after each unit's start), or on each event
+    ``on`` whose fields hold every field of ``match``; never after ``until``."""
 
     hook_id: str
     at: datetime | None
     every: str | None
     offset: str | None
-    # Empty for a task that fires on time.
+    # None for a task that fires on time.
+    on: str | None
+    # Empty for a task that fires on time, and for an on task that hears
+    # every event of its kind.
     match: tuple[HookFieldMatchResponse, ...]
     until: datetime | None
     message: str

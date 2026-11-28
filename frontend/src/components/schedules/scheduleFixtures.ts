@@ -7,6 +7,7 @@ export function hook(overrides: Partial<HookView> = {}): HookView {
     at: null,
     every: 'day',
     offset: null,
+    on: null,
     match: [],
     until: null,
     message: '仕入れ表を見て、発注が必要な食材を書き出してください。',

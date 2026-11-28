@@ -121,6 +121,8 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.approvalRequired.hook.alsoSent': 'Also sent with the message',
     'overlay.approvalRequired.hook.matchedWindow':
       'The app name, app ID and title of the window it found',
+    'overlay.approvalRequired.hook.matchedMicrophone':
+      'The name and ID of the app that started using the microphone, and its window title then',
     'overlay.approvalRequired.hook.message': 'Message it sends',
     'overlay.approvalRequired.hook.once': 'Once, {time}',
     'overlay.approvalRequired.hook.everyHour': 'Every hour at :{minute}',
@@ -136,6 +138,9 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.approvalRequired.hook.weekdays':
       'Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday',
     'overlay.approvalRequired.hook.windowAppears': 'When a window starts to match: {conditions}',
+    'overlay.approvalRequired.hook.microphoneAnyApp': 'When any app starts using the microphone',
+    'overlay.approvalRequired.hook.microphoneApp':
+      'When an app starts using the microphone, where {conditions}',
     'overlay.approvalRequired.hook.equalsMiddle': '{field} is {values}, and ',
     'overlay.approvalRequired.hook.equalsLast': '{field} is {values}',
     'overlay.approvalRequired.hook.containsMiddle': '{field} contains {values}, and ',
@@ -145,6 +150,7 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.approvalRequired.hook.field.appName': 'app name',
     'overlay.approvalRequired.hook.field.bundleId': 'app ID',
     'overlay.approvalRequired.hook.field.windowTitle': 'title',
+    'overlay.approvalRequired.hook.field.windowTitleAtStart': 'window title when it started',
     'overlay.approvalRequired.operation.integration': 'Write to {service} ({account}).',
     'overlay.approvalRequired.integration.tool': 'Action',
     'overlay.approvalRequired.loginEnvironmentNotice':
@@ -311,6 +317,8 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.approvalRequired.hook.none': 'なし',
     'overlay.approvalRequired.hook.alsoSent': 'いっしょに送るもの',
     'overlay.approvalRequired.hook.matchedWindow': '見つけたウィンドウのアプリの名前と識別子、題名',
+    'overlay.approvalRequired.hook.matchedMicrophone':
+      'マイクを使い始めたアプリの名前と識別子、そのときのウィンドウの題名',
     'overlay.approvalRequired.hook.message': '送る内容',
     'overlay.approvalRequired.hook.once': '{time} に1回',
     'overlay.approvalRequired.hook.everyHour': '毎時 {minute} 分',
@@ -324,6 +332,8 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.approvalRequired.hook.units': '秒,分,時間,日',
     'overlay.approvalRequired.hook.weekdays': '月,火,水,木,金,土,日',
     'overlay.approvalRequired.hook.windowAppears': '{conditions}ウィンドウになったとき',
+    'overlay.approvalRequired.hook.microphoneAnyApp': 'どれかのアプリがマイクを使い始めたとき',
+    'overlay.approvalRequired.hook.microphoneApp': '{conditions}アプリがマイクを使い始めたとき',
     'overlay.approvalRequired.hook.equalsMiddle': '{field}が{values}で、',
     'overlay.approvalRequired.hook.equalsLast': '{field}が{values}の',
     'overlay.approvalRequired.hook.containsMiddle': '{field}に{values}を含み、',
@@ -333,6 +343,7 @@ export const OVERLAY_MESSAGES = defineMessages({
     'overlay.approvalRequired.hook.field.appName': 'アプリの名前',
     'overlay.approvalRequired.hook.field.bundleId': 'アプリの識別子',
     'overlay.approvalRequired.hook.field.windowTitle': 'ウィンドウの題名',
+    'overlay.approvalRequired.hook.field.windowTitleAtStart': '使い始めたときのウィンドウの題名',
     'overlay.approvalRequired.operation.integration': '{service}（{account}）で書き込みます。',
     'overlay.approvalRequired.integration.tool': '操作',
     'overlay.approvalRequired.loginEnvironmentNotice': 'ログイン情報を使える状態で実行します。',

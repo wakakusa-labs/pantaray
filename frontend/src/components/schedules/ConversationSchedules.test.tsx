@@ -36,6 +36,7 @@ const meeting = hook({
   target_action_id: null,
   title: '会議メモ',
   message: '会議のメモを取ってください。',
+  on: 'activity',
   match: [{ field: 'bundle_id', op: 'equals', values: ['us.zoom.xos'] }],
 });
 
@@ -75,6 +76,31 @@ describe('ConversationSchedules', () => {
     );
     // Recording is off, so the window schedule says it sees nothing for now.
     expect(lines[1]).toHaveTextContent(ja('schedules.notWatching'));
+    expect(lines[0]).not.toHaveTextContent(ja('schedules.notWatching'));
+  });
+
+  // Catches a microphone schedule with no condition read as a repeat with no time, or
+  // looking on while recording is off and it hears nothing.
+  it('words a microphone schedule with no condition, and says it is not watching', async () => {
+    installBridge([
+      {
+        hooks: [
+          hook({ hook_id: 'task.daily', offset: '450m' }),
+          hook({ hook_id: 'task.mic', every: null, on: 'microphone', match: [] }),
+        ],
+        recording_ready: false,
+      },
+    ]);
+    renderStrip('action-1');
+
+    const strip = await screen.findByRole('list', { name: ja('schedules.strip.label') });
+    const lines = within(strip).getAllByRole('listitem');
+    expect(lines[1]).toHaveTextContent(
+      'どれかのアプリがマイクを使い始めたとき、この会話を続けます。'
+    );
+    expect(lines[1]).toHaveTextContent(ja('schedules.notWatching'));
+    // A repeat still reads as one and needs no recording.
+    expect(lines[0]).toHaveTextContent('毎日 7:30、この会話を続けます。');
     expect(lines[0]).not.toHaveTextContent(ja('schedules.notWatching'));
   });
 

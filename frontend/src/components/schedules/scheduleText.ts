@@ -13,18 +13,18 @@ export type ScheduleFieldMatch = {
 
 /**
  * When a schedule sends: once `at`, every calendar unit or duration (`offset` after each
- * unit's start), or each time a window starts to match every field of `match`. The approval
- * panel reads it from the tool's arguments; the screens that show a saved schedule word it
- * here too, so the user sees the text they approved.
+ * unit's start), or each time event `on` happens with fields that match every field of
+ * `match`. The approval panel reads it from the tool's arguments; the screens that show a
+ * saved schedule word it here too, so the user sees the text they approved.
  */
 export type ScheduleTrigger =
   | { kind: 'at'; at: string }
   | { kind: 'every'; every: string; offset: string | null }
-  | { kind: 'on'; match: readonly ScheduleFieldMatch[] };
+  | { kind: 'on'; on: NonNullable<HookView['on']>; match: readonly ScheduleFieldMatch[] };
 
 export const hookTrigger = (hook: HookView): ScheduleTrigger =>
-  hook.match.length > 0
-    ? { kind: 'on', match: hook.match }
+  hook.on
+    ? { kind: 'on', on: hook.on, match: hook.match }
     : hook.at
       ? { kind: 'at', at: hook.at }
       : { kind: 'every', every: hook.every ?? '', offset: hook.offset };
@@ -94,31 +94,57 @@ function describeTime(every: string, offsetText: string | null, t: Translate): s
   });
 }
 
-// The fields an activity condition can name; the runtime refuses any other.
-const MATCH_FIELD_KEYS: Record<string, MessageKey> = {
+// The fields a condition can name; the runtime refuses any other.
+const ACTIVITY_FIELD_KEYS: Record<string, MessageKey> = {
   app_name: 'overlay.approvalRequired.hook.field.appName',
   bundle_id: 'overlay.approvalRequired.hook.field.bundleId',
   window_title: 'overlay.approvalRequired.hook.field.windowTitle',
 };
+// A microphone use is matched on the window its app had when the use started.
+const MICROPHONE_FIELD_KEYS: Record<string, MessageKey> = {
+  ...ACTIVITY_FIELD_KEYS,
+  window_title: 'overlay.approvalRequired.hook.field.windowTitleAtStart',
+};
 
 // The condition is worded from the stored match, never from the model's paraphrase:
 // every field must match, and a field matches when any one of its values does.
-function describeCondition(matches: readonly ScheduleFieldMatch[], t: Translate): string {
-  const clauses = matches.map((match, index) =>
-    t(
-      `overlay.approvalRequired.hook.${match.op}${index === matches.length - 1 ? 'Last' : 'Middle'}`,
-      {
-        field: MATCH_FIELD_KEYS[match.field] ? t(MATCH_FIELD_KEYS[match.field]) : match.field,
-        values: match.values
-          .map((value) => t('overlay.approvalRequired.hook.quoted', { value }))
-          .join(t('overlay.approvalRequired.hook.valueOr')),
-      }
+function describeConditions(
+  matches: readonly ScheduleFieldMatch[],
+  fieldKeys: Record<string, MessageKey>,
+  t: Translate
+): string {
+  return matches
+    .map((match, index) =>
+      t(
+        `overlay.approvalRequired.hook.${match.op}${index === matches.length - 1 ? 'Last' : 'Middle'}`,
+        {
+          field: fieldKeys[match.field] ? t(fieldKeys[match.field]) : match.field,
+          values: match.values
+            .map((value) => t('overlay.approvalRequired.hook.quoted', { value }))
+            .join(t('overlay.approvalRequired.hook.valueOr')),
+        }
+      )
     )
-  );
-  return t('overlay.approvalRequired.hook.windowAppears', { conditions: clauses.join('') });
+    .join('');
 }
 
-/** When a schedule sends: a time, or the window it waits for. */
+// A microphone hook may have no condition, and then hears any app.
+function describeEvent(trigger: Extract<ScheduleTrigger, { kind: 'on' }>, t: Translate): string {
+  switch (trigger.on) {
+    case 'activity':
+      return t('overlay.approvalRequired.hook.windowAppears', {
+        conditions: describeConditions(trigger.match, ACTIVITY_FIELD_KEYS, t),
+      });
+    case 'microphone':
+      return trigger.match.length === 0
+        ? t('overlay.approvalRequired.hook.microphoneAnyApp')
+        : t('overlay.approvalRequired.hook.microphoneApp', {
+            conditions: describeConditions(trigger.match, MICROPHONE_FIELD_KEYS, t),
+          });
+  }
+}
+
+/** When a schedule sends: a time, or the event it waits for. */
 export function describeTrigger(
   trigger: ScheduleTrigger,
   t: Translate,
@@ -130,13 +156,13 @@ export function describeTrigger(
     case 'every':
       return describeTime(trigger.every, trigger.offset, t);
     case 'on':
-      return describeCondition(trigger.match, t);
+      return describeEvent(trigger, t);
   }
 }
 
 /** Whether it may run now: on, not stopped. */
 export const isRunning = (hook: HookView) => hook.enabled && hook.stopped_reason === null;
 
-/** An activity schedule that is on but sees nothing while recording is off. */
+/** An event schedule that is on but hears nothing while recording is off. */
 export const isNotWatching = (hook: HookView, recordingReady: boolean) =>
-  isRunning(hook) && hook.match.length > 0 && !recordingReady;
+  isRunning(hook) && hook.on !== null && !recordingReady;

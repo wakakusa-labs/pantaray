@@ -207,6 +207,7 @@ function readTrigger(trigger: Record<string, unknown>): ScheduleTrigger {
   if (trigger.kind === 'on')
     return {
       kind: 'on',
+      on: trigger.on === 'microphone' ? 'microphone' : 'activity',
       match: (Array.isArray(trigger.match) ? trigger.match.filter(isRecord) : []).map((match) => ({
         field: readStringValue(match, 'field') ?? '',
         op: match.op === 'contains' ? 'contains' : 'equals',
@@ -228,8 +229,7 @@ function describeHook(
   t: ApprovalDisplayTranslator,
   language: UiLanguage
 ): ToolApprovalDisplay {
-  const trigger = isRecord(summary.trigger) ? summary.trigger : {};
-  const isEvent = trigger.kind === 'on';
+  const trigger = readTrigger(isRecord(summary.trigger) ? summary.trigger : {});
   const until = readStringValue(summary, 'until');
   const place = isRecord(summary.place) ? summary.place : {};
   const none = t('overlay.approvalRequired.hook.none');
@@ -260,7 +260,7 @@ function describeHook(
           : 'overlay.approvalRequired.operation.hookUpdate',
     usesLoginEnvironment: false,
     primaryLabelKey: 'overlay.approvalRequired.hook.when',
-    primaryValue: describeTrigger(readTrigger(trigger), t, language),
+    primaryValue: describeTrigger(trigger, t, language),
     details: [
       ...(until
         ? [
@@ -279,13 +279,17 @@ function describeHook(
         ),
       },
       ...newSession,
-      // The matched window's fields go to the model with the message, so the user
-      // learns that more than the message leaves.
-      ...(isEvent
+      // The event's fields go to the model with the message, so the user learns that
+      // more than the message leaves.
+      ...(trigger.kind === 'on'
         ? [
             {
               labelKey: 'overlay.approvalRequired.hook.alsoSent' as MessageKey,
-              value: t('overlay.approvalRequired.hook.matchedWindow'),
+              value: t(
+                trigger.on === 'microphone'
+                  ? 'overlay.approvalRequired.hook.matchedMicrophone'
+                  : 'overlay.approvalRequired.hook.matchedWindow'
+              ),
             },
           ]
         : []),

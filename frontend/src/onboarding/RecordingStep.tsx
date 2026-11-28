@@ -5,6 +5,7 @@ import { useStartPermissions } from '../components/useStartPermissions';
 import type { MessageKey } from '../i18n/types';
 import type { Translate } from '../pages/settings/types';
 import '../components/recordingIntro.css';
+import { CallPermissionRows } from './CallPermissionRows';
 import './onboardingSteps.css';
 import type { useRecordingStep } from './useRecordingStep';
 
@@ -17,7 +18,7 @@ const TITLES = {
 } as const satisfies Record<CapturePermission, MessageKey>;
 
 /** Setup's recording step: what recording takes, as one checklist of the macOS permissions
- *  a start waits on, and the start. */
+ *  a start waits on, the start, and the optional permissions of call transcription. */
 export function RecordingStep({
   t,
   recording,
@@ -74,6 +75,7 @@ export function RecordingStep({
             )
           }
         />
+        <CallPermissionRows t={t} recorderRunning={isRecording === true} />
       </RecordingChecklist>
     </>
   );

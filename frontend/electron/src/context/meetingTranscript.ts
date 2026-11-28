@@ -276,6 +276,8 @@ export const MeetingSettingsSchema = z
   })
   .strict();
 export type MeetingSettings = z.infer<typeof MeetingSettingsSchema>;
+/** `restart_failed`: the settings are saved, but recording did not come back after it. */
+export type MeetingSettingsSaveResult = 'saved' | 'restart_failed';
 const DEFAULT_MEETING_SETTINGS: MeetingSettings = {
   callApps: null,
   callSites: null,

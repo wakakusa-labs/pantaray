@@ -43,6 +43,8 @@ export function CallTranscriptionSection({ t }: { t: Translate }) {
   const [defaults, setDefaults] = useState<Defaults>('loading');
   const [availability, setAvailability] = useState<MeetingAvailability | null>(null);
   const [error, setError] = useState<MessageKey | null>(null);
+  // The last change was saved, but recording did not come back after it.
+  const [restartFailed, setRestartFailed] = useState(false);
   // One save at a time: each sends the whole settings, so an edit made while another is saved
   // would send what was on screen before it and undo it.
   const [saving, setSaving] = useState(false);
@@ -110,8 +112,10 @@ export function CallTranscriptionSection({ t }: { t: Translate }) {
     setSaving(true);
     setError(null);
     try {
-      await meeting.updateSettings(next);
+      const result = await meeting.updateSettings(next);
+      // Saved either way: the screen shows what is saved, so the next edit builds on it.
       setLoaded({ settings: next });
+      setRestartFailed(result === 'restart_failed');
     } catch (reason) {
       console.error('Failed to save call transcription settings:', reason);
       setError('settings.callTranscription.saveFailed');
@@ -145,6 +149,20 @@ export function CallTranscriptionSection({ t }: { t: Translate }) {
     <div className="dashboard-subsection">
       {title}
       <p className="dashboard-section-description">{t('settings.callTranscription.description')}</p>
+      {restartFailed ? (
+        <p className="dashboard-section-description settings-section-error" role="alert">
+          {t('settings.callTranscription.resumeFailed')}{' '}
+          <button
+            type="button"
+            className="settings-text-button"
+            disabled={saving}
+            // Sending the saved settings again brings recording back the same way.
+            onClick={() => void save(settings)}
+          >
+            {t('settings.callTranscription.resume')}
+          </button>
+        </p>
+      ) : null}
       {error ? (
         <p className="dashboard-section-description settings-section-error" role="alert">
           {t(error)}

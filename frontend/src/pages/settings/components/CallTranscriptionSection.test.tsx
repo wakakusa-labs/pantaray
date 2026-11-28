@@ -16,7 +16,9 @@ const DEFAULTS = { callApps: ['us.zoom.xos'], callSites: ['meet.google.com', 'zo
 function renderSection({
   supported = true,
   getDefaultCallLists = vi.fn(async (): Promise<MeetingCallLists> => DEFAULTS),
-  updateSettings = vi.fn(async (_settings: MeetingSettings) => undefined),
+  updateSettings = vi.fn(
+    async (_settings: MeetingSettings): Promise<'saved' | 'restart_failed'> => 'saved'
+  ),
   setCaptureEditing = vi.fn(async (_request: { kind: string }) => true),
 } = {}) {
   const meeting = {
@@ -90,8 +92,8 @@ it('an edit made while a slow save runs cannot undo that save', async () => {
   let finishSave: () => void = () => undefined;
   const updateSettings = vi.fn(
     (_settings: MeetingSettings) =>
-      new Promise<undefined>((resolve) => {
-        finishSave = () => resolve(undefined);
+      new Promise<'saved' | 'restart_failed'>((resolve) => {
+        finishSave = () => resolve('saved');
       })
   );
   renderSection({ updateSettings });
@@ -114,6 +116,44 @@ it('an edit made while a slow save runs cannot undo that save', async () => {
     callSites: ['meet.google.com'],
     locale: 'ja-JP',
   });
+});
+
+it('keeps a change saved before recording failed to come back, and offers to resume it', async () => {
+  const updateSettings = vi
+    .fn<(settings: MeetingSettings) => Promise<'saved' | 'restart_failed'>>()
+    .mockResolvedValueOnce('restart_failed')
+    .mockResolvedValue('saved');
+  renderSection({ updateSettings });
+  await screen.findByRole('list', { name: '対象のサイト（Chrome と Safari）' });
+
+  fireEvent.click(screen.getByRole('button', { name: 'zoom.us を削除' }));
+  const resume = await screen.findByRole('button', { name: '記録を再開' });
+  expect(
+    screen.getByRole('list', { name: '対象のサイト（Chrome と Safari）' })
+  ).not.toHaveTextContent('zoom.us');
+
+  // The next edit builds on the saved list, not the one from before it.
+  fireEvent.change(screen.getByRole('combobox', { name: '言語' }), {
+    target: { value: 'ja-JP' },
+  });
+  const saved = { ...SETTINGS, callSites: ['meet.google.com'], locale: 'ja-JP' };
+  await waitFor(() => expect(updateSettings).toHaveBeenLastCalledWith(saved));
+  await waitFor(() => expect(screen.queryByRole('button', { name: '記録を再開' })).toBeNull());
+  expect(resume).not.toBeInTheDocument();
+});
+
+it('retries bringing recording back with the saved settings', async () => {
+  const updateSettings = vi
+    .fn<(settings: MeetingSettings) => Promise<'saved' | 'restart_failed'>>()
+    .mockResolvedValueOnce('restart_failed')
+    .mockResolvedValue('saved');
+  renderSection({ updateSettings });
+  await screen.findByRole('list', { name: '対象のサイト（Chrome と Safari）' });
+
+  fireEvent.click(screen.getByRole('button', { name: 'zoom.us を削除' }));
+  fireEvent.click(await screen.findByRole('button', { name: '記録を再開' }));
+  await waitFor(() => expect(screen.queryByRole('button', { name: '記録を再開' })).toBeNull());
+  expect(updateSettings).toHaveBeenLastCalledWith({ ...SETTINGS, callSites: ['meet.google.com'] });
 });
 
 it('keeps the language when the default lists cannot be read, and reads them again on request', async () => {

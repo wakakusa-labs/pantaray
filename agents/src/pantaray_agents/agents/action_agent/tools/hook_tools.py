@@ -1,16 +1,20 @@
 """The tools an Action sets up hooks with: later messages to a conversation.
 
-A hook sends its message at a time, on a repeat, or when a recorded window
-starts to match, to this conversation or to a new one on each fire. Each
-create or replace asks the user; the tools reach only the hooks this
-conversation created.
+A hook sends its message at a time, on a repeat, when a recorded window
+starts to match, or when an app keeps using the microphone, to this
+conversation or to a new one on each fire. Each create or replace asks the
+user; the tools reach only the hooks this conversation created.
 """
 
 from __future__ import annotations
 
 from typing import Final
 
-from pantaray_agents.local_runtime.hooks.events import USER_HOOK_EVENT_FIELDS
+from pantaray_agents.local_runtime.hooks.events import (
+    USER_HOOK_EVENT_FIELDS,
+    USER_HOOK_EVENTS_MATCHING_ALL,
+)
+from pantaray_agents.local_runtime.hooks.microphone_watch import MIC_HOLD
 from pantaray_agents.schema.agent.base import JSONValue
 from pantaray_agents.tools.contract import ToolConcurrency
 
@@ -43,9 +47,38 @@ _HOOK_ID: Final[dict[str, JSONValue]] = {
     "type": "string",
     "pattern": r"^task\.[a-z0-9][a-z0-9_-]{0,63}$",
 }
-_ACTIVITY_FIELDS: Final[list[JSONValue]] = [*sorted(USER_HOOK_EVENT_FIELDS["activity"])]
-# One of the three shapes, told apart by kind so that a provider can check
-# the branches are disjoint.
+
+
+def _on_trigger(event: str) -> dict[str, JSONValue]:
+    """The on shape for one event: its match names that event's fields, and
+    may be left out or empty only where the event hears every one."""
+
+    any_match = event in USER_HOOK_EVENTS_MATCHING_ALL
+    match: dict[str, JSONValue] = {
+        "type": "array",
+        "items": {
+            "type": "object",
+            "properties": {
+                "field": {"enum": [*sorted(USER_HOOK_EVENT_FIELDS[event])]},
+                "op": {"enum": ["equals", "contains"]},
+                "values": {"type": "array", "minItems": 1, "items": _TEXT},
+            },
+            "required": ["field", "op", "values"],
+            "additionalProperties": False,
+        },
+    }
+    if not any_match:
+        match["minItems"] = 1
+    return {
+        "type": "object",
+        "properties": {"kind": {"const": "on"}, "on": {"const": event}, "match": match},
+        "required": ["kind", "on"] if any_match else ["kind", "on", "match"],
+        "additionalProperties": False,
+    }
+
+
+# The shapes, told apart by kind, and the on shapes by on, so that a provider
+# can check the branches are disjoint.
 _TRIGGER: Final[dict[str, JSONValue]] = {
     "oneOf": [
         {
@@ -67,29 +100,7 @@ _TRIGGER: Final[dict[str, JSONValue]] = {
             "required": ["kind", "every"],
             "additionalProperties": False,
         },
-        {
-            "type": "object",
-            "properties": {
-                "kind": {"const": "on"},
-                "on": {"const": "activity"},
-                "match": {
-                    "type": "array",
-                    "minItems": 1,
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "field": {"enum": _ACTIVITY_FIELDS},
-                            "op": {"enum": ["equals", "contains"]},
-                            "values": {"type": "array", "minItems": 1, "items": _TEXT},
-                        },
-                        "required": ["field", "op", "values"],
-                        "additionalProperties": False,
-                    },
-                },
-            },
-            "required": ["kind", "on", "match"],
-            "additionalProperties": False,
-        },
+        *(_on_trigger(event) for event in sorted(USER_HOOK_EVENT_FIELDS)),
     ]
 }
 _PLACE: Final[dict[str, JSONValue]] = {
@@ -129,8 +140,9 @@ CREATE_HOOK_TOOL = ToolDefinition.from_spec(
         tool_id=CREATE_HOOK_TOOL_ID,
         name="Create Hook",
         description=(
-            "Send a message later, once, repeatedly, or when the user starts using "
-            "a matching window, to this conversation or to a new one each time."
+            "Send a message later, once, repeatedly, when the user starts using a "
+            "matching window, or when an app starts using the microphone, to this "
+            "conversation or to a new one each time."
         ),
         guide=ToolGuideSpec(
             what=(
@@ -143,14 +155,18 @@ CREATE_HOOK_TOOL = ToolDefinition.from_spec(
                 "unit's start on local time plus offset, or a duration (30m, 2h, 3d) "
                 "that repeats from the approval. Weeks start on Monday 00:00 and "
                 'months on the 1st, so every day at 08:30 is every "day" with offset '
-                '"510m". on "activity" with match fires once each time a window the '
-                "user's computer recorded starts to match: every field match must "
+                '"510m". on "activity" fires once each time a window the '
+                'user\'s computer recorded starts to match. on "microphone" fires '
+                "once each time an app keeps using the microphone for "
+                f"{int(MIC_HOLD.total_seconds())} seconds; its window_title is the "
+                "app's window when it started, and its match is optional: left out "
+                "or empty, it matches any app. In match, every field match must "
                 "hold, a field matches when it equals, or contains, any one of its "
                 "values, ignoring case; values are plain text, not patterns. Apps "
-                "that need different matches take one hook each. The "
-                "matched window's app name, bundle id and title are added to the "
-                "message. Nothing fires at or after until. Give replaces to replace "
-                "one of this conversation's hooks."
+                "that need different matches take one hook each. The app name, "
+                "bundle id and window title that fired are added to the message. "
+                "Nothing fires at or after until. Give replaces to replace one of "
+                "this conversation's hooks."
             ),
             when=(
                 "Use when the user asks for work at a later time, on a repeating "

@@ -14,7 +14,8 @@ const FieldMatchSchema = z.strictObject({
 
 /**
  * One schedule: once `at`, every calendar unit or duration (`offset` after each unit's start),
- * or each time a window starts to match every field of `match`. It sends to its target
+ * or on each event `on` (`activity`, `microphone`) whose fields hold every field of `match`,
+ * which may be empty for `microphone`. It sends to its target
  * conversation, or with none starts a new conversation (a TODO titled `title`) each time.
  */
 const HookSchema = z.strictObject({
@@ -22,6 +23,7 @@ const HookSchema = z.strictObject({
   at: InstantSchema.nullable(),
   every: z.string().nullable(),
   offset: z.string().nullable(),
+  on: z.string().nullable(),
   match: z.array(FieldMatchSchema),
   until: InstantSchema.nullable(),
   message: z.string(),

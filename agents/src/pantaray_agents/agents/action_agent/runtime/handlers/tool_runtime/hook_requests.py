@@ -54,6 +54,7 @@ class _TriggerArg(TypedDict, total=False):
     every: str
     offset: str | None
     on: str
+    # Left out where the event hears every one.
     match: list[_MatchArg]
 
 
@@ -168,7 +169,7 @@ def _schedule(trigger: _TriggerArg, until: datetime | None) -> TaskSchedule:
             on=trigger["on"],
             match=tuple(
                 FieldMatch(field=m["field"], op=m["op"], values=tuple(m["values"]))
-                for m in trigger["match"]
+                for m in trigger.get("match", ())
             ),
         )
     if trigger["kind"] == "at":
@@ -177,11 +178,12 @@ def _schedule(trigger: _TriggerArg, until: datetime | None) -> TaskSchedule:
             every=None,
             offset=None,
             until=until,
+            on=None,
         )
     every, offset = trigger["every"], trigger.get("offset")
     if offset is not None and every[0].isdigit():
         raise HookRequestError("offset goes only with a calendar unit in every.")
-    return TaskSchedule(at=None, every=every, offset=offset, until=until)
+    return TaskSchedule(at=None, every=every, offset=offset, until=until, on=None)
 
 
 def _new_conversation(

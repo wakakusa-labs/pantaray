@@ -54,6 +54,7 @@ from pantaray_agents.local_runtime.tooling.repository.workspace_settings import 
     create_workspace_project,
 )
 from pantaray_agents.schema.agent.base import JSONValue
+from pantaray_llm.providers.schema_compiler import compile_provider_schema
 
 BUSY_TIMEOUT_MS = 1_000
 NOW = "2026-03-23T00:00:02Z"
@@ -291,6 +292,42 @@ async def test_a_new_session_hook_saves_its_title_and_the_place_it_named(
     assert (listed["send_to"], listed["title"]) == ("new_session", "Meeting notes")  # type: ignore[index]
 
 
+@pytest.mark.parametrize(
+    ("trigger", "listed_match"),
+    [
+        # As a strict provider sends a match left out.
+        ({"kind": "on", "on": "microphone", "match": None}, []),
+        ({"kind": "on", "on": "microphone"}, []),
+        ({"kind": "on", "on": "microphone", "match": MEETING_MATCH}, MEETING_MATCH),
+    ],
+)
+async def test_a_microphone_hook_saves_with_or_without_a_match(
+    env: SimpleNamespace, trigger: dict[str, JSONValue], listed_match: list[JSONValue]
+) -> None:
+    # Catches a microphone hook refused for having no match, a left-out match
+    # a strict provider sends as null that fails the call, and a hook saved
+    # to listen to another event than the one shown.
+    compiled = compile_provider_schema(
+        schema=CREATE_HOOK_TOOL.build_validation_input_schema(),
+        usage="tool_parameters",
+    )
+    args = compiled.decode(
+        {**MEETINGS, "trigger": trigger, "until": None, "replaces": None}
+    )
+    assert isinstance(args, dict)
+
+    hook_id = await _create(env, args)
+
+    (row,) = _rows(env)
+    assert (row.task.hook_id, row.task.schedule.on) == (hook_id, "microphone")
+    (listed,) = _run(env, LIST_HOOKS_TOOL, {})["hooks"]  # type: ignore[misc]
+    assert listed["trigger"] == {  # type: ignore[index]
+        "kind": "on",
+        "on": "microphone",
+        "match": listed_match,
+    }
+
+
 async def test_the_approval_review_never_answers_for_a_hook(
     env: SimpleNamespace,
 ) -> None:
@@ -427,6 +464,7 @@ async def test_an_unknown_place_is_refused_with_the_names_there_are(
             "trigger": {"kind": "on", "on": "insight.recorded", "match": MEETING_MATCH},
         },
         {**MEETINGS, "trigger": {"kind": "on", "on": "activity", "match": []}},
+        {**MEETINGS, "trigger": {"kind": "on", "on": "activity"}},
         {
             **MEETINGS,
             "trigger": {

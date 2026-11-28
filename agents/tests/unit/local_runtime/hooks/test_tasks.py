@@ -909,3 +909,34 @@ def test_the_list_names_the_asking_conversation_and_an_activity_condition(
         None,
     )
     assert world.view().match == ()
+
+
+def test_the_list_says_which_event_a_task_fires_on(world: _World) -> None:
+    # Catches a list that drops on, where a microphone task with no match
+    # reads as a task with neither a time nor a condition.
+    world.save()
+    microphone = new_task_id("request-2")
+    _save(
+        world,
+        str(world.action_id),
+        build_task(
+            microphone,
+            TaskSchedule(
+                at=None,
+                every=None,
+                offset=None,
+                until=None,
+                on="microphone",
+                match=(),
+            ),
+            "Start a notes outline.",
+        ),
+    )
+
+    listed = TaskHookResponse.model_validate(world.view(microphone)).model_dump()
+    assert (listed["on"], listed["match"], listed["next_fire_at"]) == (
+        "microphone",
+        (),
+        None,
+    )
+    assert TaskHookResponse.model_validate(world.view()).model_dump()["on"] is None

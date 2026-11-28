@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import type { CapturePermission } from '../../context/zaneiProcess';
+import type { MeetingPermission } from '../../context/meetingTranscript';
 
 export const ONBOARDING_STEPS = ['ai', 'recording', 'web_search', 'apps', 'done'] as const;
 
@@ -20,3 +21,10 @@ export const CapturePermissionSchema = z.enum([
   'automate_browser',
   'automate_safari',
 ] as const satisfies readonly CapturePermission[]);
+
+/** A permission whose System Settings pane the renderer can open: call transcription's too. */
+export const SettingsPanePermissionSchema = z.enum([
+  ...CapturePermissionSchema.options,
+  'microphone',
+  'audio_capture',
+] as const satisfies readonly (CapturePermission | MeetingPermission)[]);

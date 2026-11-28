@@ -51,6 +51,8 @@ export const validReceiveChannels = [
   'recording:gateStateChanged',
   // Main window only: whether the recorder waits on a macOS permission
   'recording:permissionRequiredChanged',
+  // Main window only: the call the recorder offers or transcribes changed
+  'meeting:callChanged',
   // UI language change
   'ui:languageChanged',
   // A downloaded update became ready: re-read the notice
@@ -188,6 +190,15 @@ export const validInvokeChannels = [
   'recording:askForPermission',
   'recording:openPermissionSettings',
   'recording:getPermissionRequired',
+  // Call transcription: the offered call, the user's answer, and its settings
+  'meeting:getCall',
+  'meeting:getAvailability',
+  'meeting:getSettings',
+  'meeting:record',
+  'meeting:stop',
+  'meeting:decline',
+  'meeting:prepare',
+  'meeting:updateSettings',
   // Main window only: first-run setup progress
   'onboarding:getState',
   'onboarding:setState',

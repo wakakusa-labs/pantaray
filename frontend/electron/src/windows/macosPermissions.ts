@@ -2,6 +2,7 @@ import { app, shell, systemPreferences } from 'electron';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { CapturePermission } from '../context/zaneiProcess';
+import type { MeetingPermission } from '../context/meetingTranscript';
 
 const run = promisify(execFile);
 
@@ -36,7 +37,10 @@ const SETTINGS_PANES = {
   capture_screen: 'Privacy_ScreenCapture',
   automate_browser: 'Privacy_Automation',
   automate_safari: 'Privacy_Automation',
-} as const satisfies Record<CapturePermission, string>;
+  microphone: 'Privacy_Microphone',
+  // System audio is granted in the Screen & System Audio Recording pane.
+  audio_capture: 'Privacy_ScreenCapture',
+} as const satisfies Record<CapturePermission | MeetingPermission, string>;
 
 /**
  * Lets the E2E harness stand in for macOS: a CI runner grants no app Accessibility,
@@ -91,7 +95,9 @@ export function readCapturePermissions(): CapturePermissions {
 }
 
 /** Opens the System Settings pane where the user grants this permission. */
-export function openCapturePermissionSettings(permission: CapturePermission): Promise<void> {
+export function openCapturePermissionSettings(
+  permission: CapturePermission | MeetingPermission
+): Promise<void> {
   return shell.openExternal(
     `x-apple.systempreferences:com.apple.preference.security?${SETTINGS_PANES[permission]}`
   );

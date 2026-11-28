@@ -12,7 +12,7 @@ const PARITY_CASES = fs.readFileSync(
 );
 const isParityCasesUrl = (url) => url.includes('privacy_parity_cases.json');
 
-function fixture(t, version = '0.5.0') {
+function fixture(t, version = '0.5.0', { pinned = version, helper = false } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-zanei-test-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const app = path.join(root, 'source/Zanei.app/Contents/MacOS');
@@ -20,6 +20,7 @@ function fixture(t, version = '0.5.0') {
   fs.writeFileSync(path.join(app, 'zanei'), `#!/bin/sh\nprintf 'zanei ${version}\\n'\n`, {
     mode: 0o755,
   });
+  if (helper) fs.writeFileSync(path.join(app, 'zanei-meeting'), 'helper', { mode: 0o755 });
   fs.writeFileSync(path.join(root, 'source/THIRD_PARTY_NOTICES.md'), 'Notices');
   const archivePath = path.join(root, 'release.tar.gz');
   execFileSync('/usr/bin/tar', [
@@ -35,7 +36,7 @@ function fixture(t, version = '0.5.0') {
   fs.writeFileSync(
     releasePath,
     JSON.stringify({
-      version: '0.5.0',
+      version: pinned,
       artifactSHA256: createHash('sha256').update(archive).digest('hex'),
       privacyParityCasesSHA256: createHash('sha256').update(PARITY_CASES).digest('hex'),
     })
@@ -76,7 +77,7 @@ test('stages authenticated app and notices with matching executable version', as
 
 for (const failure of ['unpinned', 'checksum', 'parity', 'network', 'signature', 'version']) {
   test(`${failure} fails without replacing the existing runtime`, async (t) => {
-    const options = fixture(t, failure === 'version' ? '0.4.0' : '0.5.0');
+    const options = fixture(t, failure === 'version' ? '0.4.0' : '0.5.0', { pinned: '0.5.0' });
     if (failure === 'unpinned')
       fs.writeFileSync(
         options.releasePath,
@@ -100,3 +101,14 @@ for (const failure of ['unpinned', 'checksum', 'parity', 'network', 'signature',
     assert.ok(!fs.readdirSync(options.root).some((name) => name.startsWith('.zanei-stage-')));
   });
 }
+
+test('a release that ships the transcription helper stages only with it', async (t) => {
+  const withHelper = fixture(t, '0.8.0', { helper: true });
+  await stageZaneiRuntime(withHelper);
+  assert.ok(fs.existsSync(path.join(withHelper.stagingDir, 'Zanei.app/Contents/MacOS/zanei-meeting')));
+
+  // The app hosts transcription exactly when the helper is staged, so a missing one fails.
+  const missing = fixture(t, '0.10.0');
+  await assert.rejects(stageZaneiRuntime(missing), /0\.10\.0 release is missing zanei-meeting/);
+  assert.equal(fs.readFileSync(path.join(missing.stagingDir, 'previous'), 'utf8'), 'preserve');
+});

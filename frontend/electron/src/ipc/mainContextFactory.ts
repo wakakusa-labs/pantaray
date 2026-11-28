@@ -163,6 +163,13 @@ export function buildMainContext(params: {
     return state.owner.id;
   }
 
+  const withOwner =
+    <A extends unknown[], R>(operation: (...args: A) => R) =>
+    (...args: A): R => {
+      requireOwner();
+      return operation(...args);
+    };
+
   async function updatePrivacy<T>(update: () => T): Promise<T> {
     const ownerId = requireOwner();
     const assertOwner = () => {
@@ -383,6 +390,19 @@ export function buildMainContext(params: {
       askForPermission: (permission) => params.askForCapturePermission(permission),
       openPermissionSettings: (permission) => params.openCapturePermissionSettings(permission),
       getPermissionRequired: () => params.readCapturePermissionRequired(),
+    },
+
+    meeting: {
+      getCall: () => params.screenshotSync.meeting.getCall(),
+      readAvailability: withOwner(() => params.screenshotSync.meeting.readAvailability()),
+      getSettings: withOwner(() => params.screenshotSync.meeting.getSettings()),
+      record: withOwner((callId) => params.screenshotSync.meeting.record(callId)),
+      stop: withOwner((callId) => params.screenshotSync.meeting.stop(callId)),
+      decline: (callId) => params.screenshotSync.meeting.decline(callId),
+      prepare: withOwner(() => params.screenshotSync.meeting.prepare()),
+      updateSettings: withOwner((settings) =>
+        params.screenshotSync.meeting.updateSettings(settings)
+      ),
     },
 
     onboarding: params.onboarding,

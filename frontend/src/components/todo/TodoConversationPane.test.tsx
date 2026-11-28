@@ -52,6 +52,7 @@ function renderPane(todo: TodoView, list: HookList | Error) {
       <OpenWorkContext.Provider value={openWork}>
         <TodoConversationPane
           todo={todo}
+          settings={null}
           pending={false}
           deletionFailure={null}
           onAnswerDeletion={vi.fn()}

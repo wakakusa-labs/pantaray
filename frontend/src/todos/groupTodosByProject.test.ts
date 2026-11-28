@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 
 import type { TodoListPage, TodoView } from '../../electron/src/todos/todoContracts';
-import { groupTodosByProject, todoProjectSlots } from './groupTodosByProject';
+import { groupTodosByProject, todoPlaceName, todoProjectSlots } from './groupTodosByProject';
 
 const settings = {
   organizations: [
@@ -148,4 +148,17 @@ it('keeps only the project the filter names', () => {
   expect(none).toEqual([
     { projectId: null, organizationId: null, projectName: null, organization: null },
   ]);
+});
+
+it('names a TODO’s place as the list groups it', () => {
+  const place = (project_id: string | null, organization_id: string | null = null) =>
+    todoPlaceName(settings, { project_id, organization_id });
+  // A project in two organizations is under the first in their order, as in the list.
+  expect(place('p-both')).toEqual({ organization: 'Alpha', project: 'Both' });
+  expect(place('p-loose1')).toEqual({ organization: null, project: 'Loose 1' });
+  expect(place(null, 'org-b')).toEqual({ organization: 'Beta', project: null });
+  expect(place(null)).toEqual({ organization: null, project: null });
+  // Not in the settings read yet: nothing rather than a wrong place.
+  expect(place('p-new')).toBeNull();
+  expect(place(null, 'org-new')).toBeNull();
 });

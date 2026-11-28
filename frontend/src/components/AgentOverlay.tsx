@@ -32,6 +32,7 @@ import {
   OverlayComposer,
 } from './agent-overlay/OverlayComposer';
 import { QuickTodoPanel } from './agent-overlay/QuickTodoPanel';
+import { useTodoPlaceName } from './agent-overlay/useTodoPlaceName';
 type AgentOverlayProps = {
   entryMode?: 'overlay' | 'standalone';
   /** Existing Action this standalone Overlay continues, or null for the panel that adds a TODO. */
@@ -193,6 +194,7 @@ const ConversationOverlay = ({
   const repliesToSuggestion =
     state.interactionContract === 'message_only' || state.reactionState === 'rejected';
   const approvedSuggestion = currentView?.action?.approved_suggestion ?? null;
+  const todoPlace = useTodoPlaceName(state.todo);
   const suggestionDisplay = {
     suggestionText:
       approvedSuggestion?.content ??
@@ -203,9 +205,10 @@ const ConversationOverlay = ({
       (state.interactionContract === 'action_offer' && state.reactionState === 'accepted'),
     // How the TODO stands shows until a reply carries the work on; the conversation shows it then.
     todo: state.todo && {
-      text: state.todo.text,
+      ...state.todo,
       state: currentView?.action || state.reactionState === 'accepted' ? null : state.todo.state,
     },
+    todoPlace,
     dismissal:
       state.interactionContract === 'action_offer' && state.reactionState === 'rejected'
         ? { reason: state.dismissReason }

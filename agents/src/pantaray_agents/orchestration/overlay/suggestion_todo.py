@@ -27,11 +27,22 @@ def read_suggestion_todo(
     entry = read_todo(user_id=user_id, todo_id=suggestion_todo_id(suggestion_id))
     if entry is None:
         return None
+    todo = entry.todo
     if entry.conversation.kind == "action":
-        return SuggestionTodoView(text=entry.todo.text, state=None)
-    state = display_state(entry.todo, entry.conversation, read_todo_clock().today)
+        return SuggestionTodoView(
+            text=todo.text,
+            state=None,
+            project_id=todo.project_id,
+            organization_id=todo.organization_id,
+        )
+    state = display_state(todo, entry.conversation, read_todo_clock().today)
     # Without an Action a Suggestion's TODO is only ever done, partial, waiting
     # or handed over.
     if not isinstance(state, Done | Partial | Waiting | HandedOver):
         raise ValueError(f"A Suggestion's TODO without an Action is {state.kind}")
-    return SuggestionTodoView(text=entry.todo.text, state=state.kind)
+    return SuggestionTodoView(
+        text=todo.text,
+        state=state.kind,
+        project_id=todo.project_id,
+        organization_id=todo.organization_id,
+    )

@@ -1,5 +1,6 @@
-"""The TODO a shown Suggestion became reaches its popup: relayed when it arrives,
-and read again, as it stands now, when the popup is opened later."""
+"""The TODO a shown Suggestion became reaches its popup with where it sits:
+relayed when it arrives, and read again, as it stands now, when the popup is
+opened later."""
 
 from __future__ import annotations
 
@@ -34,6 +35,7 @@ from pantaray_agents.orchestration.ws.suggestion_relay import LiveSuggestionProc
 from pantaray_agents.schema.agent.base import StatusType
 from pantaray_agents.schema.agent.suggestion import (
     SuggestionAgentResponse,
+    SuggestionTargetContext,
     SuggestionTodo,
     SuggestionTodoOutcome,
 )
@@ -42,6 +44,7 @@ from pantaray_agents.schema.overlay_bootstrap import SuggestionTodoView
 BUSY_TIMEOUT_MS = 1_000
 USER_ID = "user-1"
 SUGGESTION_ID = "sug-1"
+PROJECT_ID = "project-1"
 TIMESTAMP = "2026-11-16T00:00:00Z"
 
 
@@ -55,6 +58,11 @@ async def _save_offer(
             "INSERT INTO users(user_id, ui_language, created_at, updated_at)"
             " VALUES (?, 'ja', ?, ?)",
             (USER_ID, TIMESTAMP, TIMESTAMP),
+        )
+        connection.execute(
+            "INSERT INTO workspace_projects(project_id, user_id, display_name,"
+            " created_at, updated_at) VALUES (?, ?, 'Decks', ?, ?)",
+            (PROJECT_ID, USER_ID, TIMESTAMP, TIMESTAMP),
         )
     monkeypatch.setenv("LOCAL_DB_PATH", str(db_path))
     repository = LocalSuggestionRepository(
@@ -79,6 +87,9 @@ async def _save_offer(
                 note=None if outcome == "open" else "Charts are left",
             ),
             interaction_contract="action_offer",
+            target_context=SuggestionTargetContext(
+                organization_name=None, project_name="Decks"
+            ),
         ),
         prompt_name="suggestion",
         prompt_version="test",
@@ -127,7 +138,12 @@ async def test_relayed_on_arrival_and_read_as_it_stands_when_opened_later(
     )
     sent = [call.args[0] for call in websocket.send_json.call_args_list]
     assert [m["data"]["todo"] for m in sent if m["event"] == "process_completed"] == [
-        {"text": "Draft the deck", "state": "waiting"}
+        {
+            "text": "Draft the deck",
+            "state": "waiting",
+            "project_id": PROJECT_ID,
+            "organization_id": None,
+        }
     ]
 
     # The user finishes it in the TODO list; the popup opened afterwards says so.
@@ -146,5 +162,8 @@ async def test_relayed_on_arrival_and_read_as_it_stands_when_opened_later(
         repository, db_path=tmp_path / "runtime.db"
     ).build_for_suggestion(user_id=USER_ID, suggestion_id=SUGGESTION_ID)
     assert bootstrap.snapshot.todo == SuggestionTodoView(
-        text="Draft the deck", state="done"
+        text="Draft the deck",
+        state="done",
+        project_id=PROJECT_ID,
+        organization_id=None,
     )

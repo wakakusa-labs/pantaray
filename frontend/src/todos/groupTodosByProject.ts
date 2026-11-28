@@ -36,16 +36,46 @@ export type TodoProjectGroupView = TodoProjectSlot & {
   items: TodoView[];
 };
 
+type PlaceSettings = Pick<WorkspaceSettings, 'organizations' | 'projects'>;
+
+/** The organization a project is listed under: the first of its organizations, in their order. */
+const firstOrganization = (settings: PlaceSettings, project: WorkspaceProject) =>
+  settings.organizations.find((organization) =>
+    project.organization_ids.includes(organization.organization_id)
+  );
+
+/** Where a TODO sits, by name: its organization, if any, and its project, null for no project. */
+export type TodoPlaceName = { organization: string | null; project: string | null };
+
+/**
+ * Names a TODO's place as the list groups it: a project under the organization it is listed
+ * under, or no project in the TODO's own organization or none. Null while the settings do not
+ * know the place yet.
+ */
+export function todoPlaceName(
+  settings: PlaceSettings,
+  todo: { project_id: string | null; organization_id: string | null }
+): TodoPlaceName | null {
+  if (todo.project_id !== null) {
+    const project = settings.projects.find((item) => item.project_id === todo.project_id);
+    if (project === undefined) return null;
+    const organization = firstOrganization(settings, project)?.display_name ?? null;
+    return { organization, project: project.display_name };
+  }
+  if (todo.organization_id === null) return { organization: null, project: null };
+  const organization = settings.organizations.find(
+    (item) => item.organization_id === todo.organization_id
+  );
+  return organization ? { organization: organization.display_name, project: null } : null;
+}
+
 /**
  * The places the scope shows, in order: projects by the workspace's order, each organization's
  * own no project after its projects and, while all organizations are in view, by organization
  * first. Projects in no organization, then no project in none, come last. A project in several
  * organizations is shown once, under the first of them, so each TODO is one row.
  */
-function scopeSlots(
-  settings: Pick<WorkspaceSettings, 'organizations' | 'projects'>,
-  scope: TodoScopeQuery
-): TodoProjectSlot[] {
+function scopeSlots(settings: PlaceSettings, scope: TodoScopeQuery): TodoProjectSlot[] {
   const projects = [...settings.projects].sort(compareProjects);
   const slot = (
     project: WorkspaceProject,
@@ -73,10 +103,6 @@ function scopeSlots(
       return [...unorganized.map((project) => slot(project, null)), noProject(null, null)];
     case 'all': {
       const none: TodoGroupOrganization = { kind: 'none' };
-      const firstOrganization = (project: WorkspaceProject) =>
-        settings.organizations.find((organization) =>
-          project.organization_ids.includes(organization.organization_id)
-        );
       return [
         ...settings.organizations.flatMap((organization) => {
           const heading: TodoGroupOrganization = {
@@ -85,7 +111,7 @@ function scopeSlots(
           };
           return [
             ...projects
-              .filter((project) => firstOrganization(project) === organization)
+              .filter((project) => firstOrganization(settings, project) === organization)
               .map((project) => slot(project, heading)),
             noProject(organization.organization_id, heading),
           ];
@@ -103,7 +129,7 @@ const inFilter = (projectId: string | null, filter: TodoProjectFilter): boolean 
 
 /** The projects in view under the sidebar's project filter. */
 export const todoProjectSlots = (
-  settings: Pick<WorkspaceSettings, 'organizations' | 'projects'>,
+  settings: PlaceSettings,
   scope: TodoScopeQuery,
   filter: TodoProjectFilter
 ): TodoProjectSlot[] =>

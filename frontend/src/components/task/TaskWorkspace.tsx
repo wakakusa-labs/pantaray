@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 
 import { OpenFileLinkContext } from '@/components/agent-overlay/openFileLinkContext';
+import type { TodoPlaceName } from '@/todos/groupTodosByProject';
 
 import { ActionTaskPane } from './ActionTaskPane';
 import { BrowserViewPane } from './BrowserViewPane';
@@ -18,6 +19,8 @@ type TaskWorkspaceProps = {
   /** The workspace holds one Action's preview, so the page keys it by this id. */
   actionId: string;
   title: string;
+  /** Where the Action's TODO sits, named under the title. */
+  place?: TodoPlaceName | null;
   /** The file the suggestion this Action started from had open, which stays open. */
   initialPreview?: TaskPreview | null;
   onAddProject: () => void;
@@ -43,6 +46,7 @@ type WorkspacePreview =
 export function TaskWorkspace({
   actionId,
   title,
+  place,
   initialPreview = null,
   onAddProject,
   pageControls,
@@ -63,6 +67,7 @@ export function TaskWorkspace({
     <ActionTaskPane
       actionId={actionId}
       title={title}
+      place={place}
       onAddProject={onAddProject}
       pageControls={pageControls}
       conversationStart={conversationStart}

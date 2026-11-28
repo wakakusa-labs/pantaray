@@ -26,7 +26,7 @@ from pantaray_agents.local_runtime.runtime import (
     action_job_runtime_repository,
     job_payload_models,
 )
-from pantaray_agents.local_runtime.runtime.action_approval import (
+from pantaray_agents.local_runtime.runtime.action_approval_decision import (
     ActionApprovalDecisionCommand,
     ActionApprovalDecisionError,
     apply_action_approval_decision,
@@ -245,19 +245,6 @@ async def test_action_approval_decision_resumes_the_same_runtime(
 ) -> None:
     db_path = pending_approval.db_path
     action_id = pending_approval.action_id
-    steer = submit_action_message(
-        SubmitActionMessageCommand(
-            user_id="user-1",
-            target=ExistingActionTarget(
-                action_id=action_id,
-                expected_process_id=pending_approval.predecessor_process_id,
-            ),
-            message=ActionUserMessageInput(
-                message_id="message-steer",
-                content="Continue after this approval",
-            ),
-        )
-    )
     command = ActionApprovalDecisionCommand(
         user_id="user-1",
         action_id=action_id,
@@ -288,13 +275,6 @@ async def test_action_approval_decision_resumes_the_same_runtime(
         payload_row = connection.execute(
             "SELECT payload_json FROM job_payloads WHERE job_id = ?",
             (result.job_id,),
-        ).fetchone()
-        steer_row = connection.execute(
-            """
-            SELECT step_number, adopted_process_id, adoption_canceled_at
-            FROM agent_action_steps WHERE step_id = ?
-            """,
-            (steer.user_step_id,),
         ).fetchone()
         public_event = connection.execute(
             """
@@ -347,7 +327,6 @@ async def test_action_approval_decision_resumes_the_same_runtime(
     }
     assert result.job_id == pending_approval.predecessor_job_id
     assert result.process_id == pending_approval.predecessor_process_id
-    assert steer_row == (None, None, None)
     assert public_event[:2] == (None, "action_resume_requested")
     assert predecessor_job == ("queued", None, None, None)
     assert predecessor_process == ("enqueued", None, None)
@@ -436,6 +415,58 @@ async def test_action_approval_decision_resumes_the_same_runtime(
 
     assert runtime_status == ("canceled", "canceled")
     assert started_after_terminal == 0
+
+
+def test_message_sent_while_approval_waits_sets_it_aside_and_resumes_the_run(
+    pending_approval: PendingApprovalFixture,
+) -> None:
+    fixture = pending_approval
+    result = submit_action_message(
+        SubmitActionMessageCommand(
+            user_id="user-1",
+            target=ExistingActionTarget(
+                action_id=fixture.action_id,
+                expected_process_id=fixture.predecessor_process_id,
+            ),
+            message=ActionUserMessageInput(message_id="message-2", content="Wait"),
+        )
+    )
+
+    with sqlite3.connect(fixture.db_path) as connection:
+        approval = connection.execute(
+            "SELECT status FROM approval_sessions WHERE approval_session_id = ?",
+            ("approval-1",),
+        ).fetchone()
+        runtime = connection.execute(
+            """
+            SELECT jobs.status, processes.status, job_payloads.payload_json
+            FROM jobs
+            JOIN processes ON processes.process_id = jobs.process_id
+            JOIN job_payloads ON job_payloads.job_id = jobs.job_id
+            WHERE jobs.job_id = ?
+            """,
+            (fixture.predecessor_job_id,),
+        ).fetchone()
+        user_row = connection.execute(
+            "SELECT step_number, expected_process_id, adopted_process_id "
+            "FROM agent_action_steps WHERE step_id = ?",
+            (result.user_step_id,),
+        ).fetchone()
+
+    # Set aside, not denied, and the paused run goes on at once to read the message.
+    assert approval == ("interrupted",)
+    assert runtime[:2] == ("queued", "enqueued")
+    assert json.loads(runtime[2])["continuation_ref"] == {
+        "kind": "tool_approval",
+        "approval_session_id": "approval-1",
+        "tool_request_id": "tool-request-1",
+    }
+    assert user_row == (None, fixture.predecessor_process_id, None)
+    # Electron reattaches the resumed run's stream from this.
+    assert (result.disposition, result.process_id) == (
+        "pending",
+        fixture.predecessor_process_id,
+    )
 
 
 def _add_second_pending_approval(fixture: PendingApprovalFixture) -> None:

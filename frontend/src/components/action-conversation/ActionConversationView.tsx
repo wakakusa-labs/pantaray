@@ -66,13 +66,20 @@ type LabeledToolStatus = Exclude<ToolStatus, 'success'>;
 
 /**
  * 承認されなかった呼び出しと、記録がオフのまま呼ばれた読み取りは、成功したステップとして
- * 残る。停止が届いたとき発行前だった呼び出しは、失敗したステップとして残る。どれも
+ * 残る。停止や、承認の代わりに送られたメッセージが届いたとき発行前だった呼び出しは、
+ * 失敗したステップとして残る。どれも
  * 走らなかったことに変わりはないので、状態語より先に「未実行」を出す。行を眺めるだけの
  * 人にも分かるよう、失敗の色は使わない。描く準備を待っているページと、編集の前に読ませる
  * ため中身だけを返したパッチも失敗ではなく、行の文がそう言うので状態語は出さない。
  */
 function toolRowStatus(entry: ToolEntry, copy: Copy): ToolRowStatus | null {
-  if (entry.outcome === 'not_executed') return { label: copy.toolNotRun, failed: false };
+  if (
+    entry.outcome === 'not_executed' ||
+    entry.outcome === 'approval_set_aside' ||
+    entry.outcome === 'message_arrived'
+  ) {
+    return { label: copy.toolNotRun, failed: false };
+  }
   if (entry.status !== 'success') {
     return { label: copy.toolStatus[entry.status], failed: entry.status !== 'processing' };
   }

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from pantaray_agents.agents.action_agent.runtime.state import ActionAgentState
@@ -29,6 +30,8 @@ from ...tool_runtime.formal_step import (
 )
 from ...tool_runtime.outcome_line import OutcomeStatus, build_outcome_line
 from ...tool_runtime.shared import (
+    APPROVAL_SET_ASIDE_OUTPUT_KIND,
+    MESSAGE_ARRIVED_OUTPUT_KIND,
     NOT_EXECUTED_OUTPUT_KIND,
     ToolCompletionAuditPersistenceError,
 )
@@ -62,7 +65,55 @@ TOOL_NOT_EXECUTED_MESSAGE = (
     "The user stopped the run before this call was issued. It never ran, so it "
     "changed nothing and left nothing to check."
 )
+# The user sent a message instead of answering this call's approval request, or
+# before a later call of the same batch was issued. Neither ran; the next THINK
+# reads the message.
+TOOL_APPROVAL_SET_ASIDE_ERROR_CODE = "ACTION_TOOL_APPROVAL_SET_ASIDE"
+TOOL_APPROVAL_SET_ASIDE_MESSAGE = (
+    "The user sent a new message instead of answering the approval request for "
+    "this call, so it did not run and changed nothing. Read their message; if "
+    "this call is still needed, request it again."
+)
+TOOL_MESSAGE_ARRIVED_MESSAGE = (
+    "The user sent a new message before this call was issued. It never ran, so it "
+    "changed nothing and left nothing to check. Read their message before "
+    "deciding whether it is still needed."
+)
 _TOKEN_BUDGET_EXCEEDED_CODE = "ACTION_TOKEN_BUDGET_EXCEEDED"
+
+
+@dataclass(frozen=True, slots=True)
+class NotExecutedCause:
+    """Why a call ended without being issued, as its step, body and line say."""
+
+    error_type: str
+    error_code: str
+    message: str
+    output_kind: str
+    outcome_status: OutcomeStatus
+
+
+STOPPED_BEFORE_ISSUE = NotExecutedCause(
+    "ActionStopped",
+    TOOL_NOT_EXECUTED_ERROR_CODE,
+    TOOL_NOT_EXECUTED_MESSAGE,
+    NOT_EXECUTED_OUTPUT_KIND,
+    "not_executed",
+)
+APPROVAL_SET_ASIDE = NotExecutedCause(
+    "ApprovalSetAside",
+    TOOL_APPROVAL_SET_ASIDE_ERROR_CODE,
+    TOOL_APPROVAL_SET_ASIDE_MESSAGE,
+    APPROVAL_SET_ASIDE_OUTPUT_KIND,
+    "approval_set_aside",
+)
+MESSAGE_ARRIVED_BEFORE_ISSUE = NotExecutedCause(
+    "UserMessageArrived",
+    TOOL_NOT_EXECUTED_ERROR_CODE,
+    TOOL_MESSAGE_ARRIVED_MESSAGE,
+    MESSAGE_ARRIVED_OUTPUT_KIND,
+    "message_arrived",
+)
 
 
 async def save_token_accounting_error_step(
@@ -243,6 +294,7 @@ async def finalize_tool_call_interrupted(
         step_id=step_id,
         args_payload=args_payload,
         started_at=started_at,
+        error_type="ActionStopped",
         error_code=TOOL_CANCELED_ERROR_CODE,
         message=TOOL_INTERRUPTED_MESSAGE,
         output=_interrupted_output(partial_output),
@@ -259,6 +311,7 @@ async def finalize_tool_call_not_executed(
     step_id: str,
     args_payload: ToolArgsPayload,
     started_at: str,
+    cause: NotExecutedCause,
 ) -> None:
     """停止操作が届いた時点でまだ発行していなかった呼び出しを終端として確定する。
 
@@ -266,6 +319,8 @@ async def finalize_tool_call_not_executed(
     一度も発行されていないので外部への影響が無いことは確定していて、そう言い切れる
     のはこの状態だけ。打ち切った呼び出しと同じ「stopped by user」で畳むと、次の
     THINK は「やり直してよい」と「状態を確認してからにせよ」を区別できなくなる。
+    承認を求めた呼び出しとその残りに、答えの代わりにメッセージが届いたときも同じ
+    （``cause`` が理由を分ける）。
     """
 
     await _record_stopped_call(
@@ -276,10 +331,11 @@ async def finalize_tool_call_not_executed(
         step_id=step_id,
         args_payload=args_payload,
         started_at=started_at,
-        error_code=TOOL_NOT_EXECUTED_ERROR_CODE,
-        message=TOOL_NOT_EXECUTED_MESSAGE,
-        output={"kind": NOT_EXECUTED_OUTPUT_KIND},
-        outcome_status="not_executed",
+        error_type=cause.error_type,
+        error_code=cause.error_code,
+        message=cause.message,
+        output={"kind": cause.output_kind},
+        outcome_status=cause.outcome_status,
     )
 
 
@@ -312,6 +368,7 @@ async def _record_stopped_call(
     step_id: str,
     args_payload: ToolArgsPayload,
     started_at: str,
+    error_type: str,
     error_code: str,
     message: str,
     output: dict[str, JSONValue],
@@ -331,7 +388,7 @@ async def _record_stopped_call(
         step_id=step_id,
         status="error",
         output=build_runtime_tool_error_output(
-            error_type="ActionStopped",
+            error_type=error_type,
             message=message,
             details={"tool_id": slot.tool_id},
         )
@@ -500,11 +557,16 @@ async def _record_failed_call(
 
 
 __all__ = [
+    "APPROVAL_SET_ASIDE",
+    "MESSAGE_ARRIVED_BEFORE_ISSUE",
+    "STOPPED_BEFORE_ISSUE",
+    "TOOL_APPROVAL_SET_ASIDE_ERROR_CODE",
     "TOOL_BATCH_TIMEOUT_ERROR_CODE",
     "TOOL_CANCELED_ERROR_CODE",
     "TOOL_INTERRUPTED_MESSAGE",
     "TOOL_NOT_EXECUTED_ERROR_CODE",
     "TOOL_NOT_EXECUTED_MESSAGE",
+    "NotExecutedCause",
     "finalize_tool_call_interrupted",
     "finalize_tool_call_not_executed",
     "finalize_tool_call_timeout",

@@ -11,7 +11,7 @@ import pytest
 from fastapi import HTTPException
 from tests.unit.local_runtime.run_end_probe import install_run_end_probe
 
-from pantaray_agents.local_runtime.runtime.action_approval import (
+from pantaray_agents.local_runtime.runtime.action_approval_decision import (
     ActionApprovalDecisionCommand,
     ActionApprovalDecisionError,
     apply_action_approval_decision,

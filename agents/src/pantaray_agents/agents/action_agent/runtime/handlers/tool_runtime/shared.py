@@ -22,6 +22,10 @@ APPROVAL_REQUIRED_OUTPUT_KIND = "approval_required"
 APPROVAL_DENIED_OUTPUT_KIND = "approval_denied"
 NOT_EXECUTED_OUTPUT_KIND = "not_executed"
 """Body marker of a call a user Stop reached before it was ever issued."""
+APPROVAL_SET_ASIDE_OUTPUT_KIND = "approval_set_aside"
+"""Body marker of a call whose approval the user answered with a new message."""
+MESSAGE_ARRIVED_OUTPUT_KIND = "message_arrived"
+"""Body marker of a call that user message reached before it was ever issued."""
 
 
 class ToolValidationError(RuntimeError):

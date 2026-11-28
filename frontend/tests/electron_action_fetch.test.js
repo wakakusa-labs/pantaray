@@ -498,7 +498,7 @@ test('Action fetcher はdisposition・run outcome・tool availabilityの破損�
   reversedConversation.runs[1].completed_at = '2026-08-29T23:59:59.999999Z';
   const cases = [
     {
-      payload: { ...MESSAGE_RESPONSE, disposition: 'pending' },
+      payload: { ...MESSAGE_RESPONSE, disposition: 'not_executed' },
       call: (fetcher) => fetcher.submitMessage(MESSAGE_REQUEST),
     },
     {

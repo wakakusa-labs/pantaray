@@ -106,6 +106,13 @@ APPROVAL_DENIED_MESSAGE = (
     "The requested tool call was denied by the user. "
     "Treat this tool call as skipped and continue."
 )
+# The child never sees the user's message, which went to the Action itself.
+APPROVAL_SET_ASIDE_MESSAGE = (
+    "The user sent a new message instead of answering the approval request for "
+    "this call, so it did not run and changed nothing. The message went to the "
+    "agent that assigned your task, which reads it once you report. If this call "
+    "is still needed, request it again; otherwise report what you have."
+)
 _APPROVAL_DENIED_RESULT_SCHEMA: JsonSchema = {
     "type": "object",
     "additionalProperties": False,
@@ -149,6 +156,21 @@ class ApprovalReviewer:
     client: LLMClientProtocol
     sink: TokenSink
     stop_watch: ActionStopWatch
+
+
+def approval_set_aside_result(tool_id: str) -> ReactToolResult:
+    """Answer a resumed child's paused call whose approval the user set aside."""
+
+    return ReactToolResult(
+        tool_name=tool_id,
+        status="success",
+        output={
+            "kind": "approval_set_aside",
+            "tool_id": tool_id,
+            "executed": False,
+            "message": APPROVAL_SET_ASIDE_MESSAGE,
+        },
+    )
 
 
 async def execute_action_subagent_broker_tool(

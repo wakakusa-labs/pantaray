@@ -10,6 +10,7 @@ from pantaray_agents.action_status import (
     ACTION_FAILURE_CODE_RESUME_APPROVAL_STATE_INVALID,
 )
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.request_identity import (
+    set_aside_resumed_tool_request,
     set_resumed_tool_request_id,
     set_resumed_tool_step_id,
 )
@@ -36,6 +37,7 @@ from .resume_errors import ResumeStateError
 _APPROVAL_STATUS_PENDING = "pending"
 _APPROVAL_STATUS_APPROVED_ONCE = "approved_once"
 _APPROVAL_STATUS_DENIED = "denied"
+_APPROVAL_STATUS_INTERRUPTED = "interrupted"
 
 type ApprovalSessionLoader = Callable[[str, str], StoredApprovalSession | None]
 
@@ -87,7 +89,17 @@ def normalize_approval_resume_state(
     load_approval_session_by_request: ApprovalSessionLoader,
     now_provider: Callable[[], str],
     paused_tool_step_id: str | None = None,
+    resumed_approval_session_id: str | None = None,
 ) -> ActionAgentState:
+    """Apply the decided approval of the paused call to its checkpoint.
+
+    ``resumed_approval_session_id`` is the session the ``tool_approval``
+    continuation resumes. Only that continuation may restore an ``interrupted``
+    session: a USER message sent instead of answering interrupts it and enqueues
+    this resume, and the call is then settled as not run. Every other writer of
+    ``interrupted`` ends the run, so it never resumes from here.
+    """
+
     pending_request = checkpoint_state.get("pending_approval_request")
     if pending_request is None:
         return checkpoint_state
@@ -122,12 +134,18 @@ def normalize_approval_resume_state(
     approval_status = getattr(approval_session, "status", None)
     if approval_status == _APPROVAL_STATUS_PENDING:
         return checkpoint_state
-    if approval_status == _APPROVAL_STATUS_DENIED:
+    set_aside = (
+        approval_status == _APPROVAL_STATUS_INTERRUPTED
+        and resumed_approval_session_id == parsed_request.approval_session_id
+    )
+    if approval_status == _APPROVAL_STATUS_DENIED or set_aside:
         restore_pending_tool_request_for_approval_resume(
             checkpoint_state,
             now_provider=now_provider,
             paused_tool_step_id=paused_tool_step_id,
         )
+        if set_aside:
+            set_aside_resumed_tool_request(checkpoint_state)
         clear_current_approval_blocker(
             checkpoint_state,
             approval_session_id=parsed_request.approval_session_id,

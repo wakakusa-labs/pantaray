@@ -1088,8 +1088,10 @@ def test_a_stop_while_the_child_review_runs_approves_and_writes_nothing(
             '"result":{"status":"success"',
         ),
         ("denied", None, [], 0, '"kind":"approval_denied"'),
+        # The user sent the Action a message instead of answering.
+        ("interrupted", None, [], 0, '"kind":"approval_set_aside"'),
     ),
-    ids=("approve", "deny"),
+    ids=("approve", "deny", "set_aside"),
 )
 def test_decided_gated_tool_settles_the_saved_request_exactly_once(
     monkeypatch: pytest.MonkeyPatch,

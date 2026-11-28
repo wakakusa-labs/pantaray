@@ -8,6 +8,7 @@ from pantaray_agents.utils.strict_numbers import is_strict_int
 _APPROVAL_REQUEST_COUNTERS_KEY = "approval_request_counters"
 _APPROVAL_RESUME_TOOL_REQUEST_ID_KEY = "approval_resume_tool_request_id"
 _APPROVAL_RESUME_TOOL_STEP_ID_KEY = "approval_resume_tool_step_id"
+_APPROVAL_SET_ASIDE_TOOL_REQUEST_ID_KEY = "approval_set_aside_tool_request_id"
 
 
 def resolve_tool_request_id(*, state, step_id: str) -> str:
@@ -72,6 +73,28 @@ def set_resumed_tool_step_id(*, state, step_id: str) -> None:
 
 def consume_resumed_tool_step_id(state) -> str | None:
     return _consume_resumed_identity(state, key=_APPROVAL_RESUME_TOOL_STEP_ID_KEY)
+
+
+def set_aside_resumed_tool_request(state) -> None:
+    """Mark the restored call as answered by a new USER message instead.
+
+    It must not run, and its request identity must not reach the next call, which
+    would otherwise find this approval again.
+    """
+
+    tool_request_id = consume_resumed_tool_request_id(state)
+    if tool_request_id is None:
+        raise RuntimeError("Only a restored tool request can be set aside.")
+    ensure_context(state)[_APPROVAL_SET_ASIDE_TOOL_REQUEST_ID_KEY] = tool_request_id
+
+
+def consume_set_aside_tool_request(state) -> bool:
+    """Whether the restored call's approval was answered by a new USER message."""
+
+    return (
+        _consume_resumed_identity(state, key=_APPROVAL_SET_ASIDE_TOOL_REQUEST_ID_KEY)
+        is not None
+    )
 
 
 def _set_resumed_identity(state, *, key: str, value: str, label: str) -> None:

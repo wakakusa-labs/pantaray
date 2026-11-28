@@ -358,6 +358,9 @@ class ActionResumeService:
             ),
             now_provider=self._deps.now_provider,
             paused_tool_step_id=paused_tool_step_id,
+            resumed_approval_session_id=(
+                request.approval_resume_session_id if request is not None else None
+            ),
         )
 
     def load_checkpoint_state_or_none(

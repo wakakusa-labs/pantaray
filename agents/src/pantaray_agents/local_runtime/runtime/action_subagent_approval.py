@@ -34,6 +34,9 @@ from .utc_timestamps import now_utc_iso
 
 _APPROVAL_DECISION_CONFLICT_CODE = "APPROVAL_DECISION_CONFLICT"
 _APPROVAL_DECISION_ALREADY_APPLIED_CODE = "APPROVAL_DECISION_ALREADY_APPLIED"
+_APPROVAL_STATUS_INTERRUPTED = "interrupted"
+# ``interrupted`` is the user sending the Action a message instead of answering.
+type ChildApprovalDecision = Literal["approved_once", "denied", "interrupted"]
 
 # The decision and the child's requeue commit together, so a session already
 # settled to this exact decision on this child's own anchor proves the resent
@@ -77,6 +80,8 @@ class PendingActionSubagentApproval:
     approval_session_id: str
     # The call of the paused turn this request answers.
     call_id: str
+    # The user sent the Action a message instead of answering: the call must not run.
+    set_aside: bool
 
 
 def load_pending_action_subagent_approval(
@@ -105,10 +110,15 @@ def load_pending_action_subagent_approval(
                 ACTION_SUBAGENT_TOOL_EVENT,
             ),
         ).fetchone()
-    if row is None:
-        return None
-    anchor = anchor_object(row[0])
-    blocker = anchor_blocker(anchor)
+        if row is None:
+            return None
+        anchor = anchor_object(row[0])
+        blocker = anchor_blocker(anchor)
+        session = connection.execute(
+            "SELECT status FROM approval_sessions "
+            "WHERE approval_session_id=? AND tool_request_id=?",
+            (blocker["approval_session_id"], blocker["tool_request_id"]),
+        ).fetchone()
     arguments, call_id = anchor.get("tool_arguments"), anchor.get("call_id")
     if not isinstance(arguments, dict) or not isinstance(call_id, str):
         raise LocalJobEnvelopeIntegrityError(
@@ -120,6 +130,7 @@ def load_pending_action_subagent_approval(
         tool_request_id=str(blocker["tool_request_id"]),
         approval_session_id=str(blocker["approval_session_id"]),
         call_id=call_id,
+        set_aside=session[0] == _APPROVAL_STATUS_INTERRUPTED,
     )
 
 
@@ -140,60 +151,85 @@ def apply_action_subagent_approval_decision(
     with sqlite3.connect(db_path) as connection:
         configure_connection(connection, busy_timeout_ms)
         with immediate_transaction(connection):
-            paused = load_paused_child(
+            settle_paused_child_approval_in_connection(
                 connection,
                 user_id=user_id,
                 action_id=action_id,
                 child_process_id=child_process_id,
-            )
-            # The child holds this blocker on neither an older nor a newer pause
-            # generation, so both cases ask the same question: was this exact
-            # decision already committed, or is it stale?
-            if paused is None or not _anchor_holds_blocker(
-                paused.anchor,
                 approval_session_id=approval_session_id,
                 tool_request_id=tool_request_id,
-            ):
-                raise ActionSubagentApprovalDecisionError(
-                    "child approval decision is stale or already applied",
-                    error_code=_settled_child_decision_code(
-                        connection,
-                        user_id=user_id,
-                        action_id=action_id,
-                        child_process_id=child_process_id,
-                        approval_session_id=approval_session_id,
-                        tool_request_id=tool_request_id,
-                        decision=decision,
-                    ),
-                )
-            status = decide_approval_session(
-                connection,
-                user_id=user_id,
-                action_id=action_id,
-                approval_session_id=approval_session_id,
-                tool_request_id=tool_request_id,
-                next_status=decision,
+                decision=decision,
                 decided_at=decided_at,
             )
-            if status != "updated":
-                raise ActionSubagentApprovalDecisionError(
-                    f"approval session is not decidable: {status}",
-                    error_code=_APPROVAL_DECISION_CONFLICT_CODE,
-                )
-            requeue_paused_child(
-                connection,
-                job_id=paused.job_id,
-                user_id=user_id,
-                process_id=child_process_id,
-                resumed_at=decided_at,
-            )
-            append_pending_approval_snapshot_in_connection(
+
+
+def settle_paused_child_approval_in_connection(
+    connection: sqlite3.Connection,
+    *,
+    user_id: str,
+    action_id: str,
+    child_process_id: str,
+    approval_session_id: str,
+    tool_request_id: str,
+    decision: ChildApprovalDecision,
+    decided_at: str,
+) -> None:
+    """Settle one paused child's blocker and requeue it, in the caller's transaction."""
+
+    paused = load_paused_child(
+        connection,
+        user_id=user_id,
+        action_id=action_id,
+        child_process_id=child_process_id,
+    )
+    # The child holds this blocker on neither an older nor a newer pause
+    # generation, so both cases ask the same question: was this exact
+    # decision already committed, or is it stale?
+    if paused is None or not _anchor_holds_blocker(
+        paused.anchor,
+        approval_session_id=approval_session_id,
+        tool_request_id=tool_request_id,
+    ):
+        raise ActionSubagentApprovalDecisionError(
+            "child approval decision is stale or already applied",
+            error_code=_settled_child_decision_code(
                 connection,
                 user_id=user_id,
                 action_id=action_id,
-                root_process_id=paused.parent_process_id,
-                created_at=decided_at,
-            )
+                child_process_id=child_process_id,
+                approval_session_id=approval_session_id,
+                tool_request_id=tool_request_id,
+                decision=decision,
+            ),
+        )
+    status = decide_approval_session(
+        connection,
+        user_id=user_id,
+        action_id=action_id,
+        approval_session_id=approval_session_id,
+        tool_request_id=tool_request_id,
+        next_status=decision,
+        decided_at=decided_at,
+    )
+    if status != "updated":
+        raise ActionSubagentApprovalDecisionError(
+            f"approval session is not decidable: {status}",
+            error_code=_APPROVAL_DECISION_CONFLICT_CODE,
+        )
+    requeue_paused_child(
+        connection,
+        job_id=paused.job_id,
+        user_id=user_id,
+        process_id=child_process_id,
+        resumed_at=decided_at,
+    )
+    append_pending_approval_snapshot_in_connection(
+        connection,
+        user_id=user_id,
+        action_id=action_id,
+        root_process_id=paused.parent_process_id,
+        created_at=decided_at,
+    )
 
 
 def _anchor_holds_blocker(

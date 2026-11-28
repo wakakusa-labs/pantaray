@@ -214,6 +214,22 @@ test('Deferred Action submit never requests a live relay attach', async () => {
   assert.deepEqual(resumed, []);
 });
 
+test('A message that answered a pending approval reattaches the resumed run', async () => {
+  const resumed = [];
+  const response = { ...MESSAGE_RESPONSE, disposition: 'pending', process_id: 'process-1' };
+  const invoke = register(
+    { submitMessage: async () => response },
+    { resumeLiveProcess: (request) => resumed.push(request) }
+  );
+
+  await invoke('action:submitMessage', validSubmit());
+
+  // Where the pause left the stream, as a card decision resumes it.
+  assert.deepEqual(resumed, [
+    { kind: 'action', processId: 'process-1', actionId: response.action_id, fromStart: false },
+  ]);
+});
+
 test('Committed Action submit skips local delivery when subject or sender changed', async () => {
   for (const afterSubmit of [
     (state) => {

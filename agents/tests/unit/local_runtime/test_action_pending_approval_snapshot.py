@@ -8,8 +8,12 @@ from pantaray_agents.local_runtime.runtime.action_approval_projection import (
     ACTION_APPROVAL_SNAPSHOT_EVENT,
     append_pending_approval_snapshot_in_connection,
 )
+from pantaray_agents.local_runtime.runtime.action_message_approvals import (
+    set_aside_pending_approvals_in_connection,
+)
 from pantaray_agents.local_runtime.runtime.action_subagent_approval import (
     apply_action_subagent_approval_decision,
+    load_pending_action_subagent_approval,
 )
 from pantaray_agents.local_runtime.runtime.action_subagent_cancel import (
     ActionSubagentCancelRequest,
@@ -261,3 +265,41 @@ def test_snapshot_drops_a_paused_anchor_whose_session_was_decided(
         )
 
     assert _waiting(db_path) == [[(child_a["process_id"], _request_a)], []]
+
+
+def test_a_message_sets_aside_each_paused_childs_approval_and_requeues_it(
+    tmp_path: Path,
+) -> None:
+    db_path, child_a, child_b = _running_children(tmp_path)
+    _pause_child(db_path, child_a, name="a")
+    _pause_child(db_path, child_b, name="b")
+
+    with spawn._connect(db_path) as connection, immediate_transaction(connection):
+        resumed_root = set_aside_pending_approvals_in_connection(
+            connection,
+            user_id="user-1",
+            action_id="action-1",
+            root_process_id=ROOT_PROCESS_ID,
+            decided_at=spawn.TIMESTAMP,
+        )
+
+    with spawn._connect(db_path) as connection:
+        sessions = connection.execute(
+            "SELECT status FROM approval_sessions ORDER BY approval_session_id"
+        ).fetchall()
+        children = connection.execute(
+            "SELECT jobs.status,processes.status FROM jobs JOIN processes "
+            "ON processes.process_id=jobs.process_id WHERE processes.kind=?",
+            ("action_subagent",),
+        ).fetchall()
+    # The root keeps running and reads the message once its children return.
+    assert resumed_root is None
+    assert [tuple(row) for row in sessions] == [("interrupted",), ("interrupted",)]
+    assert [tuple(row) for row in children] == [("queued", "enqueued")] * 2
+    assert _snapshot_blockers(db_path)[-1] == []
+    resumed_child = load_pending_action_subagent_approval(
+        db_path=db_path,
+        busy_timeout_ms=spawn.BUSY_TIMEOUT_MS,
+        process_id=child_a["process_id"],
+    )
+    assert resumed_child is not None and resumed_child.set_aside

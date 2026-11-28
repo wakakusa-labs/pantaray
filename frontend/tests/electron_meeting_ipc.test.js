@@ -73,7 +73,7 @@ test('the main window still starts a call the user let pass', async () => {
 });
 
 test('a save whose file was written reports only the failed restart; an unwritten one fails', async () => {
-  const settings = { callApps: null, callSites: ['zoom.us'], locale: null };
+  const settings = { locale: 'ja-JP' };
   const restartFails = async () => {
     throw new Error('recorder did not start');
   };
@@ -81,7 +81,7 @@ test('a save whose file was written reports only the failed restart; an unwritte
   assert.equal(await written.send('meeting:updateSettings', MAIN, settings), 'restart_failed');
   const unwritten = meetingIpc({
     updateSettings: restartFails,
-    stored: { ...settings, callSites: null },
+    stored: { locale: null },
   });
   await assert.rejects(unwritten.send('meeting:updateSettings', MAIN, settings), /did not start/);
   assert.equal(await meetingIpc().send('meeting:updateSettings', MAIN, settings), 'saved');

@@ -1019,7 +1019,7 @@ function meetingFixture(t, { supported = true, helper = true } = {}) {
   const start = f.process.start;
   f.process.start = (config, ...rest) => { configs.push(config); return start(config, ...rest); };
   f.process.writeConfig = (config) => written.push(config);
-  const transcribing = { callApps: null, callSites: ['meet.google.com'], locale: 'ja-JP' };
+  const transcribing = { locale: 'ja-JP' };
   const startRecordingCall = () => hostEvents(JSON.stringify({ type: 'recording', started_at: 'now',
     call_id: 'call_01JDQ3ZK8W5N3S8C7V6B5X4Y3Z', app: { name: 'zoom.us', bundle_id: 'us.zoom.xos' } }) + '\n');
   return { ...f, configs, written, transcribing, startRecordingCall, hostEvents: chunk => hostEvents(chunk) };
@@ -1035,7 +1035,7 @@ test('transcription is configured wherever this Mac and the recorder can run it'
   assert.equal(f.manager.meeting.getSettings().supported, true);
 
   await f.manager.meeting.updateSettings(f.transcribing);
-  assert.match(f.configs.at(-1), /\n\[meeting\]\ncall_sites = \["meet\.google\.com"\]\nlocale = "ja-JP"\n$/);
+  assert.match(f.configs.at(-1), /\n\[meeting\]\nlocale = "ja-JP"\n$/);
 
   for (const options of [{ supported: false }, { helper: false }]) {
     const f = meetingFixture(t, options);
@@ -1046,7 +1046,18 @@ test('transcription is configured wherever this Mac and the recorder can run it'
   }
 });
 
-test('a filter or call-list change while a call is transcribed rewrites the config in place', async t => {
+test('a settings file with keys this app no longer writes keeps its language', async t => {
+  const f = meetingFixture(t);
+  const settingsPath = resolveScopedSettingsPath({
+    userDataDir: f.dir, userId: 'alice', fileName: 'meeting-transcription-settings.json' });
+  fs.writeFileSync(settingsPath, JSON.stringify({ enabled: true, callApps: ['us.zoom.xos'],
+    callSites: ['meet.google.com'], locale: 'ja-JP' }));
+  await f.manager.start();
+  assert.deepEqual(f.manager.meeting.getSettings().settings, { locale: 'ja-JP' });
+  assert.match(f.configs[0], /\n\[meeting\]\nlocale = "ja-JP"\n$/);
+});
+
+test('a filter or language change while a call is transcribed rewrites the config in place', async t => {
   const f = meetingFixture(t);
   await f.manager.start();
   await f.manager.meeting.updateSettings(f.transcribing);
@@ -1055,11 +1066,11 @@ test('a filter or call-list change while a call is transcribed rewrites the conf
   f.calls.length = 0;
 
   await f.manager.updatePrivacy(() => f.privacy.updateCaptureSettings({ ...f.privacy.getCaptureSettings(), websites: { mode: 'exclude', hosts: ['example.com'] } }));
-  await f.manager.meeting.updateSettings({ ...f.transcribing, callSites: ['zoom.us'] });
+  await f.manager.meeting.updateSettings({ locale: 'en-US' });
   // A restart would end the transcription; the recorder reads both sections again by itself.
   assert.deepEqual(f.calls, []);
   assert.match(f.written[0], /block_list = \[\{ host = "example\.com"/);
-  assert.match(f.written[1], /call_sites = \["zoom\.us"\]/);
+  assert.match(f.written[1], /\n\[meeting\]\nlocale = "en-US"\n$/);
   assert.equal(f.manager.meeting.getCall().kind, 'recording');
 });
 

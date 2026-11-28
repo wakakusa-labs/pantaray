@@ -194,7 +194,6 @@ export const validInvokeChannels = [
   'meeting:getCall',
   'meeting:getAvailability',
   'meeting:getSettings',
-  'meeting:getDefaultCallLists',
   'meeting:record',
   'meeting:stop',
   'meeting:decline',

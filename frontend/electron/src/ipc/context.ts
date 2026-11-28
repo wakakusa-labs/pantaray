@@ -4,7 +4,6 @@ import type { CapturePermission, CapturePermissionCheck } from '../context/zanei
 import type {
   MeetingAvailability,
   MeetingCall,
-  MeetingCallLists,
   MeetingCommandResult,
   MeetingPermission,
   MeetingSettings,
@@ -329,8 +328,6 @@ export type MainContext = {
     readAvailability: () => Promise<MeetingAvailability | null>;
     /** `supported`: this Mac and the bundled recorder can transcribe calls. */
     getSettings: () => { settings: MeetingSettings; supported: boolean };
-    /** What the recorder listens to while a list in the settings is null. */
-    readDefaultCallLists: () => Promise<MeetingCallLists>;
     /** The answer arrives as `meeting:callChanged` (`recording`, or `not_recording` refused). */
     record: (callId: string) => Promise<MeetingCommandResult>;
     stop: (callId: string) => Promise<MeetingCommandResult>;

@@ -212,7 +212,7 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.callTranscription.transcribeThisCall': 'Transcribe this call',
     'settings.callTranscription.title': 'Call transcription',
     'settings.callTranscription.description':
-      'When a call starts, Pantaray asks whether to transcribe it. Only calls you allow are transcribed, on your Mac. Audio is not saved. Speech while muted is transcribed too.',
+      'When a call starts, Pantaray asks whether to transcribe it. Browser calls are supported in Chrome and Safari. Only calls you allow are transcribed, on your Mac. Audio is not saved. Speech while muted is transcribed too.',
     'settings.callTranscription.unsupported':
       'Works on Macs with Apple silicon running macOS 26 or later.',
     'settings.callTranscription.loadFailed': 'Couldn’t load the call transcription settings.',
@@ -223,14 +223,8 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.callTranscription.languageUnsupported': 'This language can’t be transcribed.',
     'settings.callTranscription.language': 'Language',
     'settings.callTranscription.languageAuto': 'Same as the Mac',
-    'settings.callTranscription.listsNote':
-      'When a call starts in one of these apps or sites, you are asked whether to transcribe it.',
-    'settings.callTranscription.listsLoadFailed': 'Couldn’t load the apps and sites to watch.',
-    'settings.callTranscription.reload': 'Try again',
     'settings.callTranscription.resumeFailed': 'Recording could not be resumed.',
     'settings.callTranscription.resume': 'Resume recording',
-    'settings.callTranscription.apps': 'Apps to watch',
-    'settings.callTranscription.sites': 'Sites to watch (Chrome and Safari)',
     'settings.screenshotCapture.screenshotsLabel': 'Computer activity recording',
     'settings.screenshotCapture.unavailable':
       'Computer activity recording is currently unavailable.',
@@ -526,7 +520,7 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.callTranscription.transcribeThisCall': 'この通話を文字起こしする',
     'settings.callTranscription.title': '通話の文字起こし',
     'settings.callTranscription.description':
-      '通話が始まると、文字起こしするか確認します。許可した通話だけを Mac の中で文字起こしします。音声は保存しません。ミュート中の発話も文字起こしされます。',
+      '通話が始まると、文字起こしするか確認します。ブラウザでの通話は Chrome と Safari が対象です。許可した通話だけを Mac の中で文字起こしします。音声は保存しません。ミュート中の発話も文字起こしされます。',
     'settings.callTranscription.unsupported': 'macOS 26 以降の Apple シリコンの Mac で使えます。',
     'settings.callTranscription.loadFailed': '通話の文字起こしの設定を読み込めませんでした。',
     'settings.callTranscription.saveFailed': '保存できませんでした。もう一度お試しください。',
@@ -536,14 +530,8 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.callTranscription.languageUnsupported': 'この言語は文字起こしできません。',
     'settings.callTranscription.language': '言語',
     'settings.callTranscription.languageAuto': 'Mac の言語に合わせる',
-    'settings.callTranscription.listsNote':
-      'ここにあるアプリやサイトで通話が始まると、文字起こしするか確認します。',
-    'settings.callTranscription.listsLoadFailed': '対象のアプリとサイトを読み込めませんでした。',
-    'settings.callTranscription.reload': 'もう一度読み込む',
     'settings.callTranscription.resumeFailed': '記録を再開できませんでした。',
     'settings.callTranscription.resume': '記録を再開',
-    'settings.callTranscription.apps': '対象のアプリ',
-    'settings.callTranscription.sites': '対象のサイト（Chrome と Safari）',
     'settings.screenshotCapture.screenshotsLabel': 'コンピューター操作の記録',
     'settings.screenshotCapture.unavailable': '現在はコンピューター操作の記録を有効にできません。',
     'settings.screenshotCapture.pausedSuggestions': '提案も止まっています',

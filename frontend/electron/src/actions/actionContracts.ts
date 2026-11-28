@@ -299,9 +299,10 @@ const ToolEntrySchema = z
     // while recording is off are successful steps that never ran, and a call a Stop
     // reached before it was issued is an error step that never ran, as is a call whose
     // approval the user answered with a new message, or one of its batch that message
-    // reached first, so the status alone cannot say. A page render whose renderer is still being set up succeeds without
-    // drawing anything, and a patch held until its file is read changes nothing. A tool
-    // step recorded before the outcome existed did run.
+    // reached first, so the status alone cannot say. A page render whose renderer is
+    // still being set up succeeds without drawing anything, and a patch held until its
+    // file is read changes nothing. A tool step recorded before the outcome existed did
+    // run.
     outcome: z
       .enum([
         'completed',

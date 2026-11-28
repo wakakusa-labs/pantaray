@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Iterator
+from contextlib import closing
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -29,12 +31,15 @@ from pantaray_agents.local_runtime.runtime.identity import (
     reset_logged_out_owner,
 )
 from pantaray_agents.local_runtime.storage.migrations import load_default_migrations
-from pantaray_agents.local_runtime.todos import core
+from pantaray_agents.local_runtime.todos import core, pickup
 from pantaray_agents.local_runtime.todos.clock import (
     TodoClock,
 )
 from pantaray_agents.local_runtime.todos.conversation import todo_message_id
-from pantaray_agents.local_runtime.todos.model import WrittenOrigin
+from pantaray_agents.local_runtime.todos.model import (
+    ActionConversation,
+    WrittenOrigin,
+)
 from pantaray_agents.local_runtime.todos.reads import read_todo
 from pantaray_agents.local_runtime.todos.writes import (
     set_todo_check,
@@ -417,3 +422,57 @@ def test_the_list_shows_each_todo_with_its_state_and_conversation(
         ),
     ]
     assert page["items"][0]["starts_on"] == "2026-10-28"
+
+
+def _started(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> tuple[str, str]:
+    """A TODO the pickup started, its run still queued; and its conversation."""
+
+    monkeypatch.setattr(pickup, "read_todo_clock", lambda: NOW)
+    todo_id = _created_id(client)
+    pickup.pick_up_todos(user_id=USER)
+    entry = read_todo(user_id=USER, todo_id=todo_id)
+    assert entry is not None and isinstance(entry.conversation, ActionConversation)
+    return todo_id, entry.conversation.action_id
+
+
+def _action_status(db: Path, action_id: str) -> str:
+    with closing(sqlite3.connect(db)) as connection:
+        (status,) = connection.execute(
+            "SELECT status FROM agent_actions WHERE action_id = ?", (action_id,)
+        ).fetchone()
+    return str(status)
+
+
+def test_moving_a_started_todos_start_past_today_stops_its_run_until_then(
+    client: TestClient, db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Catches a start that moves while the run goes on, and a run stopped by a
+    # move to today, which only changes the date.
+    todo_id, action_id = _started(client, monkeypatch)
+
+    today = client.put(f"{TODOS}/{todo_id}/start", json={"starts_on": "2026-11-03"})
+
+    assert today.status_code == 200, today.text
+    assert today.json()["state"] == {"kind": "working", "note": None}
+    assert _action_status(db, action_id) == "queued"
+
+    later = client.put(f"{TODOS}/{todo_id}/start", json={"starts_on": "2026-11-06"})
+
+    assert later.status_code == 200, later.text
+    assert later.json()["starts_on"] == "2026-11-06"
+    assert later.json()["state"] == {"kind": "not_started", "reason": "scheduled"}
+    assert later.json()["conversation"] == {"kind": "action", "action_id": action_id}
+    assert _action_status(db, action_id) == "canceled"
+
+
+def test_a_done_todos_start_moves_without_putting_anything_back(
+    client: TestClient, db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    todo_id, action_id = _started(client, monkeypatch)
+    set_todo_check(user_id=USER, todo_id=todo_id, by="ai", checked=True, clock=NOW)
+
+    moved = client.put(f"{TODOS}/{todo_id}/start", json={"starts_on": "2026-11-06"})
+
+    assert moved.status_code == 200, moved.text
+    assert moved.json()["state"]["kind"] == "done"
+    assert _action_status(db, action_id) == "queued"

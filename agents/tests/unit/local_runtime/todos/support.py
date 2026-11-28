@@ -23,6 +23,7 @@ _BASE = Todo(
     deletion_request=None,
     deletion=None,
     created_at="2026-11-02T01:00:00.000Z",
+    deferred_run_id=None,
 )
 
 WEEKLY_DUE = TodoDue(date="2026-11-08", repeat="weekly")

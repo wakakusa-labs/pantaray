@@ -6,6 +6,7 @@ import sqlite3
 import threading
 import time
 from contextlib import closing
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,7 @@ from pantaray_agents.local_runtime.agent_state import (
 )
 from pantaray_agents.local_runtime.runtime import action_messages
 from pantaray_agents.local_runtime.runtime.action_message_models import (
+    ACTION_TODO_CONTINUE_REQUEST_TEXT,
     ACTION_TODO_PICKUP_REQUEST_TEXT,
 )
 from pantaray_agents.local_runtime.runtime.suggestion_acceptance import (
@@ -30,8 +32,10 @@ from pantaray_agents.local_runtime.todos import core, pickup
 from pantaray_agents.local_runtime.todos.conversation import todo_message_id
 from pantaray_agents.local_runtime.todos.db import count_todo_change
 from pantaray_agents.local_runtime.todos.display import (
+    NotStarted,
     Partial,
     Waiting,
+    Working,
     display_state,
 )
 from pantaray_agents.local_runtime.todos.model import (
@@ -43,6 +47,7 @@ from pantaray_agents.local_runtime.todos.reads import read_todo, read_todo_revis
 from pantaray_agents.local_runtime.todos.writes import (
     create_todo_item,
     set_todo_check,
+    set_todo_start,
     suggestion_todo_id,
     update_todo,
 )
@@ -502,3 +507,81 @@ def test_a_failed_change_count_leaves_no_action_and_the_next_pass_recovers(
 
     assert len(_actions(db)) == 1
     assert read_todo_revision(user_id=USER) == revision + 1
+
+
+def _user_turns(db: Path) -> list[tuple[str, str, str]]:
+    """Each USER turn sent: its conversation, step name and message content."""
+
+    with closing(sqlite3.connect(db)) as connection:
+        return [
+            (str(action_id), str(step_name), json.loads(message)["content"])
+            for action_id, step_name, message in connection.execute(
+                """SELECT action_id, step_name, user_message_json
+                   FROM agent_action_steps WHERE step_type = 'user_request'
+                   ORDER BY accepted_sequence, created_at"""
+            )
+        ]
+
+
+def _state(todo: Todo, today: str) -> object:
+    entry = read_todo(user_id=USER, todo_id=todo.todo_id)
+    assert entry is not None
+    return display_state(entry.todo, entry.conversation, today)
+
+
+def test_work_put_back_to_tomorrow_waits_then_continues_its_own_conversation(
+    db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Catches a TODO picked up again the day its start moved, a continuation
+    # that opens a new conversation, and one sent on every pass of that day.
+    todo = _write("Send the quote")
+    pickup.pick_up_todos(user_id=USER)
+    [(action_id, _, _)] = _user_turns(db)
+    # As the user's Stop leaves the run.
+    execute(
+        db,
+        "UPDATE agent_actions SET status = 'canceled'; "
+        "UPDATE processes SET status = 'canceled'; "
+        "UPDATE jobs SET status = 'canceled';",
+    )
+
+    set_todo_start(
+        user_id=USER, todo_id=todo.todo_id, starts_on="2026-11-05", today=NOW.today
+    )
+    pickup.pick_up_todos(user_id=USER)
+
+    assert len(_user_turns(db)) == 1
+    assert _state(todo, NOW.today) == NotStarted("scheduled")
+
+    tomorrow = replace(NOW, now="2026-11-05T03:00:00.000Z")
+    monkeypatch.setattr(pickup, "read_todo_clock", lambda: tomorrow)
+    pickup.pick_up_todos(user_id=USER)
+    pickup.pick_up_todos(user_id=USER)
+
+    assert _user_turns(db) == [
+        (action_id, "user_request", "Send the quote"),
+        (action_id, "todo_pickup_request", ACTION_TODO_CONTINUE_REQUEST_TEXT),
+    ]
+    assert _state(todo, tomorrow.today) == Working(None)
+
+
+def test_work_whose_start_moves_to_today_or_earlier_goes_on_as_it_was(
+    db: Path,
+) -> None:
+    todo = _write("Send the quote")
+    pickup.pick_up_todos(user_id=USER)
+    execute(
+        db,
+        "UPDATE agent_actions SET status = 'success'; "
+        "UPDATE processes SET status = 'completed'; "
+        "UPDATE jobs SET status = 'completed';",
+    )
+    before = _state(todo, NOW.today)
+
+    set_todo_start(
+        user_id=USER, todo_id=todo.todo_id, starts_on="2026-11-01", today=NOW.today
+    )
+    pickup.pick_up_todos(user_id=USER)
+
+    assert len(_user_turns(db)) == 1
+    assert _state(todo, NOW.today) == before

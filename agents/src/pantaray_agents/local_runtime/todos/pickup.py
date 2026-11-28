@@ -2,9 +2,11 @@
 
 The TODO does not record its Action: the Action's first message id derives
 from the TODO id, so `UNIQUE (user_id, initial_user_message_id)` keeps one
-Action per TODO however often, or however concurrently, a pass runs. A submit
-that fails leaves the TODO without an Action, and the pass says so, so that the
-hook that ran it runs the next pass.
+Action per TODO however often, or however concurrently, a pass runs. Work the
+user put back to its start continues as the next turn of that Action, whose
+message id derives from the TODO and the run it was put back from, so it too
+is sent once. A submit that fails leaves the TODO as it was, and the pass says
+so, so that the hook that ran it runs the next pass.
 The only write on the TODO lets go of the attachments its Action took.
 """
 
@@ -12,13 +14,16 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from typing import assert_never
+import uuid
+from typing import Final, assert_never
 
 from pydantic import ValidationError
 
 from pantaray_agents.local_runtime.runtime.action_message_models import (
+    ACTION_TODO_CONTINUE_REQUEST_TEXT,
     ACTION_TODO_PICKUP_REQUEST_TEXT,
     ActionMessageSubmissionError,
+    ExistingActionTarget,
     NewActionTarget,
     SubmitActionMessageCommand,
 )
@@ -34,6 +39,7 @@ from pantaray_agents.local_runtime.todos.clock import (
 from pantaray_agents.local_runtime.todos.conversation import todo_message_id
 from pantaray_agents.local_runtime.todos.display import (
     ContinueAiTodo,
+    ContinueDeferred,
     PickupTarget,
     StartWritten,
     pickup_target,
@@ -56,6 +62,10 @@ from pantaray_agents.schema.agent.action_message import (
 )
 
 logger = logging.getLogger(__name__)
+
+_NAMESPACE_TODO_CONTINUATION: Final = uuid.uuid5(
+    uuid.NAMESPACE_URL, "pantaray:todo_continuation_message:v1"
+)
 
 
 def pick_up_todos(*, user_id: str) -> bool:
@@ -149,6 +159,23 @@ def _command(
                     message_id=message_id,
                     content=ACTION_TODO_PICKUP_REQUEST_TEXT,
                     todo_handoff=handoff,
+                ),
+            )
+        case ContinueDeferred(action_id=action_id, deferred_run_id=run_id):
+            # The conversation's first message already handed the TODO over.
+            return SubmitActionMessageCommand(
+                user_id=user_id,
+                origin="todo_pickup",
+                target=ExistingActionTarget(
+                    action_id=action_id, expected_process_id=None
+                ),
+                message=ActionUserMessageInput(
+                    message_id=str(
+                        uuid.uuid5(
+                            _NAMESPACE_TODO_CONTINUATION, f"{todo.todo_id}\n{run_id}"
+                        )
+                    ),
+                    content=ACTION_TODO_CONTINUE_REQUEST_TEXT,
                 ),
             )
         case _:

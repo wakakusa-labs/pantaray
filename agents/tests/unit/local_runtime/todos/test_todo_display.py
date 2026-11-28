@@ -7,6 +7,7 @@ import pytest
 
 from pantaray_agents.local_runtime.todos.display import (
     ContinueAiTodo,
+    ContinueDeferred,
     Done,
     HandedOver,
     NotStarted,
@@ -52,6 +53,9 @@ NONE = NoConversation()
 START = StartWritten("todo-1")
 CONTINUE = ContinueAiTodo("todo-1")
 SUGGESTED_TODO = make_todo(author="ai", origin=SuggestionOrigin("sug-1"))
+# Its work put back from run-2 to tomorrow, then to today.
+DEFERRED = make_todo(starts_on=TOMORROW, deferred_run_id="run-2")
+DEFERRED_TO_TODAY = replace(DEFERRED, starts_on=TODAY)
 
 
 def _reported(kind: ReportKind, run_id: str | None = "run-2") -> Todo:
@@ -94,6 +98,15 @@ def _reported(kind: ReportKind, run_id: str | None = "run-2") -> Todo:
         (make_todo(starts_on=TOMORROW), NONE, NotStarted("scheduled")),
         (make_todo(starts_on=TODAY), NONE, NotStarted("starting")),
         (make_todo(starts_on=None), NONE, NotStarted("unscheduled")),
+        # Put back from a run that ended, it waits for its start as if new.
+        (DEFERRED, CANCELED, NotStarted("scheduled")),
+        (DEFERRED, SUCCEEDED, NotStarted("scheduled")),
+        (DEFERRED_TO_TODAY, CANCELED, NotStarted("starting")),
+        (replace(DEFERRED, starts_on=None), CANCELED, NotStarted("unscheduled")),
+        # Until the stop lands, and once a newer run came, the run shows.
+        (DEFERRED, RUNNING, Working(None)),
+        (replace(DEFERRED, deferred_run_id="run-1"), CANCELED, Stopped("canceled")),
+        (replace(DEFERRED, check=TodoCheck(by="ai", at=AT)), CANCELED, Done("ai", AT)),
     ],
 )
 def test_display_state(
@@ -124,6 +137,24 @@ def test_display_state(
         (make_todo(check=TodoCheck(by="user", at=AT)), NONE, None),
         (make_todo(deletion=TodoDeletion(by="user", at=AT)), NONE, None),
         (make_todo(), SUCCEEDED, None),
+        # On its day, work put back continues its own conversation, the
+        # Suggestion's accepted one too.
+        (
+            DEFERRED_TO_TODAY,
+            CANCELED,
+            ContinueDeferred("todo-1", "action-1", "run-2"),
+        ),
+        (
+            replace(
+                _reported("continue", None), starts_on=TODAY, deferred_run_id="run-2"
+            ),
+            SUCCEEDED,
+            ContinueDeferred("todo-1", "action-1", "run-2"),
+        ),
+        (DEFERRED, CANCELED, None),
+        # A run came since, or it still runs: nothing to continue now.
+        (replace(DEFERRED_TO_TODAY, deferred_run_id="run-1"), CANCELED, None),
+        (DEFERRED_TO_TODAY, RUNNING, None),
     ],
 )
 def test_pickup_target(

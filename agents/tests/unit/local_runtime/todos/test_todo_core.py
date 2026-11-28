@@ -16,14 +16,19 @@ from pantaray_agents.local_runtime.todos.core import (
     request_deletion,
     restore,
     set_check,
+    set_start,
 )
 from pantaray_agents.local_runtime.todos.model import (
+    ActionConversation,
+    ActiveRun,
     AiReport,
     DeletionRequest,
+    NoConversation,
     RecurrenceOrigin,
     Todo,
     TodoAuthor,
     TodoCheck,
+    TodoConversation,
     TodoDeletion,
     TodoDue,
     WrittenOrigin,
@@ -242,3 +247,35 @@ def test_restore_and_purge_switch_exactly_thirty_days_after_deletion() -> None:
     assert (purge_due(todo, now=before), purge_due(todo, now=at)) == (False, True)
     assert restore(make_todo(), now=NOW) == Rejected("not_deleted")
     assert not purge_due(make_todo(), now="2027-12-04T00:00:00.000Z")
+
+
+_TODAY = "2026-11-04"
+_RUNNING = ActionConversation("action-1", ActiveRun("run-2"))
+
+
+@pytest.mark.parametrize(
+    ("todo", "conversation", "starts_on", "deferred_run_id"),
+    [
+        # Past today, or unset, started work is put back from its latest run.
+        (make_todo(), _RUNNING, "2026-11-05", "run-2"),
+        (make_todo(), _RUNNING, None, "run-2"),
+        # Today or earlier leaves the work as it is.
+        (make_todo(), _RUNNING, _TODAY, None),
+        (make_todo(), _RUNNING, "2026-11-01", None),
+        # A done TODO's work is over, and one not started has none.
+        (make_todo(check=TodoCheck(by="ai", at="T")), _RUNNING, "2026-11-05", None),
+        (make_todo(), NoConversation(), "2026-11-05", None),
+        # Brought forward again, it keeps the run its work waits after.
+        (make_todo(deferred_run_id="run-2"), _RUNNING, _TODAY, "run-2"),
+    ],
+)
+def test_a_start_past_today_puts_started_work_back(
+    todo: Todo,
+    conversation: TodoConversation,
+    starts_on: str | None,
+    deferred_run_id: str | None,
+) -> None:
+    moved = set_start(todo, starts_on, conversation=conversation, today=_TODAY)
+
+    assert isinstance(moved, Todo)
+    assert (moved.starts_on, moved.deferred_run_id) == (starts_on, deferred_run_id)

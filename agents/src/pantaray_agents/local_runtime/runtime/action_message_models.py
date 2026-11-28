@@ -75,6 +75,14 @@ ACTION_TODO_PICKUP_REQUEST_TEXT = (
 )
 
 
+# The turn that continues a TODO's conversation on the day its work was put
+# back to; the conversation above already holds the work.
+ACTION_TODO_CONTINUE_REQUEST_TEXT = (
+    "Pantaray started this turn, not the user: continue the work from where it "
+    "stopped, without repeating a tool call that already took effect."
+)
+
+
 # What the model reads after a task's prompt, which a ``hook`` turn sends as it
 # came due. The prompt comes first, so it is what the conversation is titled by.
 ACTION_HOOK_REQUEST_NOTE = (
@@ -140,7 +148,8 @@ class SubmitActionMessageCommand(BaseModel):
     # ``resume`` is the user asking for the stopped run to be continued. It is an
     # ordinary follow-up turn; only the step name and this guard differ.
     # ``todo_pickup`` is Pantaray starting an AI-written TODO: a new Action that
-    # opens with ``todo_text`` and carries the fixed request as its USER row.
+    # opens with ``todo_text`` and carries the fixed request as its USER row; or
+    # continuing a TODO's existing Action, with the fixed continuation.
     # ``hook`` is Pantaray sending a task's prompt (``action_hook_request_text``).
     origin: ActionMessageOrigin = "user"
 
@@ -155,7 +164,11 @@ class SubmitActionMessageCommand(BaseModel):
             if isinstance(target, NewActionTarget) and target.todo_text is not None:
                 raise ValueError("Only a TODO pickup opens with TODO text")
             return self
-        if not isinstance(target, NewActionTarget) or target.todo_text is None:
+        if isinstance(target, ExistingActionTarget):
+            if self.message.content != ACTION_TODO_CONTINUE_REQUEST_TEXT:
+                raise ValueError("A TODO continuation carries the fixed request text")
+            return self
+        if target.todo_text is None:
             raise ValueError("A TODO pickup opens a new Action with its TODO text")
         if self.message.content != ACTION_TODO_PICKUP_REQUEST_TEXT:
             raise ValueError("A TODO pickup carries the fixed request text")
@@ -245,6 +258,7 @@ __all__ = [
     "ACTION_RESUME_REQUEST_TEXT",
     "ACTION_RESUME_STEP_NAME",
     "ACTION_STEP_NAME_BY_ORIGIN",
+    "ACTION_TODO_CONTINUE_REQUEST_TEXT",
     "ACTION_TODO_PICKUP_REQUEST_TEXT",
     "ACTION_TODO_PICKUP_STEP_NAME",
     "ACTION_USER_STEP_NAME",

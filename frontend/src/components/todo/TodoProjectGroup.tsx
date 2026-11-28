@@ -38,7 +38,7 @@ export function TodoProjectGroup({
             {organizationName}
           </span>
         ) : null}
-        {/* An empty list's first place has nothing to count yet. */}
+        {/* An empty place has nothing to count. */}
         {totalCount > 0 ? (
           <span className="todo-group__count">
             {t('todo.group.count', { done: doneCount, total: totalCount })}

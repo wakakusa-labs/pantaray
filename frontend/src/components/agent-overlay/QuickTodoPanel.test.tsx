@@ -131,7 +131,7 @@ it('puts a TODO with no project in the organization, closes when it starts later
   pick('Project', 'Site');
   // Another organization keeps no project of the one before.
   pick('Organization', 'Xer');
-  expect(screen.getByRole('button', { name: 'Project: No project' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Project: Other' })).toBeInTheDocument();
   fireEvent.change(field, { target: { value: 'Book the room' } });
   await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Send' })));
 
@@ -142,7 +142,7 @@ it('puts a TODO with no project in the organization, closes when it starts later
   cleanup();
   await renderPanel();
   expect(screen.getByRole('button', { name: 'Organization: Xer' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Project: No project' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Project: Other' })).toBeInTheDocument();
 });
 
 it('resends an unanswered TODO under the same id, keeps a refused one, and says when the main window does not open', async () => {

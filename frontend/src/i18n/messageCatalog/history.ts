@@ -26,7 +26,7 @@ export const HISTORY_MESSAGES = defineMessages({
     'history.projects.deleteConfirmBody':
       'It leaves this list. The files in its folder stay as they are.',
     'history.projects.deleteConfirmBodyTodos':
-      'It leaves this list. The files in its folder stay as they are, and its TODOs move to No project.',
+      'It leaves this list. The files in its folder stay as they are, and its TODOs move to Other.',
     'history.projects.menu': '{name} menu',
     'history.projects.rename': 'Rename',
     'history.projects.nameLabel': 'Project name',
@@ -173,7 +173,7 @@ export const HISTORY_MESSAGES = defineMessages({
     'history.projects.deleteConfirmBody':
       '一覧から外れます。フォルダのファイルはそのまま残ります。',
     'history.projects.deleteConfirmBodyTodos':
-      '一覧から外れます。フォルダのファイルはそのまま残り、TODO は「プロジェクトなし」に移ります。',
+      '一覧から外れます。フォルダのファイルはそのまま残り、TODO は「その他」に移ります。',
     'history.projects.menu': '{name} のメニュー',
     'history.projects.rename': '名前を変更',
     'history.projects.nameLabel': 'プロジェクト名',

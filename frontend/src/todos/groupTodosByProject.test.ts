@@ -107,7 +107,7 @@ it('shows the projects in no organization, then the TODOs in no project', () => 
   expect(ids(groups)).toEqual(['p-loose1', 'p-loose2', null]);
 });
 
-it('groups the places holding TODOs, counting done ones and keeping the order given', () => {
+it('groups every place in view, empty ones too, counting done ones and keeping the order given', () => {
   const items = [
     todo('t1', 'p-alpha', true),
     todo('t2', null),
@@ -116,19 +116,25 @@ it('groups the places holding TODOs, counting done ones and keeping the order gi
   ];
   const groups = groupTodosByProject(
     page(items),
-    todoProjectSlots(settings, { scope: 'all' }, { project: 'any' })
+    todoProjectSlots(
+      settings,
+      { scope: 'organization', organization_id: 'org-b' },
+      { project: 'any' }
+    )
   );
-  expect(ids(groups)).toEqual(['p-alpha', null, null]);
-  expect(groups[1]).toMatchObject({ organizationId: 'org-b', totalCount: 1 });
-  expect(groups[1].items.map((item) => item.todo_id)).toEqual(['t4']);
-  const alpha = groups.find((g) => g.projectId === 'p-alpha');
+  // A TODO in no project goes to its own organization's place only.
+  expect(groups.map((g) => [g.projectId, g.totalCount])).toEqual([
+    ['p-both', 0],
+    ['p-beta', 0],
+    [null, 1],
+  ]);
+  expect(groups[2].items.map((item) => item.todo_id)).toEqual(['t4']);
+  const alpha = groupTodosByProject(
+    page(items),
+    todoProjectSlots(settings, { scope: 'all' }, { project: 'any' })
+  ).find((g) => g.projectId === 'p-alpha');
   expect(alpha).toMatchObject({ projectName: 'Alpha only', doneCount: 1, totalCount: 2 });
   expect(alpha?.items.map((item) => item.todo_id)).toEqual(['t1', 't3']);
-  expect(groups[groups.length - 1]).toMatchObject({
-    projectId: null,
-    projectName: null,
-    totalCount: 1,
-  });
 });
 
 it('keeps only the project the filter names', () => {

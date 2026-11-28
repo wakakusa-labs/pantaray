@@ -114,7 +114,10 @@ function excludedAppKeys(settings: CapturePrivacySettings): string[] {
  */
 export function zaneiConfig(
   settings: CapturePrivacySettings,
-  /** Null leaves transcription off, the recorder's default. */
+  /**
+   * Null, on a Mac that cannot transcribe, leaves `sources` to the recorder's default, where
+   * `transcript` does nothing and asks for no permission.
+   */
   transcription: MeetingSettings | null
 ): string {
   const isAppIncludeOnly = settings.apps.mode === 'include_only';

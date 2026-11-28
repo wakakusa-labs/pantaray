@@ -13,23 +13,3 @@
   font-size: 12px;
   font-weight: 700;
 }
-
-.call-transcription-list-section {
-  margin-top: 16px;
-  max-width: 420px;
-}
-
-/* Unlike the filter dialog's fixed-height lists, these show every entry. */
-.call-transcription-list.recording-filter-list {
-  height: auto;
-  margin-top: 6px;
-  border-top: 1px solid var(--fog-line);
-}
-
-.dashboard-section-description.call-transcription-lists-note {
-  margin: 20px 0 0;
-}
-
-.call-transcription-lists-note + .call-transcription-list-section {
-  margin-top: 10px;
-}

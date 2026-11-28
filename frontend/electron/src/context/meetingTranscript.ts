@@ -1,6 +1,4 @@
-import { execFile } from 'node:child_process';
 import fs from 'node:fs';
-import { promisify } from 'node:util';
 import { z } from 'zod';
 import { readZaneiManifest, recorderTranscribesCalls } from './zaneiConfig';
 
@@ -180,12 +178,15 @@ export function createMeetingTranscript(params: {
     }
     params.onChange(call);
   }
-  /** A settings file that cannot be read records no call: the feature reads as off. */
+  /**
+   * A settings file that cannot be read records no call: the feature reads as off. Keys this
+   * app no longer writes are dropped, so a file saved by an earlier version keeps the rest.
+   */
   const readSettings = (): MeetingSettings => {
     const filePath = params.settingsPath();
     if (!filePath || !fs.existsSync(filePath)) return DEFAULT_MEETING_SETTINGS;
     try {
-      return MeetingSettingsSchema.parse(JSON.parse(fs.readFileSync(filePath, 'utf8')));
+      return MeetingSettingsSchema.strip().parse(JSON.parse(fs.readFileSync(filePath, 'utf8')));
     } catch (error) {
       console.error('Meeting transcription settings are unreadable:', error);
       return DEFAULT_MEETING_SETTINGS;
@@ -212,9 +213,6 @@ export function createMeetingTranscript(params: {
     prepare: () => send({ kind: 'prepare' }),
     readAvailability: async () => (await params.getRecorder()?.readMeetingAvailability()) ?? null,
     getSettings: () => ({ settings: readSettings(), supported: isSupported() }),
-    /** The lists the recorder listens to while the user's own are null. */
-    readDefaultCallLists: () =>
-      readDefaultCallLists(readZaneiManifest(params.getManifestPath()).executable_path),
     /**
      * Where this Mac and recorder can transcribe, transcription is part of the configuration:
      * macOS grants or refuses its permissions, and every call is asked about. Null leaves it out.
@@ -229,46 +227,9 @@ export function createMeetingTranscript(params: {
   };
 }
 
-/** The call apps and sites the recorder listens to by default. */
-export type MeetingCallLists = { callApps: string[]; callSites: string[] };
-
-/**
- * The recorder's own defaults: its effective configuration with an empty file. `config show`
- * prints TOML, and a list of plain strings in it reads as JSON once its trailing comma goes.
- */
-async function readDefaultCallLists(executablePath: string): Promise<MeetingCallLists> {
-  const { stdout } = await promisify(execFile)(
-    executablePath,
-    ['--config', '/dev/null', 'config', 'show'],
-    { timeout: 10_000, encoding: 'utf8' }
-  );
-  const section = /^\[meeting\]\n([\s\S]*?)(?=^\[|(?![\s\S]))/m.exec(stdout)?.[1] ?? '';
-  const list = (key: string) => {
-    const value = new RegExp(`^${key} = (\\[[\\s\\S]*?\\])`, 'm').exec(section)?.[1] ?? 'null';
-    return z.array(z.string()).parse(JSON.parse(value.replace(/,\s*\]$/, ']')));
-  };
-  return { callApps: list('call_apps'), callSites: list('call_sites') };
-}
-
-const uniqueIgnoringCase = (values: string[]) =>
-  new Set(values.map((value) => value.toLowerCase())).size === values.length;
-/** The recorder refuses a whole configuration with one bad entry, so entries are checked here. */
-const listOf = (entry: z.ZodString) =>
-  z.array(entry).max(200).refine(uniqueIgnoringCase, 'Duplicate entry.').nullable();
-const DOMAIN_LABEL = '[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?';
-
-/** The user's transcription settings. A null list leaves the recorder's default list in place. */
+/** The user's transcription settings. */
 export const MeetingSettingsSchema = z
   .object({
-    /** Bundle identifiers, as the recorder matches call apps. */
-    callApps: listOf(z.string().regex(/^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/)),
-    /** Meeting site hosts; a host covers its subdomains. */
-    callSites: listOf(
-      z
-        .string()
-        .max(253)
-        .regex(new RegExp(`^${DOMAIN_LABEL}(\\.${DOMAIN_LABEL})*\\.?$`))
-    ),
     locale: z
       .string()
       .regex(/^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/)
@@ -278,8 +239,4 @@ export const MeetingSettingsSchema = z
 export type MeetingSettings = z.infer<typeof MeetingSettingsSchema>;
 /** `restart_failed`: the settings are saved, but recording did not come back after it. */
 export type MeetingSettingsSaveResult = 'saved' | 'restart_failed';
-const DEFAULT_MEETING_SETTINGS: MeetingSettings = {
-  callApps: null,
-  callSites: null,
-  locale: null,
-};
+const DEFAULT_MEETING_SETTINGS: MeetingSettings = { locale: null };

@@ -53,7 +53,6 @@ export function registerMeetingHandlers(ctx: MainContext, registrar: IpcRegistra
   registrar.handle('meeting:getCall', () => ctx.meeting.getCall());
   registrar.handle('meeting:getAvailability', () => ctx.meeting.readAvailability());
   registrar.handle('meeting:getSettings', () => ctx.meeting.getSettings());
-  registrar.handle('meeting:getDefaultCallLists', () => ctx.meeting.readDefaultCallLists());
 
   const noRecorder = (result: MeetingCommandResult) => result === 'no_recorder';
   for (const command of ['record', 'stop'] as const) {

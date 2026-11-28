@@ -121,11 +121,8 @@ export function zaneiConfig(
   const recordsNoApp = isAppIncludeOnly && settings.apps.entries.length === 0;
   const isWebsiteIncludeOnly = settings.websites.mode === 'include_only';
   const hosts = settings.websites.hosts;
-  const meeting = transcription && [
-    ...(transcription.callApps ? [`call_apps = ${quotedList(transcription.callApps)}`] : []),
-    ...(transcription.callSites ? [`call_sites = ${quotedList(transcription.callSites)}`] : []),
-    ...(transcription.locale ? [`locale = ${quote(transcription.locale)}`] : []),
-  ];
+  const meeting =
+    transcription && (transcription.locale ? [`locale = ${quote(transcription.locale)}`] : []);
   return `[capture]
 ${transcription ? `sources = ${quotedList([...DEFAULT_SOURCES, 'transcript'])}\n` : ''}text_content = true
 content_snapshot = true

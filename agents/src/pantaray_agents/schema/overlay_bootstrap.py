@@ -22,12 +22,16 @@ class SuggestionTodoView(BaseModel):
     """A shown Suggestion's TODO; ``state`` is null once an Action carries it.
 
     ``handed_over`` is a TODO Pantaray has nothing left on, shown with no state.
+    ``project_id`` and ``organization_id`` are where the TODO sits, as the TODO
+    list has them; the popup names the place from the workspace settings.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     text: str
     state: Literal["waiting", "partial", "done", "handed_over"] | None
+    project_id: str | None
+    organization_id: str | None
 
 
 class OverlaySnapshotModel(BaseModel):

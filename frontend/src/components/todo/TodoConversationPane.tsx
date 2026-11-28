@@ -3,9 +3,12 @@ import { useContext, useId, useState, type ReactNode } from 'react';
 import { OpenWorkContext } from '@/components/action-conversation/sentMessageRefs';
 import { useSchedules } from '@/components/schedules/useSchedules';
 import { SuggestionTaskPane } from '@/components/task/SuggestionTaskPane';
+import { TaskTitle } from '@/components/task/TaskTitle';
 import { TaskWorkspace } from '@/components/task/TaskWorkspace';
 import type { TaskPreview } from '@/components/task/taskFiles';
 import { useI18n } from '@/context/useI18n';
+import type { WorkspaceSettings } from '@/pages/settings/components/workspaceSettingsModel';
+import { todoPlaceName, type TodoPlaceName } from '@/todos/groupTodosByProject';
 
 import type { TodoView } from '../../../electron/src/todos/todoContracts';
 
@@ -17,6 +20,7 @@ import type { TodoView } from '../../../electron/src/todos/todoContracts';
  */
 export function TodoConversationPane({
   todo,
+  settings,
   pending,
   deletionFailure,
   onAnswerDeletion,
@@ -26,6 +30,8 @@ export function TodoConversationPane({
   pageControls,
 }: {
   todo: TodoView;
+  /** The workspace the TODO's place is named from, under the conversation's title; null until read. */
+  settings: WorkspaceSettings | null;
   /** A write on the TODO is waiting for its answer; the request's buttons wait with it. */
   pending: boolean;
   /** Why the last answer to the request failed, told under it. */
@@ -43,6 +49,7 @@ export function TodoConversationPane({
     <>
       <Conversation
         todo={todo}
+        place={settings && todoPlaceName(settings, todo)}
         onAddProject={onAddProject}
         requestedFile={requestedFile}
         handedPreview={handedPreview}
@@ -101,12 +108,14 @@ function DeletionRequest({
 
 function Conversation({
   todo,
+  place,
   onAddProject,
   requestedFile,
   handedPreview,
   pageControls,
 }: {
   todo: TodoView;
+  place: TodoPlaceName | null;
   onAddProject: () => void;
   requestedFile: string | null;
   handedPreview: { actionId: string; preview: TaskPreview } | null;
@@ -127,6 +136,7 @@ function Conversation({
         key={actionId}
         actionId={actionId}
         title={todo.text}
+        place={place}
         initialPreview={
           started?.actionId === actionId
             ? started.preview
@@ -149,6 +159,7 @@ function Conversation({
         key={conversation.suggestion_id}
         suggestionId={conversation.suggestion_id}
         title={todo.text}
+        place={place}
         requestedFile={requestedFile}
         onStarted={(id, preview) => setStarted({ actionId: id, preview })}
         onAddProject={onAddProject}
@@ -158,7 +169,7 @@ function Conversation({
   return (
     <section className="todo-conversation-none" aria-labelledby={titleId}>
       <header className="action-task__header">
-        <h1 id={titleId}>{todo.text}</h1>
+        <TaskTitle id={titleId} title={todo.text} place={place} />
         <div className="action-task__header-actions">{pageControls}</div>
       </header>
       <p className="todo-conversation-none__text">{t('todo.conversation.none')}</p>

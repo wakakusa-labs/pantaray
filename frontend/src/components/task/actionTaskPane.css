@@ -54,6 +54,21 @@
   white-space: nowrap;
 }
 
+/* The title and where its TODO sits take the room the title alone had. */
+.task-title {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.task-title__place {
+  margin: 0;
+  overflow: hidden;
+  color: var(--fog-text-3);
+  font-size: var(--text-meta-size);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* What the run is doing now, as plain muted text; the title keeps the room first. */
 .action-task__state {
   flex: 0 10 auto;

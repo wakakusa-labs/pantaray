@@ -15,11 +15,13 @@ import { useConversationCopy } from '@/components/agent-overlay/conversationCopy
 import { useCompletionViewed } from '@/components/agent-overlay/useCompletionViewed';
 import { useConversationScroll } from '@/components/agent-overlay/useConversationScroll';
 import { useI18n } from '@/context/useI18n';
+import type { TodoPlaceName } from '@/todos/groupTodosByProject';
 import { useCopyWorkLink } from '@/history/useCopyWorkLink';
 import { useLiveStageText } from '@/components/history/liveStageText';
 import { ConversationSchedules } from '@/components/schedules/ConversationSchedules';
 import { useHistoryLiveStages } from '@/hooks/useHistoryLiveStages';
 
+import { TaskTitle } from './TaskTitle';
 import { useActionTask } from './useActionTask';
 import './actionTaskPane.css';
 
@@ -28,6 +30,8 @@ type ActionTaskPaneProps = {
   actionId: string;
   /** The history row's title for this Action. */
   title: string;
+  /** Where the Action's TODO sits, named under the title; absent when it has no TODO. */
+  place?: TodoPlaceName | null;
   /**
    * A file's preview, shown left of the conversation, which narrows to a column. It sits below
    * the header and beside the conversation, so opening and closing it keeps the conversation
@@ -59,6 +63,7 @@ type ActionTaskPaneProps = {
 export function ActionTaskPane({
   actionId,
   title,
+  place,
   renderPreview,
   onWatchBrowser,
   onAddProject,
@@ -150,7 +155,7 @@ export function ActionTaskPane({
       aria-labelledby={titleId}
     >
       <header className="action-task__header">
-        <h1 id={titleId}>{title}</h1>
+        <TaskTitle id={titleId} title={title} place={place} />
         {status.kind === 'approval_pending' ? (
           <p className="action-task__state">{t('history.status.approvalPending')}</p>
         ) : liveText !== null ? (

@@ -10,6 +10,8 @@ import { splitWorkKey } from '@/history/historySelection';
 import { useCopyWorkLink } from '@/history/useCopyWorkLink';
 import type { WorkRefKind } from '@/history/workRefLink';
 import type { OverlayOpenTaskRequest } from '../../../electron/src/ipc/schemas/overlay';
+import { TodoPlace } from '@/components/todo/TodoPlace';
+import type { TodoPlaceName } from '@/todos/groupTodosByProject';
 import type { SuggestionTodoView } from '../../../electron/src/orchestration/eventContracts';
 import { PopupContainer } from './OverlayBackground';
 import { COLORS } from './Styled';
@@ -73,6 +75,15 @@ const TodoHeading = styled.div`
     line-height: 1.4;
     overflow-wrap: anywhere;
   }
+`;
+
+/** Its own line under the TODO, quiet as the list's organization names are. */
+const TodoPlaceLine = styled(TodoPlace)`
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--fog-text-3);
+  font-size: var(--text-meta-size);
+  overflow-wrap: anywhere;
 `;
 
 const TodoState = styled.span<{ $waiting: boolean }>`
@@ -160,6 +171,8 @@ type AgentOverlayShellProps = {
   isSuggestionAccepted?: boolean;
   /** The TODO the suggestion became; `state` is null while it is not shown. */
   todo?: SuggestionTodoView | null;
+  /** Where that TODO sits, named under it; null until the workspace is read. */
+  todoPlace?: TodoPlaceName | null;
   /** A dismissed offer, with the reason the user gave, if any. */
   dismissal?: { reason: string | null } | null;
   /** The suggestion's files, until an Action takes the suggestion over. */
@@ -246,6 +259,7 @@ const AgentOverlayShell = ({
   isSuggestionStreamFinished,
   isSuggestionAccepted = false,
   todo = null,
+  todoPlace = null,
   dismissal = null,
   artifacts = [],
   actionText,
@@ -437,6 +451,7 @@ const AgentOverlayShell = ({
                 {todoStateLabel ? (
                   <TodoState $waiting={todo.state === 'waiting'}>{t(todoStateLabel)}</TodoState>
                 ) : null}
+                {todoPlace ? <TodoPlaceLine place={todoPlace} /> : null}
               </TodoHeading>
             ) : null}
             {typeof content === 'string' && content.trim().length > 0 ? (

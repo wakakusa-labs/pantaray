@@ -561,6 +561,7 @@ export function TodoScreen({
             <TodoConversationPane
               key={selectedTodo.todo_id}
               todo={selectedTodo}
+              settings={settings}
               pending={mutations.pending.has(selectedTodo.todo_id)}
               deletionFailure={failureFor(
                 (target) => target.kind === 'deletion' && target.todoId === selectedTodo.todo_id

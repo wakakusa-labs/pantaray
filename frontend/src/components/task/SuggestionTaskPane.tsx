@@ -10,10 +10,12 @@ import {
   OverlayComposer,
 } from '@/components/agent-overlay/OverlayComposer';
 import { useI18n } from '@/context/useI18n';
+import type { TodoPlaceName } from '@/todos/groupTodosByProject';
 
 import { FileChips } from './FileChips';
 import { FilePreviewPane } from './FilePreviewPane';
 import { taskFileAt, type TaskFile, type TaskPreview } from './taskFiles';
+import { TaskTitle } from './TaskTitle';
 import { useSuggestionTask, type SuggestionStartFailure } from './useSuggestionTask';
 import './actionTaskPane.css';
 import './suggestionTaskPane.css';
@@ -45,6 +47,8 @@ type SuggestionTaskPaneProps = {
   suggestionId: string;
   /** The history row's title for this suggestion. */
   title: string;
+  /** Where the suggestion's TODO sits, named under the title; absent when it has no TODO. */
+  place?: TodoPlaceName | null;
   /** One of its files to preview, asked for by an Overlay chip; each new request opens it. */
   requestedFile: string | null;
   /**
@@ -66,6 +70,7 @@ type SuggestionTaskPaneProps = {
 export function SuggestionTaskPane({
   suggestionId,
   title,
+  place,
   requestedFile,
   onStarted,
   onAddProject,
@@ -133,7 +138,7 @@ export function SuggestionTaskPane({
       aria-labelledby={titleId}
     >
       <header className="suggestion-task__header">
-        <h1 id={titleId}>{title}</h1>
+        <TaskTitle id={titleId} title={title} place={place} />
         <div className="action-task__header-actions">
           <button
             type="button"

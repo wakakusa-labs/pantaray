@@ -177,4 +177,60 @@ describe('RecordingRailControl', () => {
     fireEvent.click(button);
     expect(screen.getByRole('dialog', { name: 'コンピューター操作の記録' })).toBeVisible();
   });
+
+  it('shows a transcribed call with Stop, and offers a passed-up call while it lasts', async () => {
+    localStorage.setItem('pantaray_ui_language', 'ja');
+    const CALL = 'call_01JDQ3ZK8W5N3S8C7V6B5X4Y3Z';
+    const offered = {
+      call_id: CALL,
+      app: { name: 'zoom.us', bundle_id: 'us.zoom.xos' },
+      site: null,
+    };
+    let changeCall: (call: unknown) => void = () => undefined;
+    const meeting = {
+      getCall: vi.fn(async () => ({ kind: 'recording', started_at: 'now', ...offered })),
+      onCallChanged: vi.fn((callback: (call: unknown) => void) => {
+        changeCall = callback;
+        return () => undefined;
+      }),
+      record: vi.fn(async () => 'requested'),
+      stop: vi.fn(async () => 'requested'),
+    };
+    window.electron = {
+      screenshot: {
+        start: vi.fn(async () => 'started'),
+        stop: vi.fn(async () => true),
+        getStatus: vi.fn(async () => true),
+        onStatusChanged: vi.fn(() => () => undefined),
+      },
+      meeting,
+    } as unknown as Window['electron'];
+
+    renderControl('ja');
+    const button = await screen.findByRole('button', { name: 'zoom.us の通話を文字起こし中' });
+    expect(button.querySelector('.app-recording-light')).toHaveClass(
+      'app-recording-light--transcribing'
+    );
+    fireEvent.click(button);
+    fireEvent.click(screen.getByRole('button', { name: '止める' }));
+    expect(meeting.stop).toHaveBeenCalledWith(CALL);
+
+    act(() => changeCall({ kind: 'not_recording', refused: null, ...offered }));
+    expect(button).toHaveAccessibleName('コンピューター操作の記録：オン');
+    expect(button.querySelector('.app-recording-light')).not.toHaveClass(
+      'app-recording-light--transcribing'
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'この通話を文字起こしする' }));
+    expect(meeting.record).toHaveBeenCalledWith(CALL);
+
+    // The call ended, or still waits on the chip: nothing to offer here.
+    for (const call of [
+      { kind: 'idle' },
+      { kind: 'awaiting_consent', expires_at: 'later', ...offered },
+    ]) {
+      act(() => changeCall(call));
+      expect(screen.queryByRole('button', { name: 'この通話を文字起こしする' })).toBeNull();
+      expect(screen.queryByRole('button', { name: '止める' })).toBeNull();
+    }
+  });
 });

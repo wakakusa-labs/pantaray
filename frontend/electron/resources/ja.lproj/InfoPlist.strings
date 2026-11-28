@@ -1,3 +1,3 @@
 "NSAppleEventsUsageDescription" = "Pantarayがアクティブウィンドウやブラウザ情報を取得するためには、オートメーションの許可が必要です。";
-
-
+"NSMicrophoneUsageDescription" = "Pantaray は、通話ごとに許可したときだけ、その通話でのあなたの声を文字にします。";
+"NSAudioCaptureUsageDescription" = "Pantaray は、通話ごとに許可したときだけ、その通話での相手の声を文字にします。";

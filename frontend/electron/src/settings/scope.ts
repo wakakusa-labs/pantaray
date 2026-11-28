@@ -10,6 +10,7 @@ export const SCOPED_PREFERENCE_FILES = {
   ui: 'ui-settings.json',
   capturePrivacy: 'capture-privacy-settings.json',
   recording: 'screenshot-settings.json',
+  meetingTranscription: 'meeting-transcription-settings.json',
 } as const;
 
 type SettingsScopeParams = {

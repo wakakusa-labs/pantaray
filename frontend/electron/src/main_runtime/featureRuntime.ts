@@ -333,6 +333,18 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     },
     capturePrivacy,
     onCaptureStatusChanged: () => void params.updateUi.refreshCaptureStatus(),
+    onMeetingCallChanged: (call) => {
+      const mainWindow = params.getMainWindow();
+      if (mainWindow && !mainWindow.isDestroyed())
+        mainWindow.webContents.send('meeting:callChanged', call);
+      params.updateUi.setMeetingCall(call);
+      try {
+        params.notificationWindow.setMeetingConsent(call);
+      } catch (error) {
+        // The tray and the main window still offer the call.
+        params.logger?.error?.('MEETING_CONSENT_CHIP_ERR', { err: error });
+      }
+    },
     // The runtime greets only an owner who has no data yet, so every start may ask — during
     // setup too, so the runtime decides before anything is recorded.
     onRecordingStarted: (userId) => {
@@ -501,6 +513,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
         askForCapturePermission,
         openCapturePermissionSettings,
         readCapturePermissionRequired: params.updateUi.readPermissionRequired,
+        isMeetingConsentChip: params.notificationWindow.isMeetingConsentChip,
         onboarding: { getState: onboarding.get, setState: setOnboardingState },
         capturePrivacy,
         readAppIcon: readAppIconDataUrl,
@@ -569,5 +582,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
     registerMainIpc,
     startScreenshots,
     stopScreenshots: screenshotSync.stop,
+    recordCall: (callId: string) => screenshotSync.meeting.record(callId),
+    stopCall: (callId: string) => screenshotSync.meeting.stop(callId),
   };
 }

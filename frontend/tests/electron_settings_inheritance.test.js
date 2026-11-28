@@ -21,6 +21,10 @@ function profile(t) {
     path.join(source, SCOPED_PREFERENCE_FILES.recording),
     '{"enabled":false,"recorder_paused":true}'
   );
+  fs.writeFileSync(
+    path.join(source, SCOPED_PREFERENCE_FILES.meetingTranscription),
+    '{"enabled":true,"callApps":null,"callSites":null,"locale":null}'
+  );
   const privacy = createCapturePrivacyManager({ userDataDir, resolveAppBundleId: () => null });
   privacy.updateCaptureSettings({
     apps: { mode: 'include_only', entries: [{ name: 'Editor', bundleId: 'dev.editor' }] },

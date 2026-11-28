@@ -23,6 +23,9 @@ export type TrayMenuCopy = {
   startScreenshots: string;
   stopScreenshots: string;
   quit: string;
+  transcribingCall: (call: string) => string;
+  stopTranscribing: string;
+  transcribeCall: string;
   captureStatus: (status: CaptureStatusSnapshot | null) => TrayCaptureStatusCopy;
   tip: (hasUpdateReady: boolean, status: CaptureStatusSnapshot | null) => string;
 };
@@ -195,6 +198,9 @@ export function getTrayMenuCopy(lang: UiLanguage): TrayMenuCopy {
         startScreenshots: '操作の記録を再開',
         stopScreenshots: '操作の記録を一時停止',
         quit: '終了',
+        transcribingCall: (call) => `${call} の通話を文字起こし中`,
+        stopTranscribing: '止める',
+        transcribeCall: 'この通話を文字起こしする',
         captureStatus: (status) => getTrayCaptureStatusCopy(status, 'ja'),
         tip: (hasUpdateReady, status) => {
           const base = getTrayCaptureStatusCopy(status, 'ja').label;
@@ -207,6 +213,9 @@ export function getTrayMenuCopy(lang: UiLanguage): TrayMenuCopy {
         startScreenshots: 'Resume activity recording',
         stopScreenshots: 'Pause activity recording',
         quit: 'Quit',
+        transcribingCall: (call) => `Transcribing the ${call} call`,
+        stopTranscribing: 'Stop',
+        transcribeCall: 'Transcribe this call',
         captureStatus: (status) => getTrayCaptureStatusCopy(status, 'en'),
         tip: (hasUpdateReady, status) => {
           const base = getTrayCaptureStatusCopy(status, 'en').label;

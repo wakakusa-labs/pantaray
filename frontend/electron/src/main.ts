@@ -429,6 +429,8 @@ const updateUi = createUpdateUiManager({
   startScreenshots: () => featureRuntime.startScreenshots(),
   stopScreenshots: () => featureRuntime.stopScreenshots(),
   setTrayStatusVisual: (visual) => trayController.setStatusVisual(visual),
+  recordCall: (callId) => featureRuntime.recordCall(callId),
+  stopCall: (callId) => featureRuntime.stopCall(callId),
   onQuitRequested: () => {
     (app as AppWithQuitFlag).isQuitting = true;
   },

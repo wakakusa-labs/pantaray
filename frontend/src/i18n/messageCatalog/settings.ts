@@ -206,7 +206,10 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.general.title': 'General',
     'settings.screenshotCapture.title': 'Computer activity recording',
     'settings.screenshotCapture.description':
-      'Records what you do on this device, and the text shown there, according to the recording filter below.',
+      'Records what you do on this device, and the text shown there, according to the recording filter below. It also records which app used the microphone and when (no sound is recorded).',
+    'settings.callTranscription.transcribing': 'Transcribing the {call} call',
+    'settings.callTranscription.stop': 'Stop',
+    'settings.callTranscription.transcribeThisCall': 'Transcribe this call',
     'settings.screenshotCapture.screenshotsLabel': 'Computer activity recording',
     'settings.screenshotCapture.unavailable':
       'Computer activity recording is currently unavailable.',
@@ -496,7 +499,10 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.general.title': '一般',
     'settings.screenshotCapture.title': 'コンピューター操作の記録',
     'settings.screenshotCapture.description':
-      'この端末での操作と表示中の本文を、下の記録フィルタに従って記録します。',
+      'この端末での操作と表示中の本文を、下の記録フィルタに従って記録します。どのアプリがいつマイクを使ったかを記録します（音は記録しません）。',
+    'settings.callTranscription.transcribing': '{call} の通話を文字起こし中',
+    'settings.callTranscription.stop': '止める',
+    'settings.callTranscription.transcribeThisCall': 'この通話を文字起こしする',
     'settings.screenshotCapture.screenshotsLabel': 'コンピューター操作の記録',
     'settings.screenshotCapture.unavailable': '現在はコンピューター操作の記録を有効にできません。',
     'settings.screenshotCapture.pausedSuggestions': '提案も止まっています',

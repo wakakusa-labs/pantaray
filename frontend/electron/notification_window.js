@@ -439,6 +439,37 @@ function hideNotification(id) {
   }
 }
 
+// The consent chip for a call: shown without focus while the call awaits the user's answer,
+// gone once it is answered, expires or the call closes. It reads the call itself.
+const MEETING_CONSENT_ID = 'meeting-consent';
+let meetingConsentCallId = null;
+
+function setMeetingConsent(call) {
+  const callId = call.kind === 'awaiting_consent' ? call.call_id : null;
+  if (callId === meetingConsentCallId && hasOverlayWindow(MEETING_CONSENT_ID)) return;
+  destroyOverlayWindow(MEETING_CONSENT_ID);
+  meetingConsentCallId = callId;
+  if (!callId) return;
+  readOwnerScope();
+  createMappedOverlayWindow(MEETING_CONSENT_ID, {
+    entryMode: 'meeting_consent',
+    interactive: false,
+    placementKind: 'suggestion',
+    onReadyToShow: (win) => applyOverlayShellMode(win, PASSIVE_SHELL_MODE),
+  });
+}
+
+// Whether this sender is the open consent chip, and the call it asks about is this one.
+function isMeetingConsentChip(sender, callId) {
+  const win = overlayWindows.get(MEETING_CONSENT_ID);
+  return (
+    Boolean(win) &&
+    !win.isDestroyed() &&
+    win.webContents === sender &&
+    callId === meetingConsentCallId
+  );
+}
+
 function sendToAllOverlays(channel, payload) {
   for (const [, win] of overlayWindows) {
     if (win && !win.isDestroyed()) {
@@ -502,6 +533,8 @@ module.exports = {
   setLocalOwnerIdGetter,
   clearForOwnerChange,
   showNotification,
+  setMeetingConsent,
+  isMeetingConsentChip,
   createNotificationIpcHandlers,
   sendToAllOverlays,
   sendResetToAllOverlays,

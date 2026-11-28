@@ -1,5 +1,6 @@
 import { type App, type BrowserWindow, type MenuItemConstructorOptions, type Tray } from 'electron';
 
+import type { MeetingCall } from '../context/meetingTranscript';
 import type { UiLanguage, UpdateReadyNotice } from '../ipc/context';
 import { getTrayMenuCopy, getUpdateMenuCopy, type UpdateMenuCopy } from '../ui/mainProcessCopy';
 import type { CaptureStatusSnapshot } from '../screenshot/captureStatus';
@@ -51,6 +52,9 @@ type UpdateUiManagerDeps = {
   startScreenshots: () => Promise<RecordingStartResult>;
   stopScreenshots: () => Promise<boolean>;
   setTrayStatusVisual: (visual: TrayStatusVisual) => void;
+  /** Starts or stops transcribing a call; the outcome arrives as the next call state. */
+  recordCall: (callId: string) => Promise<unknown>;
+  stopCall: (callId: string) => Promise<unknown>;
   onQuitRequested: () => void;
 };
 
@@ -66,9 +70,16 @@ export function resolveTrayIconPath(params: {
   return `${frontendRoot}/${relativeIconPath}`;
 }
 
-export function getTrayStatusVisual(status: CaptureStatusSnapshot | null): TrayStatusVisual {
+export function getTrayStatusVisual(
+  status: CaptureStatusSnapshot | null,
+  call: MeetingCall
+): TrayStatusVisual {
+  if (call.kind === 'recording') return 'transcribing';
   return status?.screenshotsEnabled ? 'capturing' : 'idle';
 }
+
+/** A call in a browser is named by its site, as the user knows it. */
+const callName = (call: Exclude<MeetingCall, { kind: 'idle' }>) => call.site ?? call.app.name;
 
 function clearTrayStatusTitle(tray: Tray): void {
   const titledTray = tray as Tray & { setTitle?: (title: string) => void };
@@ -76,6 +87,7 @@ function clearTrayStatusTitle(tray: Tray): void {
 }
 export function createUpdateUiManager(deps: UpdateUiManagerDeps) {
   let captureStatusSnapshot: CaptureStatusSnapshot | null = null;
+  let meetingCall: MeetingCall = { kind: 'idle' };
   let captureStatusRefreshSequence = 0;
 
   // One restart path for the menus, the update dialog and the main window's notice.
@@ -232,8 +244,34 @@ export function createUpdateUiManager(deps: UpdateUiManagerDeps) {
       const captureStatusText = text.captureStatus(captureStatusSnapshot);
       const screenshotsEnabled = Boolean(captureStatusSnapshot?.screenshotsEnabled);
       const addTodoAccelerator = deps.getGlobalShortcutAccelerator();
+      const callCommand = (command: (callId: string) => Promise<unknown>, callId: string) => () =>
+        void command(callId).catch((error: unknown) =>
+          console.error('Call transcription command failed:', error)
+        );
+      // A call being transcribed comes first, with the way to stop it. A call the user let pass
+      // can still be transcribed while it lasts.
+      const callItems: MenuItemConstructorOptions[] =
+        meetingCall.kind === 'recording'
+          ? [
+              { label: text.transcribingCall(callName(meetingCall)), enabled: false },
+              {
+                label: text.stopTranscribing,
+                click: callCommand(deps.stopCall, meetingCall.call_id),
+              },
+              { type: 'separator' },
+            ]
+          : meetingCall.kind === 'not_recording'
+            ? [
+                {
+                  label: text.transcribeCall,
+                  click: callCommand(deps.recordCall, meetingCall.call_id),
+                },
+                { type: 'separator' },
+              ]
+            : [];
 
       const template: MenuItemConstructorOptions[] = [
+        ...callItems,
         {
           label: captureStatusText.label,
           enabled: false,
@@ -311,9 +349,13 @@ export function createUpdateUiManager(deps: UpdateUiManagerDeps) {
         },
       ];
       tray.setContextMenu(deps.menu.buildFromTemplate(template));
-      tray.setToolTip(text.tip(hasUpdateReady, captureStatusSnapshot));
+      tray.setToolTip(
+        meetingCall.kind === 'recording'
+          ? text.transcribingCall(callName(meetingCall))
+          : text.tip(hasUpdateReady, captureStatusSnapshot)
+      );
       clearTrayStatusTitle(tray);
-      deps.setTrayStatusVisual(getTrayStatusVisual(captureStatusSnapshot));
+      deps.setTrayStatusVisual(getTrayStatusVisual(captureStatusSnapshot, meetingCall));
     } catch {
       // no-op
     }
@@ -368,5 +410,9 @@ export function createUpdateUiManager(deps: UpdateUiManagerDeps) {
     readPermissionRequired,
     rebuildAppMenu,
     rebuildTrayMenu,
+    setMeetingCall: (call: MeetingCall): void => {
+      meetingCall = call;
+      rebuildTrayMenu();
+    },
   };
 }

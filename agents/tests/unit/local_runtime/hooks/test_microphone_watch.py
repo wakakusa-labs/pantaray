@@ -222,3 +222,23 @@ def test_a_hook_off_stopped_or_past_until_neither_reads_nor_fires(
 
     assert zanei.calls == 0
     assert _fired(world, hook_id) == []
+
+
+def test_a_gap_forgets_the_uses_and_counts_again_from_the_next_start(
+    world: _World,
+) -> None:
+    # Catches a dictation whose stop the gap skipped read as held by the
+    # clock, and a use left running that keeps the next start from firing.
+    hook_id, zanei = _started(world)
+    _start(zanei, timedelta(minutes=1))
+    _watch(world, zanei, timedelta(minutes=1, seconds=2))
+    _stop(zanei, timedelta(minutes=1, seconds=3))
+    zanei.gap = True
+    _watch(world, zanei, timedelta(minutes=1, seconds=40))
+    _watch(world, zanei, timedelta(minutes=2, seconds=10))
+    assert _fired(world, hook_id) == []
+
+    _start(zanei, timedelta(minutes=5), title="Zoom Meeting")
+    _watch(world, zanei, timedelta(minutes=6))
+
+    assert _fired(world, hook_id) == [(ZOOM, "Zoom Meeting")]

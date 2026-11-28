@@ -10,7 +10,8 @@ never in one begun before it was watched.
 
 Whether a stretch was held is read from the records' times; while the
 watcher has read everything, a stretch with no stop yet is held by the clock,
-less the time Zanei takes to commit a stop.
+less the time Zanei takes to commit a stop. A gap in the records forgets
+every use, so counting starts again from the next start.
 """
 
 from __future__ import annotations
@@ -155,6 +156,14 @@ def fire_held_by_clock(
         use = _read_use(connection, user_id=user_id, bundle_id=str(bundle_id))
         assert use is not None  # Read in the same transaction.
         _fire_if_held(connection, user_id=user_id, use=use, by=by, hooks=hooks)
+
+
+def forget_uses(connection: sqlite3.Connection, *, user_id: str) -> None:
+    """Every use goes, with the hooks it fired: records were skipped, so
+    neither how long an app has used the input nor whether it still does is
+    known."""
+
+    connection.execute("DELETE FROM microphone_uses WHERE user_id = ?", (user_id,))
 
 
 def forget_stale_uses(

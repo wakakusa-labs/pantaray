@@ -188,6 +188,7 @@ async def _watch(
             logger.warning("activity watch read failed: %s", type(result).__name__)
             return
         observations: Sequence[Observation] = ()
+        gap = isinstance(result, GapResponse)
         if isinstance(result, PageResponse):
             observations, next_cursor = result.observations, result.next_cursor
             more = result.has_more
@@ -207,6 +208,7 @@ async def _watch(
                             observations=observations,
                             cursor=next_cursor,
                             caught_up=not more,
+                            gap=gap,
                             now=now(),
                         )
         # Revoked after the read: what it read is not kept.
@@ -230,9 +232,14 @@ def _commit_page(
     observations: Sequence[Observation],
     cursor: str,
     caught_up: bool,
+    gap: bool,
     now: datetime,
 ) -> None:
     hooks = _listening(connection, user_id=user_id, now=now)
+    if gap:
+        # A skipped stop would leave a use running, held by the clock: the
+        # uses start over from the next start.
+        microphone_watch.forget_uses(connection, user_id=user_id)
     fires_from = _watch_hooks(connection, user_id=user_id, hooks=hooks, now=now)
     window_hooks = [hook for hook in hooks if hook.event == ActivityStarted.NAME]
     microphone_hooks = [

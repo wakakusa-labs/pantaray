@@ -36,7 +36,9 @@ MEETING = (FieldMatch(field="window_title", op="contains", values=("Zoom Meeting
 
 
 def _schedule(match: tuple[FieldMatch, ...] = MEETING) -> TaskSchedule:
-    return TaskSchedule(at=None, every=None, offset=None, until=None, match=match)
+    return TaskSchedule(
+        at=None, every=None, offset=None, until=None, on="activity", match=match
+    )
 
 
 def _save(world: _World, message: str = "Take notes for the meeting.") -> str:
@@ -162,6 +164,8 @@ def test_events_while_a_turn_runs_leave_one_fire_after_it(world: _World) -> None
         (FieldMatch(field="url", op="contains", values=("meet.google.com",)),),
         (FieldMatch(field="window_title", op="contains", values=(" ",)),),
         (FieldMatch(field="window_title", op="equals", values=()),),
+        # Only the microphone may be heard whole; any window would fire.
+        (),
     ],
 )
 def test_a_match_on_no_activity_field_or_no_value_is_refused(

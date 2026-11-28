@@ -1,7 +1,9 @@
-"""Watch Zanei's records for the on activity hooks, by fixed rules, no model.
+"""Watch Zanei's records for the on activity and microphone hooks, by fixed
+rules, no model.
 
 Every tick reads what Zanei recorded since the watcher's own position, while
-an activity hook is on and recording is ready; otherwise Zanei is not called.
+such a hook is on and recording is ready; otherwise Zanei is not called. The
+audio input records go to ``microphone_watch``; the rest are windows'.
 Each window's last recorded form says whether it matches a hook, and stands
 while nothing more is recorded of it. A hook fires when a window starts to
 match it, and not again until that window has been seen not matching for
@@ -57,9 +59,11 @@ from pantaray_agents.local_runtime.storage.migrations.connection import (
 from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
 from pantaray_agents.local_runtime.storage.users import ensure_user_row
 
+from . import microphone_watch
 from .controls import read_tasks
-from .events import ActivityStarted
+from .events import ActivityStarted, MicrophoneStarted
 from .inbox import record_event_for
+from .microphone_watch import AUDIO_INPUT_RECORDS, MicrophoneHook
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +90,7 @@ class PageReader(Protocol):
 class _Hook:
     hook_id: str
     version: int
+    event: str
     match: tuple[FieldMatch, ...]
 
 
@@ -98,14 +103,18 @@ def _connect(db_path: Path, busy_timeout_ms: int) -> closing[sqlite3.Connection]
 def _listening(
     connection: sqlite3.Connection, *, user_id: str, now: datetime
 ) -> tuple[_Hook, ...]:
-    """The activity hooks that may fire: on, not stopped, not past until."""
+    """The activity and microphone hooks that may fire: on, not stopped, not
+    past until."""
 
     return tuple(
         _Hook(
-            hook_id=row.task.hook_id, version=row.version, match=row.task.schedule.match
+            hook_id=row.task.hook_id,
+            version=row.version,
+            event=row.task.schedule.on,
+            match=row.task.schedule.match,
         )
         for row in read_tasks(connection, user_id=user_id)
-        if row.task.schedule.match
+        if row.task.schedule.on is not None
         and row.enabled
         and row.run.stopped_reason is None
         and not hook_has_ended(row.hook, now)
@@ -127,6 +136,7 @@ def run_activity_watch_once(
         # nothing is read.
         with immediate_transaction(connection):
             _forget_stale_windows(connection, user_id=user_id, now=now())
+            microphone_watch.forget_stale_uses(connection, user_id=user_id, now=now())
         if not _listening(connection, user_id=user_id, now=now()):
             return
     if not recording_ready():
@@ -196,6 +206,7 @@ async def _watch(
                             user_id=user_id,
                             observations=observations,
                             cursor=next_cursor,
+                            caught_up=not more,
                             now=now(),
                         )
         # Revoked after the read: what it read is not kept.
@@ -218,17 +229,45 @@ def _commit_page(
     user_id: str,
     observations: Sequence[Observation],
     cursor: str,
+    caught_up: bool,
     now: datetime,
 ) -> None:
     hooks = _listening(connection, user_id=user_id, now=now)
     fires_from = _watch_hooks(connection, user_id=user_id, hooks=hooks, now=now)
+    window_hooks = [hook for hook in hooks if hook.event == ActivityStarted.NAME]
+    microphone_hooks = [
+        MicrophoneHook(
+            hook_id=hook.hook_id, match=hook.match, fires_from=fires_from[hook.hook_id]
+        )
+        for hook in hooks
+        if hook.event == MicrophoneStarted.NAME
+    ]
     for observation in observations:
-        _apply(
-            connection,
-            user_id=user_id,
-            observation=observation,
-            hooks=hooks,
-            fires_from=fires_from,
+        event_type = _text(observation.event_type)
+        if event_type in AUDIO_INPUT_RECORDS or event_type == _APP_QUIT:
+            microphone_watch.apply_record(
+                connection,
+                user_id=user_id,
+                event_type=str(event_type),
+                record=MicrophoneStarted(
+                    app_name=_text(observation.app_name),
+                    bundle_id=_text(observation.bundle_id),
+                    window_title=_text(observation.window_title),
+                ),
+                at=parse_iso_z(observation.ts),
+                hooks=microphone_hooks,
+            )
+        if event_type not in AUDIO_INPUT_RECORDS:
+            _apply(
+                connection,
+                user_id=user_id,
+                observation=observation,
+                hooks=window_hooks,
+                fires_from=fires_from,
+            )
+    if caught_up:
+        microphone_watch.fire_held_by_clock(
+            connection, user_id=user_id, hooks=microphone_hooks, now=now
         )
     ensure_user_row(connection, user_id=user_id)
     connection.execute(
@@ -246,7 +285,8 @@ def _watch_hooks(
     now: datetime,
 ) -> Mapping[str, datetime]:
     """When each hook fires from; a hook new to the watcher, or replaced since,
-    is watched afresh, its matches taken from the windows' last forms.
+    is watched afresh, an activity hook's matches taken from the windows' last
+    forms.
 
     Watching starts a tick before now, so a window that starts to match
     between the hook's save and this tick still fires it. A hook that no
@@ -276,6 +316,20 @@ def _watch_hooks(
         if current is not None and current[0] == hook.version:
             fires_from[hook.hook_id] = current[1]
             continue
+        connection.execute(
+            "DELETE FROM activity_hook_watches WHERE user_id = ? AND hook_id = ?",
+            (user_id, hook.hook_id),
+        )
+        connection.execute(
+            """INSERT INTO activity_hook_watches(user_id, hook_id, version, watched_from)
+               VALUES (?, ?, ?, ?)""",
+            (user_id, hook.hook_id, hook.version, format_utc_iso(start)),
+        )
+        fires_from[hook.hook_id] = start
+        # A microphone hook needs no seed: a use begun before ``start`` never
+        # fires it.
+        if hook.event != ActivityStarted.NAME:
+            continue
         if windows is None:
             # Design limit: read whole when a hook is new; the table holds a
             # week of windows, a few thousand rows.
@@ -290,15 +344,6 @@ def _watch_hooks(
                     (user_id,),
                 )
             ]
-        connection.execute(
-            "DELETE FROM activity_hook_watches WHERE user_id = ? AND hook_id = ?",
-            (user_id, hook.hook_id),
-        )
-        connection.execute(
-            """INSERT INTO activity_hook_watches(user_id, hook_id, version, watched_from)
-               VALUES (?, ?, ?, ?)""",
-            (user_id, hook.hook_id, hook.version, format_utc_iso(start)),
-        )
         connection.executemany(
             """INSERT INTO activity_hook_windows(user_id, hook_id, window_key)
                VALUES (?, ?, ?)""",
@@ -308,7 +353,6 @@ def _watch_hooks(
                 if fields_match(hook.match, form)
             ],
         )
-        fires_from[hook.hook_id] = start
     return fires_from
 
 

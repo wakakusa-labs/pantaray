@@ -246,7 +246,7 @@ export function createScreenshotSyncManager(params: {
       userId: startedFor.id,
       requestPermissions: params.requestPermissions,
       holdsScreenRecording: params.holdsScreenRecording,
-      onHostEvents: meeting.readHostEvents,
+      onHostEvents: meeting.hostEventReader(),
       onExit: () => {
         void enqueue(async () => {
           await suspend('shutdown');
@@ -404,20 +404,22 @@ export function createScreenshotSyncManager(params: {
     }
   }
   /**
-   * A filter change restarts the recorder; editing filters keeps it down until the edit ends,
-   * the next call here. Except while a call is transcribed, unless `capture.sources` changes:
-   * a restart would end the transcription, and the recorder reads the rest again by itself.
+   * A filter change restarts the recorder (an edit keeps it down until it ends, the next call
+   * here), except under a call being transcribed while `capture.sources` stays: the recorder
+   * rereads the rest. A failed rewrite stops it too: nothing may capture under the old rule.
    */
   async function reconfigure<T>(update: () => T, sourcesKept: boolean): Promise<T> {
-    if (sourcesKept && collector && meeting.isRecording()) {
+    const inPlace = sourcesKept && collector !== null && meeting.isRecording();
+    if (!inPlace) await suspend('policy_change');
+    try {
       const result = update();
-      collector.writeConfig(renderConfig());
+      if (inPlace) collector?.writeConfig(renderConfig());
+      else await restoreFromPreference();
       return result;
+    } catch (error) {
+      if (inPlace) await suspend('policy_change');
+      throw error;
     }
-    await suspend('policy_change');
-    const result = update();
-    await restoreFromPreference();
-    return result;
   }
   /**
    * The recorder is up and able to capture. The capture pause is deliberately not

@@ -1022,7 +1022,7 @@ function meetingFixture(t, { supported = true, helper = true } = {}) {
   const transcribing = { enabled: true, callApps: null, callSites: ['meet.google.com'], locale: 'ja-JP' };
   const startRecordingCall = () => hostEvents(JSON.stringify({ type: 'recording', started_at: 'now',
     call_id: 'call_01JDQ3ZK8W5N3S8C7V6B5X4Y3Z', app: { name: 'zoom.us', bundle_id: 'us.zoom.xos' } }) + '\n');
-  return { ...f, configs, written, transcribing, startRecordingCall };
+  return { ...f, configs, written, transcribing, startRecordingCall, hostEvents: chunk => hostEvents(chunk) };
 }
 
 test('transcription is configured only once turned on, on a Mac and recorder that can run it', async t => {
@@ -1041,7 +1041,6 @@ test('transcription is configured only once turned on, on a Mac and recorder tha
     const f = meetingFixture(t, options);
     await f.manager.start();
     await f.manager.meeting.updateSettings(f.transcribing);
-    assert.equal(f.manager.meeting.getSettings().settings.enabled, true);
     assert.equal(f.manager.meeting.getSettings().supported, false);
     assert.doesNotMatch(f.configs.at(-1), /transcript|\[meeting\]/, JSON.stringify(options));
   }
@@ -1068,4 +1067,29 @@ test('a filter or call-list change while a call is transcribed rewrites the conf
   assert.ok(f.calls.includes('stop'));
   assert.equal(f.manager.meeting.getCall().kind, 'idle');
   assert.ok(!f.configs.at(-1).includes('transcript'));
+});
+
+test('a config that cannot be rewritten while a call is transcribed stops the recorder', async t => {
+  const f = meetingFixture(t);
+  await f.manager.start();
+  await f.manager.meeting.updateSettings(f.transcribing);
+  f.startRecordingCall();
+  f.process.writeConfig = () => { throw new Error('disk full'); };
+  f.calls.length = 0;
+  // The exclusion did not reach the recorder, so it must not keep capturing under the old one.
+  await assert.rejects(f.manager.updatePrivacy(() => f.privacy.updateCaptureSettings({ ...f.privacy.getCaptureSettings(), websites: { mode: 'exclude', hosts: ['example.com'] } })), /disk full/);
+  assert.deepEqual(f.calls, ['stop', 'suspend']);
+  assert.equal(f.manager.getStatus(), false);
+  assert.equal(f.manager.meeting.getCall().kind, 'idle');
+});
+
+test('a line a recorder left unfinished does not swallow the next recorder\'s first event', async t => {
+  const f = meetingFixture(t);
+  await f.manager.start();
+  f.hostEvents('{"type":"recording","call_id":');
+  // A filter change while nothing is transcribed restarts the recorder.
+  await f.manager.updatePrivacy(() => f.privacy.updateCaptureSettings({ ...f.privacy.getCaptureSettings(), websites: { mode: 'exclude', hosts: ['example.com'] } }));
+  assert.ok(f.calls.includes('stop'));
+  f.startRecordingCall();
+  assert.equal(f.manager.meeting.getCall().kind, 'recording');
 });

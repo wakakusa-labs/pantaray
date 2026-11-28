@@ -4,8 +4,8 @@ import { readZaneiManifest, recorderTranscribesCalls } from './zaneiConfig';
 
 /**
  * Call transcription as the host of a recorder started with `--host-events`: the recorder
- * detects and transcribes calls, this app owns the consent and the stop. The recorder's stdout
- * events are the only input, and its next start replays what is current.
+ * detects and transcribes calls, this app owns the consent and the stop. Its stdout events are
+ * the only input, and its next start replays what is current.
  */
 
 /** `call_` and a ULID, as the recorder writes it. */
@@ -22,29 +22,27 @@ const RECORD_REFUSED_REASONS = [
   'unavailable',
 ] as const;
 export type RecordRefusedReason = (typeof RECORD_REFUSED_REASONS)[number];
+type Refusal = Exclude<RecordRefusedReason, 'not_active'>;
 
+const CallEvent = z.object({ call_id: CallIdSchema });
 const HostEventSchema = z.discriminatedUnion('type', [
-  z.object({
+  CallEvent.extend({
     type: z.literal('call_detected'),
-    call_id: CallIdSchema,
     app: CallAppSchema,
     site: z.string().nullable(),
     expires_at: z.string().datetime({ offset: true }),
   }),
-  z.object({
+  CallEvent.extend({
     type: z.literal('call_closed'),
-    call_id: CallIdSchema,
     reason: z.enum(['call_ended', 'expired', 'paused', 'excluded']),
   }),
-  z.object({
+  CallEvent.extend({
     type: z.literal('recording'),
-    call_id: CallIdSchema,
     app: CallAppSchema,
     started_at: z.string(),
   }),
-  z.object({
+  CallEvent.extend({
     type: z.literal('recording_stopped'),
-    call_id: CallIdSchema,
     reason: z.enum([
       'user_stopped',
       'call_ended',
@@ -57,35 +55,23 @@ const HostEventSchema = z.discriminatedUnion('type', [
       'interrupted',
     ]),
   }),
-  z.object({
+  CallEvent.extend({
     type: z.literal('record_refused'),
-    call_id: CallIdSchema,
     reason: z.enum(RECORD_REFUSED_REASONS),
   }),
 ]);
 type HostEvent = z.infer<typeof HostEventSchema>;
 
+type OfferedCall = { call_id: string; app: CallApp; site: string | null };
 /**
  * The call the UI shows. `not_recording` is a call still in progress that the user declined
  * or let expire, or that the recorder refused: it can still be recorded from the tray.
  */
 export type MeetingCall =
   | { kind: 'idle' }
-  | {
-      kind: 'awaiting_consent';
-      call_id: string;
-      app: CallApp;
-      site: string | null;
-      expires_at: string;
-    }
-  | {
-      kind: 'not_recording';
-      call_id: string;
-      app: CallApp;
-      site: string | null;
-      refused: Exclude<RecordRefusedReason, 'not_active'> | null;
-    }
-  | { kind: 'recording'; call_id: string; app: CallApp; site: string | null; started_at: string };
+  | ({ kind: 'awaiting_consent'; expires_at: string } & OfferedCall)
+  | ({ kind: 'not_recording'; refused: Refusal | null } & OfferedCall)
+  | ({ kind: 'recording'; started_at: string } & OfferedCall);
 
 const IDLE: MeetingCall = { kind: 'idle' };
 
@@ -108,7 +94,7 @@ function nextMeetingCall(call: MeetingCall, event: HostEvent | LocalEvent): Meet
     return { kind: 'recording', site, ...recording };
   }
   if (call.kind === 'idle' || call.call_id !== event.call_id) return call;
-  const missed = (refused: Extract<MeetingCall, { kind: 'not_recording' }>['refused']) =>
+  const missed = (refused: Refusal | null) =>
     ({ kind: 'not_recording', call_id: call.call_id, app: call.app, site, refused }) as const;
   if (event.type === 'recording_stopped') return IDLE;
   if (call.kind === 'recording') return call;
@@ -208,11 +194,12 @@ export function createMeetingTranscript(params: {
   return {
     getCall: () => call,
     isRecording: () => call.kind === 'recording',
-    /** Takes the recorder's stdout. */
-    readHostEvents: createLineSplitter((line) => {
-      const event = parseHostEvent(line);
-      if (event) apply(event);
-    }),
+    /** Reads one recorder process's stdout; a line it left unfinished dies with it. */
+    hostEventReader: () =>
+      createLineSplitter((line) => {
+        const event = parseHostEvent(line);
+        if (event) apply(event);
+      }),
     /** The recorder stopped: its calls and call ids ended with it. */
     reset: () => apply(null),
     decline: (callId: string) => apply({ type: 'declined', call_id: callId }),
@@ -223,7 +210,7 @@ export function createMeetingTranscript(params: {
     prepare: () => send({ kind: 'prepare' }),
     readAvailability: async () => (await params.getRecorder()?.readMeetingAvailability()) ?? null,
     getSettings: () => ({ settings: readSettings(), supported: isSupported() }),
-    /** What the recorder's configuration says about transcription; null leaves it off. */
+    /** Null leaves transcription off in the recorder's configuration. */
     transcription: (): MeetingSettings | null => {
       const settings = readSettings();
       return settings.enabled && isSupported() ? settings : null;

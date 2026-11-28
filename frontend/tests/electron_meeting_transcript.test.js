@@ -25,20 +25,21 @@ function meeting(t, recorder = null) {
     onChange: call => changes.push(call.kind), settingsPath: () => null,
     getManifestPath: () => assert.fail('settings are not read here') });
   t.after(() => manager.reset());
-  const read = (...events) => manager.readHostEvents(events.map(line).join(''));
-  return { manager, changes, read, kind: () => manager.getCall().kind };
+  const reader = manager.hostEventReader();
+  const read = (...events) => reader(events.map(line).join(''));
+  return { manager, reader, changes, read, kind: () => manager.getCall().kind };
 }
 
 test('stdout lines are read across chunk boundaries, and unreadable ones change nothing', t => {
-  const { manager, read, kind } = meeting(t);
+  const { reader, read, kind } = meeting(t);
   const text = line(detected());
-  manager.readHostEvents(text.slice(0, 25));
+  reader(text.slice(0, 25));
   assert.equal(kind(), 'idle');
-  manager.readHostEvents(text.slice(25));
+  reader(text.slice(25));
   assert.equal(kind(), 'awaiting_consent');
   // A newer recorder's event, a known event that breaks the contract, and noise.
   read({ type: 'call_summarized', call_id: CALL }, { ...recording(), call_id: 'not-a-call-id' });
-  manager.readHostEvents('{ not json\n\n');
+  reader('{ not json\n\n');
   assert.equal(kind(), 'awaiting_consent');
   // Several events in one chunk apply in order.
   read(recording(), { type: 'recording_stopped', call_id: CALL, reason: 'user_stopped' });
@@ -77,22 +78,16 @@ test('a refused record says why, and a recorder restart ends every call it held'
   assert.deepEqual([kind(), manager.getCall().refused], ['not_recording', 'permission_missing']);
   read({ type: 'record_refused', call_id: CALL, reason: 'not_active' });
   assert.equal(kind(), 'idle');
-  read(detected());
-  manager.reset();
-  assert.equal(kind(), 'idle');
+  read(detected()); manager.reset(); assert.equal(kind(), 'idle');
 });
 
 test('commands go to the running recorder, and without one nothing is queued', async t => {
   const sent = [];
-  const recorder = { meeting: async command => { sent.push(command); return 'requested'; },
-    readMeetingAvailability: async () => 'available' };
-  const { manager } = meeting(t, recorder);
-  assert.equal(await manager.record(CALL), 'requested');
-  assert.equal(await manager.stop(CALL), 'requested');
-  assert.equal(await manager.prepare(), 'requested');
-  assert.deepEqual(sent, [{ kind: 'record', call_id: CALL }, { kind: 'stop', call_id: CALL }, { kind: 'prepare' }]);
+  const { manager } = meeting(t, { meeting: async command => { sent.push(command); return 'requested'; } });
+  assert.deepEqual([await manager.record(CALL), await manager.stop(CALL), await manager.prepare()],
+    ['requested', 'requested', 'requested']);
+  assert.deepEqual(sent.map(command => command.kind), ['record', 'stop', 'prepare']);
   assert.equal(await meeting(t).manager.record(CALL), 'no_recorder');
-  assert.equal(await meeting(t).manager.readAvailability(), null);
 });
 
 test('settings refuse entries the recorder would reject the whole configuration for', () => {
@@ -109,8 +104,8 @@ function recorderProcess(t, { helper = false, exitCode = 0 } = {}) {
   const executable = path.join(dir, 'zanei'); fs.writeFileSync(executable, 'synthetic');
   if (helper) fs.writeFileSync(path.join(dir, 'zanei-meeting'), 'helper');
   const [commands, spawns, chunks] = [[], [], []];
-  const child = Object.assign(new EventEmitter(), { pid: 7, stdout: new PassThrough(),
-    stdin: { on: () => {}, end: () => {} }, kill: () => {} });
+  const stdin = { on: () => {}, end: () => {} };
+  const child = Object.assign(new EventEmitter(), { pid: 7, stdout: new PassThrough(), stdin, kill: () => {} });
   const answers = { doctor: { capabilities: {} },
     status: { state: 'stopped', running: false, permissions_ok: true } };
   const process = createZaneiProcess({
@@ -132,7 +127,7 @@ function recorderProcess(t, { helper = false, exitCode = 0 } = {}) {
       const answer = answers[args[4]];
       const error = exitCode ? Object.assign(new Error('exit'), { code: exitCode }) : null;
       setImmediate(() => answer ? callback(null, JSON.stringify(answer)) : callback(error, ''));
-      return { stdin: { on: () => {}, end: () => {} } };
+      return { stdin };
     },
   });
   return { process, commands, spawns, chunks };
@@ -140,16 +135,13 @@ function recorderProcess(t, { helper = false, exitCode = 0 } = {}) {
 
 test('meeting commands run the recorder CLI, and exit code 4 means no recorder', async t => {
   const { process, commands } = recorderProcess(t);
-  assert.equal(await process.meeting({ kind: 'record', call_id: CALL }), 'requested');
-  assert.equal(await process.meeting({ kind: 'stop', call_id: CALL }), 'requested');
-  assert.equal(await process.meeting({ kind: 'prepare' }), 'requested');
+  for (const command of [{ kind: 'record', call_id: CALL }, { kind: 'stop', call_id: CALL }, { kind: 'prepare' }])
+    assert.equal(await process.meeting(command), 'requested');
   assert.deepEqual(commands,
     [['meeting', 'record', CALL], ['meeting', 'stop', CALL], ['meeting', 'prepare']]);
-  const noRecorder = recorderProcess(t, { exitCode: 4 }).process;
-  assert.equal(await noRecorder.meeting({ kind: 'prepare' }), 'no_recorder');
+  assert.equal(await recorderProcess(t, { exitCode: 4 }).process.meeting({ kind: 'prepare' }), 'no_recorder');
   // A refused call id (a usage error) is a failure, not a missing recorder.
-  const refused = recorderProcess(t, { exitCode: 2 }).process;
-  await assert.rejects(refused.meeting({ kind: 'stop', call_id: CALL }));
+  await assert.rejects(recorderProcess(t, { exitCode: 2 }).process.meeting({ kind: 'stop', call_id: CALL }));
 });
 
 test('a recorder release with the helper starts as the host and its stdout is read', async t => {

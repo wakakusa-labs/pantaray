@@ -169,9 +169,6 @@ export function createZaneiProcess(params: {
       throw error;
     }
   }
-  async function readMeetingAvailability(): Promise<MeetingAvailability | null> {
-    return (await status()).meeting?.availability ?? null;
-  }
   /** The recorder reads `[filter]` and `[meeting]` again within seconds, the rest at a start. */
   function writeConfig(config: string): void {
     fs.mkdirSync(paths.directory, { recursive: true, mode: 0o700 });
@@ -305,7 +302,7 @@ export function createZaneiProcess(params: {
     resume,
     readPermissions,
     meeting,
-    readMeetingAvailability,
+    readMeetingAvailability: async () => (await status()).meeting?.availability ?? null,
     writeConfig,
   };
 }

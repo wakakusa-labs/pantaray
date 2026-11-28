@@ -47,9 +47,8 @@ export function zaneiSubjectPaths(manifest: ZaneiManifest, userId: string) {
 }
 
 /**
- * A recorder release with call transcription ships its `zanei-meeting` helper beside it, and
- * only such a release accepts `--host-events` and `[meeting]`. Staging requires the helper
- * from the release that has it on, so its presence says what the staged recorder can do.
+ * Only a release that ships `zanei-meeting` beside the recorder accepts `--host-events` and
+ * `[meeting]`; staging requires the helper from that release on, so its presence tells.
  */
 export function recorderTranscribesCalls(manifest: Pick<ZaneiManifest, 'executable_path'>) {
   return fs.existsSync(path.join(path.dirname(manifest.executable_path), 'zanei-meeting'));

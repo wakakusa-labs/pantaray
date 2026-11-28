@@ -135,6 +135,8 @@ export type NotificationWindowApi = {
   showNotification: (id: string) => void;
   /** Shows the consent chip while the call awaits an answer, and closes it otherwise. */
   setMeetingConsent: (call: MeetingCall) => void;
+  /** Whether the sender is the open consent chip and asks about this call. */
+  isMeetingConsentChip: (sender: Readonly<{ id: number }>, callId: string) => boolean;
   isVisibleOverlayAtPoint?: (point: { x: number; y: number }) => boolean;
   hasRecentOverlayInteraction?: (referenceMs?: number) => boolean;
   sendToAllOverlays: (channel: string, payload: unknown) => void;

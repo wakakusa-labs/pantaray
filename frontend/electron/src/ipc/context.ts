@@ -333,6 +333,8 @@ export type MainContext = {
     stop: (callId: string) => Promise<MeetingCommandResult>;
     /** "Not this time": the call stays recordable while it lasts. */
     decline: (callId: string) => void;
+    /** Whether the sender is the consent chip main opened for this call. */
+    isConsentChip: (sender: IpcSenderIdentity, callId: string) => boolean;
     /** Asks macOS for the microphone and system audio once, and fetches the speech model. */
     prepare: () => Promise<MeetingCommandResult>;
     updateSettings: (settings: MeetingSettings) => Promise<void>;

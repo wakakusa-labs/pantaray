@@ -459,6 +459,17 @@ function setMeetingConsent(call) {
   });
 }
 
+// Whether this sender is the open consent chip, and the call it asks about is this one.
+function isMeetingConsentChip(sender, callId) {
+  const win = overlayWindows.get(MEETING_CONSENT_ID);
+  return (
+    Boolean(win) &&
+    !win.isDestroyed() &&
+    win.webContents === sender &&
+    callId === meetingConsentCallId
+  );
+}
+
 function sendToAllOverlays(channel, payload) {
   for (const [, win] of overlayWindows) {
     if (win && !win.isDestroyed()) {
@@ -523,6 +534,7 @@ module.exports = {
   clearForOwnerChange,
   showNotification,
   setMeetingConsent,
+  isMeetingConsentChip,
   createNotificationIpcHandlers,
   sendToAllOverlays,
   sendResetToAllOverlays,

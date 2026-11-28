@@ -30,10 +30,19 @@ export function MeetingConsentChip() {
     );
   }, [meeting]);
 
-  // The window is sized to the chip, as every Overlay panel is to its content.
+  // The window is sized to the chip's own height, which the window's first size does not cap
+  // (see the CSS); main keeps the window on screen. A name that wraps grows it.
   useLayoutEffect(() => {
-    const height = panelRef.current?.getBoundingClientRect().height;
-    if (height) window.electron?.agentOverlay?.resize(Math.ceil(height), { settled: true });
+    const panel = panelRef.current;
+    if (!panel) return;
+    const report = () =>
+      window.electron?.agentOverlay?.resize(Math.ceil(panel.getBoundingClientRect().height), {
+        settled: true,
+      });
+    report();
+    const observer = new ResizeObserver(report);
+    observer.observe(panel);
+    return () => observer.disconnect();
   }, [call]);
 
   if (!call || !meeting) return null;

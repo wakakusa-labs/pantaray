@@ -108,6 +108,7 @@ export function buildMainContext(params: {
   askForCapturePermission: MainContext['screenshot']['askForPermission'];
   openCapturePermissionSettings: MainContext['screenshot']['openPermissionSettings'];
   readCapturePermissionRequired: MainContext['screenshot']['getPermissionRequired'];
+  isMeetingConsentChip: MainContext['meeting']['isConsentChip'];
   onboarding: MainContext['onboarding'];
   onCaptureSettingsChanged?: () => void;
 
@@ -399,6 +400,7 @@ export function buildMainContext(params: {
       record: withOwner((callId) => params.screenshotSync.meeting.record(callId)),
       stop: withOwner((callId) => params.screenshotSync.meeting.stop(callId)),
       decline: (callId) => params.screenshotSync.meeting.decline(callId),
+      isConsentChip: params.isMeetingConsentChip,
       prepare: withOwner(() => params.screenshotSync.meeting.prepare()),
       updateSettings: withOwner((settings) =>
         params.screenshotSync.meeting.updateSettings(settings)

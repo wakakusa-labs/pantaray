@@ -1535,6 +1535,10 @@ test('the consent chip shows without focus while a call awaits an answer, and go
   // The same call again keeps the chip the user is looking at.
   notificationWindow.setMeetingConsent(awaiting('call_A'));
   assert.equal(instances.length, 1);
+  // Only this chip answers, and only for its call.
+  assert.equal(notificationWindow.isMeetingConsentChip(chip.webContents, 'call_A'), true);
+  assert.equal(notificationWindow.isMeetingConsentChip(chip.webContents, 'call_B'), false);
+  assert.equal(notificationWindow.isMeetingConsentChip({ id: 99 }, 'call_A'), false);
 
   // Declined or expired: the call is still recordable, from the tray, but no longer asked about.
   notificationWindow.setMeetingConsent({
@@ -1543,6 +1547,7 @@ test('the consent chip shows without focus while a call awaits an answer, and go
     ...offered('call_A'),
   });
   assert.equal(chip.destroyed, true);
+  assert.equal(notificationWindow.isMeetingConsentChip(chip.webContents, 'call_A'), false);
 
   notificationWindow.setMeetingConsent(awaiting('call_B'));
   assert.equal(instances.length, 2);

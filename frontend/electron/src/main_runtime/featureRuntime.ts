@@ -513,6 +513,7 @@ export function createDesktopFeatureRuntime(params: FeatureRuntimeParams) {
         askForCapturePermission,
         openCapturePermissionSettings,
         readCapturePermissionRequired: params.updateUi.readPermissionRequired,
+        isMeetingConsentChip: params.notificationWindow.isMeetingConsentChip,
         onboarding: { getState: onboarding.get, setState: setOnboardingState },
         capturePrivacy,
         readAppIcon: readAppIconDataUrl,

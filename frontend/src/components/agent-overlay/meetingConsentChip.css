@@ -1,6 +1,8 @@
 /* The consent chip for a call: the question, the reminder to tell the others, two answers.
    The element selector outranks the panel's own padding. */
 section.meeting-consent {
+  /* Laid out at its own height, not the window's, so it can be measured before the resize. */
+  max-height: none;
   gap: 4px;
   padding-top: 18px;
   padding-bottom: 18px;

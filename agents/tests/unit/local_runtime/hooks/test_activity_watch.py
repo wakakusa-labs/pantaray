@@ -160,7 +160,9 @@ def _hook(
     if world.action_id is None:
         world.action_id = _conversation(world)
     hook_id = new_task_id(request)
-    schedule = TaskSchedule(at=None, every=None, offset=None, until=None, match=match)
+    schedule = TaskSchedule(
+        at=None, every=None, offset=None, until=None, on="activity", match=match
+    )
     assert (
         save_task(
             db_path=world.db,

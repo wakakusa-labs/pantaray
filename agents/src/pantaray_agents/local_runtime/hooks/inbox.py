@@ -25,8 +25,8 @@ from .events import HookEvent
 
 
 def _listening_hooks(event: HookEvent) -> tuple[str, ...]:
-    """The built-ins that listen to the event; a task hears only activity, which
-    the watcher writes to that one task's inbox."""
+    """The built-ins that listen to the event; a task hears only what the
+    activity watcher writes to that one task's inbox."""
 
     now = datetime.now(UTC)
     return tuple(

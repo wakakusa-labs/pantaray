@@ -142,6 +142,22 @@ class ActivityStarted(_DomainEvent):
     window_title: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class MicrophoneStarted(_DomainEvent):
+    """An app Zanei recorded using the audio input kept using it for the
+    watcher's hold, in a use an on microphone hook had not fired in yet.
+
+    Written by the activity watcher into the one hook's inbox. The fields are
+    those of the record that began the held stretch: the app, and its window
+    when it started using the input; one Zanei did not record is None.
+    """
+
+    NAME: ClassVar[str] = "microphone"
+    app_name: str | None
+    bundle_id: str | None
+    window_title: str | None
+
+
 HookEvent = (
     JobLifecycleEvent
     | InsightRecorded
@@ -153,6 +169,7 @@ HookEvent = (
     | SuggestionGenerationStarted
     | TodoSaved
     | ActivityStarted
+    | MicrophoneStarted
 )
 
 # An Action run's terminal is written by the Action terminal repository, not
@@ -184,4 +201,8 @@ EVENT_NAMES: Final = frozenset(
 # match may name; the built-ins listen to EVENT_NAMES only.
 USER_HOOK_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = {
     ActivityStarted.NAME: frozenset({"app_name", "bundle_id", "window_title"}),
+    MicrophoneStarted.NAME: frozenset({"app_name", "bundle_id", "window_title"}),
 }
+# The events a user hook may listen to with no match, hearing every one; the
+# others need at least one field match.
+USER_HOOK_EVENTS_MATCHING_ALL: Final = frozenset({MicrophoneStarted.NAME})

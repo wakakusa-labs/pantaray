@@ -165,6 +165,7 @@ def _schedule(trigger: _TriggerArg, until: datetime | None) -> TaskSchedule:
             every=None,
             offset=None,
             until=until,
+            on=trigger["on"],
             match=tuple(
                 FieldMatch(field=m["field"], op=m["op"], values=tuple(m["values"]))
                 for m in trigger["match"]

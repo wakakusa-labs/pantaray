@@ -878,7 +878,14 @@ def test_the_list_names_the_asking_conversation_and_an_activity_condition(
         started,
         build_task(
             activity,
-            TaskSchedule(at=None, every=None, offset=None, until=None, match=meeting),
+            TaskSchedule(
+                at=None,
+                every=None,
+                offset=None,
+                until=None,
+                on="activity",
+                match=meeting,
+            ),
             "Take notes.",
         ),
     )

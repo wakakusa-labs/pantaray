@@ -1393,34 +1393,43 @@ describe('AgentOverlay broader E2E', () => {
     expect(heading.parentElement).toHaveTextContent(/^Cancel the design tool plan$/);
   });
 
-  it('names where the TODO sits under it, as the main window does', async () => {
-    Object.assign(window.electron!, {
-      workspaceSettings: {
-        get: vi.fn(async () => ({
-          organizations: [{ organization_id: 'org-1', display_name: 'Acme', icon_data_url: null }],
-          projects: [
-            {
-              project_id: 'p-1',
-              display_name: 'Decks',
-              sort_order: 0,
-              organization_ids: ['org-1'],
-            },
-          ],
-        })),
-      },
+  it('names where the TODO sits under it, as the workspace names it now', async () => {
+    const workspace = (projectName: string) => ({
+      organizations: [{ organization_id: 'org-1', display_name: 'Acme', icon_data_url: null }],
+      projects: [
+        {
+          project_id: 'p-1',
+          display_name: projectName,
+          sort_order: 0,
+          organization_ids: ['org-1'],
+        },
+      ],
     });
+    const get = vi.fn(async () => workspace('Decks'));
+    Object.assign(window.electron!, { workspaceSettings: { get } });
     render(
       <UiLanguageProvider initialLanguage="en">
         <AgentOverlay />
       </UiLanguageProvider>
     );
+    const todo = { state: 'waiting', project_id: 'p-1', organization_id: null };
     const offer = createCommentOnlySnapshot();
     Object.assign(offer.snapshot, {
       suggestionId: 'sug-placed',
-      todo: { text: 'Draft the deck', state: 'waiting', project_id: 'p-1', organization_id: null },
+      todo: { ...todo, text: 'Draft the deck' },
     });
     await act(async () => snapshotListener?.(offer));
     expect(await screen.findByText('Acme › Decks')).toBeInTheDocument();
+
+    // The reused panel's next suggestion, in the same project since renamed.
+    get.mockImplementation(async () => workspace('Slides'));
+    const next = createCommentOnlySnapshot();
+    Object.assign(next.snapshot, {
+      suggestionId: 'sug-next',
+      todo: { ...todo, text: 'Add the charts' },
+    });
+    await act(async () => snapshotListener?.(next));
+    expect(await screen.findByText('Acme › Slides')).toBeInTheDocument();
   });
 
   it('stays open when the suggestion it shows is dismissed in the main window', async () => {

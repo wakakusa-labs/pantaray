@@ -15,6 +15,7 @@ import { TodoNewLine } from './TodoNewLine';
 import { TodoProjectGroup } from './TodoProjectGroup';
 import { TodoProjectLine } from './TodoProjectLine';
 import { TodoRow } from './TodoRow';
+import { dueDay } from './todoDates';
 
 afterEach(cleanup);
 
@@ -106,13 +107,13 @@ it('shows a TODO handed over to the user with no state word, like an ordinary on
 
 it('draws a due day gone by in the late tone, never a done one, and marks a weekly one', () => {
   renderRow({ due: { date: '2026-11-08', repeat: 'weekly' } });
-  expect(screen.getByRole('button', { name: '期限 日 11/8: 見積書を送る' })).not.toHaveClass(
+  expect(screen.getByRole('button', { name: '期限 11/8(日): 見積書を送る' })).not.toHaveClass(
     'todo-row__due--late'
   );
   expect(screen.getByRole('img', { name: '毎週くり返す' })).toBeInTheDocument();
 
   renderRow({ due: { date: '2026-11-06', repeat: 'none' } });
-  expect(screen.getByRole('button', { name: '期限 金 11/6: 見積書を送る' })).toHaveClass(
+  expect(screen.getByRole('button', { name: '期限 11/6(金): 見積書を送る' })).toHaveClass(
     'todo-row__due--late'
   );
 
@@ -120,7 +121,7 @@ it('draws a due day gone by in the late tone, never a done one, and marks a week
     due: { date: '2026-11-05', repeat: 'none' },
     state: { kind: 'done', by: 'user', at: '2026-11-04T12:00:00Z' },
   });
-  expect(screen.getByRole('button', { name: '期限 木 11/5: 見積書を送る' })).not.toHaveClass(
+  expect(screen.getByRole('button', { name: '期限 11/5(木): 見積書を送る' })).not.toHaveClass(
     'todo-row__due--late'
   );
 });
@@ -153,7 +154,7 @@ it('picks a row’s start, then its due day, and begins again from a day before 
     state: { kind: 'not_started', reason: 'scheduled' },
   });
   const picker = toggle(
-    screen.getByRole('button', { name: '開始日 火 11/10から: 見積書を送る' }),
+    screen.getByRole('button', { name: '開始日 11/10(火)から: 見積書を送る' }),
     'open'
   );
   expect(picker.getByRole('button', { name: /^開始 / })).toHaveAttribute('aria-pressed', 'true');
@@ -164,7 +165,7 @@ it('picks a row’s start, then its due day, and begins again from a day before 
   // A day before the start begins the range again from it.
   fireEvent.click(day(picker, '11月12日'));
   expect(handlers.onSetDates).not.toHaveBeenCalled();
-  expect(picker.getByRole('button', { name: /^開始 / })).toHaveTextContent('木 11/12');
+  expect(picker.getByRole('button', { name: /^開始 / })).toHaveTextContent('11/12(木)');
   fireEvent.click(day(picker, '11月14日'));
   expect(handlers.onSetDates).toHaveBeenCalledOnce();
   expect(handlers.onSetDates).toHaveBeenLastCalledWith({
@@ -180,7 +181,7 @@ it('writes only the date that changed, and the start alone when the panel closes
     due: { date: '2026-11-20', repeat: 'none' },
     state: { kind: 'not_started', reason: 'scheduled' },
   });
-  const trigger = screen.getByRole('button', { name: '期限 金 11/20: 見積書を送る' });
+  const trigger = screen.getByRole('button', { name: '期限 11/20(金): 見積書を送る' });
   // From the due day, the first click picks the due day.
   fireEvent.click(day(toggle(trigger, 'open'), '11月18日'));
   expect(handlers.onSetDates).toHaveBeenLastCalledWith({
@@ -190,7 +191,7 @@ it('writes only the date that changed, and the start alone when the panel closes
   expect(handlers.onSetDates).toHaveBeenCalledOnce();
 
   // A start picked and the panel let go: the start is handed over once, on its own.
-  const start = screen.getByRole('button', { name: '開始日 火 11/10から: 見積書を送る' });
+  const start = screen.getByRole('button', { name: '開始日 11/10(火)から: 見積書を送る' });
   fireEvent.click(day(toggle(start, 'open'), '11月9日'));
   toggle(start, 'closed');
   toggle(start, 'closed');
@@ -205,36 +206,68 @@ it('writes only the date that changed, and the start alone when the panel closes
 
 it('drops the dates chosen while a write on the row is pending', () => {
   const handlers = renderRow({ due: { date: '2026-11-20', repeat: 'none' } }, false, true);
-  const trigger = screen.getByRole('button', { name: '期限 金 11/20: 見積書を送る' });
+  const trigger = screen.getByRole('button', { name: '期限 11/20(金): 見積書を送る' });
   fireEvent.click(day(toggle(trigger, 'open'), '11月18日'));
   toggle(trigger, 'closed');
   expect(handlers.onSetDates).not.toHaveBeenCalled();
 });
 
-it('once Pantaray started, changes only the due day, never before the start', () => {
-  const handlers = renderRow({
+it('moves a started TODO’s start on its due day’s calendar, and keeps a done one’s', () => {
+  const started = {
     starts_on: '2026-11-02',
     due: { date: '2026-11-08', repeat: 'weekly' },
     state: { kind: 'working', note: null },
-  });
+    conversation: { kind: 'action', action_id: 'action-1' },
+  } satisfies Partial<TodoView>;
+  const handlers = renderRow(started);
+  // The state word says the work, not the start.
   expect(screen.queryByRole('button', { name: /^開始日/ })).toBeNull();
   expect(stateWord()).toHaveTextContent(/^作業中$/);
-  const picker = toggle(screen.getByRole('button', { name: '期限 日 11/8: 見積書を送る' }), 'open');
-  expect(picker.queryByRole('button', { name: /^開始 / })).toBeNull();
-  expect(picker.queryByRole('button', { name: '開始を未定にする' })).toBeNull();
-  expect(day(picker, '11月1日')).toHaveAttribute('aria-disabled', 'true');
-  fireEvent.click(day(picker, '11月1日'));
-  expect(handlers.onSetDates).not.toHaveBeenCalled();
+  const picker = toggle(
+    screen.getByRole('button', { name: '期限 11/8(日): 見積書を送る' }),
+    'open'
+  );
+  fireEvent.click(picker.getByRole('button', { name: /^開始 / }));
+  fireEvent.click(day(picker, '11月10日'));
   fireEvent.click(day(picker, '11月20日'));
   expect(handlers.onSetDates).toHaveBeenLastCalledWith({
+    startsOn: '2026-11-10',
     due: { date: '2026-11-20', repeat: 'weekly' },
   });
+
+  // Done, or waiting in a Suggestion only the user's answer starts, it has no start to move.
+  for (const fixed of [
+    { ...started, state: { kind: 'done', by: 'ai', at: '2026-11-06T12:00:00Z' } },
+    {
+      ...started,
+      state: { kind: 'waiting', reason: 'approval', note: null },
+      conversation: { kind: 'suggestion', suggestion_id: 'sug-1' },
+    },
+  ] satisfies Partial<TodoView>[]) {
+    const done = renderRow(fixed);
+    const fixedPicker = toggle(
+      screen.getByRole('button', { name: '期限 11/8(日): 見積書を送る' }),
+      'open'
+    );
+    expect(fixedPicker.queryByRole('button', { name: /^開始 / })).toBeNull();
+    expect(fixedPicker.queryByRole('button', { name: '開始を未定にする' })).toBeNull();
+    expect(day(fixedPicker, '11月1日')).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(day(fixedPicker, '11月20日'));
+    expect(done.onSetDates).toHaveBeenLastCalledWith({
+      due: { date: '2026-11-20', repeat: 'weekly' },
+    });
+  }
+});
+
+it('writes a day with its weekday in each language’s own order', () => {
+  expect(dueDay('ja', '2026-11-28')).toBe('11/28(土)');
+  expect(dueDay('en', '2026-11-28')).toBe('Sat, 11/28');
 });
 
 it('moves the focus over the days with the arrow keys, into the next month past this one', () => {
   renderRow({ due: { date: '2026-11-27', repeat: 'none' } });
   const picker = toggle(
-    screen.getByRole('button', { name: '期限 金 11/27: 見積書を送る' }),
+    screen.getByRole('button', { name: '期限 11/27(金): 見積書を送る' }),
     'open'
   );
   expect(day(picker, '11月27日')).toHaveFocus();

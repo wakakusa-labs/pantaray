@@ -627,7 +627,13 @@ async function openHome(page: Page, search = '', suggestion: OverlaySnapshot = S
             setStart: async ({ todo_id, starts_on }: TodoStartRequest) => {
               const item = items.find((candidate) => candidate.todo_id === todo_id)!;
               item.starts_on = starts_on;
-              item.state = notStarted(starts_on);
+              // As the backend: a start past today, or none, puts started work back until then;
+              // today or earlier only moves the date.
+              if (
+                item.state.kind === 'not_started' ||
+                (item.state.kind !== 'done' && (starts_on === null || starts_on > TODAY))
+              )
+                item.state = notStarted(starts_on);
               return { kind: 'ok', result: item };
             },
             listDeleted: async (query: TodoScopeQuery) =>
@@ -897,8 +903,8 @@ test('the home lists every organization’s TODOs by project, with the rail and 
   const resubmit = rowOf(estimate, '見積書を再提出する');
   await expect(resubmit.locator('.todo-row__state')).toHaveText('途中まで');
   await expect(
-    resubmit.getByRole('button', { name: '期限 金 11/6: 見積書を再提出する' })
-  ).toHaveText('金 11/6');
+    resubmit.getByRole('button', { name: '期限 11/6(金): 見積書を再提出する' })
+  ).toHaveText('11/6(金)');
   await expect(rowOf(page, '古いブランチを消す').locator('.todo-row__state')).toHaveText(
     '消してよい？'
   );
@@ -1132,16 +1138,20 @@ test('a row’s start and due day change on one calendar, also for a TODO just a
 }, info) => {
   await openHome(page);
   const estimate = page.getByRole('region', { name: '見積もり Xer' });
-  // Pantaray started on it, so only its due day changes, from the day it has.
-  const due = estimate.getByRole('button', { name: '期限 金 11/6: 見積書を再提出する' });
+  // Pantaray started on it: its due day opens first, and its start can move too.
+  const due = estimate.getByRole('button', { name: '期限 11/6(金): 見積書を再提出する' });
   await due.click();
   const picker = page.getByRole('dialog', { name: '開始日と期限' });
   await expect(picker.getByRole('button', { name: '2026年11月6日(金)' })).toBeFocused();
-  await expect(picker.getByRole('button', { name: '開始を未定にする' })).toHaveCount(0);
+  await expect(picker.getByRole('button', { name: '期限 11/6(金)' })).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  );
+  await expect(picker.getByRole('button', { name: '開始 10/26(月)' })).toBeVisible();
   const [trigger, panel] = await Promise.all([due.boundingBox(), picker.boundingBox()]);
   expect(panel!.y).toBeGreaterThan(trigger!.y + trigger!.height);
   expect(panel!.x + panel!.width).toBeLessThanOrEqual(trigger!.x + trigger!.width + 1);
-  await capture(page, info, 'due-only-picker');
+  await capture(page, info, 'started-picker');
   await page.keyboard.press('Escape');
   await expect(picker).toBeHidden();
   await expect(due).toBeFocused();
@@ -1152,13 +1162,23 @@ test('a row’s start and due day change on one calendar, also for a TODO just a
   await page.keyboard.press('ArrowLeft');
   await expect(picker.getByRole('button', { name: '2026年11月5日(木)' })).toBeFocused();
   await page.keyboard.press('Enter');
-  const moved = estimate.getByRole('button', { name: '期限 木 11/5: 見積書を再提出する' });
+  const moved = estimate.getByRole('button', { name: '期限 11/5(木): 見積書を再提出する' });
   await expect(moved).toBeFocused();
   await moved.click();
   await picker.getByRole('button', { name: '期限なし' }).click();
+  const noDue = estimate.getByRole('button', { name: '期限なし: 見積書を再提出する' });
+  await expect(noDue).toBeFocused();
+
+  // Its start moved past today, the work waits for that day, and the row says when.
+  await noDue.click();
+  await picker.getByRole('button', { name: '開始 10/26(月)' }).click();
+  await picker.getByRole('button', { name: '2026年11月9日(月)' }).click();
+  await page.keyboard.press('Escape');
+  const resubmit = rowOf(estimate, '見積書を再提出する');
   await expect(
-    estimate.getByRole('button', { name: '期限なし: 見積書を再提出する' })
-  ).toBeFocused();
+    resubmit.getByRole('button', { name: '開始日 11/9(月)から: 見積書を再提出する' })
+  ).toHaveText('11/9(月)から');
+  await capture(page, info, 'started-moved-later');
 
   // A TODO added from its group's line starts today with no due day.
   const hiring = page.getByRole('region', { name: '採用 Xer' });
@@ -1184,10 +1204,10 @@ test('a row’s start and due day change on one calendar, also for a TODO just a
   await capture(page, info, 'range-picker');
   await picker.getByRole('button', { name: '2026年11月18日(水)' }).click();
   await expect(picker).toBeHidden();
-  const start = added.getByRole('button', { name: '開始日 月 11/9から: 面接官の日程を押さえる' });
+  const start = added.getByRole('button', { name: '開始日 11/9(月)から: 面接官の日程を押さえる' });
   await expect(start).toBeFocused();
   await expect(
-    added.getByRole('button', { name: '期限 水 11/18: 面接官の日程を押さえる' })
+    added.getByRole('button', { name: '期限 11/18(水): 面接官の日程を押さえる' })
   ).toBeVisible();
 
   // The start changes again from the same word; a panel let go keeps the pick.
@@ -1196,7 +1216,7 @@ test('a row’s start and due day change on one calendar, also for a TODO just a
   await page.keyboard.press('Escape');
   await expect(soon).toBeFocused();
   await expect(
-    added.getByRole('button', { name: '期限 水 11/18: 面接官の日程を押さえる' })
+    added.getByRole('button', { name: '期限 11/18(水): 面接官の日程を押さえる' })
   ).toBeVisible();
 
   // 開始を未定にする leaves it with no start until a date is set again from the same word.

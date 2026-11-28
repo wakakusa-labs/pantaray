@@ -53,9 +53,12 @@ const format = (
     utcDay(date)
   );
 
-/** "日 11/8", "Sun 11/8": a due day with its weekday, as the TODO rows and the add row show it. */
+/**
+ * 「11/8(日)」, "Sun, 11/8": a day with its weekday in the language's own order, as the TODO rows,
+ * the add row and the calendar's ends show a start or due day.
+ */
 export const dueDay = (language: UiLanguage, date: string) =>
-  `${format(language, date, { weekday: 'short' })} ${monthDay(date)}`;
+  format(language, date, { month: 'numeric', day: 'numeric', weekday: 'short' });
 
 /** 「2026年11月14日(土)」, "Sat, November 14, 2026": a day named in full, for a calendar's days. */
 export const fullDay = (language: UiLanguage, date: string) =>

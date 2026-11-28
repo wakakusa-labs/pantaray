@@ -85,7 +85,17 @@ class ContinueAiTodo:
     kind: Literal["continue_ai_todo"] = "continue_ai_todo"
 
 
-type PickupTarget = StartWritten | ContinueAiTodo
+@dataclass(frozen=True, slots=True)
+class ContinueDeferred:
+    """The next turn of the conversation whose work the user put back to today."""
+
+    todo_id: TodoId
+    action_id: str
+    deferred_run_id: str
+    kind: Literal["continue_deferred"] = "continue_deferred"
+
+
+type PickupTarget = StartWritten | ContinueAiTodo | ContinueDeferred
 
 
 def display_state(
@@ -94,6 +104,8 @@ def display_state(
     if todo.check is not None:
         return Done(by=todo.check.by, at=todo.check.at)
     match conversation:
+        case ActionConversation() if _deferred(todo, conversation):
+            return _not_started(todo, today)
         case ActionConversation():
             return _action_state(todo, conversation)
         case SuggestionConversation(answered=answered):
@@ -102,6 +114,15 @@ def display_state(
             return _not_started(todo, today)
         case _:
             assert_never(conversation)
+
+
+def _deferred(todo: Todo, conversation: ActionConversation) -> bool:
+    """Whether the work waits for the start the user moved it to: nothing ran
+    since the run it was put back from, and that run has ended. Until the stop
+    lands, the run shows as it is."""
+
+    run = conversation.latest_run
+    return todo.deferred_run_id == run.run_id and isinstance(run, EndedRun)
 
 
 def _action_state(todo: Todo, conversation: ActionConversation) -> TodoDisplayState:
@@ -164,9 +185,16 @@ def pickup_target(
         or todo.deletion is not None
         or todo.starts_on is None
         or todo.starts_on > today
-        or conversation.kind == "action"
     ):
         return None
+    if isinstance(conversation, ActionConversation):
+        if not _deferred(todo, conversation):
+            return None
+        return ContinueDeferred(
+            todo_id=todo.todo_id,
+            action_id=conversation.action_id,
+            deferred_run_id=conversation.latest_run.run_id,
+        )
     # A Suggestion's TODO is worked on in the Suggestion's own conversation,
     # which only the user's approval or reply opens.
     if todo.origin.kind == "suggestion":

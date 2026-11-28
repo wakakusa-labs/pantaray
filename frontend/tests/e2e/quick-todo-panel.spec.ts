@@ -161,7 +161,7 @@ test('dates are picked on the calendar under the panel, and a later TODO just cl
   await picker.getByRole('button', { name: '2026年11月18日(水)' }).click();
   await picker.getByRole('button', { name: '2026年11月20日(金)' }).click();
   await expect(picker).toBeHidden();
-  const dates = page.getByRole('button', { name: '水 11/18から、期限 金 11/20' });
+  const dates = page.getByRole('button', { name: '11/18(水)から、期限 11/20(金)' });
   await expect(dates).toBeFocused();
   await expect(dates).toHaveText('11/18 → 11/20');
   // The window gives the calendar's room back: it is the panel's height again, whose row of
@@ -196,7 +196,7 @@ test('long names are cut short, and the dates and send stay on the one row', asy
   const row = [
     page.getByRole('button', { name: /^組織/ }),
     page.getByRole('button', { name: /^プロジェクト/ }),
-    page.getByRole('button', { name: '水 11/18から、期限 金 11/20' }),
+    page.getByRole('button', { name: '11/18(水)から、期限 11/20(金)' }),
     page.getByRole('button', { name: '送信' }),
   ];
   const boxes = await Promise.all(row.map(async (item) => (await item.boundingBox())!));

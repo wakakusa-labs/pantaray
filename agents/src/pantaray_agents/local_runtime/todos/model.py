@@ -106,6 +106,12 @@ class Todo:
     deletion_request: DeletionRequest | None
     deletion: TodoDeletion | None
     created_at: str
+    # The run of its conversation the user put the work back from by moving
+    # the start past today. While that run is still the latest and has ended,
+    # the TODO waits for its start as one not started, and on that day the
+    # pickup sends the conversation its next turn. A newer run, however it
+    # came, makes it stale.
+    deferred_run_id: str | None
 
 
 @dataclass(frozen=True, slots=True)

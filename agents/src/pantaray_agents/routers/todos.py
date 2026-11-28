@@ -7,6 +7,8 @@ Failures carry an ``error_code``; none of them names a TODO's text.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from collections.abc import Callable
 from typing import Annotated, Final, NoReturn
 
@@ -37,8 +39,10 @@ from pantaray_agents.local_runtime.todos.reads import (
 from pantaray_agents.local_runtime.todos.writes import (
     create_todo_item,
     set_todo_check,
+    set_todo_start,
     update_todo,
 )
+from pantaray_agents.routers.action_cancel_service import execute_action_cancel
 from pantaray_agents.schema.agent.base import ErrorType
 from pantaray_agents.schema.todos import (
     DeletedTodoView,
@@ -55,6 +59,8 @@ from pantaray_agents.schema.todos import (
     deleted_todo_view,
     todo_view,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/agents/users", tags=["TODOs"])
 
@@ -268,17 +274,60 @@ def put_todo_due(
     return _read_view(user_id, todo_id, read_todo_clock())
 
 
-@router.put("/{user_id}/todos/{todo_id}/start", response_model=TodoView)
-def put_todo_start(
+@router.put(
+    "/{user_id}/todos/{todo_id}/start",
+    response_model=TodoView,
+    description=(
+        "Move the TODO's start. Past today, or unset, on an open TODO Pantaray "
+        "started, it stops the run in progress as the user's Stop does and the "
+        "TODO waits for that day, when its conversation continues; today or "
+        "earlier only moves the date."
+    ),
+)
+async def put_todo_start(
     user_id: str,
     todo_id: str,
     body: TodoStartRequest,
     resolved_user_id: str = Depends(get_current_user_id_from_token),
 ) -> TodoView:
     _require_path_user(user_id, resolved_user_id)
+    clock = read_todo_clock()
     starts_on = None if body.starts_on is None else body.starts_on.isoformat()
-    _apply(user_id, todo_id, lambda todo: core.set_start(todo, starts_on))
-    return _read_view(user_id, todo_id, read_todo_clock())
+    result = await asyncio.to_thread(
+        set_todo_start,
+        user_id=user_id,
+        todo_id=todo_id,
+        starts_on=starts_on,
+        today=clock.today,
+    )
+    if result is None:
+        raise _not_found()
+    if isinstance(result, Rejected):
+        _fail(result.reason)
+    entry = await asyncio.to_thread(_entry, user_id, todo_id)
+    conversation = entry.conversation
+    run = core.deferred_run(
+        entry.todo, starts_on, conversation=conversation, today=clock.today
+    )
+    if (
+        isinstance(conversation, ActionConversation)
+        and isinstance(run, ActiveRun | ApprovalPendingRun)
+        and run.run_id == entry.todo.deferred_run_id
+    ):
+        # Fenced to the run put back, so a run started since is left alone.
+        stopped = await execute_action_cancel(
+            user_id=user_id,
+            action_id=conversation.action_id,
+            reason="todo_start_moved",
+            expected_process_id=run.run_id,
+        )
+        if not stopped:
+            # The run is canceled; only its cleanup is left to recovery.
+            logger.warning(
+                "TODO start moved; run cleanup incomplete: todo_id=%s", todo_id
+            )
+        entry = await asyncio.to_thread(_entry, user_id, todo_id)
+    return _view(entry, clock)
 
 
 @router.delete(

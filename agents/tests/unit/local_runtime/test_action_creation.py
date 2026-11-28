@@ -517,7 +517,7 @@ def test_concurrent_todo_pickups_start_one_action(creation_db: Path) -> None:
             "todo_pickup",
             ExistingActionTarget(action_id="action-1", expected_process_id=None),
             None,
-            "opens a new Action",
+            "continuation carries the fixed request text",
         ),
         ("user", None, None, "Only a TODO pickup"),
         ("resume", None, None, "Only a TODO pickup"),

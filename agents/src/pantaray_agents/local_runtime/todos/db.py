@@ -38,7 +38,7 @@ TODO_COLUMNS: Final = tuple(
     previous_todo_id hook_origin_action_id starts_on due_date due_repeat
     checked_by checked_at report_kind report_note report_run_id report_at
     deletion_request_id deletion_request_reason deletion_requested_at
-    deletion_request_state deleted_by deleted_at created_at attachments_json""".split()
+    deletion_request_state deleted_by deleted_at created_at attachments_json deferred_run_id""".split()
 )
 
 
@@ -252,6 +252,7 @@ def todo_params(todo: Todo) -> dict[str, str | None]:
             if isinstance(origin, WrittenOrigin) and (origin.files or origin.images)
             else None
         ),
+        "deferred_run_id": todo.deferred_run_id,
     }
 
 
@@ -300,6 +301,7 @@ def todo_from_row(row: sqlite3.Row) -> Todo:
             else TodoDeletion(by=row["deleted_by"], at=row["deleted_at"])
         ),
         created_at=row["created_at"],
+        deferred_run_id=row["deferred_run_id"],
     )
 
 

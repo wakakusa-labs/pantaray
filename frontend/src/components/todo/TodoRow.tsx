@@ -52,8 +52,10 @@ function stateWord(todo: TodoView): { key: MessageKey; tone: StateTone; startsOn
 /**
  * One TODO on one line: its check, a button that opens its conversation (its text and repeat
  * mark), its state in a word, its due day, then its delete button. The due day, and the state of
- * a TODO not started yet, open its start and due day on one calendar; once Pantaray started, only
- * the due day changes. A checked TODO stays in its place, struck through. The rows go in a list.
+ * a TODO not started yet, open its start and due day on one calendar. A start moved past today on
+ * work Pantaray started stops that work until the day comes, when it continues in the same
+ * conversation. A checked TODO stays in its place, struck through, and only its due day changes.
+ * The rows go in a list.
  */
 export function TodoRow({
   todo,
@@ -86,6 +88,8 @@ export function TodoRow({
         ? t(state.key)
         : t(state.key, { date: dueDay(language, state.startsOn) });
   const notStarted = todo.deletion_request === null && todo.state.kind === 'not_started';
+  // A done TODO's work is over, and a Suggestion's starts only from the user's answer to it.
+  const startFixed = done || todo.conversation.kind === 'suggestion';
   // Without a word the cell stays, empty, so the due days line up.
   const stateClass =
     state === null ? 'todo-row__state' : `todo-row__state todo-row__state--${state.tone}`;
@@ -128,7 +132,7 @@ export function TodoRow({
           ) : null}
         </span>
       </button>
-      {/* The start matters until Pantaray starts. */}
+      {/* Until Pantaray starts, the state word names the start, so it opens the calendar too. */}
       {notStarted ? (
         <TodoDateRangePicker
           triggerLabel={
@@ -164,7 +168,7 @@ export function TodoRow({
         dates={dates}
         today={today}
         opensOn="due"
-        startFixed={!notStarted}
+        startFixed={startFixed}
         disabled={pending}
         onChange={setDates}
       >

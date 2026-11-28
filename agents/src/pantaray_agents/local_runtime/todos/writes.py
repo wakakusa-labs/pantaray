@@ -290,6 +290,29 @@ def update_todo[R: str](
     return result
 
 
+def set_todo_start(
+    *, user_id: str, todo_id: TodoId, starts_on: LocalDate | None, today: LocalDate
+) -> Todo | Rejected[core.StartRejection] | None:
+    """The user's new start, judged against the conversation read in the same
+    transaction, so the run it records is the latest one; None when there is
+    no such TODO."""
+
+    verify_current_owner(user_id)
+    with todo_db_connection() as connection, immediate_transaction(connection):
+        current = read_todo_row(connection, user_id=user_id, todo_id=todo_id)
+        if current is None:
+            return None
+        conversation = resolve_todo_conversations(
+            connection, user_id=user_id, todos=(current,)
+        )[todo_id]
+        result = core.set_start(
+            current, starts_on, conversation=conversation, today=today
+        )
+        if isinstance(result, Todo) and result != current:
+            _update(connection, user_id=user_id, todo=result)
+    return result
+
+
 def release_todo_attachments(*, user_id: str, todo_id: TodoId) -> None:
     """Drop a written TODO's attachments once its Action has taken them."""
 

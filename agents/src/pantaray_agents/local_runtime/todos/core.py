@@ -12,6 +12,8 @@ from typing import Final, Literal
 from zoneinfo import ZoneInfo
 
 from pantaray_agents.local_runtime.todos.model import (
+    ActionConversation,
+    ActionRun,
     AiReport,
     DeletionRequest,
     LocalDate,
@@ -19,6 +21,7 @@ from pantaray_agents.local_runtime.todos.model import (
     Todo,
     TodoAuthor,
     TodoCheck,
+    TodoConversation,
     TodoDeletion,
     TodoDue,
     TodoId,
@@ -96,6 +99,7 @@ def create_todo(
         deletion_request=None,
         deletion=None,
         created_at=now,
+        deferred_run_id=None,
     )
 
 
@@ -138,6 +142,7 @@ def _next_recurrence(
         deletion_request=None,
         deletion=None,
         created_at=now,
+        deferred_run_id=None,
     )
 
 
@@ -148,11 +153,40 @@ def set_due(todo: Todo, due: TodoDue | None) -> Todo | Rejected[DueRejection]:
 
 
 def set_start(
-    todo: Todo, starts_on: LocalDate | None
+    todo: Todo,
+    starts_on: LocalDate | None,
+    *,
+    conversation: TodoConversation,
+    today: LocalDate,
 ) -> Todo | Rejected[StartRejection]:
+    """The user's new start; one that puts started work back records the run
+    it was put back from, and any other move only changes the date."""
+
     if todo.deletion is not None:
         return Rejected("deleted")
-    return replace(todo, starts_on=starts_on)
+    run = deferred_run(todo, starts_on, conversation=conversation, today=today)
+    if run is None:
+        return replace(todo, starts_on=starts_on)
+    return replace(todo, starts_on=starts_on, deferred_run_id=run.run_id)
+
+
+def deferred_run(
+    todo: Todo,
+    starts_on: LocalDate | None,
+    *,
+    conversation: TodoConversation,
+    today: LocalDate,
+) -> ActionRun | None:
+    """The run whose work this start puts back until it comes: the latest run
+    of an open TODO's conversation, when the start moves past today or is
+    unset. The caller stops that run if it has not ended. A start of today or
+    earlier leaves the work as it is, and a done TODO's work is over."""
+
+    if todo.check is not None or not isinstance(conversation, ActionConversation):
+        return None
+    if starts_on is not None and starts_on <= today:
+        return None
+    return conversation.latest_run
 
 
 def report_progress(todo: Todo, report: AiReport) -> Todo | Rejected[ReportRejection]:

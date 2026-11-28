@@ -225,6 +225,10 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.callTranscription.languageAuto': 'Same as the Mac',
     'settings.callTranscription.listsNote':
       'When a call starts in one of these apps or sites, you are asked whether to transcribe it.',
+    'settings.callTranscription.listsLoadFailed': 'Couldn’t load the apps and sites to watch.',
+    'settings.callTranscription.reload': 'Try again',
+    'settings.callTranscription.resumeFailed': 'Recording could not be resumed.',
+    'settings.callTranscription.resume': 'Resume recording',
     'settings.callTranscription.apps': 'Apps to watch',
     'settings.callTranscription.sites': 'Sites to watch (Chrome and Safari)',
     'settings.screenshotCapture.screenshotsLabel': 'Computer activity recording',
@@ -534,6 +538,10 @@ export const SETTINGS_MESSAGES = defineMessages({
     'settings.callTranscription.languageAuto': 'Mac の言語に合わせる',
     'settings.callTranscription.listsNote':
       'ここにあるアプリやサイトで通話が始まると、文字起こしするか確認します。',
+    'settings.callTranscription.listsLoadFailed': '対象のアプリとサイトを読み込めませんでした。',
+    'settings.callTranscription.reload': 'もう一度読み込む',
+    'settings.callTranscription.resumeFailed': '記録を再開できませんでした。',
+    'settings.callTranscription.resume': '記録を再開',
     'settings.callTranscription.apps': '対象のアプリ',
     'settings.callTranscription.sites': '対象のサイト（Chrome と Safari）',
     'settings.screenshotCapture.screenshotsLabel': 'コンピューター操作の記録',

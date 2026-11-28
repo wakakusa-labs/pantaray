@@ -1,21 +1,29 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { UiLanguageProvider } from '@/context/UiLanguageContext';
 import { LocalOwnerContext } from '@/context/localOwnerContext';
 import { t } from '@/i18n/translate';
-import type { MeetingSettings } from '../../../../electron/src/context/meetingTranscript';
+import type {
+  MeetingCallLists,
+  MeetingSettings,
+} from '../../../../electron/src/context/meetingTranscript';
 import { CallTranscriptionSection } from './CallTranscriptionSection';
 
 const SETTINGS: MeetingSettings = { enabled: true, callApps: null, callSites: null, locale: null };
 const DEFAULTS = { callApps: ['us.zoom.xos'], callSites: ['meet.google.com', 'zoom.us'] };
 
-function renderSection(supported: boolean) {
+function renderSection({
+  supported = true,
+  getDefaultCallLists = vi.fn(async (): Promise<MeetingCallLists> => DEFAULTS),
+  updateSettings = vi.fn(async (_settings: MeetingSettings) => undefined),
+  setCaptureEditing = vi.fn(async (_request: { kind: string }) => true),
+} = {}) {
   const meeting = {
     getSettings: vi.fn(async () => ({ settings: SETTINGS, supported })),
-    getDefaultCallLists: vi.fn(async () => DEFAULTS),
+    getDefaultCallLists,
     getAvailability: vi.fn(async () => ({ action_required: ['audio_capture'] })),
-    updateSettings: vi.fn(async () => undefined),
+    updateSettings,
     prepare: vi.fn(async () => 'requested'),
   };
   window.electron = {
@@ -24,6 +32,7 @@ function renderSection(supported: boolean) {
       listInstalledApps: vi.fn(async () => [
         { name: 'Zoom', bundleId: 'us.zoom.xos', iconDataUrl: null },
       ]),
+      setCaptureEditing,
     },
   } as unknown as Window['electron'];
   render(
@@ -42,7 +51,7 @@ afterEach(() => {
 });
 
 it('on a Mac that cannot transcribe, says where it works and offers no switch', async () => {
-  const meeting = renderSection(false);
+  const meeting = renderSection({ supported: false });
   expect(
     await screen.findByText('macOS 26 以降の Apple シリコンの Mac で使えます。')
   ).toBeInTheDocument();
@@ -51,7 +60,7 @@ it('on a Mac that cannot transcribe, says where it works and offers no switch', 
 });
 
 it('lists what the recorder listens to by default, and saves an edit as the user’s list', async () => {
-  const meeting = renderSection(true);
+  const meeting = renderSection();
   const apps = await screen.findByRole('list', { name: '対象のアプリ' });
   await waitFor(() => expect(apps).toHaveTextContent('Zoom'));
   const sites = screen.getByRole('list', { name: '対象のサイト（Chrome と Safari）' });
@@ -68,10 +77,91 @@ it('lists what the recorder listens to by default, and saves an edit as the user
 });
 
 it('shows each permission, with System Settings for the one still missing', async () => {
-  renderSection(true);
+  renderSection();
   expect(await screen.findByText('システムオーディオ録音')).toBeInTheDocument();
   expect(
     screen.getByRole('button', { name: /システム設定を開く システムオーディオ録音/ })
   ).toBeVisible();
   expect(screen.queryByRole('button', { name: /システム設定を開く マイク/ })).toBeNull();
+});
+
+it('an edit made while a slow save runs cannot undo that save', async () => {
+  let finishSave: () => void = () => undefined;
+  const updateSettings = vi.fn(
+    (_settings: MeetingSettings) =>
+      new Promise<undefined>((resolve) => {
+        finishSave = () => resolve(undefined);
+      })
+  );
+  renderSection({ updateSettings });
+  await screen.findByRole('list', { name: '対象のサイト（Chrome と Safari）' });
+
+  fireEvent.click(screen.getByRole('switch', { name: '通話の文字起こし' }));
+  // The language and the lists wait for the save of "off" to finish.
+  const language = screen.getByRole('combobox', { name: '言語' });
+  expect(language).toBeDisabled();
+  fireEvent.change(language, { target: { value: 'ja-JP' } });
+  fireEvent.click(screen.getByRole('button', { name: 'zoom.us を削除' }));
+  expect(updateSettings).toHaveBeenCalledTimes(1);
+
+  await act(async () => finishSave());
+  expect(screen.getByRole('switch', { name: '通話の文字起こし' })).toHaveAttribute(
+    'aria-checked',
+    'false'
+  );
+  fireEvent.change(screen.getByRole('combobox', { name: '言語' }), {
+    target: { value: 'ja-JP' },
+  });
+  expect(updateSettings).toHaveBeenLastCalledWith({ ...SETTINGS, enabled: false, locale: 'ja-JP' });
+});
+
+it('keeps the switch when the default lists cannot be read, and reads them again on request', async () => {
+  const getDefaultCallLists = vi
+    .fn<() => Promise<MeetingCallLists>>()
+    .mockRejectedValueOnce(new Error('config show failed'))
+    .mockResolvedValue(DEFAULTS);
+  const meeting = renderSection({ getDefaultCallLists });
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    '対象のアプリとサイトを読み込めませんでした。'
+  );
+  // A failed read is not an empty list.
+  expect(screen.queryByRole('list', { name: '対象のアプリ' })).toBeNull();
+
+  fireEvent.click(screen.getByRole('switch', { name: '通話の文字起こし' }));
+  await waitFor(() =>
+    expect(meeting.updateSettings).toHaveBeenCalledWith({ ...SETTINGS, enabled: false })
+  );
+
+  fireEvent.click(screen.getByRole('button', { name: 'もう一度読み込む' }));
+  expect(
+    await screen.findByRole('list', { name: '対象のサイト（Chrome と Safari）' })
+  ).toBeVisible();
+});
+
+it('offers to resume recording when it did not come back after the app picker', async () => {
+  const setCaptureEditing = vi
+    .fn<(request: { kind: string }) => Promise<boolean>>()
+    .mockImplementation(async () => true)
+    .mockImplementationOnce(async () => true)
+    .mockImplementationOnce(async () => {
+      throw new Error('restart failed');
+    });
+  renderSection({ setCaptureEditing });
+  const add = await screen.findByRole('button', { name: '+ アプリを追加' });
+
+  fireEvent.click(add);
+  await screen.findByRole('dialog', { name: 'アプリを選択' });
+  fireEvent.keyDown(document, { key: 'Escape' });
+  const resume = await screen.findByRole('button', { name: '記録を再開' });
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(add).toBeDisabled();
+
+  fireEvent.click(resume);
+  await waitFor(() => expect(screen.queryByRole('button', { name: '記録を再開' })).toBeNull());
+  expect(add).toBeEnabled();
+  expect(setCaptureEditing.mock.calls.map(([request]) => request.kind)).toEqual([
+    'begin',
+    'end',
+    'end',
+  ]);
 });

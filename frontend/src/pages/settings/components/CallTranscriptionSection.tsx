@@ -16,7 +16,8 @@ import { AppPickerPopover } from './AppPickerPopover';
 import './callTranscription.css';
 import './recordingFilter.css';
 
-type Loaded = { settings: MeetingSettings; defaults: MeetingCallLists };
+/** The recorder's own lists, read apart from the settings so a failed read keeps the switch. */
+type Defaults = MeetingCallLists | 'loading' | 'failed';
 
 const PERMISSIONS = [
   ['microphone', 'settings.callTranscription.microphone'],
@@ -35,9 +36,24 @@ const LOCALES = [
  */
 export function CallTranscriptionSection({ t }: { t: Translate }) {
   const meeting = window.electron?.meeting;
-  const [loaded, setLoaded] = useState<Loaded | 'loading' | 'unsupported' | 'failed'>('loading');
+  const [loaded, setLoaded] = useState<
+    { settings: MeetingSettings } | 'loading' | 'unsupported' | 'failed'
+  >('loading');
+  const [defaults, setDefaults] = useState<Defaults>('loading');
   const [availability, setAvailability] = useState<MeetingAvailability | null>(null);
   const [error, setError] = useState<MessageKey | null>(null);
+  // One save at a time: each sends the whole settings, so an edit made while another is saved
+  // would send what was on screen before it and undo it.
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+
+  const readDefaults = useCallback(() => {
+    setDefaults('loading');
+    meeting?.getDefaultCallLists().then(setDefaults, (reason: unknown) => {
+      console.error('Failed to read the default call lists:', reason);
+      setDefaults('failed');
+    });
+  }, [meeting]);
 
   const readAvailability = useCallback(() => {
     meeting?.getAvailability().then(setAvailability, (reason: unknown) => {
@@ -50,7 +66,8 @@ export function CallTranscriptionSection({ t }: { t: Translate }) {
     (async () => {
       const { settings, supported } = await meeting.getSettings();
       if (!supported) return setLoaded('unsupported');
-      setLoaded({ settings, defaults: await meeting.getDefaultCallLists() });
+      setLoaded({ settings });
+      readDefaults();
       readAvailability();
     })().catch((reason: unknown) => {
       console.error('Failed to load call transcription settings:', reason);
@@ -59,7 +76,7 @@ export function CallTranscriptionSection({ t }: { t: Translate }) {
     // Permissions are granted in System Settings, so coming back here reads them again.
     window.addEventListener('focus', readAvailability);
     return () => window.removeEventListener('focus', readAvailability);
-  }, [meeting, readAvailability]);
+  }, [meeting, readAvailability, readDefaults]);
 
   if (!meeting || loaded === 'loading') return null;
 
@@ -93,20 +110,36 @@ export function CallTranscriptionSection({ t }: { t: Translate }) {
     );
   }
 
-  const { settings, defaults } = loaded;
+  const { settings } = loaded;
   // `prepare` asks macOS for the two permissions once and fetches the language's speech data.
   const save = async (next: MeetingSettings, prepare = false) => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    setError(null);
     try {
-      setError(null);
       await meeting.updateSettings(next);
-      setLoaded({ settings: next, defaults });
-      if (prepare && next.enabled) await meeting.prepare();
+      setLoaded({ settings: next });
     } catch (reason) {
       console.error('Failed to save call transcription settings:', reason);
       setError('settings.callTranscription.saveFailed');
+      return;
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+    if (prepare && next.enabled) {
+      await meeting.prepare().catch((reason: unknown) => {
+        console.error('Failed to prepare call transcription:', reason);
+      });
     }
     readAvailability();
   };
+  // A list the user has not set is the recorder's; until that is read, it cannot be edited.
+  const listed = (own: string[] | null, pick: (lists: MeetingCallLists) => string[]) =>
+    own ?? (typeof defaults === 'object' ? pick(defaults) : null);
+  const callApps = listed(settings.callApps, (lists) => lists.callApps);
+  const callSites = listed(settings.callSites, (lists) => lists.callSites);
   const missing =
     typeof availability === 'object' && availability && 'action_required' in availability
       ? availability.action_required
@@ -125,6 +158,7 @@ export function CallTranscriptionSection({ t }: { t: Translate }) {
           aria-checked={settings.enabled}
           aria-label={t('settings.callTranscription.title')}
           className={settings.enabled ? 'settings-toggle settings-toggle--on' : 'settings-toggle'}
+          disabled={saving}
           onClick={() => void save({ ...settings, enabled: !settings.enabled }, true)}
         >
           <span className="settings-toggle-thumb" />
@@ -191,6 +225,7 @@ export function CallTranscriptionSection({ t }: { t: Translate }) {
         <select
           className="recording-filter-mode call-transcription-select"
           value={settings.locale ?? ''}
+          disabled={saving}
           onChange={(event) => void save({ ...settings, locale: event.target.value || null }, true)}
         >
           <option value="">{t('settings.callTranscription.languageAuto')}</option>
@@ -205,17 +240,31 @@ export function CallTranscriptionSection({ t }: { t: Translate }) {
       <p className="dashboard-section-description call-transcription-lists-note">
         {t('settings.callTranscription.listsNote')}
       </p>
-      <CallAppList
-        apps={settings.callApps ?? defaults.callApps}
-        t={t}
-        onChange={(next) => void save({ ...settings, callApps: next })}
-        onError={setError}
-      />
-      <CallSiteList
-        sites={settings.callSites ?? defaults.callSites}
-        t={t}
-        onChange={(next) => void save({ ...settings, callSites: next })}
-      />
+      {(callApps === null || callSites === null) && defaults === 'failed' ? (
+        <p className="dashboard-section-description settings-section-error" role="alert">
+          {t('settings.callTranscription.listsLoadFailed')}{' '}
+          <button type="button" className="settings-text-button" onClick={readDefaults}>
+            {t('settings.callTranscription.reload')}
+          </button>
+        </p>
+      ) : null}
+      {callApps !== null ? (
+        <CallAppList
+          apps={callApps}
+          disabled={saving}
+          t={t}
+          onChange={(next) => void save({ ...settings, callApps: next })}
+          onError={setError}
+        />
+      ) : null}
+      {callSites !== null ? (
+        <CallSiteList
+          sites={callSites}
+          disabled={saving}
+          t={t}
+          onChange={(next) => void save({ ...settings, callSites: next })}
+        />
+      ) : null}
     </div>
   );
 }
@@ -223,11 +272,13 @@ export function CallTranscriptionSection({ t }: { t: Translate }) {
 function RemovableRow({
   icon,
   name,
+  disabled,
   t,
   onRemove,
 }: {
   icon: React.ReactNode;
   name: string;
+  disabled: boolean;
   t: Translate;
   onRemove: () => void;
 }) {
@@ -241,6 +292,7 @@ function RemovableRow({
         type="button"
         className="recording-filter-remove"
         aria-label={t('settings.recordingFilter.removeEntry', { name })}
+        disabled={disabled}
         onClick={onRemove}
       >
         <X size={14} aria-hidden="true" />
@@ -255,17 +307,21 @@ function RemovableRow({
  */
 function CallAppList({
   apps,
+  disabled,
   t,
   onChange,
   onError,
 }: {
   apps: string[];
+  disabled: boolean;
   t: Translate;
   onChange: (apps: string[]) => void;
   onError: (error: MessageKey) => void;
 }) {
   const [installed, setInstalled] = useState<InstalledApp[]>([]);
   const [isPickerOpen, setPickerOpen] = useState(false);
+  // The picker is closed but recording did not come back; only resuming it again is offered.
+  const [resumeFailed, setResumeFailed] = useState(false);
   const addRef = useRef<HTMLButtonElement>(null);
   const editing = useCaptureEditingSession();
   const listInstalledApps = window.electron?.privacy?.listInstalledApps;
@@ -291,8 +347,10 @@ function CallAppList({
     setPickerOpen(false);
     try {
       await editing.close();
-    } catch {
-      onError('settings.recordingFilter.resumeFailed');
+      setResumeFailed(false);
+    } catch (reason) {
+      console.error('Failed to resume recording after the app picker:', reason);
+      setResumeFailed(true);
     }
   };
 
@@ -314,6 +372,7 @@ function CallAppList({
               )
             }
             name={app?.name ?? bundleId}
+            disabled={disabled}
             t={t}
             onRemove={() => onChange(apps.filter((listed) => listed !== bundleId))}
           />
@@ -325,6 +384,7 @@ function CallAppList({
           type="button"
           className="settings-action-button"
           aria-expanded={isPickerOpen}
+          disabled={disabled || resumeFailed}
           onClick={() => void (isPickerOpen ? closePicker() : openPicker())}
         >
           {t('settings.recordingFilter.apps.add')}
@@ -342,6 +402,14 @@ function CallAppList({
           />
         ) : null}
       </div>
+      {resumeFailed ? (
+        <p className="dashboard-section-description settings-section-error" role="alert">
+          {t('settings.callTranscription.resumeFailed')}{' '}
+          <button type="button" className="settings-text-button" onClick={() => void closePicker()}>
+            {t('settings.callTranscription.resume')}
+          </button>
+        </p>
+      ) : null}
     </section>
   );
 }
@@ -349,10 +417,12 @@ function CallAppList({
 /** The meeting sites, matched in Chrome and Safari; a site covers its subdomains. */
 function CallSiteList({
   sites,
+  disabled,
   t,
   onChange,
 }: {
   sites: string[];
+  disabled: boolean;
   t: Translate;
   onChange: (sites: string[]) => void;
 }) {
@@ -377,6 +447,7 @@ function CallSiteList({
             key={site}
             icon={<Globe className="recording-filter-row-icon" size={18} aria-hidden="true" />}
             name={site}
+            disabled={disabled}
             t={t}
             onRemove={() => onChange(sites.filter((listed) => listed !== site))}
           />
@@ -384,7 +455,12 @@ function CallSiteList({
       </ul>
       {draft === null ? (
         <div className="recording-filter-add">
-          <button type="button" className="settings-action-button" onClick={() => setDraft('')}>
+          <button
+            type="button"
+            className="settings-action-button"
+            disabled={disabled}
+            onClick={() => setDraft('')}
+          >
             {t('settings.recordingFilter.websites.add')}
           </button>
         </div>
@@ -409,7 +485,11 @@ function CallSiteList({
               setInvalid(false);
             }}
           />
-          <button type="submit" className="settings-action-button" disabled={!draft.trim()}>
+          <button
+            type="submit"
+            className="settings-action-button"
+            disabled={disabled || !draft.trim()}
+          >
             {t('common.save')}
           </button>
         </form>

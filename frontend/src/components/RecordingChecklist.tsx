@@ -34,7 +34,6 @@ export function RecordingChecklist({
 }) {
   // Which permissions were asked for here: macOS reports nothing until the user acts there.
   const [requested, setRequested] = useState<ReadonlySet<CapturePermission>>(new Set());
-  const allowId = useId();
 
   // macOS's own popup guides the user to System Settings after an ask.
   const askFor = async (permission: CapturePermission) => {
@@ -64,37 +63,71 @@ export function RecordingChecklist({
 
   return (
     <ul className="checklist">
-      {checks.map(({ permission, granted }) => {
-        const waiting = requested.has(permission);
-        const blocked = permission === 'observe_input' && accessibilityMissing;
-        const buttonId = `${allowId}-${permission}`;
-        return (
-          <CheckItem
-            key={permission}
-            title={t(titles[permission])}
-            note={!granted && waiting ? t(WAITING_COPY[permission]) : null}
-            status={granted ? 'done' : 'pending'}
-            action={(titleId) =>
-              granted ? (
-                <span className="check-item-state">{t('onboarding.recording.granted')}</span>
-              ) : (
-                // One button in both states, so focus stays on it after the first press.
-                <button
-                  type="button"
-                  id={buttonId}
-                  className={waiting ? 'settings-text-button' : 'settings-action-button'}
-                  aria-labelledby={`${buttonId} ${titleId}`}
-                  disabled={blocked}
-                  onClick={() => void (waiting ? openSettings(permission) : askFor(permission))}
-                >
-                  {t(waiting ? 'recordingIntro.openSettings' : 'onboarding.recording.allow')}
-                </button>
-              )
-            }
-          />
-        );
-      })}
+      {checks.map(({ permission, granted }) => (
+        <PermissionCheckItem
+          key={permission}
+          t={t}
+          title={t(titles[permission])}
+          granted={granted}
+          note={!granted && requested.has(permission) ? t(WAITING_COPY[permission]) : null}
+          waiting={requested.has(permission)}
+          disabled={permission === 'observe_input' && accessibilityMissing}
+          onAsk={() => void askFor(permission)}
+          onOpenSettings={() => void openSettings(permission)}
+        />
+      ))}
       {children}
     </ul>
+  );
+}
+
+/**
+ * One macOS permission: allowed, or one button that asks for it and, once asked, opens its
+ * pane in System Settings.
+ */
+export function PermissionCheckItem({
+  t,
+  title,
+  granted,
+  note,
+  waiting,
+  disabled = false,
+  onAsk,
+  onOpenSettings,
+}: {
+  t: Translate;
+  title: string;
+  granted: boolean;
+  note: string | null;
+  waiting: boolean;
+  /** The button waits on another row. */
+  disabled?: boolean;
+  onAsk: () => void;
+  onOpenSettings: () => void;
+}) {
+  const buttonId = useId();
+  return (
+    <CheckItem
+      title={title}
+      note={note}
+      status={granted ? 'done' : 'pending'}
+      action={(titleId) =>
+        granted ? (
+          <span className="check-item-state">{t('onboarding.recording.granted')}</span>
+        ) : (
+          // One button in both states, so focus stays on it after the first press.
+          <button
+            type="button"
+            id={buttonId}
+            className={waiting ? 'settings-text-button' : 'settings-action-button'}
+            aria-labelledby={`${buttonId} ${titleId}`}
+            disabled={disabled}
+            onClick={waiting ? onOpenSettings : onAsk}
+          >
+            {t(waiting ? 'recordingIntro.openSettings' : 'onboarding.recording.allow')}
+          </button>
+        )
+      }
+    />
   );
 }

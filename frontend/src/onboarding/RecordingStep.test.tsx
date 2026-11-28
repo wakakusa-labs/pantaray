@@ -90,6 +90,22 @@ const ACCESSIBILITY = 'アクセシビリティを許可';
 const INPUT_MONITORING = '入力監視を許可';
 const SCREEN_RECORDING = '画面収録を許可';
 const START = '記録を始める';
+const MICROPHONE = 'マイクを許可';
+const SYSTEM_AUDIO = 'システムオーディオ録音を許可';
+
+/** Call transcription on this Mac; `availability` is what the running recorder reports. */
+function stubMeeting(supported: boolean) {
+  const meeting = {
+    availability: { action_required: ['microphone', 'audio_capture', 'speech_model'] } as unknown,
+    getSettings: vi.fn(async () => ({ settings: {}, supported })),
+    getAvailability: vi.fn(async () => meeting.availability),
+    prepare: vi.fn(async () => 'requested'),
+  };
+  const openPermissionSettings = vi.fn(async (_permission: string) => undefined);
+  Object.assign(window.electron!, { meeting });
+  Object.assign(window.electron!.screenshot!, { openPermissionSettings });
+  return { meeting, openPermissionSettings };
+}
 
 // Coming back from System Settings focuses the window, which re-reads the permissions.
 async function returnFromSystemSettings() {
@@ -219,5 +235,78 @@ describe('RecordingStep', () => {
     expect(row(START).getByText('記録中')).toBeVisible();
     expect(row(START).queryByRole('button')).not.toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('shows no call transcription permissions on a Mac that cannot transcribe calls', async () => {
+    const bridge = stubBridge();
+    const { meeting } = stubMeeting(false);
+    bridge.grantAll();
+    bridge.start.mockImplementation(async () => {
+      bridge.reportStatus(true);
+      return 'started';
+    });
+    const start = await renderStep();
+    await waitFor(() => expect(meeting.getSettings).toHaveBeenCalled());
+    await waitFor(() => expect(start).toBeEnabled());
+    fireEvent.click(start);
+    await waitFor(() => expect(screen.getByTestId('done')).toHaveTextContent('true'));
+    expect(screen.queryByText(MICROPHONE)).not.toBeInTheDocument();
+    expect(screen.queryByText(SYSTEM_AUDIO)).not.toBeInTheDocument();
+    expect(meeting.getAvailability).not.toHaveBeenCalled();
+  });
+
+  it('asks for the call transcription permissions once recording runs, without waiting on them', async () => {
+    const bridge = stubBridge();
+    const { meeting, openPermissionSettings } = stubMeeting(true);
+    bridge.grantAll();
+    bridge.start.mockImplementation(async () => {
+      bridge.reportStatus(true);
+      return 'started';
+    });
+    const start = await renderStep();
+    const allowMicrophone = await row(MICROPHONE).findByRole('button', { name: /^許可する/ });
+    expect(screen.getAllByRole('listitem').map((item) => item.textContent)).toEqual([
+      expect.stringContaining(ACCESSIBILITY),
+      expect.stringContaining(INPUT_MONITORING),
+      expect.stringContaining(SCREEN_RECORDING),
+      expect.stringContaining(START),
+      expect.stringContaining(MICROPHONE),
+      expect.stringContaining(SYSTEM_AUDIO),
+    ]);
+    expect(row(MICROPHONE).getByText('通話の文字起こしに使います')).toBeVisible();
+    expect(row(SYSTEM_AUDIO).getByText('通話の相手の音声の文字起こしに使います')).toBeVisible();
+    // Only the running recorder can ask for them.
+    expect(allowMicrophone).toBeDisabled();
+    await waitFor(() => expect(start).toBeEnabled());
+
+    // Setup is done once recording runs, whatever the call transcription permissions are.
+    fireEvent.click(start);
+    await waitFor(() => expect(screen.getByTestId('done')).toHaveTextContent('true'));
+    await waitFor(() => expect(allowMicrophone).toBeEnabled());
+
+    fireEvent.click(allowMicrophone);
+    expect(meeting.prepare).toHaveBeenCalledTimes(1);
+    // macOS asked for both, so either one is now changed only in System Settings.
+    expect(allowMicrophone).toHaveAccessibleName(`システム設定を開く ${MICROPHONE}`);
+    expect(row(MICROPHONE).getByText('システム設定で Pantaray をオンにします')).toBeVisible();
+    const openSystemAudio = row(SYSTEM_AUDIO).getByRole('button', { name: /^システム設定を開く/ });
+    expect(
+      row(SYSTEM_AUDIO).getByText(
+        'システム設定の「システムオーディオ録音のみ」で Pantaray をオンにします'
+      )
+    ).toBeVisible();
+    fireEvent.click(openSystemAudio);
+    expect(openPermissionSettings).toHaveBeenLastCalledWith('audio_capture');
+    expect(meeting.prepare).toHaveBeenCalledTimes(1);
+
+    meeting.availability = { action_required: ['audio_capture'] };
+    await returnFromSystemSettings();
+    expect(await row(MICROPHONE).findByText('許可済み')).toBeVisible();
+    expect(row(MICROPHONE).getByText('通話の文字起こしに使います')).toBeVisible();
+    expect(row(SYSTEM_AUDIO).getByRole('button', { name: /^システム設定を開く/ })).toBeVisible();
+
+    meeting.availability = 'available';
+    await returnFromSystemSettings();
+    expect(await row(SYSTEM_AUDIO).findByText('許可済み')).toBeVisible();
   });
 });

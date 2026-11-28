@@ -70,6 +70,14 @@ export const ONBOARDING_MESSAGES = defineMessages({
     'onboarding.recording.startNote': 'You can choose apps and sites to exclude later in Settings',
     'onboarding.recording.start': 'Start',
     'onboarding.recording.recording': 'Recording',
+    'onboarding.recording.microphoneTitle': 'Allow Microphone',
+    'onboarding.recording.microphoneNote': 'Used to transcribe your calls',
+    'onboarding.recording.microphoneWaiting': 'Turn Pantaray on in System Settings',
+    'onboarding.recording.systemAudioTitle': 'Allow System Audio Recording',
+    'onboarding.recording.systemAudioNote':
+      'Used to transcribe what the other people on your calls say',
+    'onboarding.recording.systemAudioWaiting':
+      'Turn Pantaray on under System Audio Recording Only in System Settings',
   },
   ja: {
     'onboarding.title': 'はじめの準備',
@@ -140,5 +148,12 @@ export const ONBOARDING_MESSAGES = defineMessages({
     'onboarding.recording.startNote': '除外するアプリやサイトは、あとで設定で選べます',
     'onboarding.recording.start': '始める',
     'onboarding.recording.recording': '記録中',
+    'onboarding.recording.microphoneTitle': 'マイクを許可',
+    'onboarding.recording.microphoneNote': '通話の文字起こしに使います',
+    'onboarding.recording.microphoneWaiting': 'システム設定で Pantaray をオンにします',
+    'onboarding.recording.systemAudioTitle': 'システムオーディオ録音を許可',
+    'onboarding.recording.systemAudioNote': '通話の相手の音声の文字起こしに使います',
+    'onboarding.recording.systemAudioWaiting':
+      'システム設定の「システムオーディオ録音のみ」で Pantaray をオンにします',
   },
 });

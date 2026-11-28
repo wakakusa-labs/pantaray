@@ -316,16 +316,18 @@ it('answers Pantaray’s deletion request under the conversation, and waits whil
   }
 });
 
-function renderNewLine(onCreate: (text: string) => Promise<boolean>) {
+function renderNewLine(onCreate: ComponentProps<typeof TodoNewLine>['onCreate']) {
   render(
     ja(
       <ul>
-        <TodoNewLine id="new-line" placeName="見積もり" onCreate={onCreate} />
+        <TodoNewLine id="new-line" placeName="見積もり" today={TODAY} onCreate={onCreate} />
       </ul>
     )
   );
   return screen.getByRole('textbox', { name: '見積もりに TODO を追加' });
 }
+const newLineDue = (name: string) =>
+  screen.getByRole('button', { name: `${name}: 見積もりに TODO を追加` });
 
 it('adds the line on Enter and stays on the emptied line, but not on an IME’s or a blank Enter', async () => {
   const onCreate = vi.fn(async () => true);
@@ -340,9 +342,28 @@ it('adds the line on Enter and stays on the emptied line, but not on an IME’s 
   await userEvent.keyboard('{Shift>}{Enter}{/Shift}');
   expect(onCreate).not.toHaveBeenCalled();
   await userEvent.keyboard('{Enter}');
-  expect(onCreate).toHaveBeenCalledExactlyOnceWith('見積書を送る');
+  expect(onCreate).toHaveBeenCalledExactlyOnceWith('見積書を送る', null);
   expect(line).toHaveValue('');
   expect(line).toHaveFocus();
+});
+
+it('adds the line with the due day picked on it, by Tab from the text, and the next line has none', async () => {
+  const onCreate = vi.fn(async () => true);
+  const line = renderNewLine(onCreate);
+  await userEvent.type(line, '見積書を送る');
+  await userEvent.tab();
+  const due = newLineDue('期限なし');
+  expect(due).toHaveFocus();
+  // The line's TODO starts today, so the first click picks its due day.
+  fireEvent.click(day(toggle(due, 'open'), '11月20日'));
+  expect(onCreate).not.toHaveBeenCalled();
+  await userEvent.type(line, '{Enter}');
+  expect(onCreate).toHaveBeenCalledExactlyOnceWith('見積書を送る', {
+    date: '2026-11-20',
+    repeat: 'none',
+  });
+  expect(line).toHaveValue('');
+  expect(newLineDue('期限なし')).toHaveTextContent('期限なし');
 });
 
 it('leaves an IME’s Escape to the IME, and clears the line on a plain Escape', async () => {
@@ -352,9 +373,12 @@ it('leaves an IME’s Escape to the IME, and clears the line on a plain Escape',
   fireEvent.keyDown(line, { key: 'Escape', keyCode: 229 });
   expect(line).toHaveValue('見積書');
   expect(line).toHaveFocus();
+  fireEvent.click(day(toggle(newLineDue('期限なし'), 'open'), '11月20日'));
+  line.focus();
   await userEvent.keyboard('{Escape}');
   expect(line).toHaveValue('');
   expect(line).not.toHaveFocus();
+  expect(newLineDue('期限なし')).toBeInTheDocument();
 });
 
 it('keeps what was typed while the add was answering, and the whole line when it failed', async () => {
@@ -371,8 +395,25 @@ it('keeps what was typed while the add was answering, and the whole line when it
   await userEvent.type(line, '{Enter}');
   await userEvent.type(line, 'を作る');
   await act(async () => answer(false));
-  expect(onCreate).toHaveBeenLastCalledWith('請求書');
+  expect(onCreate).toHaveBeenLastCalledWith('請求書', null);
   expect(line).toHaveValue('請求書を作る');
+});
+
+it('keeps the due day of a failed add, and one picked while the add was answering', async () => {
+  let answer: (added: boolean) => void = () => undefined;
+  const onCreate = vi.fn(() => new Promise<boolean>((resolve) => (answer = resolve)));
+  const line = renderNewLine(onCreate);
+  fireEvent.click(day(toggle(newLineDue('期限なし'), 'open'), '11月20日'));
+  await userEvent.type(line, '見積書{Enter}');
+  await act(async () => answer(false));
+  expect(onCreate).toHaveBeenLastCalledWith('見積書', { date: '2026-11-20', repeat: 'none' });
+  expect(newLineDue('期限 11/20(金)')).toBeInTheDocument();
+
+  await userEvent.type(line, '{Enter}');
+  fireEvent.click(day(toggle(newLineDue('期限 11/20(金)'), 'open'), '11月25日'));
+  await act(async () => answer(true));
+  expect(line).toHaveValue('');
+  expect(newLineDue('期限 11/25(水)')).toBeInTheDocument();
 });
 
 it('joins pasted lines into one, and Escape clears the line and leaves it', async () => {

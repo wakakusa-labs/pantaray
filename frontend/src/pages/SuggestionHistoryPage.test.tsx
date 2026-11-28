@@ -789,19 +789,26 @@ it('orders the list by due date from the sort switch, and keeps the order in the
   expect(screen.getByRole('combobox', { name: '並び順' })).toHaveValue('due');
 });
 
-it('adds to the project of the group’s new line from today, and tells a refused write under its row', async () => {
+it('adds to the project of the group’s new line from today with its due day, and tells a refused write under its row', async () => {
   renderPage(['/history']);
   await screen.findByRole('checkbox', { name: '完了: TODO T1' });
+  // The due day is picked on the line before Enter, on its calendar.
+  const due = screen.getByRole('button', { name: '期限なし: 採用に TODO を追加' });
+  const calendar = due.nextElementSibling as HTMLElement;
+  act(() => {
+    calendar.dispatchEvent(Object.assign(new Event('toggle'), { newState: 'open' }));
+  });
+  fireEvent.click(within(calendar).getByRole('button', { name: /^2026年11月6日/ }));
   await userEvent.type(
     screen.getByRole('textbox', { name: '採用に TODO を追加' }),
     '請求書を送る{Enter}'
   );
-  expect(createTodo).toHaveBeenCalledWith(
+  expect(createTodo).toHaveBeenCalledExactlyOnceWith(
     expect.objectContaining({
       project_id: 'P2',
       starts_on: '2026-11-04',
       text: '請求書を送る',
-      due: null,
+      due: { date: '2026-11-06', repeat: 'none' },
     })
   );
 

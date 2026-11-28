@@ -280,7 +280,8 @@
 }
 
 /* The line after a list's rows, where the next TODO is written as on a note: an empty check
-   that does nothing yet, then the text on the row's grid, framed only while it has the focus. */
+   that does nothing yet, the text on the row's grid as a row's title is, then its due day. The
+   caret shows the text's focus. */
 .todo-new-line__check {
   box-sizing: border-box;
   width: 16px;
@@ -291,13 +292,12 @@
 }
 
 .todo-new-line__field {
-  grid-column: 2 / -1;
+  grid-column: 2 / 4;
   box-sizing: border-box;
   min-width: 0;
   height: 30px;
-  padding: 0 3px;
-  border: 1px solid transparent;
-  border-radius: 6px;
+  padding: 0 4px;
+  border: none;
   background: transparent;
   color: var(--fog-text);
   font: inherit;
@@ -309,7 +309,6 @@
 }
 
 .todo-new-line__field:focus {
-  border-color: var(--fog-text-3);
   outline: none;
 }
 

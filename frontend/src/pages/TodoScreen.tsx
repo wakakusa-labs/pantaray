@@ -291,14 +291,10 @@ export function TodoScreen({
         key="new"
         id={newLineId(group)}
         placeName={placeName(group)}
-        onCreate={(text) => {
+        today={today}
+        onCreate={(text, due) => {
           setAddedTo(place);
-          return mutations.create(
-            { projectId: group.projectId, organizationId: group.organizationId },
-            today,
-            text,
-            null
-          );
+          return mutations.create(group, today, text, due);
         }}
       />,
       addFailure ? (

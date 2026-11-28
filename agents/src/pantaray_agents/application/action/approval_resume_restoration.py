@@ -94,10 +94,9 @@ def normalize_approval_resume_state(
     """Apply the decided approval of the paused call to its checkpoint.
 
     ``resumed_approval_session_id`` is the session the ``tool_approval``
-    continuation resumes. Only that continuation may restore an ``interrupted``
-    session: a USER message sent instead of answering interrupts it and enqueues
-    this resume, and the call is then settled as not run. Every other writer of
-    ``interrupted`` ends the run, so it never resumes from here.
+    continuation resumes. Only that continuation restores an ``interrupted``
+    session (see ``TOOL_APPROVAL_CONTINUATION_STATUSES``), and the call is then
+    settled as not run.
     """
 
     pending_request = checkpoint_state.get("pending_approval_request")

@@ -156,7 +156,7 @@ function createOverlayWindowFactory({ getUiLanguage, registerWindow }) {
       ? buildFrontendDevPageUrl('/notification.html')
       : `file://${path.join(__dirname, '../dist/notification.html')}`;
     const url = new URL(notificationUrl);
-    if (entryMode === 'standalone') url.searchParams.set('mode', 'standalone');
+    if (entryMode) url.searchParams.set('mode', entryMode);
     if (actionId) url.searchParams.set('actionId', actionId);
     hardDisableDevTools(win);
     win.loadURL(url.toString());

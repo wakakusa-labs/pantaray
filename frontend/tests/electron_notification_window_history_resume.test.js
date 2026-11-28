@@ -1512,3 +1512,40 @@ test('a window opening in a shared cell takes the slot a closed one freed, not o
   notificationWindow.openStandaloneConversationOverlay('conversation:A1', 'A1');
   assert.deepEqual(position(instances[4]), { x: 1020, y: 416 });
 });
+
+test('the consent chip shows without focus while a call awaits an answer, and goes after', () => {
+  const { notificationWindow, instances } = loadNotificationWindowModule();
+  const offered = (callId) => ({
+    call_id: callId,
+    app: { name: 'zoom.us', bundle_id: 'us.zoom.xos' },
+    site: null,
+  });
+  const awaiting = (callId) => ({
+    kind: 'awaiting_consent',
+    expires_at: 'later',
+    ...offered(callId),
+  });
+
+  notificationWindow.setMeetingConsent(awaiting('call_A'));
+  const chip = instances[0];
+  assert.equal(new URL(chip.loadedUrl).searchParams.get('mode'), 'meeting_consent');
+  chip.windowEvents.emit('ready-to-show');
+  assert.equal(chip.showInactiveCalls, 1);
+  assert.equal(chip.focusCalls, undefined);
+  // The same call again keeps the chip the user is looking at.
+  notificationWindow.setMeetingConsent(awaiting('call_A'));
+  assert.equal(instances.length, 1);
+
+  // Declined or expired: the call is still recordable, from the tray, but no longer asked about.
+  notificationWindow.setMeetingConsent({
+    kind: 'not_recording',
+    refused: null,
+    ...offered('call_A'),
+  });
+  assert.equal(chip.destroyed, true);
+
+  notificationWindow.setMeetingConsent(awaiting('call_B'));
+  assert.equal(instances.length, 2);
+  notificationWindow.setMeetingConsent({ kind: 'idle' });
+  assert.equal(instances[1].destroyed, true);
+});

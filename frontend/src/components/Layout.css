@@ -228,6 +228,12 @@
   box-shadow: 0 0 6px 2px rgba(241, 245, 252, 0.3);
 }
 
+/* A call is transcribed: the light gets a ring, as the tray icon gets its dot. */
+.app-recording-light--transcribing {
+  outline: 1.5px solid var(--fog-light);
+  outline-offset: 3px;
+}
+
 /* Recording waits on a macOS permission; drawn over the light's corner like the unread dot. */
 .app-recording-alert {
   position: absolute;
@@ -274,6 +280,16 @@
   font-size: 14px;
   font-weight: var(--weight-semibold);
   line-height: 1.3;
+}
+
+.app-recording-call {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding-bottom: 12px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--fog-line);
 }
 
 .app-recording-status {

@@ -1,5 +1,6 @@
 import type { SuggestionOverlayOpenRequest } from '../ipc/schemas/overlay';
 import type { OverlayPlacements } from '../ipc/schemas/overlayPlacement';
+import type { MeetingCall } from '../context/meetingTranscript';
 
 import type {
   ActionDisplayStatus,
@@ -132,6 +133,8 @@ export type NotificationWindowApi = {
   // Synchronously destroy owner windows and invalidate pending delivery before rebinding.
   clearForOwnerChange: () => void;
   showNotification: (id: string) => void;
+  /** Shows the consent chip while the call awaits an answer, and closes it otherwise. */
+  setMeetingConsent: (call: MeetingCall) => void;
   isVisibleOverlayAtPoint?: (point: { x: number; y: number }) => boolean;
   hasRecentOverlayInteraction?: (referenceMs?: number) => boolean;
   sendToAllOverlays: (channel: string, payload: unknown) => void;

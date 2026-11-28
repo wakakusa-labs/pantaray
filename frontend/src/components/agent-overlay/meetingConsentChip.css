@@ -1,0 +1,36 @@
+/* The consent chip for a call: the question, the reminder to tell the others, two answers.
+   The element selector outranks the panel's own padding. */
+section.meeting-consent {
+  gap: 4px;
+  padding-top: 18px;
+  padding-bottom: 18px;
+}
+
+.meeting-consent > * {
+  position: relative;
+  z-index: 1;
+}
+
+.meeting-consent__question {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.94);
+  font-size: 15px;
+  font-weight: var(--weight-semibold);
+  line-height: 1.5;
+  word-break: auto-phrase;
+}
+
+.meeting-consent__note {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: var(--text-ui-size-sm);
+  line-height: 1.5;
+  word-break: auto-phrase;
+}
+
+.meeting-consent__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}

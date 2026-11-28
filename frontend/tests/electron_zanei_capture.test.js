@@ -42,7 +42,7 @@ function fixture(t, overrides = {}) {
     pause: async () => { calls.push('pause'); report = { ...report, paused: true }; },
     resume: async () => { calls.push('resume'); report = { ...report, paused: false }; } };
   const manager = createScreenshotSyncManager({
-    isMac: true, userDataDir: dir, getMainWindow: () => null,
+    isMac: true, userDataDir: dir, getMainWindow: () => null, onMeetingCallChanged: () => {},
     isBackendRuntimeReady: () => true,
     capturePrivacy: privacy,
     getManifestPath: () => manifestPath,

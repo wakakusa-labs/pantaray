@@ -2,6 +2,10 @@ import { defineMessages } from './defineMessages';
 
 export const OVERLAY_MESSAGES = defineMessages({
   en: {
+    'overlay.meetingConsent.question': 'Transcribe the {call} call?',
+    'overlay.meetingConsent.tellOthers': 'Let the others on the call know.',
+    'overlay.meetingConsent.record': 'Transcribe',
+    'overlay.meetingConsent.decline': 'Not this time',
     'overlay.actioning': 'Running',
     'overlay.thinking': 'Thinking',
     'overlay.userBrowserWait.allow': 'Waiting for you to allow Pantaray in {browser}',
@@ -199,6 +203,10 @@ export const OVERLAY_MESSAGES = defineMessages({
       'Approval was recorded, but the latest overlay state could not be restored.',
   },
   ja: {
+    'overlay.meetingConsent.question': '{call} の通話を文字起こししますか',
+    'overlay.meetingConsent.tellOthers': '相手にも伝えてください',
+    'overlay.meetingConsent.record': '文字起こしする',
+    'overlay.meetingConsent.decline': '今回はしない',
     'overlay.actioning': '実行中',
     'overlay.thinking': '考えています',
     'overlay.userBrowserWait.allow': '{browser} で許可を待っています',

@@ -62,6 +62,10 @@ const MAIN_AND_OVERLAY_CHANNELS = new Set<IpcChannel>([
   // The Option+Space panel hands work over as a TODO; the list's reads and every other TODO
   // write stay main-only.
   'todos:create',
+  // The consent chip for a call is an Overlay panel: it reads the call and answers for it.
+  'meeting:getCall',
+  'meeting:record',
+  'meeting:decline',
 ]);
 
 const OVERLAY_ONLY_CHANNELS = new Set<IpcChannel>([

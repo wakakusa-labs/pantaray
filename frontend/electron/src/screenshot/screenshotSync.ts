@@ -49,6 +49,7 @@ export function createScreenshotSyncManager(params: {
   ) => Promise<SourceTransitionResult>;
   containSource: (userId: string) => Promise<void>;
   onCaptureStatusChanged?: () => void;
+  onMeetingCallChanged: Parameters<typeof createMeetingTranscript>[0]['onChange'];
   /** Capture started for this owner; called once per owner in a run, after the start succeeded. */
   onRecordingStarted?: (userId: string) => void;
   createProcess?: typeof createZaneiProcess;
@@ -73,11 +74,8 @@ export function createScreenshotSyncManager(params: {
   const source = createContextSourceClient(params);
   const meeting = createMeetingTranscript({
     getRecorder: () => collector,
-    onChange: (call) => {
-      const win = params.getMainWindow();
-      if (win && !win.isDestroyed()) win.webContents.send('meeting:callChanged', call);
-    },
-    settingsPath: () => (owner ? scopedPath('meeting-transcription-settings.json') : null),
+    onChange: params.onMeetingCallChanged,
+    settingsPath: () => (owner ? scopedPath(SCOPED_PREFERENCE_FILES.meetingTranscription) : null),
     getManifestPath: params.getManifestPath,
     supportsTranscription: params.supportsTranscription,
   });

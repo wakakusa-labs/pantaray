@@ -1,4 +1,5 @@
-export type TrayStatusVisual = 'capturing' | 'idle';
+/** `transcribing`: a call is transcribed, which only a running recorder does. */
+export type TrayStatusVisual = 'capturing' | 'idle' | 'transcribing';
 
 type NativeImageSource = Pick<
   Electron.NativeImage,

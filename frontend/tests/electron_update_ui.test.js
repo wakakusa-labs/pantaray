@@ -16,17 +16,71 @@ async function withPlatform(value, fn) {
   }
 }
 
+const IDLE = { kind: 'idle' };
+const ZOOM = { name: 'zoom.us', bundle_id: 'us.zoom.xos' };
+const CALL = 'call_01JDQ3ZK8W5N3S8C7V6B5X4Y3Z';
+
 test('macOS tray icon visual follows recording enabled state, including degraded capture', () => {
-  assert.equal(getTrayStatusVisual(null), 'idle');
-  assert.equal(getTrayStatusVisual({ kind: 'capturing', screenshotsEnabled: true }), 'capturing');
-  assert.equal(getTrayStatusVisual({ kind: 'degraded', screenshotsEnabled: true }), 'capturing');
-  assert.equal(
-    getTrayStatusVisual({ kind: 'permission_required', screenshotsEnabled: true }),
-    'capturing'
-  );
-  assert.equal(getTrayStatusVisual({ kind: 'unavailable', screenshotsEnabled: true }), 'capturing');
-  assert.equal(getTrayStatusVisual({ kind: 'unavailable', screenshotsEnabled: false }), 'idle');
-  assert.equal(getTrayStatusVisual({ kind: 'paused', screenshotsEnabled: false }), 'idle');
+  const visual = (status) => getTrayStatusVisual(status, IDLE);
+  assert.equal(visual(null), 'idle');
+  assert.equal(visual({ kind: 'capturing', screenshotsEnabled: true }), 'capturing');
+  assert.equal(visual({ kind: 'degraded', screenshotsEnabled: true }), 'capturing');
+  assert.equal(visual({ kind: 'permission_required', screenshotsEnabled: true }), 'capturing');
+  assert.equal(visual({ kind: 'unavailable', screenshotsEnabled: true }), 'capturing');
+  assert.equal(visual({ kind: 'unavailable', screenshotsEnabled: false }), 'idle');
+  assert.equal(visual({ kind: 'paused', screenshotsEnabled: false }), 'idle');
+});
+
+test('the tray shows a transcribed call with Stop, and a passed-up call only while it lasts', () => {
+  let trayMenu = null;
+  let tip = null;
+  const visuals = [];
+  const commands = [];
+  const updateUi = createUpdateUiManager({
+    app: { getVersion: () => '0.0.0' },
+    dialog: { showMessageBox: async () => ({ response: 0 }) },
+    menu: { buildFromTemplate: (template) => ({ template }), setApplicationMenu: () => {} },
+    getUiLanguage: () => 'ja',
+    getDesktopUpdater: () => null,
+    getTray: () => ({
+      setContextMenu: (menu) => {
+        trayMenu = menu;
+      },
+      setToolTip: (text) => {
+        tip = text;
+      },
+      setTitle: () => {},
+    }),
+    getMainWindow: () => null,
+    getGlobalShortcutAccelerator: () => null,
+    openAddTodoPanel: () => {},
+    setTrayStatusVisual: (visual) => visuals.push(visual),
+    recordCall: async (callId) => commands.push(['record', callId]),
+    stopCall: async (callId) => commands.push(['stop', callId]),
+  });
+  const labels = () => trayMenu.template.map((item) => item.label).filter(Boolean);
+  const offered = { call_id: CALL, app: ZOOM, site: null };
+
+  updateUi.setMeetingCall({ kind: 'recording', started_at: 'now', ...offered });
+  assert.deepEqual(labels().slice(0, 2), ['zoom.us の通話を文字起こし中', '止める']);
+  assert.equal(tip, 'zoom.us の通話を文字起こし中');
+  assert.equal(visuals.at(-1), 'transcribing');
+  trayMenu.template[1].click();
+
+  updateUi.setMeetingCall({ kind: 'not_recording', refused: null, ...offered });
+  assert.equal(labels()[0], 'この通話を文字起こしする');
+  assert.equal(visuals.at(-1), 'idle');
+  trayMenu.template[0].click();
+  assert.deepEqual(commands, [
+    ['stop', CALL],
+    ['record', CALL],
+  ]);
+
+  // The chip asks while the consent is open, and a call that ended offers nothing.
+  for (const call of [{ kind: 'awaiting_consent', expires_at: 'later', ...offered }, IDLE]) {
+    updateUi.setMeetingCall(call);
+    assert.ok(!labels().some((label) => label.includes('通話')), call.kind);
+  }
 });
 
 test('tray add-a-TODO entry opens the add-a-TODO panel', () => {

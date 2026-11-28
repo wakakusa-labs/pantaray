@@ -12,6 +12,7 @@ type LoggerLike = {
 const TRAY_STATUS_ICON_RELATIVE_PATHS: Record<TrayStatusVisual, string> = {
   capturing: path.join('assets', 'icons', 'Pantaray_tray_capturing.png'),
   idle: path.join('assets', 'icons', 'Pantaray_tray_idle.png'),
+  transcribing: path.join('assets', 'icons', 'Pantaray_tray_transcribing.png'),
 };
 const TRAY_STATUS_RETINA_SUFFIX = '@2x';
 

@@ -951,10 +951,15 @@ test('the home lists every organization’s TODOs by project, with the rail and 
   await page.keyboard.press('Tab');
   await expect(estimate.getByRole('checkbox', { name: '完了: 見積書を再提出する' })).toBeFocused();
   await capture(page, info, 'list-focus');
-  // Past the group's last row, Tab reaches its new line, then the next group's first row.
+  // Past the group's last row, Tab reaches its new line and the line's due day, then the next
+  // group's first row.
   await estimate.getByRole('button', { name: '削除: 名刺 40 枚を入れておく' }).focus();
   await page.keyboard.press('Tab');
   await expect(estimate.getByRole('textbox', { name: '見積もりに TODO を追加' })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(
+    estimate.getByRole('button', { name: '期限なし: 見積もりに TODO を追加' })
+  ).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(
     page.getByRole('region', { name: '採用 Xer' }).getByRole('checkbox').first()

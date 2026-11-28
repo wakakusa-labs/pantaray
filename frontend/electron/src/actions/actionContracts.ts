@@ -200,13 +200,20 @@ const ActionMessageStartedResponseSchema = ActionMessageResponseBaseSchema.exten
   disposition: z.literal('started'),
   process_id: CanonicalIdentitySchema,
 });
-const ActionMessageDeferredResponseSchema = ActionMessageResponseBaseSchema.extend({
-  disposition: z.enum(['pending', 'not_executed']),
+const ActionMessagePendingResponseSchema = ActionMessageResponseBaseSchema.extend({
+  disposition: z.literal('pending'),
+  // A message sent while the run waited on its own approval answers it as set aside and
+  // resumes that run, which takes the message at its next turn: this names it.
+  process_id: CanonicalIdentitySchema.nullable(),
+});
+const ActionMessageNotExecutedResponseSchema = ActionMessageResponseBaseSchema.extend({
+  disposition: z.literal('not_executed'),
   process_id: z.null(),
 });
 const ActionMessageResponseSchema = z.union([
   ActionMessageStartedResponseSchema,
-  ActionMessageDeferredResponseSchema,
+  ActionMessagePendingResponseSchema,
+  ActionMessageNotExecutedResponseSchema,
 ]);
 
 const ApprovedSuggestionSchema = z
@@ -290,12 +297,23 @@ const ToolEntrySchema = z
     status: ToolStatusSchema,
     // Whether the tool did what it was called for. A denied approval and a read taken
     // while recording is off are successful steps that never ran, and a call a Stop
-    // reached before it was issued is an error step that never ran, so the status alone
-    // cannot say. A page render whose renderer is still being set up succeeds without
-    // drawing anything, and a patch held until its file is read changes nothing. A tool
-    // step recorded before the outcome existed did run.
+    // reached before it was issued is an error step that never ran, as is a call whose
+    // approval the user answered with a new message, or one of its batch that message
+    // reached first, so the status alone cannot say. A page render whose renderer is
+    // still being set up succeeds without drawing anything, and a patch held until its
+    // file is read changes nothing. A tool step recorded before the outcome existed did
+    // run.
     outcome: z
-      .enum(['completed', 'denied', 'unavailable', 'not_executed', 'preparing', 'needs_read'])
+      .enum([
+        'completed',
+        'denied',
+        'unavailable',
+        'not_executed',
+        'approval_set_aside',
+        'message_arrived',
+        'preparing',
+        'needs_read',
+      ])
       .default('completed'),
     // The one argument the step acted on, and the head of its result when it has none.
     // A tool step recorded before the row said what it did carries neither.

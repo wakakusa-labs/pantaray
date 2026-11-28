@@ -96,6 +96,7 @@ from pantaray_llm.errors import LlmProxyExecutionError
 
 from .action_subagent_broker import (
     ApprovalReviewer,
+    approval_set_aside_result,
     build_action_subagent_broker_tools,
     execute_action_subagent_broker_tool,
 )
@@ -212,21 +213,25 @@ async def _execute_action_subagent_job(
     if resumed is not None:
         # The saved gated request settles exactly once: the broker either runs
         # the approved call or reports the denial, which answers the call left
-        # waiting.
-        settled = await stop_watch.run(
-            execute_action_subagent_broker_tool(
-                db_path=db_path,
-                busy_timeout_ms=busy_timeout_ms,
-                payload=payload,
-                authority=broker_authority,
-                tool_id=resumed.tool_id,
-                args=resumed.arguments,
-                tool_request_id=resumed.tool_request_id,
-                call_id=resumed.call_id,
-                agents_md=agents_md,
-                reviewer=reviewer,
-            ),
-            cancellable=resumed.tool_id not in UNCANCELLABLE_TOOL_IDS,
+        # waiting. A request the user set aside by messaging instead never runs.
+        settled = (
+            approval_set_aside_result(resumed.tool_id)
+            if resumed.set_aside
+            else await stop_watch.run(
+                execute_action_subagent_broker_tool(
+                    db_path=db_path,
+                    busy_timeout_ms=busy_timeout_ms,
+                    payload=payload,
+                    authority=broker_authority,
+                    tool_id=resumed.tool_id,
+                    args=resumed.arguments,
+                    tool_request_id=resumed.tool_request_id,
+                    call_id=resumed.call_id,
+                    agents_md=agents_md,
+                    reviewer=reviewer,
+                ),
+                cancellable=resumed.tool_id not in UNCANCELLABLE_TOOL_IDS,
+            )
         )
         writer.answer_waiting_call(resumed.call_id, resumed.tool_id, settled)
         history = load_history()

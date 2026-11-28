@@ -174,6 +174,7 @@ def _create_schema(db_path: Path) -> None:
                 terminal_event_id TEXT,
                 acknowledged_at TEXT,
                 current_job_id TEXT,
+                parent_process_id TEXT,
                 next_event_seq INTEGER NOT NULL,
                 FOREIGN KEY(user_id) REFERENCES users(user_id)
             );
@@ -253,6 +254,18 @@ def _create_schema(db_path: Path) -> None:
                 action_id TEXT NOT NULL,
                 withdrawn_at TEXT NOT NULL,
                 PRIMARY KEY (user_id, message_id)
+            );
+            -- Read by the submit that answers waiting approvals; none wait here.
+            CREATE TABLE approval_sessions (
+                approval_session_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                action_id TEXT,
+                tool_request_id TEXT NOT NULL,
+                tool_id TEXT NOT NULL,
+                intent_class TEXT NOT NULL,
+                command_summary_json TEXT NOT NULL,
+                review_reason TEXT,
+                status TEXT NOT NULL
             );
             INSERT INTO users(user_id, ui_language, created_at, updated_at)
             VALUES ('user-1', 'ja', '2026-08-16T00:00:00Z', '2026-08-16T00:00:00Z');
@@ -1602,46 +1615,6 @@ def test_submit_action_message_surfaces_corrupt_expected_process_envelope(
                 ),
             )
         )
-
-
-def test_submit_action_message_keeps_approval_paused_run_pending(
-    creation_db: Path,
-) -> None:
-    first = submit_action_message(_text_command())
-    with sqlite3.connect(creation_db) as connection:
-        connection.execute(
-            "UPDATE agent_actions SET status='processing' WHERE action_id=?",
-            (first.action_id,),
-        )
-        connection.execute(
-            "UPDATE processes SET status='paused' WHERE process_id=?",
-            (first.process_id,),
-        )
-        connection.execute(
-            "UPDATE jobs SET status='paused' WHERE job_id=?",
-            (first.job_id,),
-        )
-    command = SubmitActionMessageCommand(
-        user_id="user-1",
-        target=ExistingActionTarget(
-            action_id=first.action_id,
-            expected_process_id=first.process_id,
-        ),
-        message=ActionUserMessageInput(message_id="message-2", content="More work"),
-    )
-
-    pending = submit_action_message(command)
-
-    with sqlite3.connect(creation_db) as connection:
-        row = connection.execute(
-            "SELECT expected_process_id, adopted_process_id, step_number "
-            "FROM agent_action_steps WHERE step_id=?",
-            (pending.user_step_id,),
-        ).fetchone()
-    assert pending.disposition == "pending"
-    assert pending.action_status == "processing"
-    assert pending.process_id is None and pending.job_id is None
-    assert row == (first.process_id, None, None)
 
 
 def test_submit_action_message_records_canceled_fence_without_new_run(

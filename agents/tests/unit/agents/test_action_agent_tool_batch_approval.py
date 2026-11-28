@@ -42,6 +42,7 @@ from pantaray_agents.agents.core.mixins.llm_tool_use_mixin import ActionTurnRepl
 from pantaray_agents.application.action.approval_resume_restoration import (
     normalize_approval_resume_state,
 )
+from pantaray_agents.application.action.resume_errors import ResumeStateError
 from pantaray_agents.application.action.resume_service import (
     _RESTORED_OPTIONAL_STATE_FIELDS,
 )
@@ -315,6 +316,7 @@ def _resume_from_pause(
     request,
     agent,
     decision: str,
+    resumed_approval_session_id: str | None = None,
 ) -> ActionAgentState:
     """pause 行の checkpoint を復元し、承認・拒否の決定を適用する。"""
 
@@ -327,6 +329,7 @@ def _resume_from_pause(
         ),
         now_provider=lambda: datetime.now(UTC).isoformat(),
         paused_tool_step_id=str(pause_row["step_id"]),
+        resumed_approval_session_id=resumed_approval_session_id,
     )
 
 
@@ -528,3 +531,50 @@ async def test_cancel_between_pause_and_resume_leaves_the_remainder_unstarted(
     assert executed == []
     assert resumed["status"] == "canceled"
     assert len(_persisted_tool_steps(agent, request.action_id)) == 2
+
+
+@pytest.mark.asyncio
+async def test_message_instead_of_an_answer_settles_the_batch_unrun(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """承認の代わりにメッセージが届いたら、その呼び出しも残りも実行せず次の THINK へ渡す。"""
+
+    (
+        agent,
+        runtime,
+        state,
+        request,
+        _started,
+        _approval_step_number,
+    ) = await _run_batch_pausing_on_the_second_call(
+        monkeypatch, tmp_path, action_id="act-batch-set-aside"
+    )
+    pause_short_step_id = _tool_history(state)[-1]["short_step_id"]
+    # Only the continuation the message enqueued resumes an interrupted session; any
+    # other interrupted approval still fails the resume.
+    with pytest.raises(ResumeStateError):
+        _resume_from_pause(state, request=request, agent=agent, decision="interrupted")
+
+    resumed = _resume_from_pause(
+        state,
+        request=request,
+        agent=agent,
+        decision="interrupted",
+        resumed_approval_session_id=_APPROVAL_SESSION_ID,
+    )
+    monkeypatch.setattr(
+        call_execution,
+        "run_tool",
+        AsyncMock(side_effect=AssertionError("a set-aside call must not run")),
+    )
+    resumed = await _act(agent, runtime, resumed)
+
+    set_aside, remainder = _tool_history(resumed)[1:]
+    assert set_aside["short_step_id"] == pause_short_step_id
+    assert set_aside["output"]["kind"] == "approval_set_aside"
+    assert remainder["output"]["kind"] == "message_arrived"
+    assert _distinct_persisted_step_ids(agent, request.action_id) == 3
+    # The set-aside request's identity must not reach the model's next call.
+    assert "approval_resume_tool_request_id" not in resumed["context"]
+    assert resumed["status"] == "processing"
+    assert runtime.route_after_action(resumed) == "think"

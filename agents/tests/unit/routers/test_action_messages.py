@@ -238,7 +238,11 @@ def test_openapi_publishes_required_typed_request_body() -> None:
     assert started["disposition"]["const"] == "started"
     assert started["process_id"]["type"] == "string"
     assert set(deferred["disposition"]["enum"]) == {"pending", "not_executed"}
-    assert deferred["process_id"]["type"] == "null"
+    # A pending message names the paused run it resumed by answering its approval.
+    assert {item["type"] for item in deferred["process_id"]["anyOf"]} == {
+        "string",
+        "null",
+    }
     assert "user-wide idempotency key" in operation["description"]
     assert (
         "same `message_id` and identical target and message" in operation["description"]

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import logging
+import uuid
 from typing import TYPE_CHECKING
 
 from pantaray_agents.agents.action_agent.runtime.conversation_service import (
@@ -30,7 +31,12 @@ from pantaray_agents.agents.action_agent.services.token_accounting_service impor
     StateTokenSink,
 )
 from pantaray_agents.config_tunables import load_local_runtime_tunables
+from pantaray_agents.local_runtime.runtime.utc_timestamps import now_utc_iso
 
+from ...tool_runtime.request_identity import (
+    consume_resumed_tool_step_id,
+    consume_set_aside_tool_request,
+)
 from ...tool_runtime.shared import (
     ToolExecutionActor,
 )
@@ -40,6 +46,11 @@ from .call_slots import (
     ToolCallSlot,
     allocate_tool_call_slots,
     call_timeout_seconds,
+)
+from .failures import (
+    APPROVAL_SET_ASIDE,
+    MESSAGE_ARRIVED_BEFORE_ISSUE,
+    finalize_tool_call_not_executed,
 )
 from .helpers import (
     _extract_previous_step_note,
@@ -72,6 +83,8 @@ async def action_step(
 ) -> ActionAgentState:
     """Action ノードの処理。"""
 
+    # Taken before any branch below returns, so the mark never reaches a later call.
+    approval_set_aside = consume_set_aside_tool_request(state)
     if (
         state.get("run_authority") == "superseded"
         or state.get("skip_persist")
@@ -167,6 +180,26 @@ async def action_step(
         decided_at=next_action.decided_at,
         pending=list(slots),
     )
+    if approval_set_aside:
+        # The user answered the paused call's approval with a new message. Neither
+        # it nor the rest of its batch runs; the next THINK reads the message.
+        for slot in slots:
+            await finalize_tool_call_not_executed(
+                agent,
+                state,
+                runtime,
+                slot=slot,
+                # The paused call settles its own row in place.
+                step_id=consume_resumed_tool_step_id(state) or str(uuid.uuid4()),
+                args_payload=dict(slot.call.args),
+                started_at=now_utc_iso(),
+                cause=(
+                    APPROVAL_SET_ASIDE
+                    if slot is slots[0]
+                    else MESSAGE_ARRIVED_BEFORE_ISSUE
+                ),
+            )
+        return state
 
     # 実行中に届いた停止要求は、ノード境界を待たずに実行中の呼び出しを cancel する。
     stop_watch = ActionStopWatch(probe=build_action_stop_probe(state))

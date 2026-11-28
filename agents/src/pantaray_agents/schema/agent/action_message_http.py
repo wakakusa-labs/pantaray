@@ -166,7 +166,8 @@ class ActionMessageHttpStartedResponse(_ActionMessageHttpResponseBase):
 
 class ActionMessageHttpDeferredResponse(_ActionMessageHttpResponseBase):
     disposition: Literal["pending", "not_executed"]
-    process_id: None
+    # The paused run a ``pending`` message resumed by answering its approval.
+    process_id: str | None
 
 
 ActionMessageHttpResponse = Annotated[

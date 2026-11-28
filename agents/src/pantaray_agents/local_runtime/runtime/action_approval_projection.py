@@ -143,6 +143,24 @@ def append_pending_approval_snapshot_in_connection(
     )
 
 
+def load_pending_approval_blockers_in_connection(
+    connection: sqlite3.Connection,
+    *,
+    user_id: str,
+    action_id: str,
+    root_process_id: str,
+) -> list[PendingApprovalBlocker]:
+    """The blockers the Action's snapshot shows: pending ones of paused processes."""
+
+    return _anchored_blockers(
+        connection,
+        user_id=user_id,
+        action_id=action_id,
+        root_process_id=root_process_id,
+        include_root=True,
+    )
+
+
 def _anchored_blockers(
     connection: sqlite3.Connection,
     *,

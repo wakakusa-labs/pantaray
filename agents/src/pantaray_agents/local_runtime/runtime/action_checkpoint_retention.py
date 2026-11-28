@@ -58,8 +58,18 @@ ORDER BY step.step_number DESC, step.completed_at IS NULL ASC,
 LIMIT 1
 """
 
-# Only a resumed run consumes a decided approval: a denial is recorded on the
-# paused step, and an approved tool claims the session before it runs.
+# The approval session statuses a ``tool_approval`` continuation resumes from.
+# ``interrupted`` is the user sending a message instead of answering
+# (``action_message_approvals``), which enqueues the continuation. Every other
+# writer of ``interrupted`` -- a Stop, a failed pause checkpoint, startup
+# recovery -- ends the run and enqueues none, so no continuation names it.
+TOOL_APPROVAL_CONTINUATION_STATUSES = frozenset(
+    {"approved_once", "denied", "interrupted"}
+)
+
+# Only a resumed run consumes a decided approval: a denial or a set-aside call
+# is recorded on the paused step, and an approved tool claims the session
+# before it runs.
 _CONSUMED_APPROVAL_NEWEST_CHECKPOINT_SQL = """
 SELECT step_id, step_number FROM agent_action_steps AS step
 WHERE step.user_id = :user_id AND step.action_id = :action_id
@@ -68,7 +78,7 @@ WHERE step.user_id = :user_id AND step.action_id = :action_id
       WHERE approval.approval_session_id = :approval_session_id
         AND approval.tool_request_id = :tool_request_id
         AND approval.user_id = :user_id AND approval.action_id = :action_id
-        AND (approval.status = 'denied'
+        AND (approval.status IN ('denied', 'interrupted')
              OR (approval.status = 'approved_once'
                  AND approval.claimed_at IS NOT NULL)))
 ORDER BY step.step_number DESC, step.completed_at IS NULL ASC,
@@ -127,6 +137,7 @@ def load_tool_approval_resume_anchor_in_connection(
 
 
 __all__ = [
+    "TOOL_APPROVAL_CONTINUATION_STATUSES",
     "ToolApprovalResumeAnchor",
     "load_tool_approval_resume_anchor_in_connection",
     "prune_action_checkpoints_in_connection",

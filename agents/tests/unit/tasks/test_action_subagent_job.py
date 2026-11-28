@@ -21,6 +21,9 @@ from pantaray_agents.local_runtime.runtime import (
     action_subagent_process_stop as process_stop,
 )
 from pantaray_agents.local_runtime.runtime import run_end as run_end_module
+from pantaray_agents.local_runtime.runtime.action_message_approvals import (
+    set_aside_pending_approvals_in_connection,
+)
 from pantaray_agents.local_runtime.runtime.action_subagent_approval import (
     ActionSubagentApprovalDecisionError,
     apply_action_subagent_approval_decision,
@@ -59,6 +62,7 @@ from pantaray_agents.local_runtime.storage.migrations import (
 from pantaray_agents.local_runtime.storage.migrations.connection import (
     configure_connection,
 )
+from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
 from pantaray_agents.local_runtime.tooling.bootstrap import (
     bootstrap_local_tooling_catalog,
     ensure_action_scratch_execution_context,
@@ -931,6 +935,19 @@ def _pause_gated_child(
 
 
 def _decide(db_path: Path, session_id: str, request_id: str, decision: str) -> None:
+    if decision == "interrupted":
+        # The user sends the Action a message instead of answering the card.
+        with sqlite3.connect(db_path) as connection:
+            configure_connection(connection, 1_000)
+            with immediate_transaction(connection):
+                set_aside_pending_approvals_in_connection(
+                    connection,
+                    user_id="user-1",
+                    action_id="action-1",
+                    root_process_id="parent-process",
+                    decided_at=TIMESTAMP,
+                )
+        return
     apply_action_subagent_approval_decision(
         db_path=db_path,
         busy_timeout_ms=1_000,
@@ -1088,8 +1105,9 @@ def test_a_stop_while_the_child_review_runs_approves_and_writes_nothing(
             '"result":{"status":"success"',
         ),
         ("denied", None, [], 0, '"kind":"approval_denied"'),
+        ("interrupted", None, [], 0, '"kind":"approval_set_aside"'),
     ),
-    ids=("approve", "deny"),
+    ids=("approve", "deny", "set_aside"),
 )
 def test_decided_gated_tool_settles_the_saved_request_exactly_once(
     monkeypatch: pytest.MonkeyPatch,

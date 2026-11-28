@@ -204,6 +204,20 @@ describe('resolveToolLine', () => {
     }
   );
 
+  // 承認を待つあいだにユーザーがメッセージを送ると、その呼び出しも同じまとまりの残りも
+  // 走らない。停止の文を借りると、押していない停止を押したことになる。
+  it.each([
+    ['ja', 'approval_set_aside', 'ls は確認の前にメッセージが届いたため実行していません'],
+    ['en', 'approval_set_aside', 'ls was not run: your message arrived before you answered'],
+    ['ja', 'message_arrived', 'ls はメッセージが届いたため実行していません'],
+    ['en', 'message_arrived', 'ls was not run because your message arrived'],
+  ] as const)('says in %s that a %s call did not run', (language, outcome, expected) => {
+    expect(resolveToolLine('bash', language, { subject: 'ls', running: false, outcome })).toEqual({
+      text: expected,
+      mono: false,
+    });
+  });
+
   // 描く準備を待っているページは失敗でも「見ました」でもない。
   it.each([
     ['ja', 'slides.pptx を表示する準備をしています'],

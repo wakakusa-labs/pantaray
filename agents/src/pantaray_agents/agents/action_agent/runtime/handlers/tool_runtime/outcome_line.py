@@ -35,6 +35,8 @@ OutcomeStatus = Literal[
     "stopped",
     "interrupted",
     "not_executed",
+    "approval_set_aside",
+    "message_arrived",
 ]
 
 _UNKNOWN_FAILURE_CODE = "UNKNOWN"
@@ -59,6 +61,10 @@ def build_outcome_line(
             # The Stop was already durable before this call was issued, so it
             # had no effect at all and nothing has to be checked before retrying.
             return f"{tool_id}: not executed, stopped by user"
+        case "approval_set_aside":
+            return f"{tool_id}: not executed, user sent a message instead of approving"
+        case "message_arrived":
+            return f"{tool_id}: not executed, a new user message arrived first"
         case "interrupted":
             # Issued, then cut off. What it did to the world is not knowable from
             # here, and the line must not let the Supervisor assume otherwise.

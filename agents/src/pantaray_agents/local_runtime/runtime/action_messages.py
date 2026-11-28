@@ -28,6 +28,7 @@ from pantaray_agents.tasks.action_user_message import (
 from ..todos.db import count_todo_change
 from .action_file_attachments import ActionFileAttachmentLinks
 from .action_invalidation_events import append_action_invalidation_event
+from .action_message_approvals import set_aside_pending_approvals_in_connection
 from .action_message_models import (
     ACTION_STEP_NAME_BY_ORIGIN,
     ActionMessageConflictError,
@@ -173,6 +174,18 @@ def submit_action_message(
                 if isinstance(command.target, ExistingActionTarget)
                 else None
             )
+            # This message answers the approvals still waiting (see the callee).
+            resumed_process_id = (
+                None
+                if expected_process_id is None
+                else set_aside_pending_approvals_in_connection(
+                    connection,
+                    user_id=command.user_id,
+                    action_id=action_id,
+                    root_process_id=expected_process_id,
+                    decided_at=created_at,
+                )
+            )
             adoption_canceled_at = (
                 created_at
                 if process_disposition is not None
@@ -284,7 +297,7 @@ def submit_action_message(
         command.message.message_id,
         user_step_id,
         action_status,
-        None,
+        resumed_process_id,
         None,
         True,
     )

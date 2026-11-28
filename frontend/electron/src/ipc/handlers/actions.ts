@@ -112,6 +112,16 @@ async function openUserTurn(
       actionId: response.action_id,
       fromStart: true,
     });
+  } else if (response.process_id !== null) {
+    // The message answered the run's own pending approval and resumed that paused run,
+    // as a card decision does: reattach its stream where the pause left it, and the
+    // approval snapshot on it clears the card.
+    ctx.overlay.resumeLiveProcess({
+      kind: 'action',
+      processId: response.process_id,
+      actionId: response.action_id,
+      fromStart: false,
+    });
   }
   return { kind: 'submitted', response } satisfies ActionMessageSubmitResult;
 }

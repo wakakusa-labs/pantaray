@@ -194,7 +194,9 @@ class DeferredActionMessageResult:
     message_id: str
     user_step_id: str
     action_status: ActionStatus
-    process_id: None
+    # The paused run this message resumed by answering its pending approval; it
+    # takes the message at its next THINK. ``None`` when no run was resumed.
+    process_id: str | None
     job_id: None
     inserted: bool
 

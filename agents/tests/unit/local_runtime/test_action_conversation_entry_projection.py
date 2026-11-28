@@ -611,6 +611,16 @@ def test_previews_no_output_the_page_cannot_read(
             id="read",
         ),
         pytest.param("read", "first line", "completed", id="prose-result"),
+        # A message sent instead of answering: the asked call and the rest of its batch.
+        pytest.param(
+            "bash",
+            {"kind": "approval_set_aside"},
+            "approval_set_aside",
+            id="approval-set-aside",
+        ),
+        pytest.param(
+            "bash", {"kind": "message_arrived"}, "message_arrived", id="message-arrived"
+        ),
     ],
 )
 def test_projects_what_the_tool_actually_did(

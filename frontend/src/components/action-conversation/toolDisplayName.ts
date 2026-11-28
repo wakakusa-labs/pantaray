@@ -479,6 +479,30 @@ const NOT_EXECUTED_LINES = {
   },
 } as const;
 
+/** 承認を求めた呼び出しに、ユーザーは答えずにメッセージを送った。 */
+const APPROVAL_SET_ASIDE_LINES = {
+  ja: {
+    subject: '{subject} は確認の前にメッセージが届いたため実行していません',
+    bare: '確認の前にメッセージが届いたため実行していません',
+  },
+  en: {
+    subject: '{subject} was not run: your message arrived before you answered',
+    bare: 'Not run: your message arrived before you answered',
+  },
+} as const;
+
+/** その呼び出しと同じまとまりで、メッセージが届いたときまだ始まっていなかった。 */
+const MESSAGE_ARRIVED_LINES = {
+  ja: {
+    subject: '{subject} はメッセージが届いたため実行していません',
+    bare: 'メッセージが届いたため実行していません',
+  },
+  en: {
+    subject: '{subject} was not run because your message arrived',
+    bare: 'Not run because your message arrived',
+  },
+} as const;
+
 /** ページを描く準備がまだ済んでいない。失敗ではなく、準備が済めば見られる。 */
 const PREPARING_LINES = {
   ja: '{subject} を表示する準備をしています',
@@ -493,6 +517,17 @@ const NEEDS_READ_LINES = {
   },
   en: { subject: 'Read {subject} before editing', bare: 'Read the file before editing' },
 } as const;
+
+/** ツールが頼まれたことをしなかった行。どれも subject の有無で 2 通りの文を持つ。 */
+const NOT_DONE_LINES: Partial<
+  Record<ToolOutcome, Record<'en' | 'ja', { subject: string; bare: string }>>
+> = {
+  denied: DENIED_LINES,
+  not_executed: NOT_EXECUTED_LINES,
+  approval_set_aside: APPROVAL_SET_ASIDE_LINES,
+  message_arrived: MESSAGE_ARRIVED_LINES,
+  needs_read: NEEDS_READ_LINES,
+};
 
 /** apply_patch が作った・消したファイル。書き換えは apply_patch の文のまま。 */
 const FILE_OPERATION_LINES = {
@@ -540,13 +575,8 @@ export function resolveToolLine(
   }
 ): ToolLine {
   if (outcome === 'unavailable') return { text: UNAVAILABLE_LINES[language], mono: false };
-  if (outcome === 'denied' || outcome === 'not_executed' || outcome === 'needs_read') {
-    const lines =
-      outcome === 'denied'
-        ? DENIED_LINES[language]
-        : outcome === 'not_executed'
-          ? NOT_EXECUTED_LINES[language]
-          : NEEDS_READ_LINES[language];
+  const lines = NOT_DONE_LINES[outcome]?.[language];
+  if (lines !== undefined) {
     if (subject === null) return { text: lines.bare, mono: false };
     // subject は記録されたままの文字列。置換文字列として解釈させない。
     return { text: lines.subject.replace(SUBJECT_SLOT, () => subject), mono: false };

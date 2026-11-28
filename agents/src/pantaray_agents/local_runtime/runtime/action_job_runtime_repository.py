@@ -38,7 +38,10 @@ from pantaray_agents.tasks.types import (
 )
 
 from .action_assistant_messages import read_preceding_assistant_messages
-from .action_checkpoint_retention import load_tool_approval_resume_anchor_in_connection
+from .action_checkpoint_retention import (
+    TOOL_APPROVAL_CONTINUATION_STATUSES,
+    load_tool_approval_resume_anchor_in_connection,
+)
 from .action_job_recovery import is_recovered_user_step_resume
 from .action_message_models import ACTION_RESUME_STEP_NAME
 from .action_stopped_run_note import read_stopped_run_note
@@ -394,7 +397,7 @@ def _prepare_tool_approval(
         raise MigrationError(
             "Tool approval continuation does not own the approval request"
         )
-    if approval_row["status"] not in {"approved_once", "denied"}:
+    if approval_row["status"] not in TOOL_APPROVAL_CONTINUATION_STATUSES:
         raise MigrationError("Tool approval continuation requires a decided approval")
     anchor = load_tool_approval_resume_anchor_in_connection(
         connection,

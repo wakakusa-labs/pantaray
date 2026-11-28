@@ -6,6 +6,8 @@ from pydantic import ValidationError
 
 from pantaray_agents.agents.action_agent.runtime.handlers.tool_runtime.shared import (
     APPROVAL_DENIED_OUTPUT_KIND,
+    APPROVAL_SET_ASIDE_OUTPUT_KIND,
+    MESSAGE_ARRIVED_OUTPUT_KIND,
     NOT_EXECUTED_OUTPUT_KIND,
 )
 from pantaray_agents.agents.action_agent.tools.zanei_tools import (
@@ -214,7 +216,9 @@ def _tool_entry_outcome(step: FormalToolStepOutput) -> ToolEntryOutcome:
     A denied approval and a read taken while recording is off are both persisted as
     successful steps whose body says the call never happened, so the terminal status
     cannot carry that distinction. A call a user Stop reached before it was issued is
-    persisted as an error step, yet it never ran either. A page render whose renderer
+    persisted as an error step, yet it never ran either, and so is a call the user
+    answered with a new message instead of approving it, or one of its batch that
+    message reached before it was issued. A page render whose renderer
     is still being set up succeeds without drawing anything, and a patch held until its
     file is read succeeds without changing the file. Each producer marks its
     own body, and this is the one place that turns those markers into the closed
@@ -231,6 +235,10 @@ def _tool_entry_outcome(step: FormalToolStepOutput) -> ToolEntryOutcome:
         return "denied"
     if output.get("kind") == NOT_EXECUTED_OUTPUT_KIND:
         return "not_executed"
+    if output.get("kind") == APPROVAL_SET_ASIDE_OUTPUT_KIND:
+        return "approval_set_aside"
+    if output.get("kind") == MESSAGE_ARRIVED_OUTPUT_KIND:
+        return "message_arrived"
     if output.get("status") == RECORDING_UNAVAILABLE_STATUS:
         return "unavailable"
     if (

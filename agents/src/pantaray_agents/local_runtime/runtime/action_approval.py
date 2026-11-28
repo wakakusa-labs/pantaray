@@ -1,4 +1,9 @@
-"""Canonical transactional decision boundary for Action tool approval."""
+"""Canonical transactional resume of a paused Action root from its approval.
+
+Both a card decision and a USER message sent instead of answering settle the
+blocker and requeue the same runtime here, in the caller's transaction, so the
+resumed job restores its checkpoint through one ``tool_approval`` continuation.
+"""
 
 from __future__ import annotations
 
@@ -7,19 +12,9 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-
 from pantaray_agents.local_runtime.storage.migrations import MigrationError
-from pantaray_agents.local_runtime.storage.migrations.connection import (
-    configure_connection,
-)
-from pantaray_agents.local_runtime.storage.transactions import immediate_transaction
 from pantaray_agents.local_runtime.suggestion_state.event_names import (
     EVENT_ACTION_RESUME_REQUESTED,
-)
-from pantaray_agents.local_runtime.tooling.outside_workspace_grant import (
-    OutsideWorkspaceGrantError,
-    grant_outside_workspace_folder_in_connection,
 )
 from pantaray_agents.local_runtime.tooling.repository import (
     apply_approval_decision_in_connection,
@@ -33,15 +28,12 @@ from .action_resume_events import (
     ActionResumeEventIdentity,
     append_action_resume_events_in_connection,
 )
-from .identity import verify_current_owner
 from .job_payload_builder import build_action_job_payload
 from .job_types import ACTION_PROCESS_KIND, LOCAL_ACTION_JOB_TYPE
-from .runtime_env import read_local_runtime_db_config
-from .utc_timestamps import now_utc_iso
 
-# "approved_for_conversation" approves the call once, like "approved_once", and
-# also opens its outside-workspace folder for the rest of this Action.
-ActionApprovalDecision = Literal["approved_once", "approved_for_conversation", "denied"]
+# What a resumed blocker's approval session ends as. ``interrupted`` is the user
+# sending a new message instead of answering: the call is set aside, not denied.
+type ApprovalSessionDecision = Literal["approved_once", "denied", "interrupted"]
 
 
 class ActionApprovalDecisionError(MigrationError):
@@ -52,38 +44,15 @@ class ActionApprovalDecisionError(MigrationError):
         self.error_code = error_code
 
 
-def _require_non_blank(value: str) -> str:
-    normalized = value.strip()
-    if not normalized:
-        raise ValueError("value must be a non-empty string")
-    return normalized
-
-
-class ActionApprovalDecisionCommand(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-
-    user_id: str = Field(min_length=1)
-    action_id: str = Field(min_length=1)
-    process_id: str = Field(min_length=1)
-    tool_request_id: str = Field(min_length=1)
-    approval_session_id: str = Field(min_length=1)
-    decision: ActionApprovalDecision
-
-    _validate_user_id = field_validator("user_id")(_require_non_blank)
-    _validate_action_id = field_validator("action_id")(_require_non_blank)
-    _validate_process_id = field_validator("process_id")(_require_non_blank)
-    _validate_tool_request_id = field_validator("tool_request_id")(_require_non_blank)
-    _validate_approval_session_id = field_validator("approval_session_id")(
-        _require_non_blank
-    )
-
-
 @dataclass(frozen=True, slots=True)
-class ActionApprovalDecisionResult:
-    approval_session_id: str
+class ActionApprovalTarget:
+    """One pending approval blocker on a paused Action root process."""
+
+    user_id: str
+    action_id: str
     process_id: str
-    job_id: str
-    decision: ActionApprovalDecision
+    tool_request_id: str
+    approval_session_id: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,109 +68,89 @@ class _PausedActionPredecessor:
     job_id: str
 
 
-def apply_action_approval_decision(
-    command: ActionApprovalDecisionCommand,
-) -> ActionApprovalDecisionResult:
-    """Apply one decision and resume its paused Action runtime atomically."""
+def resume_paused_action_approval_in_connection(
+    connection: sqlite3.Connection,
+    *,
+    target: ActionApprovalTarget,
+    session_status: ApprovalSessionDecision,
+    decided_at: str,
+) -> str:
+    """Settle one pending blocker of a paused root and requeue that same runtime.
 
-    verify_current_owner(command.user_id)
-    db_path, busy_timeout_ms = read_local_runtime_db_config()
-    decided_at = now_utc_iso()
+    The caller owns the transaction. Returns the requeued job id; the resumed
+    job restores the checkpoint through the ``tool_approval`` continuation.
+    """
 
-    with sqlite3.connect(db_path) as connection:
-        connection.row_factory = sqlite3.Row
-        configure_connection(connection, busy_timeout_ms)
-        with immediate_transaction(connection):
-            approval_session_id = _resolve_pending_approval(
-                connection,
-                command=command,
-            )
-            predecessor = _resolve_paused_predecessor(
-                connection,
-                command=command,
-                approval_session_id=approval_session_id,
-            )
-            context = _load_action_resume_context(
-                connection,
-                command=command,
-                approval_session_id=approval_session_id,
-            )
-            _apply_decision(
-                connection,
-                command=command,
-                approval_session_id=approval_session_id,
-                decided_at=decided_at,
-            )
-            if command.decision == "approved_for_conversation":
-                try:
-                    grant_outside_workspace_folder_in_connection(
-                        connection,
-                        user_id=command.user_id,
-                        action_id=command.action_id,
-                        approval_session_id=approval_session_id,
-                        db_path=db_path,
-                        granted_at=decided_at,
-                    )
-                except OutsideWorkspaceGrantError as exc:
-                    raise ActionApprovalDecisionError(
-                        str(exc), error_code="APPROVAL_REQUEST_MISMATCH"
-                    ) from exc
-            payload = build_action_job_payload(
-                {
-                    "job_id": predecessor.job_id,
-                    "process_id": predecessor.process_id,
-                    "action_id": command.action_id,
-                    "user_id": command.user_id,
-                    "continuation_ref": {
-                        "kind": "tool_approval",
-                        "approval_session_id": approval_session_id,
-                        "tool_request_id": command.tool_request_id,
-                    },
-                }
-            )
-            _resume_paused_action_runtime(
-                connection,
-                predecessor=predecessor,
-                command=command,
-                payload_json=json.dumps(payload, ensure_ascii=False),
-                resumed_at=decided_at,
-            )
-            append_action_resume_events_in_connection(
-                connection=connection,
-                identity=ActionResumeEventIdentity(
-                    user_id=command.user_id,
-                    action_id=command.action_id,
-                    suggestion_id=context.suggestion_id,
-                    command_id=context.command_id,
-                    accepted_at=context.accepted_at,
-                    approval_session_id=approval_session_id,
-                    approval_tool_request_id=command.tool_request_id,
-                    predecessor_process_id=predecessor.process_id,
-                    process_id=predecessor.process_id,
-                    job_id=predecessor.job_id,
-                    requested_at=decided_at,
-                ),
-            )
-            append_pending_approval_snapshot_in_connection(
-                connection,
-                user_id=command.user_id,
-                action_id=command.action_id,
-                root_process_id=predecessor.process_id,
-                created_at=decided_at,
-            )
-
-    return ActionApprovalDecisionResult(
-        approval_session_id=approval_session_id,
-        process_id=predecessor.process_id,
-        job_id=predecessor.job_id,
-        decision=command.decision,
+    approval_session_id = _resolve_pending_approval(
+        connection, target=target, session_status=session_status
     )
+    predecessor = _resolve_paused_predecessor(
+        connection,
+        target=target,
+        approval_session_id=approval_session_id,
+    )
+    context = _load_action_resume_context(
+        connection,
+        target=target,
+        approval_session_id=approval_session_id,
+    )
+    _apply_decision(
+        connection,
+        target=target,
+        approval_session_id=approval_session_id,
+        session_status=session_status,
+        decided_at=decided_at,
+    )
+    payload = build_action_job_payload(
+        {
+            "job_id": predecessor.job_id,
+            "process_id": predecessor.process_id,
+            "action_id": target.action_id,
+            "user_id": target.user_id,
+            "continuation_ref": {
+                "kind": "tool_approval",
+                "approval_session_id": approval_session_id,
+                "tool_request_id": target.tool_request_id,
+            },
+        }
+    )
+    _resume_paused_action_runtime(
+        connection,
+        predecessor=predecessor,
+        target=target,
+        payload_json=json.dumps(payload, ensure_ascii=False),
+        resumed_at=decided_at,
+    )
+    append_action_resume_events_in_connection(
+        connection=connection,
+        identity=ActionResumeEventIdentity(
+            user_id=target.user_id,
+            action_id=target.action_id,
+            suggestion_id=context.suggestion_id,
+            command_id=context.command_id,
+            accepted_at=context.accepted_at,
+            approval_session_id=approval_session_id,
+            approval_tool_request_id=target.tool_request_id,
+            predecessor_process_id=predecessor.process_id,
+            process_id=predecessor.process_id,
+            job_id=predecessor.job_id,
+            requested_at=decided_at,
+        ),
+    )
+    append_pending_approval_snapshot_in_connection(
+        connection,
+        user_id=target.user_id,
+        action_id=target.action_id,
+        root_process_id=predecessor.process_id,
+        created_at=decided_at,
+    )
+    return predecessor.job_id
 
 
 def _resolve_paused_predecessor(
     connection: sqlite3.Connection,
     *,
-    command: ActionApprovalDecisionCommand,
+    target: ActionApprovalTarget,
     approval_session_id: str,
 ) -> _PausedActionPredecessor:
     predecessor_rows = connection.execute(
@@ -242,16 +191,16 @@ def _resolve_paused_predecessor(
         LIMIT 2
         """,
         (
-            command.user_id,
-            command.action_id,
-            command.process_id,
+            target.user_id,
+            target.action_id,
+            target.process_id,
             approval_session_id,
-            command.tool_request_id,
+            target.tool_request_id,
         ),
     ).fetchall()
     if not predecessor_rows and _action_resume_is_in_progress(
         connection,
-        command=command,
+        target=target,
     ):
         raise ActionApprovalDecisionError(
             "Another approval continuation is still running",
@@ -264,12 +213,12 @@ def _resolve_paused_predecessor(
         )
     predecessor_row = predecessor_rows[0]
     if (
-        predecessor_row["event_action_id"] != command.action_id
-        or predecessor_row["event_user_id"] != command.user_id
+        predecessor_row["event_action_id"] != target.action_id
+        or predecessor_row["event_user_id"] != target.user_id
         or predecessor_row["process_kind"] != ACTION_PROCESS_KIND
-        or predecessor_row["job_user_id"] != command.user_id
+        or predecessor_row["job_user_id"] != target.user_id
         or predecessor_row["job_type"] != LOCAL_ACTION_JOB_TYPE
-        or predecessor_row["logical_key"] != command.action_id
+        or predecessor_row["logical_key"] != target.action_id
     ):
         raise ActionApprovalDecisionError(
             "Approval predecessor identity or state does not match the requested Action",
@@ -284,7 +233,7 @@ def _resolve_paused_predecessor(
 def _action_resume_is_in_progress(
     connection: sqlite3.Connection,
     *,
-    command: ActionApprovalDecisionCommand,
+    target: ActionApprovalTarget,
 ) -> bool:
     row = connection.execute(
         """
@@ -306,13 +255,13 @@ def _action_resume_is_in_progress(
         """,
         (
             EVENT_ACTION_RESUME_REQUESTED,
-            command.user_id,
-            command.action_id,
-            command.process_id,
+            target.user_id,
+            target.action_id,
+            target.process_id,
             ACTION_PROCESS_KIND,
-            command.user_id,
+            target.user_id,
             LOCAL_ACTION_JOB_TYPE,
-            command.action_id,
+            target.action_id,
         ),
     ).fetchone()
     return row is not None
@@ -322,7 +271,7 @@ def _resume_paused_action_runtime(
     connection: sqlite3.Connection,
     *,
     predecessor: _PausedActionPredecessor,
-    command: ActionApprovalDecisionCommand,
+    target: ActionApprovalTarget,
     payload_json: str,
     resumed_at: str,
 ) -> None:
@@ -352,9 +301,9 @@ def _resume_paused_action_runtime(
             resumed_at,
             predecessor.job_id,
             predecessor.process_id,
-            command.user_id,
+            target.user_id,
             LOCAL_ACTION_JOB_TYPE,
-            command.action_id,
+            target.action_id,
         ),
     )
     process_cursor = connection.execute(
@@ -373,8 +322,8 @@ def _resume_paused_action_runtime(
             resumed_at,
             resumed_at,
             predecessor.process_id,
-            command.user_id,
-            command.action_id,
+            target.user_id,
+            target.action_id,
             ACTION_PROCESS_KIND,
         ),
     )
@@ -392,7 +341,7 @@ def _resume_paused_action_runtime(
 def _load_action_resume_context(
     connection: sqlite3.Connection,
     *,
-    command: ActionApprovalDecisionCommand,
+    target: ActionApprovalTarget,
     approval_session_id: str,
 ) -> _ActionResumeContext:
     row = connection.execute(
@@ -451,16 +400,16 @@ def _load_action_resume_context(
           AND a.status = 'processing'
         """,
         (
-            command.user_id,
-            command.action_id,
+            target.user_id,
+            target.action_id,
             approval_session_id,
-            command.tool_request_id,
+            target.tool_request_id,
             approval_session_id,
-            command.tool_request_id,
-            command.user_id,
-            command.action_id,
-            command.user_id,
-            command.action_id,
+            target.tool_request_id,
+            target.user_id,
+            target.action_id,
+            target.user_id,
+            target.action_id,
         ),
     ).fetchone()
     if row is None:
@@ -497,7 +446,8 @@ def _load_action_resume_context(
 def _resolve_pending_approval(
     connection: sqlite3.Connection,
     *,
-    command: ActionApprovalDecisionCommand,
+    target: ActionApprovalTarget,
+    session_status: ApprovalSessionDecision,
 ) -> str:
     row = connection.execute(
         """
@@ -512,15 +462,15 @@ def _resolve_pending_approval(
         WHERE user_id = ? AND tool_request_id = ? AND action_id = ?
         """,
         (
-            command.process_id,
+            target.process_id,
             EVENT_ACTION_RESUME_REQUESTED,
-            command.user_id,
-            command.action_id,
-            command.approval_session_id,
-            command.tool_request_id,
-            command.user_id,
-            command.tool_request_id,
-            command.action_id,
+            target.user_id,
+            target.action_id,
+            target.approval_session_id,
+            target.tool_request_id,
+            target.user_id,
+            target.tool_request_id,
+            target.action_id,
         ),
     ).fetchone()
     if row is None:
@@ -529,7 +479,7 @@ def _resolve_pending_approval(
             error_code="APPROVAL_NOT_FOUND",
         )
     approval_session_id = str(row["approval_session_id"] or "").strip()
-    if not approval_session_id or command.approval_session_id != approval_session_id:
+    if not approval_session_id or target.approval_session_id != approval_session_id:
         raise ActionApprovalDecisionError(
             "Approval request does not match the pending tool request",
             error_code="APPROVAL_REQUEST_MISMATCH",
@@ -537,9 +487,7 @@ def _resolve_pending_approval(
     approval_status = str(row["status"])
     if approval_status != "pending":
         error_code = "APPROVAL_DECISION_CONFLICT"
-        if approval_status == _session_status(command.decision) and bool(
-            row["decision_was_applied"]
-        ):
+        if approval_status == session_status and bool(row["decision_was_applied"]):
             error_code = "APPROVAL_DECISION_ALREADY_APPLIED"
         raise ActionApprovalDecisionError(
             "Approval decision is stale or already applied",
@@ -548,27 +496,22 @@ def _resolve_pending_approval(
     return approval_session_id
 
 
-def _session_status(
-    decision: ActionApprovalDecision,
-) -> Literal["approved_once", "denied"]:
-    return "denied" if decision == "denied" else "approved_once"
-
-
 def _apply_decision(
     connection: sqlite3.Connection,
     *,
-    command: ActionApprovalDecisionCommand,
+    target: ActionApprovalTarget,
     approval_session_id: str,
+    session_status: ApprovalSessionDecision,
     decided_at: str,
 ) -> None:
     result = apply_approval_decision_in_connection(
         connection=connection,
-        user_id=command.user_id,
-        tool_request_id=command.tool_request_id,
-        action_id=command.action_id,
+        user_id=target.user_id,
+        tool_request_id=target.tool_request_id,
+        action_id=target.action_id,
         approval_session_id=approval_session_id,
         expected_current_status="pending",
-        next_status=_session_status(command.decision),
+        next_status=session_status,
         decided_at=decided_at,
     )
     if result.status == "not_found":
@@ -586,9 +529,8 @@ def _apply_decision(
 
 
 __all__ = [
-    "ActionApprovalDecision",
-    "ActionApprovalDecisionCommand",
     "ActionApprovalDecisionError",
-    "ActionApprovalDecisionResult",
-    "apply_action_approval_decision",
+    "ActionApprovalTarget",
+    "ApprovalSessionDecision",
+    "resume_paused_action_approval_in_connection",
 ]

@@ -17,7 +17,10 @@ from pantaray_agents.agents.action_agent.runtime.checkpoint import (
 from pantaray_agents.agents.action_agent.runtime.handlers.nodes.user_request import (
     project_persisted_user_request_step,
 )
-from pantaray_agents.agents.action_agent.runtime.state import create_initial_state
+from pantaray_agents.agents.action_agent.runtime.state import (
+    build_pending_approval_request,
+    create_initial_state,
+)
 from pantaray_agents.application.action.resume_service import (
     ActionResumeService,
     ResumeDeps,
@@ -26,13 +29,16 @@ from pantaray_agents.local_runtime.runtime import (
     action_job_runtime_repository,
     job_payload_models,
 )
-from pantaray_agents.local_runtime.runtime.action_approval import (
+from pantaray_agents.local_runtime.runtime.action_approval_decision import (
     ActionApprovalDecisionCommand,
     ActionApprovalDecisionError,
     apply_action_approval_decision,
 )
 from pantaray_agents.local_runtime.runtime.action_cancel_repository import (
     ActionCancelRepository,
+)
+from pantaray_agents.local_runtime.runtime.action_checkpoint_retention import (
+    load_tool_approval_resume_anchor_in_connection,
 )
 from pantaray_agents.local_runtime.runtime.action_message_process_fence import (
     resolve_action_process_lineage_in_connection,
@@ -69,6 +75,9 @@ from pantaray_agents.local_runtime.tooling.bootstrap import (
 )
 from pantaray_agents.local_runtime.tooling.brokering.command_approval_summaries import (
     build_apply_patch_summary,
+)
+from pantaray_agents.local_runtime.tooling.repository import (
+    load_approval_session_by_request,
 )
 from pantaray_agents.schema.agent.action import (
     ActionAgentRequest,
@@ -245,19 +254,6 @@ async def test_action_approval_decision_resumes_the_same_runtime(
 ) -> None:
     db_path = pending_approval.db_path
     action_id = pending_approval.action_id
-    steer = submit_action_message(
-        SubmitActionMessageCommand(
-            user_id="user-1",
-            target=ExistingActionTarget(
-                action_id=action_id,
-                expected_process_id=pending_approval.predecessor_process_id,
-            ),
-            message=ActionUserMessageInput(
-                message_id="message-steer",
-                content="Continue after this approval",
-            ),
-        )
-    )
     command = ActionApprovalDecisionCommand(
         user_id="user-1",
         action_id=action_id,
@@ -288,13 +284,6 @@ async def test_action_approval_decision_resumes_the_same_runtime(
         payload_row = connection.execute(
             "SELECT payload_json FROM job_payloads WHERE job_id = ?",
             (result.job_id,),
-        ).fetchone()
-        steer_row = connection.execute(
-            """
-            SELECT step_number, adopted_process_id, adoption_canceled_at
-            FROM agent_action_steps WHERE step_id = ?
-            """,
-            (steer.user_step_id,),
         ).fetchone()
         public_event = connection.execute(
             """
@@ -347,7 +336,6 @@ async def test_action_approval_decision_resumes_the_same_runtime(
     }
     assert result.job_id == pending_approval.predecessor_job_id
     assert result.process_id == pending_approval.predecessor_process_id
-    assert steer_row == (None, None, None)
     assert public_event[:2] == (None, "action_resume_requested")
     assert predecessor_job == ("queued", None, None, None)
     assert predecessor_process == ("enqueued", None, None)
@@ -436,6 +424,230 @@ async def test_action_approval_decision_resumes_the_same_runtime(
 
     assert runtime_status == ("canceled", "canceled")
     assert started_after_terminal == 0
+
+
+def test_message_sent_while_approval_waits_sets_it_aside_and_resumes_the_run(
+    pending_approval: PendingApprovalFixture,
+) -> None:
+    fixture = pending_approval
+    result = submit_action_message(
+        SubmitActionMessageCommand(
+            user_id="user-1",
+            target=ExistingActionTarget(
+                action_id=fixture.action_id,
+                expected_process_id=fixture.predecessor_process_id,
+            ),
+            message=ActionUserMessageInput(message_id="message-2", content="Wait"),
+        )
+    )
+
+    with sqlite3.connect(fixture.db_path) as connection:
+        approval = connection.execute(
+            "SELECT status FROM approval_sessions WHERE approval_session_id = ?",
+            ("approval-1",),
+        ).fetchone()
+        runtime = connection.execute(
+            """
+            SELECT jobs.status, processes.status, job_payloads.payload_json
+            FROM jobs
+            JOIN processes ON processes.process_id = jobs.process_id
+            JOIN job_payloads ON job_payloads.job_id = jobs.job_id
+            WHERE jobs.job_id = ?
+            """,
+            (fixture.predecessor_job_id,),
+        ).fetchone()
+        user_row = connection.execute(
+            "SELECT step_number, expected_process_id, adopted_process_id "
+            "FROM agent_action_steps WHERE step_id = ?",
+            (result.user_step_id,),
+        ).fetchone()
+
+    # Set aside, not denied, and the paused run goes on at once to read the message.
+    assert approval == ("interrupted",)
+    assert runtime[:2] == ("queued", "enqueued")
+    assert json.loads(runtime[2])["continuation_ref"] == {
+        "kind": "tool_approval",
+        "approval_session_id": "approval-1",
+        "tool_request_id": "tool-request-1",
+    }
+    assert user_row == (None, fixture.predecessor_process_id, None)
+    # Electron reattaches the resumed run's stream from this.
+    assert (result.disposition, result.process_id) == (
+        "pending",
+        fixture.predecessor_process_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_message_resumes_the_paused_run_through_its_real_job_entry(
+    pending_approval: PendingApprovalFixture,
+) -> None:
+    """Submit, claim, prepare and restore the run a message resumed, then adopt it."""
+
+    fixture = pending_approval
+    state = project_persisted_user_request_step(
+        create_initial_state(
+            user_id="user-1",
+            suggestion_id=None,
+            action_id=fixture.action_id,
+            started_at="2026-08-16T00:00:00Z",
+            max_steps=25,
+            max_tool_steps=25,
+            token_budget=None,
+        ),
+        step_id=fixture.user_step_id,
+        step_number=1,
+        local_step_number=1,
+        short_step_id="S-1-USER",
+        request_text="Continue after tool approval",
+        occurred_at="2026-08-16T00:00:00Z",
+        history_phase="executing",
+    )
+    state["phase"] = "executing"
+    paused_request = build_pending_approval_request(
+        owner="supervisor",
+        tool_id="read",
+        args={"path": "/tmp/input.txt"},
+        approval_session_id="approval-1",
+        tool_request_id="tool-request-1",
+        requested_at="2026-08-16T00:00:20Z",
+        intent_class="read_local",
+        command_summary={"kind": "read", "path": "/tmp/input.txt"},
+        thinking=None,
+        thinking_summary=None,
+    )
+    state["pending_approval_request"] = paused_request
+    state["current_approval_blockers"] = [paused_request]
+    with sqlite3.connect(fixture.db_path) as connection, connection:
+        connection.execute(
+            "UPDATE agent_action_steps SET runtime_state_checkpoint = ?, "
+            "runtime_state_checkpoint_version = ? WHERE step_id = ?",
+            (
+                json.dumps(build_runtime_state_checkpoint(state)),
+                RUNTIME_STATE_CHECKPOINT_VERSION,
+                fixture.user_step_id,
+            ),
+        )
+
+    message = submit_action_message(
+        SubmitActionMessageCommand(
+            user_id="user-1",
+            target=ExistingActionTarget(
+                action_id=fixture.action_id,
+                expected_process_id=fixture.predecessor_process_id,
+            ),
+            message=ActionUserMessageInput(message_id="message-2", content="Wait"),
+        )
+    )
+    claimed = claim_next_pending_job(
+        db_path=str(fixture.db_path),
+        busy_timeout_ms=BUSY_TIMEOUT_MS,
+        job_type="execute_action",
+        owner_user_id="user-1",
+        claimed_by="worker-2",
+        process_running_status="running",
+        expected_process_pending_status="enqueued",
+    )
+    assert claimed is not None
+    payload = job_payload_models.parse_action_job_payload_json(claimed["payload_json"])
+    preparation = action_job_runtime_repository.ActionJobRuntimeRepository(
+        fixture.db_path, BUSY_TIMEOUT_MS
+    ).prepare_execution(payload=payload, started_at="2026-08-16T00:01:00Z")
+    request = ActionAgentRequest(
+        user_id="user-1",
+        suggestion_id=None,
+        action_id=fixture.action_id,
+        user_step_id=preparation.context.user_step_id,
+        user_step_number=preparation.context.user_step_number,
+        user_step_local_step_number=1,
+        user_step_short_id="S-1-USER",
+        user_step_created_at=preparation.context.user_step_created_at,
+        user_message=preparation.context.user_message,
+        approval_resume_session_id=preparation.context.approval_session_id,
+        approval_resume_tool_request_id=preparation.context.approval_tool_request_id,
+    )
+    checkpoint_row = await build_action_repository(
+        fixture.db_path
+    ).get_runtime_checkpoint_for_approval_resume(
+        user_id="user-1",
+        action_id=fixture.action_id,
+        approval_session_id="approval-1",
+        tool_request_id="tool-request-1",
+    )
+    restored = ActionResumeService(
+        ResumeDeps(
+            logger=logging.getLogger(__name__),
+            load_approval_session_by_request=lambda user_id, tool_request_id: (
+                load_approval_session_by_request(
+                    db_path=fixture.db_path,
+                    busy_timeout_ms=BUSY_TIMEOUT_MS,
+                    user_id=user_id,
+                    tool_request_id=tool_request_id,
+                )
+            ),
+            build_agent_error=lambda **values: AgentError(severity="error", **values),
+            now_provider=lambda: "2026-08-16T00:01:00Z",
+        )
+    ).resolve_initial_state(
+        request=request,
+        started_at="2026-08-16T00:01:00Z",
+        state_config={
+            "max_steps": 25,
+            "max_tool_steps": 25,
+            "token_budget": None,
+            "prompt_name": "action/executing",
+            "prompt_version": "1.0",
+            "cancel_check_max_consecutive_failures": 3,
+            "cancel_check_failure_grace_seconds": 60,
+        },
+        token_budget=None,
+        checkpoint_row=checkpoint_row,
+    )
+
+    # ACT gets the paused call back to settle on its own row without running it
+    # (see test_action_agent_tool_batch_approval for that settlement).
+    assert restored["status"] == "processing"
+    assert "pending_approval_request" not in restored
+    assert restored["next_action"].tool.tool_id == "read"
+    context = restored["context"]
+    assert context["approval_resume_tool_step_id"] == fixture.user_step_id
+    assert context["approval_set_aside_tool_request_id"] == "tool-request-1"
+    assert "approval_resume_tool_request_id" not in context
+
+    adopt_pending_action_user_steps_at_parent_think(
+        db_path=fixture.db_path,
+        busy_timeout_ms=BUSY_TIMEOUT_MS,
+        job_id=payload["job_id"],
+        process_id=payload["process_id"],
+        request=request,
+        state=restored,
+    )
+    with sqlite3.connect(fixture.db_path) as connection:
+        adopted = connection.execute(
+            "SELECT adopted_process_id, step_number IS NOT NULL "
+            "FROM agent_action_steps WHERE step_id = ?",
+            (message.user_step_id,),
+        ).fetchone()
+    assert adopted == (fixture.predecessor_process_id, 1)
+
+    # Once the call is settled no checkpoint names the approval, and a restarted
+    # continuation still resumes from the run's newest checkpoint.
+    state.pop("pending_approval_request")
+    state.pop("current_approval_blockers")
+    with sqlite3.connect(fixture.db_path) as connection, connection:
+        connection.execute(
+            "UPDATE agent_action_steps SET runtime_state_checkpoint = ? "
+            "WHERE step_id = ?",
+            (json.dumps(build_runtime_state_checkpoint(state)), fixture.user_step_id),
+        )
+        anchor = load_tool_approval_resume_anchor_in_connection(
+            connection,
+            user_id="user-1",
+            action_id=fixture.action_id,
+            approval_session_id="approval-1",
+            tool_request_id="tool-request-1",
+        )
+    assert anchor is not None and not anchor.names_approval
 
 
 def _add_second_pending_approval(fixture: PendingApprovalFixture) -> None:

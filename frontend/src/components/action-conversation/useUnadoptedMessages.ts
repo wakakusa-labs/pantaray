@@ -36,7 +36,8 @@ export function useUnadoptedMessages(
       !(item.kind === 'user' && item.source === 'canonical' && withdrawn.has(item.entry.step_id))
   );
 
-  // Offered while the Stop is: not while the run waits for an approval, which the user decides.
+  // Offered while the Stop is: not while the run waits for an approval, since a message sent
+  // then answers that approval and the resumed run takes it at once.
   const stopTarget = actionStopTarget(lifecycle, view.action && { action: view.action }, null);
   const target =
     stopTarget !== null &&

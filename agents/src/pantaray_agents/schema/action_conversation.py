@@ -29,7 +29,14 @@ type UserEntryStatus = Literal[
 ]
 type ActionStepStatus = Literal["processing", "success", "error", "timeout"]
 type ToolEntryOutcome = Literal[
-    "completed", "denied", "unavailable", "not_executed", "preparing", "needs_read"
+    "completed",
+    "denied",
+    "unavailable",
+    "not_executed",
+    "approval_set_aside",
+    "message_arrived",
+    "preparing",
+    "needs_read",
 ]
 type ToolEntryFileOperation = Literal["add", "update", "delete"]
 # The body kind a successful page render returns while the renderer it needs is still

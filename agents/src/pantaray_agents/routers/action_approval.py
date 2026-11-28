@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from pantaray_agents.auth_http import get_current_user_id_from_token
-from pantaray_agents.local_runtime.runtime.action_approval import (
+from pantaray_agents.local_runtime.runtime.action_approval_decision import (
     ActionApprovalDecision,
     ActionApprovalDecisionCommand,
     ActionApprovalDecisionError,

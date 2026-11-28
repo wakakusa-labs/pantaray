@@ -67,6 +67,7 @@ from .call_slots import (
     ToolCallSlot,
 )
 from .failures import (
+    STOPPED_BEFORE_ISSUE,
     finalize_tool_call_interrupted,
     finalize_tool_call_not_executed,
     finalize_tool_call_timeout,
@@ -185,6 +186,7 @@ async def execute_tool_call(
             step_id=tool_step_id,
             args_payload=args_payload,
             started_at=started_at,
+            cause=STOPPED_BEFORE_ISSUE,
         )
         return state
     if isolate_state:

@@ -8,7 +8,7 @@ from typing import Literal
 import pytest
 from fastapi import HTTPException, status
 
-from pantaray_agents.local_runtime.runtime.action_approval import (
+from pantaray_agents.local_runtime.runtime.action_approval_decision import (
     ActionApprovalDecisionCommand,
     ActionApprovalDecisionResult,
 )

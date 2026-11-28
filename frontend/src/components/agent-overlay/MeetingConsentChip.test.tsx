@@ -41,7 +41,7 @@ it('names the call, asks to tell the others, and answers for that call', async (
   const panel = await screen.findByRole('region', {
     name: 'meet.google.com の通話を文字起こししますか',
   });
-  expect(panel).toHaveAccessibleDescription('相手にも伝えてください');
+  expect(panel).toHaveAccessibleDescription('相手の同意が必要です');
 
   fireEvent.click(screen.getByRole('button', { name: '文字起こしする' }));
   expect(record).toHaveBeenCalledWith(CALL);

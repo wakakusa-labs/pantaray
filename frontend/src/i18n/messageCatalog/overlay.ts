@@ -3,7 +3,7 @@ import { defineMessages } from './defineMessages';
 export const OVERLAY_MESSAGES = defineMessages({
   en: {
     'overlay.meetingConsent.question': 'Transcribe the {call} call?',
-    'overlay.meetingConsent.tellOthers': 'Let the others on the call know.',
+    'overlay.meetingConsent.othersConsent': 'The others on the call must agree.',
     'overlay.meetingConsent.record': 'Transcribe',
     'overlay.meetingConsent.decline': 'Not this time',
     'overlay.actioning': 'Running',
@@ -204,7 +204,7 @@ export const OVERLAY_MESSAGES = defineMessages({
   },
   ja: {
     'overlay.meetingConsent.question': '{call} の通話を文字起こししますか',
-    'overlay.meetingConsent.tellOthers': '相手にも伝えてください',
+    'overlay.meetingConsent.othersConsent': '相手の同意が必要です',
     'overlay.meetingConsent.record': '文字起こしする',
     'overlay.meetingConsent.decline': '今回はしない',
     'overlay.actioning': '実行中',

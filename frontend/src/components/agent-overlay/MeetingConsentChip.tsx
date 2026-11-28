@@ -69,7 +69,7 @@ export function MeetingConsentChip() {
         {t('overlay.meetingConsent.question', { call: call.site ?? call.app.name })}
       </p>
       <p id={noteId} className="meeting-consent__note">
-        {t('overlay.meetingConsent.tellOthers')}
+        {t('overlay.meetingConsent.othersConsent')}
       </p>
       <div className="meeting-consent__actions">
         <ApprovalDecisionButton
